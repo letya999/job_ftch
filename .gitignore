@@ -41,3 +41,6 @@ build/
 # Temp/output
 jobs.json
 jobs_*.json
+
+# Bandit
+.bandit

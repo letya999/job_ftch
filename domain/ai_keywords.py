@@ -1,0 +1,217 @@
+# domain/ai_keywords.py — чистый список
+"""AI/ML job keywords for filtering."""
+
+AI_KEYWORDS = [
+    # Core AI
+    "ai",
+    "artificial intelligence",
+    "machine learning",
+    "ml",
+    "deep learning",
+    "neural network",
+    "neural nets",
+    "foundation model",
+    "foundation models",
+    # LLM / GenAI
+    "llm",
+    "llms",
+    "large language model",
+    "large language models",
+    "generative ai",
+    "genai",
+    "agentic ai",
+    "ai agent",
+    "ai agents",
+    "autonomous agent",
+    "reasoning model",
+    "reasoning models",
+    # NLP
+    "nlp",
+    "natural language processing",
+    "text generation",
+    "semantic search",
+    "embedding",
+    "embeddings",
+    "vector search",
+    "vector database",
+    "retrieval",
+    "retrieval augmented generation",
+    "rag",
+    "knowledge graph",
+    # Multimodal
+    "multimodal",
+    "vision language model",
+    "vlm",
+    "image generation",
+    "text to image",
+    "image understanding",
+    "video generation",
+    "video ai",
+    "voice ai",
+    "speech ai",
+    "audio ai",
+    # AI Engineering
+    "ai engineer",
+    "genai engineer",
+    "llm engineer",
+    "prompt engineer",
+    "ai architect",
+    "ai researcher",
+    "ml engineer",
+    "machine learning engineer",
+    "research engineer",
+    "applied scientist",
+    "applied ai",
+    "ai product manager",
+    # Data
+    "data science",
+    "data scientist",
+    "data engineer",
+    "data analyst",
+    "analytics engineer",
+    "data platform",
+    "big data",
+    # MLOps / LLMOps
+    "mlops",
+    "llmops",
+    "model serving",
+    "model deployment",
+    "model monitoring",
+    "model evaluation",
+    "evaluation framework",
+    "evals",
+    "observability",
+    "prompt optimization",
+    "inference optimization",
+    # AI Infrastructure
+    "ai infrastructure",
+    "gpu",
+    "cuda",
+    "distributed training",
+    "inference",
+    "batch inference",
+    "real-time inference",
+    "serving",
+    "training pipeline",
+    "feature store",
+    # Frameworks
+    "tensorflow",
+    "pytorch",
+    "jax",
+    "keras",
+    "hugging face",
+    "transformers",
+    "sentence transformers",
+    "onnx",
+    "ray",
+    "deepspeed",
+    "vllm",
+    "sglang",
+    # Agent Frameworks
+    "langchain",
+    "langgraph",
+    "llamaindex",
+    "autogen",
+    "crewai",
+    "semantic kernel",
+    "haystack",
+    # Model Providers
+    "openai",
+    "gpt",
+    "chatgpt",
+    "claude",
+    "anthropic",
+    "gemini",
+    "google ai",
+    "mistral",
+    "llama",
+    "deepseek",
+    "qwen",
+    "grok",
+    "cohere",
+    # Computer Vision
+    "computer vision",
+    "object detection",
+    "image classification",
+    "ocr",
+    "segmentation",
+    # Training / Fine-tuning
+    "fine tuning",
+    "fine-tuning",
+    "sft",
+    "supervised fine tuning",
+    "rlhf",
+    "dpo",
+    "alignment",
+    "distillation",
+    "synthetic data",
+    # AI Safety
+    "ai safety",
+    "responsible ai",
+    "model alignment",
+    "red teaming",
+    "guardrails",
+    # Robotics
+    "robotics",
+    "robot learning",
+    "embodied ai",
+    # Search terms frequently used in vacancies
+    "ai platform",
+    "ai solutions",
+    "intelligent systems",
+    "predictive modeling",
+    "recommendation system",
+    "recommendation engine",
+    "decision intelligence",
+    "conversational ai",
+    "chatbot",
+    "copilot",
+    "assistant",
+]
+
+AI_JOB_TITLES = [
+    "ai engineer",
+    "genai engineer",
+    "llm engineer",
+    "machine learning engineer",
+    "ml engineer",
+    "applied ai engineer",
+    "applied scientist",
+    "research engineer",
+    "ai researcher",
+    "ai architect",
+    "ai developer",
+    "prompt engineer",
+    "mlops engineer",
+    "llmops engineer",
+    "data scientist",
+    "computer vision engineer",
+    "nlp engineer",
+    "ai product manager",
+    "ai solutions engineer",
+    "ai consultant",
+    "ai infrastructure engineer",
+    "inference engineer",
+    "agent engineer",
+    "rag engineer",
+]
+
+
+def is_ai_job(title: str, description: str, skills: list[str] | None = None) -> bool:
+    """Check if job is AI-related."""
+    text = f"{title} {description}".lower()
+    if skills:
+        text += " " + " ".join(s.lower() for s in skills)
+
+    # Check keywords
+    for keyword in AI_KEYWORDS:
+        if keyword in text:
+            return True
+
+    # Check job titles
+    title_lower = title.lower()
+    for job_title in AI_JOB_TITLES:
+        if job_title in title_lower:
+            return True
+
+    return False
