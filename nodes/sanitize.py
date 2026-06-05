@@ -45,7 +45,9 @@ class SanitizeNode:
         sanitized_text = _normalize_whitespace(_strip_control_chars(item.text))
         sanitized_source_name = _normalize_whitespace(_strip_control_chars(item.source_name))
         normalized_url = (
-            _URL_ADAPTER.validate_python(_normalize_url(str(item.url))) if item.url is not None else None
+            _URL_ADAPTER.validate_python(_normalize_url(str(item.url)))
+            if item.url is not None
+            else None
         )
         updates: dict[str, object] = {
             "text": sanitized_text,
