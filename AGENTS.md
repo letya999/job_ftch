@@ -12,6 +12,13 @@ Async pipeline: Telegram channels/groups/comments + career sites → structured 
 | [docs/rules.md](docs/rules.md) | Development process: research → design → implement → verify. |
 | [docs/adr/](docs/adr/) | All past architectural decisions. Read before making a new one. |
 
+## How to work
+
+**Think before coding.** Ambiguous request → ask, don't guess. State the forks out loud.
+**Simplicity first.** Minimum code that solves the task. Nothing speculative. See [docs/rules.md](docs/rules.md).
+**Surgical changes.** Touch only what was asked. Don't refactor uninvited.
+**Goal-driven.** Define success criteria before starting. Each action = step + verify.
+
 ## Hard rules
 
 - `domain/` has zero imports outside `pydantic` and stdlib. No exceptions.
