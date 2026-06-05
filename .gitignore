@@ -41,3 +41,4 @@ build/
 # Temp/output
 jobs.json
 jobs_*.json
+artifacts/
