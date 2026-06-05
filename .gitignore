@@ -1,0 +1,43 @@
+# Python standard
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+uv.lock
+
+# env files
+.env
+.env.dev
+.env.prod
+!.env.*.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+.coverage
+htmlcov/
+coverage.xml
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Telethon sessions
+*.session
+*.session-journal
+
+# Temp/output
+jobs.json
+jobs_*.json
