@@ -34,5 +34,7 @@ def test_config_loads() -> None:
     from config import Settings
 
     s = Settings()
-    assert s.store_backend == "memory"
-    assert s.log_level == "DEBUG"
+    assert s.store_backend.value == "memory"
+    assert s.source_backend.value == "local_fixture"
+    assert s.sink_backend.value == "json_file"
+    assert s.log_level == "INFO"

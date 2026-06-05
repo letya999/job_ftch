@@ -21,7 +21,7 @@
 2. `uv run ruff format --check .` — проверка форматирования.
 3. `uv run mypy .` — проверка типов.
 4. `uv run pytest tests/` — запуск тестов.
-5. `uv run bandit -r . -ll` — проверка безопасности.
+5. `uv run bandit -r app.py config.py application domain infrastructure nodes sinks -ll` — проверка безопасности проекта без шума из `.venv`.
 
 ## Архитектурные решения
 Все нетривиальные решения фиксируются в `docs/adr/` в формате `NNN-slug.md`. Статусы: PROPOSED → ACCEPTED → DEPRECATED.
