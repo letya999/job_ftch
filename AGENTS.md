@@ -1,48 +1,36 @@
-# Project Overview
-job_ftch is an open-source async pipeline that ingests vacancies from Telegram channels, groups, comments and career sites, normalizes them, deduplicates, optionally AI-screens, and emits structured JSON.
+# job_ftch — agent instructions
 
-# Core Principles
-1. Simplicity over cleverness — if it can be done in 10 lines, do not use a framework
-2. Extensibility over completeness — add extension points, not features prematurely
-3. Open source cleanliness — no vendor lock-in, no proprietary SDKs as hard deps
-4. Light DDD — use DDD vocabulary (Entity, Value Object, Repository, Bounded Context) without ceremony (no event sourcing, no CQRS in v0)
-5. No overloading — each file does one thing; each function has one responsibility
-6. Explicit > implicit — no magic, no DI containers, composition in app.py
+Async pipeline: Telegram channels/groups/comments + career sites → structured JSON vacancies.
 
-# Architecture Summary
-- 5 Protocols: Source, Node, Sink, Store, LLMProvider
-- Domain core: pure Pydantic models, zero I/O imports
-- Infrastructure adapters: implement Protocols
-- Pipeline engine: ~25 lines, composes everything
+## Read first
 
-# Working with this repo as an AI agent
-- Always read docs/architecture.md before writing code
-- Always read docs/tech_stack.md before choosing libraries
-- Never add a new library without updating docs/tech_stack.md
-- ADR for every architectural decision in docs/adr/
-- Prefer editing existing files over creating new ones
-- Write tests before/alongside implementation (TDD)
-- Run `uv run ruff check .` before finishing
-- Domain layer: zero imports outside pydantic and stdlib
-- Never put I/O in domain/
-- Infrastructure adapters: one file per adapter
-- If uncertain about a choice, write an ADR and mark it PROPOSED
+| File | Why |
+|------|-----|
+| [docs/vision.md](docs/vision.md) | What this is, what it is NOT, who it's for. Read before touching anything. |
+| [docs/architecture.md](docs/architecture.md) | 5 Protocols, layer rules, data flow. Mandatory before writing code. |
+| [docs/tech_stack.md](docs/tech_stack.md) | Chosen libs and why. Check before adding any dependency. |
+| [docs/rules.md](docs/rules.md) | Development process: research → design → implement → verify. |
+| [docs/adr/](docs/adr/) | All past architectural decisions. Read before making a new one. |
 
-# Extension points
-- New source: implement Source Protocol in infrastructure/sources/
-- New processing step: implement Node Protocol in nodes/
-- New output: implement Sink Protocol in sinks/
-- New storage backend: implement Store Protocol in infrastructure/stores/
-- New LLM backend: implement LLMProvider Protocol in infrastructure/llm/
+## Hard rules
 
-# Security rules
-- SanitizeNode MUST be first in every pipeline chain
-- Never pass raw scraped text directly to LLM without sanitization
-- No credentials in code — only via env vars
-- Validate all URLs before HTTP requests (no SSRF)
+- `domain/` has zero imports outside `pydantic` and stdlib. No exceptions.
+- `SanitizeNode` is always first in any pipeline chain.
+- No credentials in code. `.env` only.
+- New dependency → update `docs/tech_stack.md` first.
+- Architectural choice → write ADR in `docs/adr/` first.
+- Commits: `feat`, `fix`, `chore`, `docs`, `refactor` only.
 
-# Commit rules
-feat, fix, chore, docs, refactor only. No "WIP", no "update", no "fix stuff"
+## Extending
 
-# DO NOT
-Add Kafka, Celery, Airflow, LangChain, LangGraph, heavy ORMs, Scrapy as core deps
+| Want to add | Where |
+|-------------|-------|
+| New data source | `infrastructure/sources/` — implement `Source` Protocol |
+| New processing step | `nodes/` — implement `Node` Protocol |
+| New output | `sinks/` — implement `Sink` Protocol |
+| New storage backend | `infrastructure/stores/` — implement `Store` Protocol |
+| New LLM backend | `infrastructure/llm/` — implement `LLMProvider` Protocol |
+
+## Never add
+
+Kafka · Celery · Airflow · LangChain · LangGraph · Scrapy · heavy ORMs
