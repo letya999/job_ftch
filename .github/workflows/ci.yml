@@ -8,44 +8,83 @@ on:
 
 jobs:
   lint:
+    name: Lint & Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - run: uv sync --dev
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
 
   type-check:
+    name: Type Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - run: uv sync --dev
-      - run: uv run mypy .
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: mypy
+        run: uv run mypy domain application infrastructure nodes sinks config.py
 
   test:
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - run: uv sync --dev
-      - run: uv run pytest tests/ --cov --cov-report=xml -v
-      - uses: codecov/codecov-action@v4
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest tests/ --cov --cov-report=xml -v
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v5
         if: always()
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
 
   security:
+    name: Security Scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - run: uv sync --dev
-      - run: uv run bandit -r . -ll --exclude .venv,tests
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Bandit security scan
+        run: uv run bandit -r domain application infrastructure nodes sinks app.py config.py -ll

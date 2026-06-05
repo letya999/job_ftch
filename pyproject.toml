@@ -35,9 +35,14 @@ dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
-    "bandit>=1.7",
+    "bandit[toml]>=1.7",
     "httpx",
+    "types-setuptools",
 ]
+
+# Tell hatchling which Python packages to include in the wheel
+[tool.hatch.build.targets.wheel]
+packages = ["domain", "application", "infrastructure", "nodes", "sinks"]
 
 [tool.ruff]
 target-version = "py312"
@@ -47,18 +52,32 @@ line-length = 100
 select = ["E", "F", "I", "UP", "B", "SIM", "TCH"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # allow assert in tests
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
+# Explicit package roots for flat layout
+mypy_path = "."
+exclude = [
+    "^tests/",
+    "^\\.venv/",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-v"
 
 [tool.coverage.run]
-source = ["."]
-omit = ["tests/*", "app.py"]
+source = ["domain", "application", "infrastructure", "nodes", "sinks"]
+omit = ["tests/*", "app.py", "config.py"]
+
+[tool.bandit]
+exclude_dirs = [".venv", "tests"]
+skips = []
 
 [build-system]
 requires = ["hatchling"]
