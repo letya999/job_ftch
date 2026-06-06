@@ -20,8 +20,6 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-          enable-cache: true
-          cache-dependency-glob: pyproject.toml
 
       - name: Install dependencies
         run: uv sync
@@ -42,8 +40,6 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-          enable-cache: true
-          cache-dependency-glob: pyproject.toml
 
       - name: Install dependencies
         run: uv sync
@@ -61,8 +57,6 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-          enable-cache: true
-          cache-dependency-glob: pyproject.toml
 
       - name: Install dependencies
         run: uv sync
@@ -87,8 +81,6 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
-          enable-cache: true
-          cache-dependency-glob: pyproject.toml
 
       - name: Install dependencies
         run: uv sync
