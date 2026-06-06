@@ -41,6 +41,10 @@ build/
 # Temp/output
 jobs.json
 jobs_*.json
+<<<<<<< HEAD
 
 # Bandit
 .bandit
+=======
+artifacts/
+>>>>>>> upstream/dev

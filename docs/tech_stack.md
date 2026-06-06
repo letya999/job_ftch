@@ -17,7 +17,7 @@
 - `openai` + `instructor` — работа с LLM и получение структурированных данных.
 
 ## Observability (Наблюдаемость)
-- `opentelemetry-api` — стандарт для трейсинга.
+- `opentelemetry-api` + `opentelemetry-sdk` — стандартный API/SDK слой для трейсинга без привязки к вендору.
 - `structlog` — структурированное логирование в JSON.
 
 ## Инструменты разработки
