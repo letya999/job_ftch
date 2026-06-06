@@ -41,10 +41,13 @@ build/
 # Temp/output
 jobs.json
 jobs_*.json
-<<<<<<< HEAD
 
-# Bandit
+# Bandit + txt
+dev.txt
 .bandit
-=======
-artifacts/
->>>>>>> upstream/dev
+
+# SQLite database
+*.db
+*.sqlite
+*.sqlite3
+data/

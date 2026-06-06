@@ -2,12 +2,10 @@
 """Domain-level skill normalization (pure functions)."""
 
 import re
-from typing import Set, List
 from difflib import get_close_matches
 
 # ============ Константы ============
-
-CANONICAL_SKILLS: Set[str] = {
+CANONICAL_SKILLS: set[str] = {
     "python",
     "javascript",
     "typescript",
@@ -73,7 +71,7 @@ CANONICAL_SKILLS: Set[str] = {
 SHORT_SKILLS: dict[str, str] = {
     "r": "r",  # Язык R, но только если есть контекст
     "c": "c",  # Язык C (тоже с контекстом)
-    "go": "go",  # Go - нормальный, оставляем
+    "go": "go",  # Go - нормальный
 }
 
 SKILL_SYNONYMS: dict[str, str] = {
@@ -199,7 +197,6 @@ SKILL_SYNONYMS: dict[str, str] = {
     "azure": "azure",
     "microsoft azure": "azure",
     "terraform": "terraform",
-    "tf": "terraform",
     "iac": "terraform",
     "jenkins": "jenkins",
     "ci/cd": "ci/cd",
@@ -220,7 +217,6 @@ SKILL_SYNONYMS: dict[str, str] = {
     "apache kafka": "kafka",
     "airflow": "airflow",
     "apache airflow": "airflow",
-    "spark": "spark",
     "apache spark": "spark",
     "pyspark": "spark",
 }
@@ -249,7 +245,7 @@ def normalize_skill(skill: str) -> str:
     return matches[0] if matches else skill_lower
 
 
-def normalize_skills(skills: List[str]) -> List[str]:
+def normalize_skills(skills: list[str]) -> list[str]:
     """Normalize a list of skills."""
     normalized = set()
     for s in skills:
@@ -261,7 +257,7 @@ def normalize_skills(skills: List[str]) -> List[str]:
 
 # ============ Извлечение навыков из текста ============
 
-SKILL_SEARCH_PATTERNS: Set[str] = {
+SKILL_SEARCH_PATTERNS: set[str] = {
     # Языки (исключая односимвольные)
     "python",
     "javascript",
@@ -344,7 +340,7 @@ CONTEXT_PATTERNS: dict[str, list[str]] = {
 }
 
 
-def extract_skills_from_text(text: str) -> List[str]:
+def extract_skills_from_text(text: str) -> list[str]:
     """
     Extract and normalize skills from text.
     Uses pattern matching and synonym resolution.
@@ -358,10 +354,7 @@ def extract_skills_from_text(text: str) -> List[str]:
     # Direct pattern matching for normal skills
     for pattern in SKILL_SEARCH_PATTERNS:
         # Try word boundary match first
-        if re.search(r"\b" + re.escape(pattern) + r"\b", text_lower):
-            found.add(pattern)
-        # Then simple substring for multi-word
-        elif pattern in text_lower:
+        if re.search(r"\b" + re.escape(pattern) + r"\b", text_lower) or pattern in text_lower:
             found.add(pattern)
 
     # Special handling for short skills (R language, C language)
@@ -379,9 +372,12 @@ def extract_skills_from_text(text: str) -> List[str]:
         found.add("artificial intelligence")
     if "k8s" in text_lower:
         found.add("kubernetes")
-    if "tf" in text_lower and "tensorflow" not in found:
-        if "tensor" in text_lower or "flow" in text_lower:
-            found.add("tensorflow")
+    if (
+        "tf" in text_lower
+        and "tensorflow" not in found
+        and ("tensor" in text_lower or "flow" in text_lower)
+    ):
+        found.add("tensorflow")
 
     # Normalize each found skill
     normalized = set()

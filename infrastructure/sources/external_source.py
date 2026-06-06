@@ -1,16 +1,20 @@
-# infrastructure/sources/external_source.py
 """External job source (API/RSS based on VacancyEngine).
 Fetches jobs from Remotive, Jobicy, Arbeitnow, RemoteOK, WeWorkRemotely, StackOverflow.
+
+Configuration:
+- Sources are identified by source_kind='career_site' in the database
+- All external jobs are separated from Telegram sources
 """
 
 import asyncio
-import hashlib
 import logging
-from typing import AsyncIterator, Optional, List, Dict, Any
-from datetime import datetime, UTC
+import platform
+import random
+from collections.abc import AsyncIterator
+from typing import Any
 
-import httpx
 import feedparser
+import httpx
 
 from domain import RawItem, SourceKind
 from domain.ai_keywords import is_ai_job
@@ -19,68 +23,143 @@ from domain.skills import extract_skills_from_text
 logger = logging.getLogger(__name__)
 
 
+def _get_universal_user_agent() -> str:
+    """Generate a realistic cross-platform User-Agent string."""
+    user_agents = {
+        "Linux": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Darwin": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Windows": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    return user_agents.get(
+        platform.system(),
+        "Mozilla/5.0 (compatible; job_ftch/1.0; +https://github.com/letya999/job_ftch)",
+    )
+
+
+class RateLimiter:
+    """Simple rate limiter to avoid being blocked."""
+
+    def __init__(self, min_delay: float = 0.5, max_delay: float = 2.0):
+        self.min_delay = min_delay
+        self.max_delay = max_delay
+
+    async def wait(self) -> None:
+        """Wait random delay between requests."""
+        delay = random.uniform(self.min_delay, self.max_delay)
+        await asyncio.sleep(delay)
+
+
 class ExternalJobSource:
-    """Fetch jobs from external APIs and RSS feeds."""
+    """Fetch jobs from external APIs and RSS feeds.
+
+    All jobs are marked with source_kind=CAREER_SITE to separate them from Telegram sources.
+    Includes rate limiting and retry logic to avoid being blocked.
+    """
 
     def __init__(
         self,
-        sources: Optional[List[str]] = None,
+        sources: list[str] | None = None,
         max_jobs_per_source: int = 50,
-        user_agent: Optional[str] = None,
+        user_agent: str | None = None,
+        rate_limiter: RateLimiter | None = None,
     ):
         self.sources = sources or [
-            "remotive", "jobicy", "arbeitnow",
-            "remoteok", "weworkremotely", "stackoverflow"
+            "remotive",
+            "jobicy",
+            "arbeitnow",
+            "remoteok",
+            "weworkremotely",
+            "stackoverflow",
         ]
         self.max_jobs_per_source = max_jobs_per_source
-        self.user_agent = user_agent or (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        self._items: List[RawItem] = []
+        self.user_agent = user_agent or _get_universal_user_agent()
+        self.rate_limiter = rate_limiter or RateLimiter(min_delay=0.5, max_delay=1.5)
+        self._items: list[RawItem] = []
         self._index = 0
-    
+        self._retry_count = 3
+        self._retry_delay = 2
+
     async def fetch(self) -> AsyncIterator[RawItem]:
         """Fetch all external jobs and yield as RawItems."""
         if not self._items:
             await self._load_all_jobs()
-        
+
         while self._index < len(self._items):
             yield self._items[self._index]
             self._index += 1
-    
+
+    async def _fetch_with_retry(self, url: str, source_name: str) -> httpx.Response | None:
+        """Fetch URL with retry logic."""
+        for attempt in range(self._retry_count):
+            try:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    response = await client.get(url, headers={"User-Agent": self.user_agent})
+                    if response.status_code == 200:
+                        return response
+                    elif response.status_code == 429:  # Too Many Requests
+                        wait_time = self._retry_delay * (attempt + 1)
+                        logger.warning(f"Rate limited for {source_name}, waiting {wait_time}s")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.warning(f"HTTP {response.status_code} for {source_name}")
+                        return None
+            except httpx.TimeoutException:
+                logger.warning(f"Timeout for {source_name}, attempt {attempt + 1}")
+                await asyncio.sleep(self._retry_delay)
+            except Exception as e:
+                logger.error(f"Error fetching {source_name}: {e}")
+                await asyncio.sleep(self._retry_delay)
+
+        logger.error(f"Failed to fetch {source_name} after {self._retry_count} attempts")
+        return None
+
     async def _load_all_jobs(self) -> None:
-        """Load jobs from configured sources concurrently."""
+        """Load jobs from configured sources concurrently with rate limiting."""
         logger.info(f"Loading jobs from sources: {self.sources}")
-        
+        logger.debug(f"Using User-Agent: {self.user_agent}")
+
         tasks = []
+
+        # API Sources
         if "remotive" in self.sources:
             tasks.append(self._fetch_remotive())
+            await self.rate_limiter.wait()
         if "jobicy" in self.sources:
             tasks.append(self._fetch_jobicy())
+            await self.rate_limiter.wait()
         if "arbeitnow" in self.sources:
             tasks.append(self._fetch_arbeitnow())
+            await self.rate_limiter.wait()
+
+        # RSS Sources
         if "remoteok" in self.sources:
             tasks.append(self._fetch_remoteok_rss())
+            await self.rate_limiter.wait()
         if "weworkremotely" in self.sources:
             tasks.append(self._fetch_wwr_rss())
+            await self.rate_limiter.wait()
         if "stackoverflow" in self.sources:
             tasks.append(self._fetch_stackoverflow_rss())
-        
+            await self.rate_limiter.wait()
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        all_jobs: List[Dict[str, Any]] = []
+
+        all_jobs: list[dict[str, Any]] = []
         for result in results:
             if isinstance(result, Exception):
                 logger.error(f"Source fetch error: {result}")
-            elif result:
+            elif isinstance(result, list):  # ← явная проверка на list
                 all_jobs.extend(result)
-        
+            elif result is not None:
+                logger.warning(f"Unexpected result type: {type(result)}")
+
         logger.info(f"Total raw jobs fetched: {len(all_jobs)}")
-        
+
         # Deduplication by URL
         seen_urls = set()
+        seen_keys = set()
         deduped_jobs = []
+
         for job in all_jobs:
             url = job.get("url", "")
             if url and url not in seen_urls:
@@ -88,29 +167,28 @@ class ExternalJobSource:
                 deduped_jobs.append(job)
             elif not url:
                 key = f"{job.get('title', '')}_{job.get('company', '')}"
-                if key not in seen_urls:
-                    seen_urls.add(key)
+                if key not in seen_keys:
+                    seen_keys.add(key)
                     deduped_jobs.append(job)
-        
+
         logger.info(f"After dedup: {len(deduped_jobs)} jobs")
-        
+
         # AI filter
         ai_jobs = []
         for job in deduped_jobs:
             if is_ai_job(job.get("title", ""), job.get("description", ""), job.get("skills", [])):
                 ai_jobs.append(job)
-        
+
         logger.info(f"After AI filter: {len(ai_jobs)} jobs")
-        
-        # Convert to RawItems (используя новую структуру)
+
+        # Convert to RawItems with source_kind=CAREER_SITE
         for job in ai_jobs:
             url = job.get("url", "")
             source_name = f"external_{job['source']}"
-            
-            # Создаём RawItem с новыми полями
+
             try:
                 raw_item = RawItem(
-                    source_kind=SourceKind.CAREER_SITE,  # Внешние API = career_site
+                    source_kind=SourceKind.CAREER_SITE,  # Все внешние вакансии имеют этот тип
                     source_name=source_name,
                     external_id=job.get("url", job.get("title", "")),
                     url=url if url else None,
@@ -125,27 +203,26 @@ class ExternalJobSource:
                         "experience_years": job.get("experience_years", 0),
                         "skills": job.get("skills", []),
                         "source": job["source"],
-                    }
+                    },
                 )
                 self._items.append(raw_item)
             except Exception as e:
                 logger.error(f"Failed to create RawItem for job {job.get('title')}: {e}")
-        
-        logger.info(f"Created {len(self._items)} RawItems")
-    
-    # ============ API Sources ============
 
-    async def _fetch_remotive(self) -> List[Dict[str, Any]]:
+        logger.info(f"Created {len(self._items)} RawItems")
+
+    # ============ API Sources with rate limiting ============
+
+    async def _fetch_remotive(self) -> list[dict[str, Any]]:
         """Fetch from Remotive API."""
         jobs = []
         try:
             logger.info("Fetching Remotive API...")
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(
-                    "https://remotive.com/api/remote-jobs", headers={"User-Agent": self.user_agent}
-                )
+            response = await self._fetch_with_retry(
+                "https://remotive.com/api/remote-jobs", "remotive"
+            )
 
-            if response.status_code == 200:
+            if response:
                 data = response.json()
                 raw_jobs = data.get("jobs", [])
                 logger.info(f"Remotive: {len(raw_jobs)} jobs")
@@ -153,8 +230,6 @@ class ExternalJobSource:
                 for job in raw_jobs[: self.max_jobs_per_source]:
                     title = job.get("title", "")
                     description = job.get("description", "")
-
-                    # Extract skills from text
                     skills = extract_skills_from_text(f"{title} {description}")
 
                     url = job.get("url", "")
@@ -182,17 +257,16 @@ class ExternalJobSource:
             logger.error(f"Remotive API error: {e}")
         return jobs
 
-    async def _fetch_jobicy(self) -> List[Dict[str, Any]]:
+    async def _fetch_jobicy(self) -> list[dict[str, Any]]:
         """Fetch from Jobicy API."""
         jobs = []
         try:
             logger.info("Fetching Jobicy API...")
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(
-                    "https://jobicy.com/api/v2/remote-jobs", headers={"User-Agent": self.user_agent}
-                )
+            response = await self._fetch_with_retry(
+                "https://jobicy.com/api/v2/remote-jobs", "jobicy"
+            )
 
-            if response.status_code == 200:
+            if response:
                 data = response.json()
                 raw_jobs = data.get("jobs", [])
                 logger.info(f"Jobicy: {len(raw_jobs)} jobs")
@@ -200,7 +274,6 @@ class ExternalJobSource:
                 for job in raw_jobs[: self.max_jobs_per_source]:
                     title = job.get("jobTitle", "")
                     description = job.get("jobDescription", "")
-
                     skills = extract_skills_from_text(f"{title} {description}")
 
                     url = job.get("url", "") or job.get("applyUrl", "")
@@ -226,18 +299,16 @@ class ExternalJobSource:
             logger.error(f"Jobicy API error: {e}")
         return jobs
 
-    async def _fetch_arbeitnow(self) -> List[Dict[str, Any]]:
+    async def _fetch_arbeitnow(self) -> list[dict[str, Any]]:
         """Fetch from Arbeitnow API."""
         jobs = []
         try:
             logger.info("Fetching Arbeitnow API...")
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(
-                    "https://www.arbeitnow.com/api/job-board-api",
-                    headers={"User-Agent": self.user_agent},
-                )
+            response = await self._fetch_with_retry(
+                "https://www.arbeitnow.com/api/job-board-api", "arbeitnow"
+            )
 
-            if response.status_code == 200:
+            if response:
                 data = response.json()
                 raw_jobs = data.get("data", []) or data.get("jobs", [])
                 logger.info(f"Arbeitnow: {len(raw_jobs)} jobs")
@@ -245,7 +316,6 @@ class ExternalJobSource:
                 for job in raw_jobs[: min(self.max_jobs_per_source, 30)]:
                     title = job.get("title", "")
                     description = job.get("description", "")
-
                     skills = extract_skills_from_text(f"{title} {description}")
                     company = job.get("company_name", "") or job.get("company", "Unknown")
 
@@ -278,19 +348,17 @@ class ExternalJobSource:
 
     # ============ RSS Sources ============
 
-    async def _fetch_remoteok_rss(self) -> List[Dict[str, Any]]:
-        """Fetch from RemoteOK RSS (sync wrapper)."""
+    async def _fetch_remoteok_rss(self) -> list[dict[str, Any]]:
+        """Fetch from RemoteOK RSS."""
         jobs = []
         try:
             logger.info("Fetching RemoteOK RSS...")
-            # feedparser is sync, run in thread pool
             feed = await asyncio.to_thread(feedparser.parse, "https://remoteok.io/remote-jobs.rss")
             logger.info(f"RemoteOK: {len(feed.entries)} entries")
 
             for entry in feed.entries[: self.max_jobs_per_source]:
                 title = entry.get("title", "")
                 description = entry.get("summary", "")
-
                 skills = extract_skills_from_text(f"{title} {description}")
 
                 jobs.append(
@@ -312,7 +380,7 @@ class ExternalJobSource:
             logger.error(f"RemoteOK RSS error: {e}")
         return jobs
 
-    async def _fetch_wwr_rss(self) -> List[Dict[str, Any]]:
+    async def _fetch_wwr_rss(self) -> list[dict[str, Any]]:
         """Fetch from WeWorkRemotely RSS."""
         jobs = []
         try:
@@ -329,7 +397,6 @@ class ExternalJobSource:
             for entry in feed.entries[: self.max_jobs_per_source]:
                 title = entry.get("title", "")
                 description = entry.get("summary", "") or entry.get("description", "")
-
                 skills = extract_skills_from_text(f"{title} {description}")
 
                 jobs.append(
@@ -351,7 +418,7 @@ class ExternalJobSource:
             logger.error(f"WWR RSS error: {e}")
         return jobs
 
-    async def _fetch_stackoverflow_rss(self) -> List[Dict[str, Any]]:
+    async def _fetch_stackoverflow_rss(self) -> list[dict[str, Any]]:
         """Fetch from StackOverflow RSS."""
         jobs = []
         try:
@@ -361,7 +428,6 @@ class ExternalJobSource:
             for entry in feed.entries[: self.max_jobs_per_source]:
                 title = entry.get("title", "")
                 description = entry.get("summary", "")
-
                 skills = extract_skills_from_text(f"{title} {description}")
                 is_remote = "remote" in title.lower()
 
@@ -390,10 +456,8 @@ class ExternalJobSource:
         """Parse salary from various formats."""
         if not salary_str:
             return 0
-
         if isinstance(salary_str, (int, float)):
             return int(salary_str)
-
         salary_str = str(salary_str)
         try:
             cleaned = salary_str.replace("$", "").replace(",", "").strip()
@@ -408,22 +472,24 @@ class ExternalJobSource:
 
     def _extract_company_from_title(self, title: str) -> str:
         """Extract company name from job title."""
-        if " at " in title:
-            parts = title.split(" at ")
-            if len(parts) > 1:
-                return parts[-1].strip()[:50]
-        if " is hiring" in title:
-            return title.split(" is hiring")[0].strip()[:50]
-        if " is looking" in title:
-            return title.split(" is looking")[0].strip()[:50]
-        if " - " in title:
-            return title.split(" - ")[0].strip()[:50]
+        patterns = [" at ", " is hiring", " is looking", " - "]
+        for pattern in patterns:
+            if pattern in title:
+                parts = title.split(pattern)
+                if len(parts) > 1:
+                    return parts[-1].strip()[:50]
         return "Unknown"
 
 
-# Optional: Factory function for easy creation
+# Optional: Factory function
 def create_external_source(
-    sources: Optional[List[str]] = None, max_jobs: int = 50
+    sources: list[str] | None = None,
+    max_jobs: int = 50,
+    rate_limiter: RateLimiter | None = None,
 ) -> ExternalJobSource:
     """Create configured ExternalJobSource instance."""
-    return ExternalJobSource(sources=sources, max_jobs_per_source=max_jobs)
+    return ExternalJobSource(
+        sources=sources,
+        max_jobs_per_source=max_jobs,
+        rate_limiter=rate_limiter,
+    )

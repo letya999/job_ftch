@@ -204,14 +204,9 @@ def is_ai_job(title: str, description: str, skills: list[str] | None = None) -> 
         text += " " + " ".join(s.lower() for s in skills)
 
     # Check keywords
-    for keyword in AI_KEYWORDS:
-        if keyword in text:
-            return True
+    if any(keyword in text for keyword in AI_KEYWORDS):
+        return True
 
     # Check job titles
     title_lower = title.lower()
-    for job_title in AI_JOB_TITLES:
-        if job_title in title_lower:
-            return True
-
-    return False
+    return any(job_title in title_lower for job_title in AI_JOB_TITLES)
