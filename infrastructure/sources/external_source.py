@@ -36,24 +36,18 @@ def _get_universal_user_agent() -> str:
     )
 
 
-class RateLimiter:
-    """Simple rate limiter to avoid being blocked."""
-
-    def __init__(self, min_delay: float = 0.5, max_delay: float = 2.0):
-        self.min_delay = min_delay
-        self.max_delay = max_delay
-
-    async def wait(self) -> None:
-        """Wait random delay between requests."""
-        delay = random.uniform(self.min_delay, self.max_delay)
-        await asyncio.sleep(delay)
-
-
 class ExternalJobSource:
     """Fetch jobs from external APIs and RSS feeds.
 
     All jobs are marked with source_kind=CAREER_SITE to separate them from Telegram sources.
     Includes rate limiting and retry logic to avoid being blocked.
+
+    Features:
+    - Shared HTTP client with connection pooling
+    - Semaphore-based concurrency control (default: 2 concurrent requests)
+    - Exponential backoff with jitter for retries
+    - Honors Retry-After headers from 429 responses
+    - Separate retry handling for RSS feeds
     """
 
     def __init__(
@@ -61,7 +55,7 @@ class ExternalJobSource:
         sources: list[str] | None = None,
         max_jobs_per_source: int = 50,
         user_agent: str | None = None,
-        rate_limiter: RateLimiter | None = None,
+        max_concurrent: int = 2,
     ):
         self.sources = sources or [
             "remotive",
@@ -73,11 +67,23 @@ class ExternalJobSource:
         ]
         self.max_jobs_per_source = max_jobs_per_source
         self.user_agent = user_agent or _get_universal_user_agent()
-        self.rate_limiter = rate_limiter or RateLimiter(min_delay=0.5, max_delay=1.5)
+        self.max_concurrent = max_concurrent
         self._items: list[RawItem] = []
         self._index = 0
         self._retry_count = 3
-        self._retry_delay = 2
+
+        # Shared HTTP client with connection pooling
+        self._client = httpx.AsyncClient(
+            timeout=15.0,
+            headers={"User-Agent": self.user_agent},
+            limits=httpx.Limits(
+                max_connections=10,
+                max_keepalive_connections=5,
+            ),
+        )
+
+        # Concurrency control
+        self._semaphore = asyncio.Semaphore(max_concurrent)
 
     async def fetch(self) -> AsyncIterator[RawItem]:
         """Fetch all external jobs and yield as RawItems."""
@@ -89,66 +95,156 @@ class ExternalJobSource:
             self._index += 1
 
     async def _fetch_with_retry(self, url: str, source_name: str) -> httpx.Response | None:
-        """Fetch URL with retry logic."""
+        """Fetch URL with intelligent retry logic.
+
+        Features:
+        - Honors Retry-After header from 429 responses
+        - Exponential backoff with jitter for other errors
+        - Separate handling for 5xx errors vs timeouts
+        """
         for attempt in range(self._retry_count):
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
-                    response = await client.get(url, headers={"User-Agent": self.user_agent})
-                    if response.status_code == 200:
-                        return response
-                    elif response.status_code == 429:  # Too Many Requests
-                        wait_time = self._retry_delay * (attempt + 1)
-                        logger.warning(f"Rate limited for {source_name}, waiting {wait_time}s")
-                        await asyncio.sleep(wait_time)
-                    else:
-                        logger.warning(f"HTTP {response.status_code} for {source_name}")
-                        return None
-            except httpx.TimeoutException:
-                logger.warning(f"Timeout for {source_name}, attempt {attempt + 1}")
-                await asyncio.sleep(self._retry_delay)
-            except Exception as e:
-                logger.error(f"Error fetching {source_name}: {e}")
-                await asyncio.sleep(self._retry_delay)
+                async with self._semaphore:
+                    response = await self._client.get(url)
 
-        logger.error(f"Failed to fetch {source_name} after {self._retry_count} attempts")
+                if response.status_code == 200:
+                    return response
+
+                if response.status_code == 429:
+                    # Handle rate limiting - check for Retry-After header
+                    retry_after = response.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            delay = float(retry_after)
+                        except ValueError:
+                            # Retry-After could be HTTP date, fallback to exponential
+                            delay = min(60, (2**attempt) + random.uniform(0, 1))
+                    else:
+                        # Exponential backoff with jitter
+                        delay = min(60, (2**attempt) + random.uniform(0, 1))
+
+                    logger.warning(
+                        f"{source_name}: 429 rate limited, retrying in {delay:.1f}s "
+                        f"(attempt {attempt + 1}/{self._retry_count})"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                if response.status_code in (500, 502, 503, 504):
+                    # Server errors - exponential backoff
+                    delay = min(30, (2**attempt) + random.uniform(0, 1))
+                    logger.warning(
+                        f"{source_name}: HTTP {response.status_code}, retrying in {delay:.1f}s "
+                        f"(attempt {attempt + 1}/{self._retry_count})"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                # Other client errors (400, 403, 404, etc.) - don't retry
+                logger.warning(f"{source_name}: HTTP {response.status_code}, giving up")
+                return None
+
+            except (httpx.TimeoutException, httpx.NetworkError) as e:
+                # Network issues - exponential backoff
+                delay = min(30, (2**attempt) + random.uniform(0, 1))
+                logger.warning(
+                    f"{source_name}: {e.__class__.__name__}, retrying in {delay:.1f}s "
+                    f"(attempt {attempt + 1}/{self._retry_count})"
+                )
+                await asyncio.sleep(delay)
+
+            except Exception as e:
+                logger.error(f"{source_name}: unexpected error: {e}")
+                await asyncio.sleep(2**attempt)
+                continue
+
+        logger.error(f"{source_name}: failed after {self._retry_count} attempts")
+        return None
+
+    async def _fetch_rss_with_retry(self, url: str, source_name: str) -> Any:
+        """Fetch and parse RSS feed with retry logic."""
+        for attempt in range(self._retry_count):
+            try:
+                async with self._semaphore:
+                    # Use semaphore for RSS too, but feedparser is CPU-bound
+                    response = await self._client.get(url)
+
+                if response.status_code != 200:
+                    if response.status_code == 429:
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = float(retry_after)
+                            except ValueError:
+                                delay = min(60, (2**attempt) + random.uniform(0, 1))
+                        else:
+                            delay = min(60, (2**attempt) + random.uniform(0, 1))
+                        logger.warning(f"{source_name}: 429 rate limited, retrying in {delay:.1f}s")
+                        await asyncio.sleep(delay)
+                        continue
+
+                    if response.status_code in (500, 502, 503, 504):
+                        delay = min(30, (2**attempt) + random.uniform(0, 1))
+                        logger.warning(f"{source_name}: HTTP {response.status_code}, retrying")
+                        await asyncio.sleep(delay)
+                        continue
+
+                    logger.warning(f"{source_name}: HTTP {response.status_code}, giving up")
+                    return None
+
+                # Parse RSS in thread pool to avoid blocking
+                feed = await asyncio.to_thread(feedparser.parse, response.text)
+                return feed
+
+            except (httpx.TimeoutException, httpx.NetworkError) as e:
+                delay = min(30, (2**attempt) + random.uniform(0, 1))
+                logger.warning(f"{source_name}: {e.__class__.__name__}, retrying in {delay:.1f}s")
+                await asyncio.sleep(delay)
+
+            except Exception as e:
+                logger.error(f"{source_name}: RSS parse error: {e}")
+                await asyncio.sleep(2**attempt)
+
+        logger.error(f"{source_name}: failed after {self._retry_count} attempts")
         return None
 
     async def _load_all_jobs(self) -> None:
-        """Load jobs from configured sources concurrently with rate limiting."""
+        """Load jobs from configured sources with concurrency control.
+
+        Uses semaphore to limit concurrent requests to self.max_concurrent.
+        All sources are executed concurrently but each respects the semaphore.
+        """
         logger.info(f"Loading jobs from sources: {self.sources}")
         logger.debug(f"Using User-Agent: {self.user_agent}")
+        logger.debug(f"Max concurrent requests: {self.max_concurrent}")
 
+        # Build task list - they will be controlled by semaphore internally
         tasks = []
 
         # API Sources
         if "remotive" in self.sources:
             tasks.append(self._fetch_remotive())
-            await self.rate_limiter.wait()
         if "jobicy" in self.sources:
             tasks.append(self._fetch_jobicy())
-            await self.rate_limiter.wait()
         if "arbeitnow" in self.sources:
             tasks.append(self._fetch_arbeitnow())
-            await self.rate_limiter.wait()
 
         # RSS Sources
         if "remoteok" in self.sources:
             tasks.append(self._fetch_remoteok_rss())
-            await self.rate_limiter.wait()
         if "weworkremotely" in self.sources:
             tasks.append(self._fetch_wwr_rss())
-            await self.rate_limiter.wait()
         if "stackoverflow" in self.sources:
             tasks.append(self._fetch_stackoverflow_rss())
-            await self.rate_limiter.wait()
 
+        # Execute all tasks concurrently - semaphore inside each prevents overload
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         all_jobs: list[dict[str, Any]] = []
         for result in results:
             if isinstance(result, Exception):
                 logger.error(f"Source fetch error: {result}")
-            elif isinstance(result, list):  # ← явная проверка на list
+            elif isinstance(result, list):
                 all_jobs.extend(result)
             elif result is not None:
                 logger.warning(f"Unexpected result type: {type(result)}")
@@ -188,7 +284,7 @@ class ExternalJobSource:
 
             try:
                 raw_item = RawItem(
-                    source_kind=SourceKind.CAREER_SITE,  # Все внешние вакансии имеют этот тип
+                    source_kind=SourceKind.CAREER_SITE,
                     source_name=source_name,
                     external_id=job.get("url", job.get("title", "")),
                     url=url if url else None,
@@ -211,7 +307,11 @@ class ExternalJobSource:
 
         logger.info(f"Created {len(self._items)} RawItems")
 
-    # ============ API Sources with rate limiting ============
+    async def _close(self) -> None:
+        """Close the HTTP client. Should be called when shutting down."""
+        await self._client.aclose()
+
+    # ============ API Sources ============
 
     async def _fetch_remotive(self) -> list[dict[str, Any]]:
         """Fetch from Remotive API."""
@@ -238,6 +338,9 @@ class ExternalJobSource:
                         if slug:
                             url = f"https://remotive.com/remote-jobs/{slug}"
 
+                    # Parse salary range
+                    salary_min, salary_max = self._parse_salary(job.get("salary", ""))
+
                     jobs.append(
                         {
                             "source": "remotive",
@@ -246,8 +349,8 @@ class ExternalJobSource:
                             "description": description,
                             "skills": skills,
                             "experience_years": 0,
-                            "salary_min": self._parse_salary(job.get("salary", "")),
-                            "salary_max": 0,
+                            "salary_min": salary_min,
+                            "salary_max": salary_max,
                             "remote": True,
                             "location": job.get("candidate_required_location", "Remote"),
                             "url": url,
@@ -280,6 +383,9 @@ class ExternalJobSource:
                     if not url and job.get("slug"):
                         url = f"https://jobicy.com/jobs/{job.get('slug')}"
 
+                    # Parse salary range
+                    salary_min, salary_max = self._parse_salary(job.get("salary", ""))
+
                     jobs.append(
                         {
                             "source": "jobicy",
@@ -288,8 +394,8 @@ class ExternalJobSource:
                             "description": description,
                             "skills": skills,
                             "experience_years": 0,
-                            "salary_min": self._parse_salary(job.get("salary", "")),
-                            "salary_max": 0,
+                            "salary_min": salary_min,
+                            "salary_max": salary_max,
                             "remote": True,
                             "location": job.get("jobLocation", "Remote"),
                             "url": url,
@@ -353,29 +459,33 @@ class ExternalJobSource:
         jobs = []
         try:
             logger.info("Fetching RemoteOK RSS...")
-            feed = await asyncio.to_thread(feedparser.parse, "https://remoteok.io/remote-jobs.rss")
-            logger.info(f"RemoteOK: {len(feed.entries)} entries")
+            feed = await self._fetch_rss_with_retry(
+                "https://remoteok.io/remote-jobs.rss", "remoteok"
+            )
 
-            for entry in feed.entries[: self.max_jobs_per_source]:
-                title = entry.get("title", "")
-                description = entry.get("summary", "")
-                skills = extract_skills_from_text(f"{title} {description}")
+            if feed and hasattr(feed, "entries"):
+                logger.info(f"RemoteOK: {len(feed.entries)} entries")
 
-                jobs.append(
-                    {
-                        "source": "remoteok",
-                        "title": title,
-                        "company": self._extract_company_from_title(title),
-                        "description": description,
-                        "skills": skills,
-                        "experience_years": 0,
-                        "salary_min": 0,
-                        "salary_max": 0,
-                        "remote": True,
-                        "location": "Remote",
-                        "url": entry.get("link", ""),
-                    }
-                )
+                for entry in feed.entries[: self.max_jobs_per_source]:
+                    title = entry.get("title", "")
+                    description = entry.get("summary", "")
+                    skills = extract_skills_from_text(f"{title} {description}")
+
+                    jobs.append(
+                        {
+                            "source": "remoteok",
+                            "title": title,
+                            "company": self._extract_company_from_title(title),
+                            "description": description,
+                            "skills": skills,
+                            "experience_years": 0,
+                            "salary_min": 0,
+                            "salary_max": 0,
+                            "remote": True,
+                            "location": "Remote",
+                            "url": entry.get("link", ""),
+                        }
+                    )
         except Exception as e:
             logger.error(f"RemoteOK RSS error: {e}")
         return jobs
@@ -385,35 +495,38 @@ class ExternalJobSource:
         jobs = []
         try:
             logger.info("Fetching WeWorkRemotely RSS...")
-            feed = await asyncio.to_thread(
-                feedparser.parse,
+            feed = await self._fetch_rss_with_retry(
                 "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+                "weworkremotely",
             )
-            if len(feed.entries) == 0:
-                feed = await asyncio.to_thread(
-                    feedparser.parse, "https://weworkremotely.com/feed.xml"
+
+            if feed and len(feed.entries) == 0:
+                # Try main feed
+                feed = await self._fetch_rss_with_retry(
+                    "https://weworkremotely.com/feed.xml", "weworkremotely"
                 )
 
-            for entry in feed.entries[: self.max_jobs_per_source]:
-                title = entry.get("title", "")
-                description = entry.get("summary", "") or entry.get("description", "")
-                skills = extract_skills_from_text(f"{title} {description}")
+            if feed and hasattr(feed, "entries"):
+                for entry in feed.entries[: self.max_jobs_per_source]:
+                    title = entry.get("title", "")
+                    description = entry.get("summary", "") or entry.get("description", "")
+                    skills = extract_skills_from_text(f"{title} {description}")
 
-                jobs.append(
-                    {
-                        "source": "weworkremotely",
-                        "title": title,
-                        "company": self._extract_company_from_title(title),
-                        "description": description,
-                        "skills": skills,
-                        "experience_years": 0,
-                        "salary_min": 0,
-                        "salary_max": 0,
-                        "remote": True,
-                        "location": "Remote",
-                        "url": entry.get("link", ""),
-                    }
-                )
+                    jobs.append(
+                        {
+                            "source": "weworkremotely",
+                            "title": title,
+                            "company": self._extract_company_from_title(title),
+                            "description": description,
+                            "skills": skills,
+                            "experience_years": 0,
+                            "salary_min": 0,
+                            "salary_max": 0,
+                            "remote": True,
+                            "location": "Remote",
+                            "url": entry.get("link", ""),
+                        }
+                    )
         except Exception as e:
             logger.error(f"WWR RSS error: {e}")
         return jobs
@@ -423,53 +536,89 @@ class ExternalJobSource:
         jobs = []
         try:
             logger.info("Fetching StackOverflow RSS...")
-            feed = await asyncio.to_thread(feedparser.parse, "https://stackoverflow.com/jobs/feed")
+            feed = await self._fetch_rss_with_retry(
+                "https://stackoverflow.com/jobs/feed", "stackoverflow"
+            )
 
-            for entry in feed.entries[: self.max_jobs_per_source]:
-                title = entry.get("title", "")
-                description = entry.get("summary", "")
-                skills = extract_skills_from_text(f"{title} {description}")
-                is_remote = "remote" in title.lower()
+            if feed and hasattr(feed, "entries"):
+                for entry in feed.entries[: self.max_jobs_per_source]:
+                    title = entry.get("title", "")
+                    description = entry.get("summary", "")
+                    skills = extract_skills_from_text(f"{title} {description}")
+                    is_remote = "remote" in title.lower()
 
-                jobs.append(
-                    {
-                        "source": "stackoverflow",
-                        "title": title,
-                        "company": self._extract_company_from_title(title),
-                        "description": description,
-                        "skills": skills,
-                        "experience_years": 0,
-                        "salary_min": 0,
-                        "salary_max": 0,
-                        "remote": is_remote,
-                        "location": "Remote" if is_remote else "On-site",
-                        "url": entry.get("link", ""),
-                    }
-                )
+                    jobs.append(
+                        {
+                            "source": "stackoverflow",
+                            "title": title,
+                            "company": self._extract_company_from_title(title),
+                            "description": description,
+                            "skills": skills,
+                            "experience_years": 0,
+                            "salary_min": 0,
+                            "salary_max": 0,
+                            "remote": is_remote,
+                            "location": "Remote" if is_remote else "On-site",
+                            "url": entry.get("link", ""),
+                        }
+                    )
         except Exception as e:
             logger.error(f"StackOverflow RSS error: {e}")
         return jobs
 
     # ============ Helper Methods ============
 
-    def _parse_salary(self, salary_str: Any) -> int:
-        """Parse salary from various formats."""
+    def _parse_salary(self, salary_str: Any) -> tuple[int, int]:
+        """Parse salary range from various formats."""
         if not salary_str:
-            return 0
+            return (0, 0)
+        
         if isinstance(salary_str, (int, float)):
-            return int(salary_str)
-        salary_str = str(salary_str)
-        try:
-            cleaned = salary_str.replace("$", "").replace(",", "").strip()
-            if "k" in cleaned.lower():
-                num = float(cleaned.lower().replace("k", "").strip())
-                return int(num * 1000)
-            if "-" in cleaned:
-                cleaned = cleaned.split("-")[0]
-            return int(float(cleaned))
-        except (ValueError, TypeError):
-            return 0
-
+            return (int(salary_str), 0)
+        
+        salary_str = str(salary_str).lower().strip()
+        
+        # Remove $ and commas
+        cleaned = salary_str.replace("$", "").replace(",", "").strip()
+        
+        # Check if the whole string has 'k' (thousands marker)
+        has_k = "k" in cleaned
+        
+        # Remove 'k' for parsing
+        if has_k:
+            cleaned = cleaned.replace("k", "").strip()
+        
+        # Extract all numbers from the string
+        import re
+        numbers = re.findall(r"(\d+(?:\.\d+)?)", cleaned)
+        
+        if not numbers:
+            return (0, 0)
+        
+        # Parse found numbers and apply multiplier if needed
+        values = []
+        for num_str in numbers:
+            val = int(float(num_str))
+            if has_k:
+                val *= 1000
+            values.append(val)
+        
+        # If only one number found
+        if len(values) == 1:
+            # Check if it's a "up to" case
+            if "up to" in cleaned or "max" in cleaned:
+                return (0, values[0])
+            else:
+                return (values[0], 0)
+        
+        # Two or more numbers - take first two as range
+        if len(values) >= 2:
+            min_val = min(values[0], values[1])
+            max_val = max(values[0], values[1])
+            return (min_val, max_val)
+        
+        return (values[0], 0)
+        
     def _extract_company_from_title(self, title: str) -> str:
         """Extract company name from job title."""
         patterns = [" at ", " is hiring", " is looking", " - "]
@@ -485,11 +634,11 @@ class ExternalJobSource:
 def create_external_source(
     sources: list[str] | None = None,
     max_jobs: int = 50,
-    rate_limiter: RateLimiter | None = None,
+    max_concurrent: int = 2,
 ) -> ExternalJobSource:
     """Create configured ExternalJobSource instance."""
     return ExternalJobSource(
         sources=sources,
         max_jobs_per_source=max_jobs,
-        rate_limiter=rate_limiter,
+        max_concurrent=max_concurrent,
     )
