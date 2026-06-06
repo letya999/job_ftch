@@ -7,20 +7,19 @@ import asyncio
 import hashlib
 import logging
 from typing import AsyncIterator, Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, UTC
 
 import httpx
 import feedparser
 
-from domain.protocols import Source
-from domain.models import RawItem
+from domain import RawItem, SourceKind
 from domain.ai_keywords import is_ai_job
 from domain.skills import extract_skills_from_text
 
 logger = logging.getLogger(__name__)
 
 
-class ExternalJobSource(Source):
+class ExternalJobSource:
     """Fetch jobs from external APIs and RSS feeds."""
 
     def __init__(
@@ -30,12 +29,8 @@ class ExternalJobSource(Source):
         user_agent: Optional[str] = None,
     ):
         self.sources = sources or [
-            "remotive",
-            "jobicy",
-            "arbeitnow",
-            "remoteok",
-            "weworkremotely",
-            "stackoverflow",
+            "remotive", "jobicy", "arbeitnow",
+            "remoteok", "weworkremotely", "stackoverflow"
         ]
         self.max_jobs_per_source = max_jobs_per_source
         self.user_agent = user_agent or (
@@ -44,21 +39,20 @@ class ExternalJobSource(Source):
         )
         self._items: List[RawItem] = []
         self._index = 0
-
+    
     async def fetch(self) -> AsyncIterator[RawItem]:
         """Fetch all external jobs and yield as RawItems."""
         if not self._items:
             await self._load_all_jobs()
-
+        
         while self._index < len(self._items):
             yield self._items[self._index]
             self._index += 1
-
+    
     async def _load_all_jobs(self) -> None:
         """Load jobs from configured sources concurrently."""
         logger.info(f"Loading jobs from sources: {self.sources}")
-
-        # Create tasks for each source
+        
         tasks = []
         if "remotive" in self.sources:
             tasks.append(self._fetch_remotive())
@@ -72,20 +66,18 @@ class ExternalJobSource(Source):
             tasks.append(self._fetch_wwr_rss())
         if "stackoverflow" in self.sources:
             tasks.append(self._fetch_stackoverflow_rss())
-
-        # Execute all tasks concurrently
+        
         results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Collect all jobs
+        
         all_jobs: List[Dict[str, Any]] = []
         for result in results:
             if isinstance(result, Exception):
                 logger.error(f"Source fetch error: {result}")
             elif result:
                 all_jobs.extend(result)
-
+        
         logger.info(f"Total raw jobs fetched: {len(all_jobs)}")
-
+        
         # Deduplication by URL
         seen_urls = set()
         deduped_jobs = []
@@ -99,49 +91,48 @@ class ExternalJobSource(Source):
                 if key not in seen_urls:
                     seen_urls.add(key)
                     deduped_jobs.append(job)
-
+        
         logger.info(f"After dedup: {len(deduped_jobs)} jobs")
-
+        
         # AI filter
         ai_jobs = []
         for job in deduped_jobs:
             if is_ai_job(job.get("title", ""), job.get("description", ""), job.get("skills", [])):
                 ai_jobs.append(job)
-
+        
         logger.info(f"After AI filter: {len(ai_jobs)} jobs")
-
-        # Convert to RawItems
+        
+        # Convert to RawItems (используя новую структуру)
         for job in ai_jobs:
-            # Create unique ID
             url = job.get("url", "")
-            if url:
-                id_str = f"{job['source']}_{url}"
-            else:
-                id_str = f"{job['source']}_{job.get('title', '')}_{job.get('company', '')}"
-            item_id = hashlib.sha256(id_str.encode()).hexdigest()[:16]
-
-            self._items.append(
-                RawItem(
-                    id=item_id,
-                    source_type=f"external_{job['source']}",
-                    source_id=job.get("url", job.get("title", "")),
-                    content=job.get("description", ""),
+            source_name = f"external_{job['source']}"
+            
+            # Создаём RawItem с новыми полями
+            try:
+                raw_item = RawItem(
+                    source_kind=SourceKind.CAREER_SITE,  # Внешние API = career_site
+                    source_name=source_name,
+                    external_id=job.get("url", job.get("title", "")),
+                    url=url if url else None,
+                    text=job.get("description", ""),
                     metadata={
                         "title": job.get("title", ""),
                         "company": job.get("company", ""),
-                        "url": job.get("url", ""),
                         "salary_min": job.get("salary_min", 0),
                         "salary_max": job.get("salary_max", 0),
                         "remote": job.get("remote", True),
                         "location": job.get("location", "Remote"),
                         "experience_years": job.get("experience_years", 0),
                         "skills": job.get("skills", []),
-                    },
+                        "source": job["source"],
+                    }
                 )
-            )
-
+                self._items.append(raw_item)
+            except Exception as e:
+                logger.error(f"Failed to create RawItem for job {job.get('title')}: {e}")
+        
         logger.info(f"Created {len(self._items)} RawItems")
-
+    
     # ============ API Sources ============
 
     async def _fetch_remotive(self) -> List[Dict[str, Any]]:

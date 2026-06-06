@@ -1,64 +1,63 @@
-# infrastructure/stores/sqlite_store.py
-"""SQLite implementation of Store Protocol."""
+# infrastructure/stores/sqlite_store.py (обновлённый)
 
 import sqlite3
 import json
-from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
-from domain.protocols import Store
-from domain.models import Job, RawItem
+from domain import RawItem, Job  # Новые модели
 
 
-class SQLiteStore(Store):
+class SQLiteStore:
     """Store implementation using SQLite with proper indexes."""
-
+    
     def __init__(self, db_path: str = "data/jobs.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_tables()
-
+    
     def _init_tables(self) -> None:
         """Initialize database schema with indexes."""
         with self._get_connection() as conn:
-            # Jobs table (ваша схема)
+            # Jobs table (адаптированная под новую модель)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS jobs (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    source TEXT NOT NULL,
+                    stable_id TEXT PRIMARY KEY,
+                    raw_item_id TEXT NOT NULL,
+                    source_kind TEXT NOT NULL,
+                    source_name TEXT NOT NULL,
                     title TEXT NOT NULL,
-                    company TEXT,
-                    description TEXT,
-                    skills TEXT DEFAULT '[]',
-                    experience_years INTEGER DEFAULT 0,
-                    salary_min INTEGER,
-                    salary_max INTEGER,
-                    remote BOOLEAN DEFAULT 0,
+                    company TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    canonical_url TEXT,
                     location TEXT,
-                    url TEXT UNIQUE,
-                    raw_content TEXT,
-                    found_at DATE DEFAULT CURRENT_DATE,
-                    expires_at DATE DEFAULT (date('now', '+7 days')),
-                    is_active BOOLEAN DEFAULT 1,
+                    work_mode TEXT DEFAULT 'unknown',
+                    compensation_currency TEXT,
+                    compensation_min INTEGER,
+                    compensation_max INTEGER,
+                    metadata TEXT,
+                    found_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-
-            # Raw items table (для Source)
+            
+            # Raw items table (адаптированная под новую модель)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS raw_items (
-                    id TEXT PRIMARY KEY,
-                    source_type TEXT NOT NULL,
-                    source_id TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    metadata TEXT,
+                    stable_id TEXT PRIMARY KEY,
+                    source_kind TEXT NOT NULL,
+                    source_name TEXT NOT NULL,
+                    external_id TEXT,
+                    url TEXT,
+                    text TEXT NOT NULL,
                     fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    processed BOOLEAN DEFAULT 0
+                    metadata TEXT,
+                    processed BOOLEAN DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-
-            # Processing state table (для дедупликации)
+            
+            # Processing state table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS processing_state (
                     key TEXT PRIMARY KEY,
@@ -66,49 +65,98 @@ class SQLiteStore(Store):
                     last_item_id TEXT
                 )
             """)
-
-            # Индексы (ваши + дополнительные)
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_found ON jobs(found_at)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_expires ON jobs(expires_at)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_url ON jobs(url)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_skills ON jobs(skills)")
+            
+            # Индексы
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_source ON jobs(source_kind, source_name)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_raw_source ON raw_items(source_kind, source_name)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_raw_fetched ON raw_items(fetched_at)")
-
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_processed ON raw_items(processed)")
+            
             conn.commit()
-
+    
     def _get_connection(self):
-        """Get database connection with row factory."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
-
-    # Store Protocol methods
+    
+    async def save_raw_item(self, item: RawItem) -> None:
+        """Save raw item from source."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO raw_items 
+                (stable_id, source_kind, source_name, external_id, url, text, metadata, processed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                item.stable_id,
+                str(item.source_kind),
+                item.source_name,
+                item.external_id,
+                str(item.url) if item.url else None,
+                item.text,
+                json.dumps(item.metadata),
+                0
+            ))
+            conn.commit()
+    
+    async def is_processed(self, item_id: str) -> bool:
+        """Check if raw item was already processed."""
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT processed FROM raw_items WHERE stable_id = ?", (item_id,)
+            )
+            row = cursor.fetchone()
+            return row["processed"] == 1 if row else False
+    
+    async def mark_processed(self, item_id: str) -> None:
+        """Mark raw item as processed."""
+        with self._get_connection() as conn:
+            conn.execute("UPDATE raw_items SET processed = 1 WHERE stable_id = ?", (item_id,))
+            conn.commit()
+    
+    async def get_last_state(self, key: str) -> Optional[str]:
+        """Get last processing state."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT last_item_id FROM processing_state WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row["last_item_id"] if row else None
+    
+    async def set_last_state(self, key: str, value: str) -> None:
+        """Set last processing state."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO processing_state (key, last_item_id, last_processed_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+            """, (key, value))
+            conn.commit()
+    
     async def save_job(self, job: Job) -> str:
         """Save or update a job."""
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                """
+            compensation = job.compensation
+            conn.execute("""
                 INSERT OR REPLACE INTO jobs 
-                (source, title, company, description, skills, experience_years,
-                 salary_min, salary_max, remote, location, url)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
-                    job.source,
-                    job.title,
-                    job.company,
-                    job.description,
-                    json.dumps(job.skills),
-                    job.experience_years,
-                    job.salary_min,
-                    job.salary_max,
-                    job.remote,
-                    job.location,
-                    job.url,
-                ),
-            )
+                (stable_id, raw_item_id, source_kind, source_name, title, company, 
+                 description, canonical_url, location, work_mode, 
+                 compensation_currency, compensation_min, compensation_max, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                job.stable_id,
+                job.raw_item_id,
+                str(job.source_kind),
+                job.source_name,
+                job.title,
+                job.company,
+                job.description,
+                str(job.canonical_url) if job.canonical_url else None,
+                job.location,
+                str(job.work_mode),
+                compensation.currency if compensation else None,
+                compensation.min_amount if compensation else None,
+                compensation.max_amount if compensation else None,
+                json.dumps(job.metadata)
+            ))
             conn.commit()
-            return str(cursor.lastrowid)
+            return job.stable_id
 
     async def save_raw_item(self, item: RawItem) -> None:
         """Save raw item from source."""
