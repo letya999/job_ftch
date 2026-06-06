@@ -17,12 +17,51 @@ from infrastructure.sources.raw_item_factory import build_raw_item
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from types import TracebackType
 
     from config import Settings
 
 
 _GREENHOUSE_JOB_ID_RE = re.compile(r"/jobs/(?P<job_id>\d+)")
 _BCC_JOB_ID_RE = re.compile(r"/career/(?P<job_id>\d+)/?$")
+
+
+class _RetryingHttpClient:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        max_retries: int,
+        retry_delay_seconds: float,
+    ) -> None:
+        self._client = client
+        self._max_retries = max_retries
+        self._retry_delay_seconds = retry_delay_seconds
+
+    async def __aenter__(self) -> _RetryingHttpClient:
+        await self._client.__aenter__()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        await self._client.__aexit__(exc_type, exc, tb)
+
+    async def get(self, url: str, *, follow_redirects: bool = False) -> httpx.Response:
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = await self._client.get(url, follow_redirects=follow_redirects)
+                response.raise_for_status()
+                return response
+            except Exception as exc:
+                if attempt >= self._max_retries or not _is_retryable_http_error(exc):
+                    raise
+                await asyncio.sleep(self._retry_delay_seconds * (attempt + 1))
+        msg = "career-site retry loop exhausted unexpectedly"
+        raise RuntimeError(msg)
 
 
 @asynccontextmanager
@@ -41,6 +80,15 @@ def _clean_text(value: str) -> str:
 def _source_name_from_url(url: str) -> str:
     path = urlsplit(url).path.strip("/")
     return path.split("/")[-1] or "career-site"
+
+
+def _is_retryable_http_error(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status == 429 or status >= 500
+    return False
 
 
 class _CareerSiteParser(Protocol):
@@ -185,7 +233,6 @@ class _BCCParser:
             return None
         detail_url = urljoin(vacancies_url, href)
         detail_response = await client.get(detail_url, follow_redirects=True)
-        detail_response.raise_for_status()
         detail_parser = LexborHTMLParser(detail_response.text)
         detail_card = detail_parser.css_first(".bg-white.rounded-xl") or detail_parser
 
@@ -259,6 +306,67 @@ class _BCCParser:
         return [item for item in items if item is not None]
 
 
+class _YandexJobsParser:
+    def _extract_tag_texts(self, card: Any) -> list[str]:
+        texts: list[str] = []
+        for tag in card.css(".lc-jobs-vacancy-card__tag"):
+            text = _clean_text(tag.text(separator=" ", strip=True))
+            if text and text not in texts:
+                texts.append(text)
+        return texts
+
+    async def parse(
+        self,
+        *,
+        client: Any,
+        url: str,
+        html: str,
+        limit: int,
+    ) -> list[RawItem]:
+        del client
+        parser = LexborHTMLParser(html)
+        cards = parser.css("span[data-vacancy-card=true]")
+        items: list[RawItem] = []
+
+        for card in cards[:limit]:
+            href = card.css_first(".lc-jobs-vacancy-card__link")
+            if href is None:
+                continue
+            link = href.attributes.get("href")
+            if not link:
+                continue
+            full_url = urljoin(url, link)
+            title_node = card.css_first(".lc-jobs-vacancy-card__header")
+            summary_node = card.css_first(".lc-jobs-vacancy-card__description")
+            title = _clean_text(title_node.text(separator=" ", strip=True)) if title_node else ""
+            summary = (
+                _clean_text(summary_node.text(separator=" ", strip=True)) if summary_node else None
+            )
+            if not title:
+                continue
+            tags = self._extract_tag_texts(card)
+            service = tags[0] if tags else "Yandex"
+            metadata = {
+                "board_url": url,
+                "job_url": full_url,
+                "service": service,
+                "tags": tags,
+                "parser": "yandex_jobs",
+            }
+            text_parts = [title, summary, *tags]
+            items.append(
+                build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name="Yandex",
+                    external_id=str(card.attributes.get("data-vacancy-id") or full_url),
+                    url=full_url,
+                    text="\n".join(part for part in text_parts if part),
+                    metadata=metadata,
+                )
+            )
+        return items
+
+
 class CareerSiteSource:
     def __init__(
         self,
@@ -278,7 +386,6 @@ class CareerSiteSource:
     async def fetch(self) -> AsyncIterator[RawItem]:
         async with _http_session(self._client, own_client=self._own_client) as client:
             response = await client.get(self._site_url, follow_redirects=True)
-            response.raise_for_status()
             parser = self._parser or self._select_parser(url=self._site_url, html=response.text)
             items = await parser.parse(
                 client=client,
@@ -299,6 +406,15 @@ def _is_bcc(url: str, html: str) -> bool:
     return parser.css_first('[data-ajax-partial="career/list"]') is not None
 
 
+def _is_yandex_jobs(url: str, html: str) -> bool:
+    return "yandex.ru/jobs" in url.lower() and 'data-vacancy-card="true"' in html
+
+
+@register_parser("yandex_jobs", matcher=_is_yandex_jobs)
+def _build_yandex_jobs_parser() -> _YandexJobsParser:
+    return _YandexJobsParser()
+
+
 @register_parser("bcc", matcher=_is_bcc)
 def _build_bcc_parser() -> _BCCParser:
     return _BCCParser()
@@ -309,10 +425,22 @@ def _build_career_site_source(settings: Settings) -> CareerSiteSource:
     if settings.career_site_url is None:
         msg = "Career site source requires JOB_FTCH_CAREER_SITE_URL."
         raise ValueError(msg)
-    client = httpx.AsyncClient(timeout=30.0)
+    timeout = httpx.Timeout(settings.career_site_timeout_seconds, connect=30.0)
+    limits = httpx.Limits(
+        max_keepalive_connections=settings.career_site_max_keepalive_connections,
+        max_connections=settings.career_site_max_connections,
+    )
+    client = _RetryingHttpClient(
+        httpx.AsyncClient(timeout=timeout, limits=limits),
+        max_retries=settings.career_site_max_retries,
+        retry_delay_seconds=settings.career_site_retry_delay_seconds,
+    )
     return CareerSiteSource(
         client,
         settings.career_site_url,
         limit=settings.pipeline_max_items_per_run,
         own_client=True,
+        parser=_BCCParser(max_concurrency=settings.career_site_detail_concurrency)
+        if urlsplit(settings.career_site_url).hostname in {"www.bcc.kz", "bcc.kz"}
+        else None,
     )

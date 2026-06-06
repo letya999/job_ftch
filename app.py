@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from domain import Job, QuarantinedRawItem, RawItem, RejectedItem
     from sinks import CountedSink
 
-from sinks import FanOutSink, RoutingSink
+from sinks import FailureTolerantSink, FanOutSink, RoutingSink
 
 
 def parse_args() -> argparse.Namespace:
@@ -142,7 +142,10 @@ def build_nodes(
         JobValidationNode(),
     ]
     return (
-        SanitizeNode(allowed_career_site_hosts=settings.career_site_allowed_hosts),
+        SanitizeNode(
+            allowed_career_site_hosts=settings.career_site_allowed_hosts,
+            max_text_length=settings.pipeline_max_text_length,
+        ),
         cast("Sequence[ProcessingNode[object]]", nodes),
     )
 
@@ -152,13 +155,21 @@ def build_sink(settings: Settings) -> Sink[Job]:
 
 
 def build_quarantine_sink(settings: Settings) -> Sink[QuarantinedRawItem]:
-    return create_sink(settings, quarantine=True)  # type: ignore[return-value]
+    return FailureTolerantSink(
+        create_sink(settings, quarantine=True),  # type: ignore[arg-type]
+        sink_name="quarantine",
+    )
 
 
-def build_rejected_sink(settings: Settings) -> CountedSink[RejectedItem]:
+def build_rejected_sink(
+    settings: Settings,
+) -> tuple[CountedSink[RejectedItem], Sink[RejectedItem]]:
     from sinks import CountedSink
 
-    return CountedSink(create_sink(settings.rejected_settings()))  # type: ignore[arg-type]
+    counted: CountedSink[RejectedItem] = CountedSink(
+        create_sink(settings.rejected_settings())  # type: ignore[arg-type]
+    )
+    return counted, FailureTolerantSink(counted, sink_name="rejected")
 
 
 def build_output_sinks(
@@ -168,27 +179,32 @@ def build_output_sinks(
 
     main_sink: CountedSink[Job] = CountedSink(build_sink(settings))
     sink_chain: list[Sink[Job]] = [main_sink]
-    review_sink: CountedSink[Job] = CountedSink(
+    review_counted: CountedSink[Job] = CountedSink(
         create_sink(settings.review_settings())  # type: ignore[arg-type]
     )
     sink_chain.append(
         RoutingSink(
-            [(_needs_review(settings), review_sink)],
+            [(_needs_review(settings), FailureTolerantSink(review_counted, sink_name="review"))],
         )
     )
     if not settings.dry_run and settings.posting_backend != "none":
-        active_posting_sink: CountedSink[Job] = CountedSink(
+        posting_counted: CountedSink[Job] = CountedSink(
             create_sink(settings.posting_settings())  # type: ignore[arg-type]
         )
         sink_chain.append(
             RoutingSink(
-                [(_should_post(settings), active_posting_sink)],
+                [
+                    (
+                        _should_post(settings),
+                        FailureTolerantSink(posting_counted, sink_name="posting"),
+                    )
+                ],
             )
         )
-        posting_sink: CountedSink[Job] | None = active_posting_sink
+        posting_sink: CountedSink[Job] | None = posting_counted
     else:
         posting_sink = None
-    return FanOutSink(sink_chain), review_sink, posting_sink
+    return FanOutSink(sink_chain), review_counted, posting_sink
 
 
 def build_store(settings: Settings) -> Store:
@@ -229,7 +245,7 @@ async def run_pipeline(settings: Settings) -> RunSummary:
     llm = build_llm(settings)
     sanitize_node, nodes = build_nodes(settings, store, llm)
     output_sink, review_sink, posting_sink = build_output_sinks(settings)
-    rejected_sink = build_rejected_sink(settings)
+    rejected_counted, rejected_sink = build_rejected_sink(settings)
     pipeline = Pipeline(
         source=build_source(settings),
         sanitize_node=sanitize_node,
@@ -242,7 +258,7 @@ async def run_pipeline(settings: Settings) -> RunSummary:
     summary = await pipeline.run(max_items=settings.pipeline_max_items_per_run)
     summary.review = review_sink.emit_count
     summary.posted = posting_sink.emit_count if posting_sink is not None else 0
-    summary.rejected = rejected_sink.emit_count
+    summary.rejected = rejected_counted.emit_count
     for source_kind, count in review_sink.by_source_kind.items():
         summary.source_stats(source_kind).review = count
     if posting_sink is not None:

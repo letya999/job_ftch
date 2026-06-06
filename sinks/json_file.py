@@ -23,20 +23,22 @@ class JsonFileSink:
     ) -> None:
         self._output_path = output_path
         self._tmp_path = self._build_tmp_path(output_path)
+        self._staging_path = self._build_staging_path(output_path)
         self._jsonl = jsonl
         self._schema_version = schema_version
-        self._buffer: list[object] = []
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
-        if self._jsonl:
+        if self._jsonl and not self._tmp_path.exists():
             self._tmp_path.write_text("", encoding="utf-8")
 
     async def emit(self, item: object) -> None:
         payload = self._serialize(item)
+        line = f"{json.dumps(payload, ensure_ascii=True, sort_keys=True)}\n"
         if self._jsonl:
             with self._tmp_path.open("a", encoding="utf-8") as handle:
-                handle.write(f"{json.dumps(payload, ensure_ascii=True, sort_keys=True)}\n")
+                handle.write(line)
             return
-        self._buffer.append(payload)
+        with self._staging_path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
 
     async def flush(self) -> None:
         if self._jsonl:
@@ -44,14 +46,17 @@ class JsonFileSink:
                 self._tmp_path.write_text("", encoding="utf-8")
             self._tmp_path.replace(self._output_path)
             return
-        payload: object = self._buffer
+        items = self._load_staged_items()
+        payload: object = items
         if self._schema_version is not None:
-            payload = {"schema_version": self._schema_version, "items": self._buffer}
+            payload = {"schema_version": self._schema_version, "items": items}
         self._tmp_path.write_text(
             json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True),
             encoding="utf-8",
         )
         self._tmp_path.replace(self._output_path)
+        if self._staging_path.exists():
+            self._staging_path.unlink()
 
     def _serialize(self, item: object) -> object:
         payload = item.model_dump(mode="json") if hasattr(item, "model_dump") else item
@@ -66,6 +71,21 @@ class JsonFileSink:
         suffix = "".join(output_path.suffixes)
         stem = output_path.name[: -len(suffix)] if suffix else output_path.name
         return output_path.with_name(f"{stem}.tmp{suffix}")
+
+    @staticmethod
+    def _build_staging_path(output_path: Path) -> Path:
+        suffix = "".join(output_path.suffixes)
+        stem = output_path.name[: -len(suffix)] if suffix else output_path.name
+        return output_path.with_name(f"{stem}.staging.jsonl")
+
+    def _load_staged_items(self) -> list[object]:
+        if not self._staging_path.exists():
+            return []
+        return [
+            json.loads(line)
+            for line in self._staging_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
 
 
 @register_sink("json_file")

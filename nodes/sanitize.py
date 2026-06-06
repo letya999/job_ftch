@@ -53,8 +53,14 @@ def _normalize_url(value: str) -> str:
 
 
 class SanitizeNode:
-    def __init__(self, *, allowed_career_site_hosts: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        allowed_career_site_hosts: tuple[str, ...] = (),
+        max_text_length: int = 20_000,
+    ) -> None:
         self._allowed_career_site_hosts = {host.lower() for host in allowed_career_site_hosts}
+        self._max_text_length = max_text_length
 
     async def process(self, item: RawItem) -> RawItem | None:
         sanitized_text = _normalize_text(str(item.text))
@@ -64,6 +70,15 @@ class SanitizeNode:
             raise RawItemRejected(
                 reason=RawItemRejectionReason.EMPTY_TEXT,
                 details="Sanitized text is empty.",
+                item=item,
+            )
+        if len(sanitized_text) > self._max_text_length:
+            raise RawItemRejected(
+                reason=RawItemRejectionReason.TEXT_TOO_LONG,
+                details=(
+                    f"Sanitized text length {len(sanitized_text)} exceeds "
+                    f"the configured limit {self._max_text_length}."
+                ),
                 item=item,
             )
         if not sanitized_source_name:

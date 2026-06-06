@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     telemetry_service_name: str = "job_ftch"
     telemetry_console_exporter: bool = False
     pipeline_max_items_per_run: int = Field(default=200, gt=0)
+    pipeline_max_text_length: int = Field(default=20_000, ge=256, le=500_000)
     dry_run: bool = False
     debug_source_path: Path = Path("fixtures/debug/raw_items.json")
     output_path: Path = Path("artifacts/debug/raw_items.json")
@@ -50,6 +51,10 @@ class Settings(BaseSettings):
     telegram_comment_post_limit: int = Field(default=20, gt=0)
     telegram_comment_limit_per_post: int = Field(default=50, gt=0)
     telegram_history_wait_time_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
+    telegram_timeout_seconds: float = Field(default=10.0, gt=0.0, le=120.0)
+    telegram_request_retries: int = Field(default=3, ge=0, le=20)
+    telegram_connection_retries: int = Field(default=3, ge=0, le=20)
+    telegram_retry_delay_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
     telegram_flood_sleep_threshold_seconds: int = Field(default=60, ge=0, le=86400)
     openai_api_key: str | None = None
     openai_model: str = "gpt-4.1-mini"
@@ -57,6 +62,12 @@ class Settings(BaseSettings):
     openai_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     openai_max_retries: int = Field(default=2, ge=0, le=10)
     career_site_url: str | None = None
+    career_site_timeout_seconds: float = Field(default=15.0, gt=0.0, le=300.0)
+    career_site_max_retries: int = Field(default=2, ge=0, le=10)
+    career_site_retry_delay_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
+    career_site_max_connections: int = Field(default=10, gt=0, le=200)
+    career_site_max_keepalive_connections: int = Field(default=5, gt=0, le=200)
+    career_site_detail_concurrency: int = Field(default=5, gt=0, le=50)
     career_site_allowed_hosts: Annotated[tuple[str, ...], NoDecode] = ()
 
     model_config = SettingsConfigDict(
