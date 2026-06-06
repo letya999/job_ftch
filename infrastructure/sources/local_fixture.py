@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from domain import RawItem
+from pydantic import ValidationError
+
+from domain import QuarantinedRawItem, RawItem, RawItemRejectionReason
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -16,18 +18,104 @@ class LocalFixtureSource:
     def __init__(self, fixture_path: Path) -> None:
         self._fixture_path = fixture_path
 
-    async def fetch(self) -> AsyncIterator[RawItem]:
-        for payload in self._load_payloads():
-            yield RawItem.model_validate(payload)
+    async def fetch(self) -> AsyncIterator[RawItem | QuarantinedRawItem]:
+        items = (
+            self._iter_jsonl_payloads()
+            if self._fixture_path.suffix == ".jsonl"
+            else self._iter_json_payloads()
+        )
+        for item in items:
+            yield item
 
-    def _load_payloads(self) -> list[dict[str, Any]]:
+    def _iter_json_payloads(self) -> list[RawItem | QuarantinedRawItem]:
         raw_text = self._fixture_path.read_text(encoding="utf-8").strip()
         if not raw_text:
             return []
-        if self._fixture_path.suffix == ".jsonl":
-            return [json.loads(line) for line in raw_text.splitlines() if line.strip()]
-        data = json.loads(raw_text)
+        try:
+            data = json.loads(raw_text)
+        except json.JSONDecodeError as exc:
+            return [self._json_decode_error(exc, raw_text=raw_text)]
         if not isinstance(data, list):
-            msg = "Local fixture source expects a JSON array or JSONL file."
-            raise ValueError(msg)
-        return data
+            return [
+                QuarantinedRawItem(
+                    reason=RawItemRejectionReason.INVALID_RAW_ITEM,
+                    details="Local fixture source expects a JSON array or JSONL file.",
+                    snapshot={"fixture_path": str(self._fixture_path)},
+                )
+            ]
+        return [
+            self._validate_payload(payload, index=index)
+            for index, payload in enumerate(data, start=1)
+        ]
+
+    def _iter_jsonl_payloads(self) -> list[RawItem | QuarantinedRawItem]:
+        items: list[RawItem | QuarantinedRawItem] = []
+        raw_text = self._fixture_path.read_text(encoding="utf-8")
+        for line_number, line in enumerate(raw_text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError as exc:
+                items.append(
+                    self._json_decode_error(
+                        exc,
+                        raw_line=line,
+                        line_number=line_number,
+                    )
+                )
+                continue
+            items.append(self._validate_payload(payload, index=line_number))
+        return items
+
+    def _validate_payload(self, payload: Any, *, index: int) -> RawItem | QuarantinedRawItem:
+        if not isinstance(payload, dict):
+            return QuarantinedRawItem(
+                reason=RawItemRejectionReason.INVALID_RAW_ITEM,
+                details="Fixture payload must be a JSON object.",
+                snapshot={"payload": payload, "record_index": index},
+            )
+        try:
+            return RawItem.model_validate(payload)
+        except ValidationError as exc:
+            return QuarantinedRawItem(
+                reason=RawItemRejectionReason.INVALID_RAW_ITEM,
+                details=str(exc),
+                source_kind=(
+                    str(payload.get("source_kind"))
+                    if payload.get("source_kind") is not None
+                    else None
+                ),
+                source_name=(
+                    str(payload.get("source_name"))
+                    if payload.get("source_name") is not None
+                    else None
+                ),
+                external_id=(
+                    str(payload.get("external_id"))
+                    if payload.get("external_id") is not None
+                    else None
+                ),
+                snapshot={"payload": payload, "record_index": index},
+            )
+
+    def _json_decode_error(
+        self,
+        exc: json.JSONDecodeError,
+        *,
+        raw_text: str | None = None,
+        raw_line: str | None = None,
+        line_number: int | None = None,
+    ) -> QuarantinedRawItem:
+        snapshot: dict[str, Any] = {"fixture_path": str(self._fixture_path)}
+        if raw_text is not None:
+            snapshot["raw_text"] = raw_text
+        if raw_line is not None:
+            snapshot["raw_line"] = raw_line
+        if line_number is not None:
+            snapshot["line_number"] = line_number
+        return QuarantinedRawItem(
+            reason=RawItemRejectionReason.INVALID_RAW_ITEM,
+            details=f"Invalid JSON fixture payload: {exc}",
+            snapshot=snapshot,
+        )

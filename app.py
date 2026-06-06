@@ -6,26 +6,48 @@ import argparse
 import asyncio
 from typing import TYPE_CHECKING
 
+import httpx
 import structlog
 
 from application.logging import configure_logging
 from application.pipeline import Pipeline, RunSummary
 from application.telemetry import configure_telemetry
 from config import Settings, SinkBackend, SourceBackend, StoreBackend
-from infrastructure.sources.local_fixture import LocalFixtureSource
+from infrastructure.sources import (
+    CareerSiteSource,
+    LocalFixtureSource,
+    TelegramChannelSource,
+    TelegramCommentSource,
+    TelegramGroupSource,
+)
 from infrastructure.stores.in_memory import InMemoryStore
 from nodes import SanitizeNode
 from sinks.json_file import JsonFileSink
 
 if TYPE_CHECKING:
     from application.contracts import Node, Sink, Source, Store
-    from domain import RawItem
+    from domain import QuarantinedRawItem, RawItem
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the local job_ftch debug pipeline.")
     parser.add_argument(
+        "--source-backend",
+        default=None,
+        help="Source backend: local_fixture, telegram_channel, telegram_group, telegram_comment, career_site.",
+    )
+    parser.add_argument(
         "--source-path", default=None, help="Path to a JSON or JSONL RawItem fixture."
+    )
+    parser.add_argument(
+        "--telegram-entity",
+        default=None,
+        help="Telegram channel/group username or invite-style entity for Telegram sources.",
+    )
+    parser.add_argument(
+        "--career-site-url",
+        default=None,
+        help="Career-site URL for auto-detected career site parsing.",
     )
     parser.add_argument("--output-path", default=None, help="Path to JSON or JSONL output.")
     parser.add_argument(
@@ -37,8 +59,14 @@ def parse_args() -> argparse.Namespace:
 
 def build_settings(args: argparse.Namespace) -> Settings:
     updates: dict[str, object] = {}
+    if args.source_backend is not None:
+        updates["source_backend"] = args.source_backend
     if args.source_path is not None:
         updates["debug_source_path"] = args.source_path
+    if args.telegram_entity is not None:
+        updates["telegram_entity"] = args.telegram_entity
+    if args.career_site_url is not None:
+        updates["career_site_url"] = args.career_site_url
     if args.output_path is not None:
         updates["output_path"] = args.output_path
     if args.jsonl:
@@ -54,17 +82,84 @@ def build_settings(args: argparse.Namespace) -> Settings:
 def build_source(settings: Settings) -> Source[RawItem]:
     if settings.source_backend is SourceBackend.LOCAL_FIXTURE:
         return LocalFixtureSource(settings.debug_source_path)
+    if settings.source_backend in {
+        SourceBackend.TELEGRAM_CHANNEL,
+        SourceBackend.TELEGRAM_GROUP,
+        SourceBackend.TELEGRAM_COMMENT,
+    }:
+        if settings.telegram_api_id is None or settings.telegram_api_hash is None:
+            msg = (
+                "Telegram sources require JOB_FTCH_TELEGRAM_API_ID and JOB_FTCH_TELEGRAM_API_HASH."
+            )
+            raise ValueError(msg)
+        if settings.telegram_entity is None:
+            msg = "Telegram sources require JOB_FTCH_TELEGRAM_ENTITY."
+            raise ValueError(msg)
+        from telethon import TelegramClient
+
+        settings.telegram_session_path.parent.mkdir(parents=True, exist_ok=True)
+        client = TelegramClient(
+            str(settings.telegram_session_path),
+            settings.telegram_api_id,
+            settings.telegram_api_hash,
+        )
+        client.flood_sleep_threshold = settings.telegram_flood_sleep_threshold_seconds
+        if settings.source_backend is SourceBackend.TELEGRAM_CHANNEL:
+            return TelegramChannelSource(
+                client,
+                settings.telegram_entity,
+                limit=settings.telegram_message_limit,
+                wait_time=settings.telegram_history_wait_time_seconds,
+                own_client=True,
+            )
+        if settings.source_backend is SourceBackend.TELEGRAM_GROUP:
+            return TelegramGroupSource(
+                client,
+                settings.telegram_entity,
+                limit=settings.telegram_message_limit,
+                wait_time=settings.telegram_history_wait_time_seconds,
+                own_client=True,
+            )
+        return TelegramCommentSource(
+            client,
+            settings.telegram_entity,
+            post_limit=settings.telegram_comment_post_limit,
+            comment_limit_per_post=settings.telegram_comment_limit_per_post,
+            wait_time=settings.telegram_history_wait_time_seconds,
+            own_client=True,
+        )
+    if settings.source_backend is SourceBackend.CAREER_SITE:
+        if settings.career_site_url is None:
+            msg = "Career site source requires JOB_FTCH_CAREER_SITE_URL."
+            raise ValueError(msg)
+        client = httpx.AsyncClient(timeout=30.0)
+        return CareerSiteSource(
+            client,
+            settings.career_site_url,
+            limit=settings.pipeline_max_items_per_run,
+            own_client=True,
+        )
     msg = f"Unsupported source backend: {settings.source_backend}"
     raise ValueError(msg)
 
 
-def build_nodes() -> list[Node[RawItem]]:
-    return [SanitizeNode()]
+def build_nodes(settings: Settings) -> list[Node[RawItem]]:
+    return [SanitizeNode(allowed_career_site_hosts=settings.career_site_allowed_hosts)]
 
 
 def build_sink(settings: Settings) -> Sink[RawItem]:
     if settings.sink_backend is SinkBackend.JSON_FILE:
         return JsonFileSink(settings.output_path, jsonl=settings.output_jsonl)
+    msg = f"Unsupported sink backend: {settings.sink_backend}"
+    raise ValueError(msg)
+
+
+def build_quarantine_sink(settings: Settings) -> Sink[QuarantinedRawItem]:
+    if settings.sink_backend is SinkBackend.JSON_FILE:
+        return JsonFileSink(
+            settings.quarantine_output_path,
+            jsonl=settings.quarantine_output_jsonl,
+        )
     msg = f"Unsupported sink backend: {settings.sink_backend}"
     raise ValueError(msg)
 
@@ -84,9 +179,10 @@ async def run_pipeline(settings: Settings) -> RunSummary:
     )
     pipeline = Pipeline(
         source=build_source(settings),
-        nodes=build_nodes(),
+        nodes=build_nodes(settings),
         sink=build_sink(settings),
         store=build_store(settings),
+        quarantine_sink=build_quarantine_sink(settings),
     )
     summary = await pipeline.run(max_items=settings.pipeline_max_items_per_run)
     structlog.get_logger("job_ftch.app").info(

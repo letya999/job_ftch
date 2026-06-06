@@ -1,0 +1,6 @@
+{"source_kind":"telegram_channel","source_name":"Broken Channel","external_id":"bad-001","url":"https://evil.example/telegram/1","text":"Looks like a vacancy but origin is suspicious","metadata":{"chat_username":"broken_channel"}}
+{"source_kind":"telegram_group","source_name":"\u200b","external_id":"bad-002","url":"https://t.me/legit_group/2","text":"Valid text but broken source name","metadata":{"chat_username":"legit_group"}}
+{"source_kind":"telegram_comment","source_name":"Comment Feed","external_id":"bad-003","url":"https://t.me/comment_feed/3","text":"Useful comment","metadata":{"post_url":"notaurl","reply_to_message_id":7}}
+{"source_kind":"career_site","source_name":"Unknown Careers","external_id":"bad-004","url":"https://jobs.example.com/4","text":"Platform engineer role","metadata":{"board_url":"https://jobs.example.com","job_url":"https://jobs.example.com/4"}}
+{"source_kind":"career_site","source_name":"ClickHouse","external_id":"","url":"https://job-boards.greenhouse.io/clickhouse/jobs/7000000000","text":"   ","metadata":{"board_url":"https://job-boards.greenhouse.io/clickhouse","job_url":"https://job-boards.greenhouse.io/clickhouse/jobs/7000000000"}}
+not-json-at-all

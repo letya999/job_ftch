@@ -1,0 +1,21 @@
+{
+  "chat": {
+    "id": -1001382491369,
+    "title": "Bro Coders(s) Discussion",
+    "username": "brocodersdoubts"
+  },
+  "messages": [
+    {
+      "id": 4812,
+      "message": "Ram Ram Coders. Join the discussion group if you need help with DSA, interview prep, and roadmaps. Please read the pinned rules before posting.",
+      "date": "2024-08-30T14:05:00+00:00",
+      "sender_id": 701001,
+      "sender": {
+        "id": 701001,
+        "first_name": "Community",
+        "last_name": "Admin",
+        "username": "brocoders_admin"
+      }
+    }
+  ]
+}
