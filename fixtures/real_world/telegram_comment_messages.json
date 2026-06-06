@@ -1,0 +1,31 @@
+{
+  "chat": {
+    "id": -1001224624669,
+    "title": "Telegram Tips",
+    "username": "TelegramTips"
+  },
+  "posts": [
+    {
+      "id": 209,
+      "message": "Channel Comments. Channels with a linked Discussion Group have a comment button under each post.",
+      "date": "2021-01-12T08:27:39+00:00"
+    }
+  ],
+  "comments_by_post_id": {
+    "209": [
+      {
+        "id": 9001,
+        "message": "This is useful. The separate thread model makes moderation much easier.",
+        "date": "2021-01-12T08:36:11+00:00",
+        "sender_id": 552211,
+        "sender": {
+          "id": 552211,
+          "first_name": "Alex",
+          "last_name": "Reader",
+          "username": "alex_reader"
+        },
+        "reply_to_message_id": 209
+      }
+    ]
+  }
+}
