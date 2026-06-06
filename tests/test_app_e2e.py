@@ -87,3 +87,38 @@ def test_app_quarantines_multisource_negative_fixture_end_to_end(tmp_path: Path)
         "empty_source_name": 1,
     }
     assert any(record["snapshot"].get("line_number") == 6 for record in quarantine_records)
+
+
+def test_app_applies_max_text_length_to_processing_context(tmp_path: Path) -> None:
+    output_path = tmp_path / "too-long-output.json"
+    quarantine_path = tmp_path / "too-long-quarantine.jsonl"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "app.py",
+            "--source-path",
+            "fixtures/e2e/multisource_positive.jsonl",
+            "--output-path",
+            str(output_path),
+            "--max-items",
+            "20",
+        ],
+        cwd=_repo_root(),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "JOB_FTCH_MAX_TEXT_LENGTH": "5",
+            "JOB_FTCH_QUARANTINE_OUTPUT_PATH": str(quarantine_path),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    quarantine_records = [
+        json.loads(line) for line in quarantine_path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert not output_path.exists()
+    assert len(quarantine_records) == 8
+    assert {record["reason"] for record in quarantine_records} == {"text_too_long"}

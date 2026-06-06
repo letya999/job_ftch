@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from application import Pipeline
+from application import NodeOutcome, Pipeline, PipelineStage, ProcessingContext, RejectReason
 from domain import RawItem, SourceKind
 from infrastructure.sources.local_fixture import LocalFixtureSource
 from infrastructure.stores.in_memory import InMemoryStore
@@ -28,16 +28,49 @@ class StubSource:
 
 
 class DropSecondNode:
+    name = "drop_second"
+    stage = PipelineStage.TRIAGE
     is_sanitize = False
 
     def __init__(self) -> None:
         self._seen = 0
 
-    async def process(self, item: RawItem) -> RawItem | None:
+    async def process(self, item: RawItem, context: ProcessingContext) -> NodeOutcome[RawItem]:
         self._seen += 1
         if self._seen == 2:
-            return None
-        return item
+            return NodeOutcome.drop(reason=RejectReason.NON_JOB, message="test drop")
+        return NodeOutcome.pass_(item)
+
+
+class ExplodingOnceNode:
+    name = "explode_once"
+    stage = PipelineStage.TRIAGE
+    is_sanitize = False
+
+    def __init__(self) -> None:
+        self._seen = 0
+
+    async def process(self, item: RawItem, context: ProcessingContext) -> NodeOutcome[RawItem]:
+        self._seen += 1
+        if self._seen == 1:
+            raise RuntimeError("node exploded")
+        return NodeOutcome.pass_(item)
+
+
+class TrackingSink(JsonFileSink):
+    def __init__(self, output_path: Path, *, fail_emit: bool = False) -> None:
+        super().__init__(output_path)
+        self.finalized = False
+        self._fail_emit = fail_emit
+
+    async def emit(self, item: object) -> None:
+        if self._fail_emit:
+            raise RuntimeError("sink exploded")
+        await super().emit(item)
+
+    async def finalize(self) -> None:
+        self.finalized = True
+        await super().finalize()
 
 
 @pytest.mark.asyncio
@@ -62,6 +95,8 @@ async def test_pipeline_happy_path_and_drop_semantics(tmp_path: Path) -> None:
     assert summary.emitted == 1
     assert summary.quarantined == 0
     assert summary.failed == 0
+    assert summary.stage_counts["sanitize"] == 2
+    assert summary.reason_counts["non_job"] == 1
     assert payload[0]["external_id"] == "1"
 
 
@@ -101,6 +136,53 @@ async def test_local_fixture_source_and_jsonl_sink(tmp_path: Path) -> None:
     assert summary.emitted == 2
     assert summary.quarantined == 0
     assert len(lines) == 2
+
+
+@pytest.mark.asyncio
+async def test_pipeline_isolates_node_exception_and_finalizes_sink(tmp_path: Path) -> None:
+    items = [
+        RawItem(source_kind=SourceKind.DEBUG, source_name="debug", external_id="1", text="one"),
+        RawItem(source_kind=SourceKind.DEBUG, source_name="debug", external_id="2", text="two"),
+    ]
+    sink = TrackingSink(tmp_path / "out.json")
+    pipeline = Pipeline(
+        source=StubSource(items),
+        nodes=[SanitizeNode(), ExplodingOnceNode()],
+        sink=sink,
+        store=InMemoryStore(),
+        quarantine_sink=JsonFileSink(tmp_path / "quarantine.jsonl", jsonl=True),
+    )
+
+    summary = await pipeline.run()
+    payload = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    quarantine = (tmp_path / "quarantine.jsonl").read_text(encoding="utf-8").splitlines()
+
+    assert sink.finalized
+    assert summary.failed == 1
+    assert summary.emitted == 1
+    assert summary.reason_counts["node_failed"] == 1
+    assert payload[0]["external_id"] == "2"
+    assert json.loads(quarantine[0])["reason"] == "node_failed"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_sink_failure_does_not_mark_processed(tmp_path: Path) -> None:
+    item = RawItem(source_kind=SourceKind.DEBUG, source_name="debug", external_id="1", text="one")
+    store = InMemoryStore()
+    pipeline = Pipeline(
+        source=StubSource([item]),
+        nodes=[SanitizeNode()],
+        sink=TrackingSink(tmp_path / "out.json", fail_emit=True),
+        store=store,
+        quarantine_sink=JsonFileSink(tmp_path / "quarantine.jsonl", jsonl=True),
+    )
+
+    summary = await pipeline.run()
+
+    assert summary.failed == 1
+    assert summary.emitted == 0
+    assert not await store.has_processed(item.stable_id)
+    assert summary.reason_counts["sink_emit_error"] == 1
 
 
 def test_pipeline_requires_sanitize_node_first(tmp_path: Path) -> None:

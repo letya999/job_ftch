@@ -9,15 +9,16 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import AnyHttpUrl, TypeAdapter, ValidationError
 
+from application.outcomes import NodeOutcome, PipelineStage, RejectReason
 from application.rejections import RawItemRejected
-from domain import RawItemRejectionReason, SourceKind
+from domain import RawItemRejectionReason
 
 if TYPE_CHECKING:
+    from application.context import ProcessingContext
     from domain import RawItem
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _URL_ADAPTER = TypeAdapter(AnyHttpUrl)
-_TELEGRAM_HOSTS = frozenset({"t.me", "www.t.me"})
 _METADATA_URL_FIELDS = ("board_url", "job_url", "post_url")
 
 
@@ -53,35 +54,54 @@ def _normalize_url(value: str) -> str:
 
 
 class SanitizeNode:
+    name = "sanitize"
+    stage = PipelineStage.SANITIZE
     is_sanitize = True
 
     def __init__(self, *, allowed_career_site_hosts: tuple[str, ...] = ()) -> None:
-        self._allowed_career_site_hosts = {host.lower() for host in allowed_career_site_hosts}
+        # Kept for backwards-compatible construction; OriginPolicyNode owns host allowlists.
+        _ = allowed_career_site_hosts
 
-    async def process(self, item: RawItem) -> RawItem | None:
+    async def process(
+        self,
+        item: RawItem,
+        context: ProcessingContext | None = None,
+    ) -> NodeOutcome[RawItem]:
         sanitized_text = _normalize_text(str(item.text))
         sanitized_source_name = _normalize_text(str(item.source_name))
         sanitized_external_id = _normalize_text(str(item.external_id)) if item.external_id else None
         if not sanitized_text:
-            raise RawItemRejected(
-                reason=RawItemRejectionReason.EMPTY_TEXT,
-                details="Sanitized text is empty.",
+            return NodeOutcome.quarantine(
                 item=item,
+                reason=RejectReason.EMPTY_TEXT,
+                message="Sanitized text is empty.",
+                metadata=self._snapshot(item),
             )
         if not sanitized_source_name:
-            raise RawItemRejected(
-                reason=RawItemRejectionReason.EMPTY_SOURCE_NAME,
-                details="Sanitized source_name is empty.",
+            return NodeOutcome.quarantine(
                 item=item,
+                reason=RejectReason.EMPTY_SOURCE_NAME,
+                message="Sanitized source_name is empty.",
+                metadata=self._snapshot(item),
             )
-        normalized_url = self._validate_primary_url(item)
+        try:
+            normalized_url = self._validate_primary_url(item)
+            metadata = self._sanitize_metadata(item)
+        except RawItemRejected as exc:
+            return NodeOutcome.quarantine(
+                item=item,
+                reason=RejectReason.from_value(exc.reason.value),
+                message=exc.details,
+                metadata=exc.snapshot or self._snapshot(item),
+            )
         if not sanitized_external_id and normalized_url is None:
-            raise RawItemRejected(
-                reason=RawItemRejectionReason.MISSING_LOCATOR,
-                details="Raw item must keep external_id or url after sanitation.",
+            return NodeOutcome.quarantine(
                 item=item,
+                reason=RejectReason.MISSING_LOCATOR,
+                message="Raw item must keep external_id or url after sanitation.",
+                metadata=self._snapshot(item),
             )
-        metadata = self._sanitize_metadata(item)
+        payload = item.model_dump(mode="python", warnings=False)
         updates: dict[str, object] = {
             "text": sanitized_text,
             "source_name": sanitized_source_name,
@@ -90,18 +110,16 @@ class SanitizeNode:
         }
         if normalized_url is not None:
             updates["url"] = normalized_url
-        candidate = item.model_copy(update=updates)
+        payload.update(updates)
         try:
-            return item.__class__.model_validate(
-                candidate.model_dump(mode="python", warnings=False)
-            )
+            return NodeOutcome.pass_(item.__class__.model_validate(payload))
         except ValidationError as exc:
-            raise RawItemRejected(
-                reason=RawItemRejectionReason.INVALID_RAW_ITEM,
-                details=str(exc),
+            return NodeOutcome.quarantine(
                 item=item,
-                snapshot=candidate.model_dump(mode="json", warnings=False),
-            ) from exc
+                reason=RejectReason.INVALID_RAW_ITEM,
+                message=str(exc),
+                metadata=payload,
+            )
 
     def _sanitize_metadata(self, item: RawItem) -> dict[str, object]:
         sanitized: dict[str, object] = {}
@@ -122,7 +140,6 @@ class SanitizeNode:
             item=item,
             value=str(item.url),
             reason_on_invalid=RawItemRejectionReason.INVALID_URL,
-            reason_on_disallowed=RawItemRejectionReason.DISALLOWED_URL_HOST,
         )
 
     def _validate_origin_url(self, item: RawItem, field_name: str, value: str) -> AnyHttpUrl:
@@ -130,7 +147,6 @@ class SanitizeNode:
             item=item,
             value=value,
             reason_on_invalid=RawItemRejectionReason.INVALID_ORIGIN_URL,
-            reason_on_disallowed=RawItemRejectionReason.DISALLOWED_ORIGIN_HOST,
             field_name=field_name,
         )
 
@@ -140,39 +156,17 @@ class SanitizeNode:
         item: RawItem,
         value: str,
         reason_on_invalid: RawItemRejectionReason,
-        reason_on_disallowed: RawItemRejectionReason,
         field_name: str = "url",
     ) -> AnyHttpUrl:
         normalized = _normalize_url(_normalize_text(value))
         try:
-            parsed = _URL_ADAPTER.validate_python(normalized)
+            return _URL_ADAPTER.validate_python(normalized)
         except ValidationError as exc:
             raise RawItemRejected(
                 reason=reason_on_invalid,
                 details=f"{field_name} is not a valid URL: {value!r}",
                 item=item,
             ) from exc
-        host = parsed.host.lower() if parsed.host is not None else ""
-        if item.source_kind is SourceKind.CAREER_SITE:
-            if host not in self._allowed_career_site_hosts:
-                allowed = ", ".join(sorted(self._allowed_career_site_hosts))
-                raise RawItemRejected(
-                    reason=reason_on_disallowed,
-                    details=f"{field_name} host {host!r} is not in the allowlist: {allowed}",
-                    item=item,
-                )
-        elif (
-            item.source_kind
-            in {
-                SourceKind.TELEGRAM_CHANNEL,
-                SourceKind.TELEGRAM_GROUP,
-                SourceKind.TELEGRAM_COMMENT,
-            }
-            and host not in _TELEGRAM_HOSTS
-        ):
-            raise RawItemRejected(
-                reason=reason_on_disallowed,
-                details=f"{field_name} host {host!r} is not an allowed Telegram origin.",
-                item=item,
-            )
-        return parsed
+
+    def _snapshot(self, item: RawItem) -> dict[str, object]:
+        return item.model_dump(mode="json", warnings=False)

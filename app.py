@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING
 import httpx
 import structlog
 
+from application.context import ProcessingContext
 from application.logging import configure_logging
-from application.pipeline import Pipeline, RunSummary
+from application.pipeline import Pipeline
 from application.telemetry import configure_telemetry
 from config import Settings, SinkBackend, SourceBackend, StoreBackend
 from infrastructure.sources import (
@@ -21,11 +22,13 @@ from infrastructure.sources import (
     TelegramGroupSource,
 )
 from infrastructure.stores.in_memory import InMemoryStore
-from nodes import SanitizeNode
+from infrastructure.stores.postgres import PostgresStore
+from nodes import OriginPolicyNode, SanitizeNode, ValidateRawNode
 from sinks.json_file import JsonFileSink
 
 if TYPE_CHECKING:
     from application.contracts import Node, Sink, Source, Store
+    from application.run_summary import RunSummary
     from domain import QuarantinedRawItem, RawItem
 
 
@@ -132,7 +135,7 @@ def build_source(settings: Settings) -> Source[RawItem]:
         if settings.career_site_url is None:
             msg = "Career site source requires JOB_FTCH_CAREER_SITE_URL."
             raise ValueError(msg)
-        client = httpx.AsyncClient(timeout=30.0)
+        client = httpx.AsyncClient(timeout=settings.http_timeout_seconds)
         return CareerSiteSource(
             client,
             settings.career_site_url,
@@ -143,8 +146,12 @@ def build_source(settings: Settings) -> Source[RawItem]:
     raise ValueError(msg)
 
 
-def build_nodes(settings: Settings) -> list[Node[RawItem]]:
-    return [SanitizeNode(allowed_career_site_hosts=settings.career_site_allowed_hosts)]
+def build_nodes(settings: Settings) -> list[Node[RawItem, RawItem]]:
+    return [
+        SanitizeNode(),
+        ValidateRawNode(),
+        OriginPolicyNode(allowed_career_site_hosts=settings.career_site_allowed_hosts),
+    ]
 
 
 def build_sink(settings: Settings) -> Sink[RawItem]:
@@ -167,6 +174,11 @@ def build_quarantine_sink(settings: Settings) -> Sink[QuarantinedRawItem]:
 def build_store(settings: Settings) -> Store:
     if settings.store_backend is StoreBackend.MEMORY:
         return InMemoryStore()
+    if settings.store_backend is StoreBackend.POSTGRES:
+        if settings.postgres_dsn is None:
+            msg = "PostgreSQL store backend requires JOB_FTCH_POSTGRES_DSN."
+            raise ValueError(msg)
+        return PostgresStore(settings.postgres_dsn)
     msg = f"Unsupported store backend: {settings.store_backend}"
     raise ValueError(msg)
 
@@ -184,7 +196,15 @@ async def run_pipeline(settings: Settings) -> RunSummary:
         store=build_store(settings),
         quarantine_sink=build_quarantine_sink(settings),
     )
-    summary = await pipeline.run(max_items=settings.pipeline_max_items_per_run)
+    summary = await pipeline.run(
+        max_items=settings.pipeline_max_items_per_run,
+        context=ProcessingContext(
+            dry_run=settings.dry_run,
+            max_text_length=settings.max_text_length,
+            allowed_domains=frozenset(settings.career_site_allowed_hosts),
+            dedup_threshold=settings.dedup_threshold,
+        ),
+    )
     structlog.get_logger("job_ftch.app").info(
         "app_run_complete",
         output_path=str(settings.output_path),

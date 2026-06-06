@@ -8,7 +8,9 @@ Phase 2 requires explicit rejection reasons, URL/origin policy enforcement, and 
 
 ## Decision
 Add an explicit quarantine path:
-- `SanitizeNode` raises structured rejections for malformed or suspicious `RawItem` values.
+- `SanitizeNode` raises structured rejections for sanitation/shape failures.
+- `ValidateRawNode` and `OriginPolicyNode` raise structured rejections for raw
+  usefulness limits and URL/origin policy failures.
 - Sources may emit `QuarantinedRawItem` records for payloads that fail before a valid `RawItem` exists.
 - `Pipeline` routes both source-level quarantined records and node-level rejections into a quarantine sink.
 - Source fetch failures are logged and emitted as quarantined records with a dedicated reason.

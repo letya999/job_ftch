@@ -5,12 +5,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from application import Pipeline
-from application.rejections import RawItemRejected
+from application import Pipeline, ProcessingContext
 from domain import RawItem, RawItemRejectionReason, SourceKind
 from infrastructure.sources.local_fixture import LocalFixtureSource
 from infrastructure.stores.in_memory import InMemoryStore
-from nodes import SanitizeNode
+from nodes import OriginPolicyNode, SanitizeNode, ValidateRawNode
 from sinks.json_file import JsonFileSink
 
 if TYPE_CHECKING:
@@ -40,7 +39,7 @@ class FailingSource:
 
 @pytest.mark.asyncio
 async def test_sanitize_node_normalizes_text_url_and_origin_metadata() -> None:
-    node = SanitizeNode(allowed_career_site_hosts=("job-boards.greenhouse.io",))
+    node = SanitizeNode()
     item = RawItem(
         source_kind=SourceKind.CAREER_SITE,
         source_name=" ClickHouse\u200b ",
@@ -53,7 +52,8 @@ async def test_sanitize_node_normalizes_text_url_and_origin_metadata() -> None:
         },
     )
 
-    sanitized = await node.process(item)
+    outcome = await node.process(item, ProcessingContext())
+    sanitized = outcome.item
 
     assert sanitized is not None
     assert sanitized.source_name == "ClickHouse"
@@ -76,10 +76,10 @@ async def test_sanitize_node_rejects_empty_text_after_normalization() -> None:
         metadata={},
     )
 
-    with pytest.raises(RawItemRejected) as exc_info:
-        await node.process(malformed)
+    outcome = await node.process(malformed, ProcessingContext())
 
-    assert exc_info.value.reason == RawItemRejectionReason.EMPTY_TEXT
+    assert outcome.reason is not None
+    assert outcome.reason.value == RawItemRejectionReason.EMPTY_TEXT
 
 
 @pytest.mark.asyncio
@@ -95,10 +95,10 @@ async def test_sanitize_node_rejects_empty_source_name_after_normalization() -> 
         metadata={},
     )
 
-    with pytest.raises(RawItemRejected) as exc_info:
-        await node.process(malformed)
+    outcome = await node.process(malformed, ProcessingContext())
 
-    assert exc_info.value.reason == RawItemRejectionReason.EMPTY_SOURCE_NAME
+    assert outcome.reason is not None
+    assert outcome.reason.value == RawItemRejectionReason.EMPTY_SOURCE_NAME
 
 
 @pytest.mark.asyncio
@@ -112,7 +112,11 @@ async def test_pipeline_quarantines_disallowed_origin_host(tmp_path: Path) -> No
     )
     pipeline = Pipeline(
         source=StubSource([item]),
-        nodes=[SanitizeNode(allowed_career_site_hosts=("job-boards.greenhouse.io",))],
+        nodes=[
+            SanitizeNode(),
+            ValidateRawNode(),
+            OriginPolicyNode(allowed_career_site_hosts=("job-boards.greenhouse.io",)),
+        ],
         sink=JsonFileSink(tmp_path / "out.json"),
         store=InMemoryStore(),
         quarantine_sink=JsonFileSink(tmp_path / "quarantine.jsonl", jsonl=True),
@@ -126,6 +130,38 @@ async def test_pipeline_quarantines_disallowed_origin_host(tmp_path: Path) -> No
     assert summary.dropped == 1
     assert summary.quarantined == 1
     assert quarantine_record["reason"] == RawItemRejectionReason.DISALLOWED_URL_HOST
+
+
+@pytest.mark.asyncio
+async def test_pipeline_marks_processed_with_sanitized_stable_id(tmp_path: Path) -> None:
+    item = RawItem(
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="ClickHouse",
+        external_id="6014112004",
+        url="HTTPS://JOB-BOARDS.GREENHOUSE.IO/CLICKHOUSE/JOBS/6014112004#fragment",
+        text="Senior AI Engineer",
+    )
+    original_id = item.stable_id
+    store = InMemoryStore()
+    pipeline = Pipeline(
+        source=StubSource([item]),
+        nodes=[
+            SanitizeNode(),
+            ValidateRawNode(),
+            OriginPolicyNode(allowed_career_site_hosts=("job-boards.greenhouse.io",)),
+        ],
+        sink=JsonFileSink(tmp_path / "out.json"),
+        store=store,
+    )
+
+    summary = await pipeline.run()
+    emitted = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    sanitized_id = emitted[0]["stable_id"]
+
+    assert summary.emitted == 1
+    assert sanitized_id != original_id
+    assert await store.has_processed(sanitized_id)
+    assert not await store.has_processed(original_id)
 
 
 @pytest.mark.asyncio
@@ -156,7 +192,7 @@ async def test_local_fixture_source_routes_invalid_payloads_to_quarantine(tmp_pa
     )
     pipeline = Pipeline(
         source=LocalFixtureSource(fixture),
-        nodes=[SanitizeNode()],
+        nodes=[SanitizeNode(), ValidateRawNode(), OriginPolicyNode()],
         sink=JsonFileSink(tmp_path / "out.json"),
         store=InMemoryStore(),
         quarantine_sink=JsonFileSink(tmp_path / "quarantine.jsonl", jsonl=True),
@@ -180,7 +216,7 @@ async def test_local_fixture_source_routes_invalid_payloads_to_quarantine(tmp_pa
 async def test_pipeline_quarantines_source_fetch_failures(tmp_path: Path) -> None:
     pipeline = Pipeline(
         source=FailingSource(),
-        nodes=[SanitizeNode()],
+        nodes=[SanitizeNode(), ValidateRawNode(), OriginPolicyNode()],
         sink=JsonFileSink(tmp_path / "out.json"),
         store=InMemoryStore(),
         quarantine_sink=JsonFileSink(tmp_path / "quarantine.jsonl", jsonl=True),

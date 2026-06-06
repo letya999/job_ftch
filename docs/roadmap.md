@@ -5,6 +5,11 @@
 Build `job_ftch` as a lean MVP pipeline that reaches real-world inputs early, keeps the
 core architecture stable, and grows source coverage and output quality incrementally.
 
+For the current architecture hardening sequence, use
+[MVP Implementation Plan](mvp_implementation_plan.md). The roadmap remains the
+product milestone map; the implementation plan is the source of truth for
+PR-sized development order after the Batch 1 outcome refactor.
+
 ## Delivery rules
 
 - Real-world contact as early as possible: Telegram channels, Telegram groups/comments,

@@ -26,3 +26,6 @@ What are the trade-offs?
 ## Index
 1. [001-hexagonal-architecture.md](001-hexagonal-architecture.md) — Use Hexagonal Architecture
 2. [002-ddd-lite.md](002-ddd-lite.md) — Use DDD Lite
+3. [003-input-quarantine-flow.md](003-input-quarantine-flow.md) — Use explicit input quarantine flow
+4. [004-pipeline-outcomes-and-stage-transition.md](004-pipeline-outcomes-and-stage-transition.md) — Use structured pipeline outcomes
+5. [005-postgresql-store-first.md](005-postgresql-store-first.md) — Use PostgreSQL as the first production persistent store

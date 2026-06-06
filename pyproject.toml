@@ -26,6 +26,7 @@ dependencies = [
     "opentelemetry-api>=1.25",
     "opentelemetry-sdk>=1.25",
     "structlog>=24.2",
+    "psycopg[binary]>=3.2",
 ]
 
 [dependency-groups]

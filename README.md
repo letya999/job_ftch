@@ -23,7 +23,7 @@ uv run python app.py
 Hexagonal (Ports & Adapters) — see [docs/architecture.md](docs/architecture.md) for details.
 
 ## Documentation
-Documentation on architecture, vision, rules, and tech stack can be found in the [docs/](docs/) directory.
+Documentation on architecture, vision, configuration, implementation order, rules, and tech stack can be found in the [docs/](docs/) directory.
 
 ## Contributing
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

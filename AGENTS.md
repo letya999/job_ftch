@@ -28,6 +28,12 @@ Async pipeline: Telegram channels/groups/comments + career sites → structured 
 - Architectural choice → write ADR in `docs/adr/` first.
 - Commits: `feat`, `fix`, `chore`, `docs`, `refactor` only.
 
+## Repo agent policy
+
+- Agent instruction docs and Serena memories are tracked in `main` for this project.
+- Do not create or publish a separate `fullrepo` branch here.
+- Do not install fullrepo exclude rules that hide `AGENTS.md`, `.claude/`, or `.serena/` from normal git status.
+
 ## Extending
 
 | Want to add | Where |
