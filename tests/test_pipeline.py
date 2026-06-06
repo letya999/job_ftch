@@ -60,6 +60,7 @@ async def test_pipeline_happy_path_and_drop_semantics(tmp_path: Path) -> None:
     assert summary.fetched == 2
     assert summary.dropped == 1
     assert summary.emitted == 1
+    assert summary.quarantined == 0
     assert summary.failed == 0
     assert payload[0]["external_id"] == "1"
 
@@ -98,6 +99,7 @@ async def test_local_fixture_source_and_jsonl_sink(tmp_path: Path) -> None:
     lines = (tmp_path / "out.jsonl").read_text(encoding="utf-8").strip().splitlines()
 
     assert summary.emitted == 2
+    assert summary.quarantined == 0
     assert len(lines) == 2
 
 

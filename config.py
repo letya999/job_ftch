@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     debug_source_path: Path = Path("fixtures/debug/raw_items.json")
     output_path: Path = Path("artifacts/debug/raw_items.json")
     output_jsonl: bool = False
+    quarantine_output_path: Path = Path("artifacts/debug/quarantine.jsonl")
+    quarantine_output_jsonl: bool = True
     telegram_api_id: int | None = None
     telegram_api_hash: str | None = None
     telegram_session_path: Path = Path(".runtime/telegram.session")

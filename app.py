@@ -26,7 +26,7 @@ from sinks.json_file import JsonFileSink
 
 if TYPE_CHECKING:
     from application.contracts import Node, Sink, Source, Store
-    from domain import RawItem
+    from domain import QuarantinedRawItem, RawItem
 
 
 def parse_args() -> argparse.Namespace:
@@ -143,13 +143,23 @@ def build_source(settings: Settings) -> Source[RawItem]:
     raise ValueError(msg)
 
 
-def build_nodes() -> list[Node[RawItem]]:
-    return [SanitizeNode()]
+def build_nodes(settings: Settings) -> list[Node[RawItem]]:
+    return [SanitizeNode(allowed_career_site_hosts=settings.career_site_allowed_hosts)]
 
 
 def build_sink(settings: Settings) -> Sink[RawItem]:
     if settings.sink_backend is SinkBackend.JSON_FILE:
         return JsonFileSink(settings.output_path, jsonl=settings.output_jsonl)
+    msg = f"Unsupported sink backend: {settings.sink_backend}"
+    raise ValueError(msg)
+
+
+def build_quarantine_sink(settings: Settings) -> Sink[QuarantinedRawItem]:
+    if settings.sink_backend is SinkBackend.JSON_FILE:
+        return JsonFileSink(
+            settings.quarantine_output_path,
+            jsonl=settings.quarantine_output_jsonl,
+        )
     msg = f"Unsupported sink backend: {settings.sink_backend}"
     raise ValueError(msg)
 
@@ -169,9 +179,10 @@ async def run_pipeline(settings: Settings) -> RunSummary:
     )
     pipeline = Pipeline(
         source=build_source(settings),
-        nodes=build_nodes(),
+        nodes=build_nodes(settings),
         sink=build_sink(settings),
         store=build_store(settings),
+        quarantine_sink=build_quarantine_sink(settings),
     )
     summary = await pipeline.run(max_items=settings.pipeline_max_items_per_run)
     structlog.get_logger("job_ftch.app").info(

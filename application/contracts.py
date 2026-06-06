@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from domain import QuarantinedRawItem
+
 SourceItem = TypeVar("SourceItem", covariant=True)
 PipelineItem = TypeVar("PipelineItem")
 SinkItem = TypeVar("SinkItem", contravariant=True)
@@ -15,8 +17,8 @@ ExtractedItem = TypeVar("ExtractedItem")
 
 @runtime_checkable
 class Source(Protocol[SourceItem]):
-    def fetch(self) -> AsyncIterator[SourceItem]:
-        """Yield normalized input items."""
+    def fetch(self) -> AsyncIterator[SourceItem | QuarantinedRawItem]:
+        """Yield validated input items or quarantined source payloads."""
 
 
 @runtime_checkable

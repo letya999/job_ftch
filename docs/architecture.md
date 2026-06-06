@@ -4,14 +4,14 @@
 Проект использует **Гексагональную архитектуру** (Ports & Adapters). Основная бизнес-логика (Domain) находится в центре, а внешние зависимости и детали реализации (Инфраструктура) — снаружи.
 
 ## 5 протоколов (порты)
-1. **Source** — асинхронный итератор `RawItem` (Telegram-каналы, карьерные сайты и т.д.).
+1. **Source** — асинхронный итератор `RawItem`; при pre-validation ошибках источник может отдать `QuarantinedRawItem` в quarantine flow.
 2. **Node** — `async process(item) -> T | None`, при этом `SanitizeNode` всегда первый (очистка, нормализация, AI-фильтрация, дедупликация).
 3. **Sink** — `async emit(item: T)`; в production обычно `Job`, в debug-режиме допустим `RawItem`.
 4. **Store** — интерфейс для хранения состояния (был ли пост обработан, сохранение вакансии).
 5. **LLMProvider** — `extract[T](text, schema) -> T` (структурированное извлечение данных через LLM).
 
 ## Слои системы
-- `domain/` — чистые Pydantic-модели (Job, Source, RawItem). Никаких побочных эффектов или I/O.
+- `domain/` — чистые Pydantic-модели (Job, RawItem, QuarantinedRawItem). Никаких побочных эффектов или I/O.
 - `application/` — логика пайплайна (`pipeline.py`), контракты и сценарии использования.
 - `infrastructure/` — реализация адаптеров (Telegram Client, HTTP, БД, LLM SDK).
 - `nodes/` — конкретные шаги обработки (SanitizeNode, DedupNode, AIGateNode).
@@ -21,6 +21,8 @@
 ## Потоки данных
 ```
 Source.fetch() → [Node...] → Sink.emit()
+      ↘
+       quarantine → QuarantineSink.emit()
                       ↕
                     Store
 ```
