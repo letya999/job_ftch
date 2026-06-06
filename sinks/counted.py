@@ -25,4 +25,3 @@ class CountedSink[ItemT]:
     async def flush(self) -> None:
         if hasattr(self._sink, "flush"):
             await self._sink.flush()
-

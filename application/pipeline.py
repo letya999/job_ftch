@@ -359,7 +359,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
     ) -> None:
         if self._rejected_sink is None:
             return
-        payload = item.model_dump(mode="json") if hasattr(item, "model_dump") else {"item": str(item)}
+        payload = (
+            item.model_dump(mode="json") if hasattr(item, "model_dump") else {"item": str(item)}
+        )
         rejected = RejectedItem(
             outcome=outcome,
             reason=reason,

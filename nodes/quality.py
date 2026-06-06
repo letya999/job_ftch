@@ -22,9 +22,14 @@ class QualityScoringNode:
         score += 0.15 * (item.relevance_score or 0.0)
         score = min(1.0, round(score, 2))
         review_reasons = list(item.review_reasons)
-        if score < self._review_threshold and JobReviewReason.LOW_QUALITY_SCORE.value not in review_reasons:
+        if (
+            score < self._review_threshold
+            and JobReviewReason.LOW_QUALITY_SCORE.value not in review_reasons
+        ):
             review_reasons.append(JobReviewReason.LOW_QUALITY_SCORE.value)
-        return item.model_copy(update={"quality_score": score, "review_reasons": tuple(review_reasons)})
+        return item.model_copy(
+            update={"quality_score": score, "review_reasons": tuple(review_reasons)}
+        )
 
 
 class JobValidationNode:

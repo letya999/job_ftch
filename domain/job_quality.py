@@ -23,4 +23,3 @@ class JobValidationRejectionReason(StrEnum):
     JOB_MISSING_CORE_FIELDS = "job_missing_core_fields"
     JOB_OUT_OF_SCOPE = "job_out_of_scope"
     JOB_TOO_LOW_QUALITY = "job_too_low_quality"
-

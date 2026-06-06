@@ -53,4 +53,3 @@ class AIRoleRelevanceNode:
                 stage=self.__class__.__name__,
             )
         return item.model_copy(update={"relevance_score": relevance_score})
-

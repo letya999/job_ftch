@@ -29,4 +29,3 @@ class ExtractionValidationNode:
         if item.location is None and JobReviewReason.MISSING_LOCATION.value not in review_reasons:
             review_reasons.append(JobReviewReason.MISSING_LOCATION.value)
         return item.model_copy(update={"review_reasons": tuple(review_reasons)})
-

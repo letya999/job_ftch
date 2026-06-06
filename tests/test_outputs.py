@@ -71,7 +71,9 @@ async def test_json_file_sink_writes_schema_versioned_envelope(tmp_path: Path) -
 
 @pytest.mark.asyncio
 async def test_jsonl_sink_wraps_payloads_with_schema_version(tmp_path: Path) -> None:
-    sink = JsonFileSink(tmp_path / "rejected.jsonl", jsonl=True, schema_version="job_ftch.rejected.v1")
+    sink = JsonFileSink(
+        tmp_path / "rejected.jsonl", jsonl=True, schema_version="job_ftch.rejected.v1"
+    )
 
     await sink.emit({"reason": "too_short"})
     await sink.flush()

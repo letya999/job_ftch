@@ -92,4 +92,6 @@ def test_app_quarantines_multisource_negative_fixture_end_to_end(tmp_path: Path)
         "invalid_origin_url": 1,
         "empty_source_name": 1,
     }
-    assert any(record["payload"]["snapshot"].get("line_number") == 6 for record in quarantine_records)
+    assert any(
+        record["payload"]["snapshot"].get("line_number") == 6 for record in quarantine_records
+    )

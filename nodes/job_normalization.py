@@ -89,4 +89,3 @@ class CompensationParsingNode:
             max_amount=_normalize_amount(match.group("max")),
         )
         return item.model_copy(update={"compensation": compensation})
-

@@ -48,7 +48,9 @@ async def test_extraction_validation_drops_too_short_descriptions() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_provider_forwards_timeout_retry_and_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_openai_provider_forwards_timeout_retry_and_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, object] = {}
 
     class FakeClient:
@@ -61,7 +63,9 @@ async def test_openai_provider_forwards_timeout_retry_and_prompt(monkeypatch: py
         captured["provider_kwargs"] = kwargs
         return FakeClient()
 
-    monkeypatch.setattr("infrastructure.llm.openai_provider.instructor.from_provider", fake_from_provider)
+    monkeypatch.setattr(
+        "infrastructure.llm.openai_provider.instructor.from_provider", fake_from_provider
+    )
 
     provider = OpenAIInstructorLLMProvider(
         api_key="test",
@@ -91,7 +95,9 @@ async def test_openai_provider_forwards_timeout_retry_and_prompt(monkeypatch: py
 
 
 @pytest.mark.asyncio
-async def test_build_output_sinks_routes_borderline_jobs_to_review(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_build_output_sinks_routes_borderline_jobs_to_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class RecordingSink:
         def __init__(self) -> None:
             self.items: list[Job] = []
@@ -135,7 +141,9 @@ async def test_build_output_sinks_routes_borderline_jobs_to_review(monkeypatch: 
 
 
 @pytest.mark.asyncio
-async def test_build_output_sinks_respects_dry_run_for_posting(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_build_output_sinks_respects_dry_run_for_posting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     create_calls: list[tuple[str, str]] = []
 
     class RecordingSink:
@@ -170,7 +178,9 @@ async def test_build_output_sinks_respects_dry_run_for_posting(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
-async def test_build_output_sinks_routes_strong_jobs_to_posting(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_build_output_sinks_routes_strong_jobs_to_posting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class RecordingSink:
         def __init__(self) -> None:
             self.items: list[Job] = []

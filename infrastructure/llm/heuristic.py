@@ -73,4 +73,3 @@ class HeuristicLLMProvider:
 def _build_heuristic_llm(settings: Settings) -> HeuristicLLMProvider:
     del settings
     return HeuristicLLMProvider()
-

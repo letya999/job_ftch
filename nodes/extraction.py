@@ -118,7 +118,9 @@ class ExtractionNode:
                 item=item,
             )
         review_reasons: list[str] = []
-        extraction_status = JobExtractionStatus.PARTIAL if degraded else JobExtractionStatus.COMPLETE
+        extraction_status = (
+            JobExtractionStatus.PARTIAL if degraded else JobExtractionStatus.COMPLETE
+        )
         if title is None:
             review_reasons.append(JobReviewReason.MISSING_TITLE.value)
             extraction_status = JobExtractionStatus.PARTIAL

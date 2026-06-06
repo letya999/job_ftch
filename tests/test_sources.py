@@ -275,6 +275,7 @@ async def test_telegram_comment_source_skips_invalid_reply_threads() -> None:
             wait_time: float | None = None,
         ):
             if reply_to == 209:
+
                 async def _fail() -> Any:
                     raise MsgIdInvalidError(
                         "The message ID used in the peer was invalid (caused by GetRepliesRequest)"

@@ -66,4 +66,3 @@ async def test_gold_samples_regression_fixture() -> None:
         assert job is not None
         assert job.title == record["expected"]["title"]
         assert job.work_mode.value == record["expected"]["work_mode"]
-

@@ -201,18 +201,20 @@ def build_llm(settings: Settings) -> LLMProvider:
 
 def _needs_review(settings: Settings) -> Callable[[Job], bool]:
     def predicate(job: Job) -> bool:
-        return bool(job.review_reasons) or (
-            job.quality_score or 0.0
-        ) < settings.review_max_quality_score
+        return (
+            bool(job.review_reasons)
+            or (job.quality_score or 0.0) < settings.review_max_quality_score
+        )
 
     return predicate
 
 
 def _should_post(settings: Settings) -> Callable[[Job], bool]:
     def predicate(job: Job) -> bool:
-        return not job.review_reasons and (
-            job.quality_score or 0.0
-        ) >= settings.posting_min_quality_score
+        return (
+            not job.review_reasons
+            and (job.quality_score or 0.0) >= settings.posting_min_quality_score
+        )
 
     return predicate
 
