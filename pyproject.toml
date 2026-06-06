@@ -28,6 +28,14 @@ dependencies = [
     "structlog>=24.2",
 ]
 
+[project.entry-points."job_ftch.sources"]
+
+[project.entry-points."job_ftch.parsers"]
+
+[project.entry-points."job_ftch.sinks"]
+
+[project.entry-points."job_ftch.stores"]
+
 [dependency-groups]
 dev = [
     "ruff>=0.4",

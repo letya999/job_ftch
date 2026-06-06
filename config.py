@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -12,28 +11,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _VALID_LOG_LEVELS = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}
 
 
-class SourceBackend(StrEnum):
-    LOCAL_FIXTURE = "local_fixture"
-    TELEGRAM_CHANNEL = "telegram_channel"
-    TELEGRAM_GROUP = "telegram_group"
-    TELEGRAM_COMMENT = "telegram_comment"
-    CAREER_SITE = "career_site"
-
-
-class SinkBackend(StrEnum):
-    JSON_FILE = "json_file"
-
-
-class StoreBackend(StrEnum):
-    MEMORY = "memory"
-
-
 class Settings(BaseSettings):
     """Pipeline settings loaded from environment variables."""
 
-    source_backend: SourceBackend = SourceBackend.LOCAL_FIXTURE
-    sink_backend: SinkBackend = SinkBackend.JSON_FILE
-    store_backend: StoreBackend = StoreBackend.MEMORY
+    source_backend: str = "local_fixture"
+    sink_backend: str = "json_file"
+    store_backend: str = "memory"
     log_level: str = "INFO"
     telemetry_service_name: str = "job_ftch"
     telemetry_console_exporter: bool = False
@@ -53,11 +36,7 @@ class Settings(BaseSettings):
     telegram_history_wait_time_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
     telegram_flood_sleep_threshold_seconds: int = Field(default=60, ge=0, le=86400)
     career_site_url: str | None = None
-    career_site_allowed_hosts: tuple[str, ...] = (
-        "job-boards.greenhouse.io",
-        "www.bcc.kz",
-        "bcc.kz",
-    )
+    career_site_allowed_hosts: tuple[str, ...] = ()
 
     model_config = SettingsConfigDict(
         env_file=(".env", ".env.dev"),
@@ -72,6 +51,15 @@ class Settings(BaseSettings):
         normalized = value.upper()
         if normalized not in _VALID_LOG_LEVELS:
             msg = f"log_level must be one of: {', '.join(sorted(_VALID_LOG_LEVELS))}"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("source_backend", "sink_backend", "store_backend")
+    @classmethod
+    def normalize_backend_keys(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            msg = "backend keys must not be blank"
             raise ValueError(msg)
         return normalized
 
@@ -106,7 +94,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_career_site_policy(self) -> Settings:
-        if self.source_backend is not SourceBackend.CAREER_SITE or self.career_site_url is None:
+        if self.source_backend != "career_site" or self.career_site_url is None:
             return self
 
         parsed = urlsplit(self.career_site_url)
@@ -122,5 +110,12 @@ class Settings(BaseSettings):
 
         return self
 
+    def quarantine_settings(self) -> Settings:
+        payload = self.model_dump(mode="python")
+        payload["output_path"] = self.quarantine_output_path
+        payload["output_jsonl"] = self.quarantine_output_jsonl
+        return self.__class__.model_validate(payload)
 
-settings = Settings()
+
+def get_settings() -> Settings:
+    return Settings()

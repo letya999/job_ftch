@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from application.contracts import ProcessingNode, SanitizingNode, Sink, Source, Store
+    from application.contracts import (
+        FlushableSink,
+        ProcessingNode,
+        SanitizingNode,
+        Sink,
+        Source,
+        Store,
+    )
 
 import structlog
 from opentelemetry import trace
@@ -18,7 +24,8 @@ from application.drops import RawItemDropped
 from application.rejections import RawItemRejected
 from domain import QuarantinedRawItem, RawItem, RawItemRejectionReason, processed_key_for_raw_item
 
-PipelineItem = TypeVar("PipelineItem")
+PipelineInput = TypeVar("PipelineInput")
+PipelineOutput = TypeVar("PipelineOutput")
 
 
 @dataclass(slots=True)
@@ -77,20 +84,20 @@ class RunSummary(StatsBase):
         return asdict(self)
 
 
-class Pipeline[PipelineItem]:
+class Pipeline[PipelineInput, PipelineOutput]:
     def __init__(
         self,
-        source: Source[PipelineItem],
-        sanitize_node: SanitizingNode[PipelineItem],
-        nodes: Sequence[ProcessingNode[PipelineItem]],
-        sink: Sink[PipelineItem],
+        source: Source[PipelineInput],
+        sanitize_node: SanitizingNode[PipelineInput],
+        nodes: Sequence[ProcessingNode[Any]],
+        sink: Sink[PipelineOutput] | Sequence[Sink[PipelineOutput]],
         store: Store,
         quarantine_sink: Sink[QuarantinedRawItem] | None = None,
     ) -> None:
         self._source = source
         self._sanitize_node = sanitize_node
         self._nodes = list(nodes)
-        self._sink = sink
+        self._sink = self._coerce_sink(sink)
         self._store = store
         self._quarantine_sink = quarantine_sink
         self._logger = structlog.get_logger("job_ftch.pipeline")
@@ -135,7 +142,7 @@ class Pipeline[PipelineItem]:
                                 reason="already_processed",
                             )
                             continue
-                        sanitized = await self._sanitize_node.process(cast("PipelineItem", item))
+                        sanitized = await self._sanitize_node.process(cast("PipelineInput", item))
                         if sanitized is None:
                             summary.record_source_drop(source_kind, "node_returned_none")
                             item_span.set_attribute("job_ftch.result", "dropped")
@@ -148,7 +155,7 @@ class Pipeline[PipelineItem]:
                             continue
                         summary.sanitized += 1
                         summary.source_stats(source_kind).sanitized += 1
-                        current: PipelineItem | None = sanitized
+                        current: Any = sanitized
                         for node in self._nodes:
                             if current is None:
                                 break
@@ -169,7 +176,7 @@ class Pipeline[PipelineItem]:
                             continue
                         summary.triaged += 1
                         summary.source_stats(source_kind).triaged += 1
-                        await self._sink.emit(current)
+                        await self._sink.emit(cast("PipelineOutput", current))
                         summary.emitted += 1
                         summary.source_stats(source_kind).emitted += 1
                         item_span.set_attribute("job_ftch.result", "emitted")
@@ -199,6 +206,9 @@ class Pipeline[PipelineItem]:
                     if finalized and processed_key is not None:
                         await self._store.mark_processed(processed_key)
             summary.finish()
+            await self._flush_if_supported(self._sink)
+            if self._quarantine_sink is not None:
+                await self._flush_if_supported(self._quarantine_sink)
             span.set_attribute("job_ftch.fetched", summary.fetched)
             span.set_attribute("job_ftch.sanitized", summary.sanitized)
             span.set_attribute("job_ftch.triaged", summary.triaged)
@@ -211,7 +221,7 @@ class Pipeline[PipelineItem]:
 
     async def _handle_pre_quarantined_item(
         self,
-        item: PipelineItem | QuarantinedRawItem,
+        item: PipelineInput | QuarantinedRawItem,
         summary: RunSummary,
     ) -> bool:
         if not isinstance(item, QuarantinedRawItem):
@@ -243,3 +253,18 @@ class Pipeline[PipelineItem]:
                 },
             )
         )
+
+    def _coerce_sink(
+        self,
+        sink: Sink[PipelineOutput] | Sequence[Sink[PipelineOutput]],
+    ) -> Sink[PipelineOutput]:
+        from sinks.fanout import FanOutSink
+
+        if isinstance(sink, Sequence):
+            return FanOutSink(sink)
+        return sink
+
+    async def _flush_if_supported(self, sink: object) -> None:
+        flushable = cast("FlushableSink[object] | None", sink if hasattr(sink, "flush") else None)
+        if flushable is not None:
+            await flushable.flush()

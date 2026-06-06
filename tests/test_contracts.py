@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from application import LLMProvider, ProcessingNode, SanitizingNode, Sink, Source, Store
+from application import LLMProvider, ProcessingNode, SanitizingNode, Sink, Source, Stage, Store
 from domain import (
     DedupKeyKind,
     DuplicateRecord,
@@ -92,6 +92,7 @@ class MinimalLLMProvider:
 
 def test_protocol_contracts_runtime_checkable() -> None:
     assert isinstance(MinimalSource(), Source)
+    assert isinstance(MinimalSanitizeNode(), Stage)
     assert isinstance(MinimalSanitizeNode(), SanitizingNode)
     assert isinstance(MinimalProcessingNode(), ProcessingNode)
     assert isinstance(MinimalSink(), Sink)

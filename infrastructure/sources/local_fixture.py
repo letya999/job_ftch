@@ -7,11 +7,14 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
+from application.registry import register_source
 from domain import QuarantinedRawItem, RawItem, RawItemRejectionReason
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
+
+    from config import Settings
 
 
 class LocalFixtureSource:
@@ -119,3 +122,8 @@ class LocalFixtureSource:
             details=f"Invalid JSON fixture payload: {exc}",
             snapshot=snapshot,
         )
+
+
+@register_source("local_fixture")
+def _build_local_fixture_source(settings: Settings) -> LocalFixtureSource:
+    return LocalFixtureSource(settings.debug_source_path)

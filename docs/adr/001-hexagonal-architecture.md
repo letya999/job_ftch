@@ -8,6 +8,8 @@ Need an architecture that supports pluggable sources, processors, and sinks whil
 
 ## Decision
 Hexagonal Architecture (Ports & Adapters) with 5 core Protocols: Source, Node, Sink, Store, LLMProvider.
+`Node` is further specialized by ADR-004 into `PipelineNode` / `SanitizingNode` / `ProcessingNode`,
+and by ADR-006 into typed `Stage[In, Out]` composition for type-changing pipelines.
 
 ## Consequences
 - (+) Zero coupling between domain and infra.

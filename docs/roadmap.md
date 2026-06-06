@@ -14,6 +14,12 @@ core architecture stable, and grows source coverage and output quality increment
 - Every task should end in working code, tests, and an observable result.
 - Avoid speculative infra until the MVP loop is proven.
 
+## Architecture principles
+
+- New source, sink, store, or parser backends should arrive via registry or config, not core edits.
+- Type changes in the pipeline happen only through `Stage[In, Out]` boundaries.
+- See ADR-006, ADR-007, ADR-008, and ADR-009 for the hardening baseline.
+
 ## Phase 0. Spine
 
 Purpose: create the smallest correct executable core.
@@ -139,6 +145,28 @@ Purpose: stabilize reruns and avoid inflated job counts.
 ### RM-026 Dedup explainability
 - Persist why an item/job was marked as duplicate.
 
+## Phase 4.5. Architecture hardening
+
+Purpose: remove extension bottlenecks before extraction, multi-source, and downstream outputs lock the core in place.
+
+### RM-026a Extension registry and plugin discovery
+- Replace hardcoded backend dispatch with self-registration and entry-point discovery.
+
+### RM-026b Typed pipeline stages
+- Introduce `Stage[In, Out]` so `RawItem -> Job` and later `Job -> Job` processing stay type-safe.
+
+### RM-026c Declarative CareerSiteConfig source
+- Support selector-driven career-site extraction without per-site parser classes by default.
+
+### RM-026d Sink fan-out and routing
+- Support multiple sinks and conditional routing without adding orchestration branches.
+
+### RM-026e Output and fetch efficiency
+- Remove O(n^2) JSON sink rewrites and parallelize BCC detail-page fetching with bounded concurrency.
+
+### RM-026f Config hygiene
+- Remove private default allowlists from core config and switch to a settings factory instead of module import side effects.
+
 ## Phase 5. Extraction and schema quality
 
 Purpose: turn filtered raw signal into structured jobs.
@@ -150,10 +178,12 @@ Purpose: turn filtered raw signal into structured jobs.
 ### RM-028 Extraction node v1
 - Convert `RawItem` into structured `Job` output.
 - Handle parse success, partial success, and failure explicitly.
+- Blocked by: RM-026b.
 
 ### RM-029 LLM provider adapter
 - Implement `openai + instructor` behind `LLMProvider`.
 - Add timeout, retry, and schema validation behavior.
+- Blocked by: RM-026b.
 
 ### RM-030 Extraction validation layer
 - Validate extracted jobs after parsing.
@@ -174,6 +204,7 @@ Purpose: make output useful for the target AI-jobs niche.
 
 ### RM-034 AI-role relevance filter
 - Keep jobs in the target niche: LLM, AI PM, MLOps, AgentOps, AI Infra, related roles.
+- Implement as `Stage[Job, Job]` after extraction.
 
 ### RM-035 Title and company normalization
 - Clean noisy company/title strings after extraction.
@@ -193,15 +224,19 @@ Purpose: make results consumable by operators and downstream users.
 
 ### RM-039 JSON sink hardening
 - Support atomic writes, stable schema versioning, and JSONL mode.
+- Fix O(n^2) full-file rewrite behavior from the debug implementation.
 
 ### RM-040 Rejected-items sink
 - Write dropped, quarantined, and failed items to a separate sink.
+- Depends on: RM-026d.
 
 ### RM-041 Posting sink v1
 - Publish selected jobs to Telegram or another outbound target.
+- Depends on: RM-026d.
 
 ### RM-042 Human review output
 - Export borderline jobs for quick manual review.
+- Depends on: RM-026d.
 
 ### RM-043 CLI run modes
 - Add `once`, source selection, output path, item limit, and dry-run modes.
@@ -292,6 +327,7 @@ Purpose: make the project usable by someone other than the author.
 - `M2 - Real-world ingestion`
 - `M3 - Input hygiene and triage`
 - `M4 - Dedup and identity`
+- `M4.5 - Architecture hardening`
 - `M5 - Extraction`
 - `M6 - Job quality`
 - `M7 - Outputs and feedback`
@@ -305,8 +341,11 @@ Purpose: run the pipeline over many sources in a single invocation instead of on
 
 ### RM-063 Source registry in config
 - Add `sources: list[SourceConfig]` to `Settings` (replacing the single-source fields).
-- `SourceConfig` is a Pydantic discriminated union: `TelegramChannelConfig | TelegramGroupConfig | TelegramCommentConfig | CareerSiteConfig`.
+- `SourceConfig` is a Pydantic discriminated union and should align with ADR-007 open registry keys.
 - Keep the old single-source flags as a deprecated compatibility shim during transition.
+
+### RM-063a Declarative CareerSiteConfig
+- Promote selector-driven `CareerSiteConfig` to the default path for common boards.
 
 ### RM-064 CompositeSource adapter
 - Implement `CompositeSource(sources: Sequence[Source[RawItem]])` in `infrastructure/sources/composite.py`.
@@ -329,6 +368,9 @@ Purpose: run the pipeline over many sources in a single invocation instead of on
 - `app.py` reads `Settings.sources` and builds a `CompositeSource` when multiple sources are configured.
 - `--source-backend` / `--telegram-entity` CLI flags remain for single-source quick runs.
 - Add `--sources-file` CLI flag that accepts a YAML/JSON file with a list of source configs.
+
+### RM-067a Entry-point discovery
+- Load third-party source/parser/sink/store plugins from Python packaging entry points.
 
 ## Phase 12. Persistent store
 
@@ -395,6 +437,7 @@ Purpose: make collected jobs queryable without exporting raw JSON files.
 - Schema: `jobs(stable_id TEXT PK, raw_item_id TEXT, source_kind TEXT, source_name TEXT, title TEXT, company TEXT, description TEXT, location TEXT, work_mode TEXT, canonical_url TEXT, compensation_json TEXT, metadata_json TEXT, emitted_at TEXT)`.
 - Use `INSERT OR IGNORE` for idempotent writes.
 - Wire as `SinkBackend.SQLITE_JOB` in config.
+- Implement as `Stage[Job, Job]`-compatible downstream sink flow per ADR-006.
 
 ### RM-078 SQLite FTS5 fulltext index
 - Add a `jobs_fts` virtual table (FTS5) on `title || ' ' || company || ' ' || description`.
@@ -416,6 +459,7 @@ Purpose: make collected jobs queryable without exporting raw JSON files.
 - When `EmbeddingBackend != NONE`, add `--semantic-search "query"` CLI flag.
 - Compute query embedding, rank by cosine similarity using `numpy` (no vector DB dependency).
 - Return top-K results merged with FTS5 results (union, deduplicated by `stable_id`).
+- Match/search refinement nodes should stay in `Stage[Job, Job]` form.
 
 ### RM-082 Search result export
 - Add `--search-output path.json` to write search results as JSON (same schema as pipeline output).
@@ -464,4 +508,3 @@ Purpose: run the pipeline continuously over many sources without manual CLI invo
 - `M13 - Configurable filters` — RM-072 to RM-076
 - `M14 - Search layer` — RM-077 to RM-082
 - `M15 - Daemon mode` — RM-083 to RM-088
-

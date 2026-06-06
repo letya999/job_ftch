@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from application.registry import register_store
+
 if TYPE_CHECKING:
+    from config import Settings
     from domain import DuplicateRecord, RememberedDedupKey
 
 
@@ -44,3 +47,9 @@ class InMemoryStore:
 
     async def set_run_state(self, key: str, value: str) -> None:
         self._run_state[key] = value
+
+
+@register_store("memory")
+def _build_in_memory_store(settings: Settings) -> InMemoryStore:
+    del settings
+    return InMemoryStore()

@@ -6,11 +6,14 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
+from application.registry import register_source
 from domain import RawItem, SourceKind
 from infrastructure.sources.raw_item_factory import build_raw_item
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from config import Settings
 
 
 class TelegramClientLike(Protocol):
@@ -281,3 +284,56 @@ class TelegramCommentSource:
                     )
                     if item is not None:
                         yield item
+
+
+def _build_telegram_client(settings: Settings) -> Any:
+    if settings.telegram_api_id is None or settings.telegram_api_hash is None:
+        msg = "Telegram sources require JOB_FTCH_TELEGRAM_API_ID and JOB_FTCH_TELEGRAM_API_HASH."
+        raise ValueError(msg)
+    if settings.telegram_entity is None:
+        msg = "Telegram sources require JOB_FTCH_TELEGRAM_ENTITY."
+        raise ValueError(msg)
+    from telethon import TelegramClient
+
+    settings.telegram_session_path.parent.mkdir(parents=True, exist_ok=True)
+    client = TelegramClient(
+        str(settings.telegram_session_path),
+        settings.telegram_api_id,
+        settings.telegram_api_hash,
+    )
+    client.flood_sleep_threshold = settings.telegram_flood_sleep_threshold_seconds
+    return client
+
+
+@register_source("telegram_channel")
+def _build_telegram_channel_source(settings: Settings) -> TelegramChannelSource:
+    return TelegramChannelSource(
+        _build_telegram_client(settings),
+        settings.telegram_entity or "",
+        limit=settings.telegram_message_limit,
+        wait_time=settings.telegram_history_wait_time_seconds,
+        own_client=True,
+    )
+
+
+@register_source("telegram_group")
+def _build_telegram_group_source(settings: Settings) -> TelegramGroupSource:
+    return TelegramGroupSource(
+        _build_telegram_client(settings),
+        settings.telegram_entity or "",
+        limit=settings.telegram_message_limit,
+        wait_time=settings.telegram_history_wait_time_seconds,
+        own_client=True,
+    )
+
+
+@register_source("telegram_comment")
+def _build_telegram_comment_source(settings: Settings) -> TelegramCommentSource:
+    return TelegramCommentSource(
+        _build_telegram_client(settings),
+        settings.telegram_entity or "",
+        post_limit=settings.telegram_comment_post_limit,
+        comment_limit_per_post=settings.telegram_comment_limit_per_post,
+        wait_time=settings.telegram_history_wait_time_seconds,
+        own_client=True,
+    )

@@ -12,6 +12,7 @@ from domain import RawItem, SourceKind
 from infrastructure.sources.local_fixture import LocalFixtureSource
 from infrastructure.stores.in_memory import InMemoryStore
 from nodes import SanitizeNode
+from sinks.fanout import FanOutSink
 from sinks.json_file import JsonFileSink
 
 
@@ -121,6 +122,28 @@ def test_pipeline_accepts_explicit_sanitize_node_contract(tmp_path: Path) -> Non
     )
 
     assert pipeline is not None
+
+
+@pytest.mark.asyncio
+async def test_pipeline_supports_fanout_sinks(tmp_path: Path) -> None:
+    items = [
+        RawItem(source_kind=SourceKind.DEBUG, source_name="debug", external_id="1", text="one"),
+    ]
+    left_path = tmp_path / "left.json"
+    right_path = tmp_path / "right.json"
+    pipeline = Pipeline(
+        source=StubSource(items),
+        sanitize_node=SanitizeNode(),
+        nodes=[],
+        sink=FanOutSink([JsonFileSink(left_path), JsonFileSink(right_path)]),
+        store=InMemoryStore(),
+    )
+
+    summary = await pipeline.run()
+
+    assert summary.emitted == 1
+    assert json.loads(left_path.read_text(encoding="utf-8"))[0]["external_id"] == "1"
+    assert json.loads(right_path.read_text(encoding="utf-8"))[0]["external_id"] == "1"
 
 
 def test_app_runs_local_pipeline_command(tmp_path: Path) -> None:

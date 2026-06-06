@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     from domain import DuplicateRecord, QuarantinedRawItem, RememberedDedupKey
 
 SourceItem = TypeVar("SourceItem", covariant=True)
+StageInput = TypeVar("StageInput", contravariant=True)
+StageOutput = TypeVar("StageOutput", covariant=True)
 PipelineItem = TypeVar("PipelineItem")
 SinkItem = TypeVar("SinkItem", contravariant=True)
 ExtractedItem = TypeVar("ExtractedItem")
@@ -22,18 +24,23 @@ class Source(Protocol[SourceItem]):
 
 
 @runtime_checkable
-class PipelineNode(Protocol[PipelineItem]):
-    async def process(self, item: PipelineItem) -> PipelineItem | None:
+class Stage(Protocol[StageInput, StageOutput]):
+    async def process(self, item: StageInput) -> StageOutput | None:
         """Return the item, a transformed item, or None to drop it."""
 
 
 @runtime_checkable
-class SanitizingNode(PipelineNode[PipelineItem], Protocol[PipelineItem]):
+class PipelineNode(Stage[PipelineItem, PipelineItem], Protocol[PipelineItem]):
+    """Backward-compatible same-type pipeline stage."""
+
+
+@runtime_checkable
+class SanitizingNode(Stage[PipelineItem, PipelineItem], Protocol[PipelineItem]):
     """Mandatory first pipeline step."""
 
 
 @runtime_checkable
-class ProcessingNode(PipelineNode[PipelineItem], Protocol[PipelineItem]):
+class ProcessingNode(Stage[PipelineItem, PipelineItem], Protocol[PipelineItem]):
     """Subsequent pipeline steps after sanitation."""
 
 
@@ -41,6 +48,12 @@ class ProcessingNode(PipelineNode[PipelineItem], Protocol[PipelineItem]):
 class Sink(Protocol[SinkItem]):
     async def emit(self, item: SinkItem) -> None:
         """Persist or forward an emitted pipeline item."""
+
+
+@runtime_checkable
+class FlushableSink(Sink[SinkItem], Protocol[SinkItem]):
+    async def flush(self) -> None:
+        """Finalize buffered writes."""
 
 
 @runtime_checkable

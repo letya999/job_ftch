@@ -23,7 +23,10 @@ Async pipeline: Telegram channels/groups/comments + career sites → structured 
 
 - `domain/` has zero imports outside `pydantic` and stdlib. No exceptions.
 - `SanitizeNode` is always first in any pipeline chain.
+- Type changes happen only via `Stage[In, Out]`. No ad hoc `isinstance` / union routing in core.
 - No credentials in code. `.env` only.
+- New adapter backends must self-register. No `if/elif` dispatch by adapter kind in core.
+- Sinks must not rewrite the whole output file on every `emit`.
 - New dependency → update `docs/tech_stack.md` first.
 - Architectural choice → write ADR in `docs/adr/` first.
 - Commits: `feat`, `fix`, `chore`, `docs`, `refactor` only.
@@ -32,12 +35,13 @@ Async pipeline: Telegram channels/groups/comments + career sites → structured 
 
 | Want to add | Where |
 |-------------|-------|
-| New data source | `infrastructure/sources/` — implement `Source` Protocol |
-| New processing step | `nodes/` — implement `Node` Protocol |
-| New output | `sinks/` — implement `Sink` Protocol |
+| New data source | Prefer declarative `CareerSiteConfig`; otherwise add a single self-registered file with `@register_source`, or a third-party entry-point plugin |
+| New processing step | `nodes/` — implement `Stage` / `ProcessingNode` Protocol |
+| New output | `sinks/` — implement `Sink` Protocol and self-register if it is a backend |
 | New storage backend | `infrastructure/stores/` — implement `Store` Protocol |
 | New LLM backend | `infrastructure/llm/` — implement `LLMProvider` Protocol |
 
 ## Never add
 
 Kafka · Celery · Airflow · LangChain · LangGraph · Scrapy · heavy ORMs
+- Hardcoded domain-specific hosts or parser switches in `config.py` or core composition

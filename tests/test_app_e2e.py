@@ -33,6 +33,7 @@ def test_app_processes_multisource_fixture_end_to_end(tmp_path: Path) -> None:
         env={
             **os.environ,
             "JOB_FTCH_QUARANTINE_OUTPUT_PATH": str(quarantine_path),
+            "JOB_FTCH_CAREER_SITE_ALLOWED_HOSTS": '["job-boards.greenhouse.io","www.bcc.kz","bcc.kz"]',
         },
     )
 
@@ -71,6 +72,7 @@ def test_app_quarantines_multisource_negative_fixture_end_to_end(tmp_path: Path)
         env={
             **os.environ,
             "JOB_FTCH_QUARANTINE_OUTPUT_PATH": str(quarantine_path),
+            "JOB_FTCH_CAREER_SITE_ALLOWED_HOSTS": '["job-boards.greenhouse.io","www.bcc.kz","bcc.kz"]',
         },
     )
 

@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urljoin, urlsplit
 
+import httpx
 from selectolax.lexbor import LexborHTMLParser
 
+from application.registry import register_parser, register_source, resolve_career_site_parser
 from domain import RawItem, SourceKind
 from infrastructure.sources.raw_item_factory import build_raw_item
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from config import Settings
 
 
 _GREENHOUSE_JOB_ID_RE = re.compile(r"/jobs/(?P<job_id>\d+)")
@@ -167,6 +172,9 @@ class _GreenhouseParser:
 
 
 class _BCCParser:
+    def __init__(self, *, max_concurrency: int = 5) -> None:
+        self._max_concurrency = max_concurrency
+
     def _job_id(self, url: str) -> str:
         match = _BCC_JOB_ID_RE.search(url)
         return match.group("job_id") if match is not None else url
@@ -240,13 +248,15 @@ class _BCCParser:
         if list_node is None:
             return []
 
-        items: list[RawItem] = []
         anchors = list_node.css('a[href^="https://www.bcc.kz/career/"], a[href^="/career/"]')
-        for anchor in anchors[:limit]:
-            item = await self._parse_anchor(client, url, anchor)
-            if item is not None:
-                items.append(item)
-        return items
+        semaphore = asyncio.Semaphore(self._max_concurrency)
+
+        async def _load(anchor: Any) -> RawItem | None:
+            async with semaphore:
+                return await self._parse_anchor(client, url, anchor)
+
+        items = await asyncio.gather(*(_load(anchor) for anchor in anchors[:limit]))
+        return [item for item in items if item is not None]
 
 
 class CareerSiteSource:
@@ -257,17 +267,19 @@ class CareerSiteSource:
         *,
         limit: int = 100,
         own_client: bool = False,
+        parser: _CareerSiteParser | None = None,
     ) -> None:
         self._client = client
         self._site_url = site_url.rstrip("/") + "/"
         self._limit = limit
         self._own_client = own_client
+        self._parser = parser
 
     async def fetch(self) -> AsyncIterator[RawItem]:
         async with _http_session(self._client, own_client=self._own_client) as client:
             response = await client.get(self._site_url, follow_redirects=True)
             response.raise_for_status()
-            parser = self._select_parser(url=self._site_url, html=response.text)
+            parser = self._parser or self._select_parser(url=self._site_url, html=response.text)
             items = await parser.parse(
                 client=client,
                 url=self._site_url,
@@ -278,11 +290,29 @@ class CareerSiteSource:
                 yield item
 
     def _select_parser(self, *, url: str, html: str) -> _CareerSiteParser:
-        lowered_url = url.lower()
-        if "greenhouse.io" in lowered_url:
-            return _GreenhouseParser()
-        parser = LexborHTMLParser(html)
-        if parser.css_first('[data-ajax-partial="career/list"]') is not None:
-            return _BCCParser()
-        msg = f"Unsupported career site layout for URL: {url}"
+        return resolve_career_site_parser(url=url, html=html)  # type: ignore[return-value]
+
+
+def _is_bcc(url: str, html: str) -> bool:
+    del url
+    parser = LexborHTMLParser(html)
+    return parser.css_first('[data-ajax-partial="career/list"]') is not None
+
+
+@register_parser("bcc", matcher=_is_bcc)
+def _build_bcc_parser() -> _BCCParser:
+    return _BCCParser()
+
+
+@register_source("career_site")
+def _build_career_site_source(settings: Settings) -> CareerSiteSource:
+    if settings.career_site_url is None:
+        msg = "Career site source requires JOB_FTCH_CAREER_SITE_URL."
         raise ValueError(msg)
+    client = httpx.AsyncClient(timeout=30.0)
+    return CareerSiteSource(
+        client,
+        settings.career_site_url,
+        limit=settings.pipeline_max_items_per_run,
+        own_client=True,
+    )
