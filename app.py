@@ -21,7 +21,7 @@ from infrastructure.sources import (
     TelegramGroupSource,
 )
 from infrastructure.stores.in_memory import InMemoryStore
-from nodes import HeuristicTriageNode, SanitizeNode
+from nodes import DedupNode, HeuristicTriageNode, SanitizeNode
 from sinks.json_file import JsonFileSink
 
 if TYPE_CHECKING:
@@ -152,10 +152,11 @@ def build_source(settings: Settings) -> Source[RawItem]:
 
 def build_nodes(
     settings: Settings,
+    store: Store,
 ) -> tuple[SanitizingNode[RawItem], Sequence[ProcessingNode[RawItem]]]:
     return (
         SanitizeNode(allowed_career_site_hosts=settings.career_site_allowed_hosts),
-        [HeuristicTriageNode()],
+        [HeuristicTriageNode(), DedupNode(store)],
     )
 
 
@@ -189,13 +190,14 @@ async def run_pipeline(settings: Settings) -> RunSummary:
         settings.telemetry_service_name,
         console_exporter=settings.telemetry_console_exporter,
     )
-    sanitize_node, nodes = build_nodes(settings)
+    store = build_store(settings)
+    sanitize_node, nodes = build_nodes(settings, store)
     pipeline = Pipeline(
         source=build_source(settings),
         sanitize_node=sanitize_node,
         nodes=nodes,
         sink=build_sink(settings),
-        store=build_store(settings),
+        store=store,
         quarantine_sink=build_quarantine_sink(settings),
     )
     summary = await pipeline.run(max_items=settings.pipeline_max_items_per_run)

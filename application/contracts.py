@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from domain import QuarantinedRawItem
+    from domain import DuplicateRecord, QuarantinedRawItem, RememberedDedupKey
 
 SourceItem = TypeVar("SourceItem", covariant=True)
 PipelineItem = TypeVar("PipelineItem")
@@ -46,16 +46,25 @@ class Sink(Protocol[SinkItem]):
 @runtime_checkable
 class Store(Protocol):
     async def has_processed(self, item_id: str) -> bool:
-        """Check whether the item was already emitted."""
+        """Check whether the raw item already reached a terminal outcome."""
 
     async def mark_processed(self, item_id: str) -> None:
-        """Persist the processed item identifier."""
+        """Persist the raw-item identity after a terminal outcome."""
 
     async def has_dedup_key(self, key: str) -> bool:
         """Check whether a deduplication key is already known."""
 
-    async def remember_dedup_key(self, key: str) -> None:
-        """Persist a deduplication key."""
+    async def remember_dedup_key(self, record: RememberedDedupKey) -> None:
+        """Persist a deduplication key and the item it points to."""
+
+    async def list_dedup_keys(self, kind: str | None = None) -> tuple[RememberedDedupKey, ...]:
+        """List remembered deduplication keys, optionally filtered by kind."""
+
+    async def record_duplicate(self, record: DuplicateRecord) -> None:
+        """Persist why an item was marked as duplicate."""
+
+    async def list_duplicate_records(self) -> tuple[DuplicateRecord, ...]:
+        """List duplicate decisions recorded by the pipeline."""
 
     async def get_run_state(self, key: str) -> str | None:
         """Read arbitrary run state."""

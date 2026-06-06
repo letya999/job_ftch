@@ -16,7 +16,7 @@ from opentelemetry import trace
 
 from application.drops import RawItemDropped
 from application.rejections import RawItemRejected
-from domain import QuarantinedRawItem, RawItemRejectionReason
+from domain import QuarantinedRawItem, RawItem, RawItemRejectionReason, processed_key_for_raw_item
 
 PipelineItem = TypeVar("PipelineItem")
 
@@ -117,15 +117,21 @@ class Pipeline[PipelineItem]:
                 if await self._handle_pre_quarantined_item(item, summary):
                     continue
                 item_id = getattr(item, "stable_id", None)
+                processed_key = (
+                    processed_key_for_raw_item(item) if isinstance(item, RawItem) else item_id
+                )
+                finalized = False
                 try:
                     with self._tracer.start_as_current_span("pipeline.item") as item_span:
                         item_span.set_attribute("job_ftch.item_id", str(item_id or ""))
-                        if item_id is not None and await self._store.has_processed(item_id):
+                        if processed_key is not None and await self._store.has_processed(
+                            processed_key
+                        ):
                             summary.record_source_drop(source_kind, "already_processed")
                             item_span.set_attribute("job_ftch.result", "already_processed")
                             self._logger.info(
                                 "pipeline_item_skipped",
-                                item_id=item_id,
+                                item_id=processed_key,
                                 reason="already_processed",
                             )
                             continue
@@ -138,6 +144,7 @@ class Pipeline[PipelineItem]:
                                 item_id=item_id,
                                 reason="node_returned_none",
                             )
+                            finalized = True
                             continue
                         summary.sanitized += 1
                         summary.source_stats(source_kind).sanitized += 1
@@ -155,6 +162,7 @@ class Pipeline[PipelineItem]:
                                     item_id=item_id,
                                     reason="node_returned_none",
                                 )
+                                finalized = True
                                 break
                             current = next_item
                         if current is None:
@@ -165,8 +173,7 @@ class Pipeline[PipelineItem]:
                         summary.emitted += 1
                         summary.source_stats(source_kind).emitted += 1
                         item_span.set_attribute("job_ftch.result", "emitted")
-                        if item_id is not None:
-                            await self._store.mark_processed(item_id)
+                        finalized = True
                 except RawItemDropped as exc:
                     summary.record_source_drop(source_kind, exc.reason.value)
                     self._logger.info(
@@ -175,6 +182,7 @@ class Pipeline[PipelineItem]:
                         reason=exc.reason.value,
                         details=exc.details,
                     )
+                    finalized = True
                 except RawItemRejected as exc:
                     summary.record_source_drop(source_kind, exc.reason.value)
                     summary.record_source_quarantine(source_kind, exc.reason.value)
@@ -186,6 +194,10 @@ class Pipeline[PipelineItem]:
                     )
                     if self._quarantine_sink is not None:
                         await self._quarantine_sink.emit(exc.to_quarantined())
+                    finalized = True
+                finally:
+                    if finalized and processed_key is not None:
+                        await self._store.mark_processed(processed_key)
             summary.finish()
             span.set_attribute("job_ftch.fetched", summary.fetched)
             span.set_attribute("job_ftch.sanitized", summary.sanitized)

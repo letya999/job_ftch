@@ -3,7 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from application import LLMProvider, ProcessingNode, SanitizingNode, Sink, Source, Store
-from domain import RawItem, SourceKind
+from domain import (
+    DedupKeyKind,
+    DuplicateRecord,
+    DuplicateRejectionReason,
+    RawItem,
+    RememberedDedupKey,
+    SourceKind,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -43,7 +50,8 @@ class MinimalSink:
 class MinimalStore:
     def __init__(self) -> None:
         self._processed: set[str] = set()
-        self._dedup: set[str] = set()
+        self._dedup: dict[str, RememberedDedupKey] = {}
+        self._duplicates: list[DuplicateRecord] = []
         self._state: dict[str, str] = {}
 
     async def has_processed(self, item_id: str) -> bool:
@@ -55,8 +63,20 @@ class MinimalStore:
     async def has_dedup_key(self, key: str) -> bool:
         return key in self._dedup
 
-    async def remember_dedup_key(self, key: str) -> None:
-        self._dedup.add(key)
+    async def remember_dedup_key(self, record: RememberedDedupKey) -> None:
+        self._dedup[record.key] = record
+
+    async def list_dedup_keys(self, kind: str | None = None) -> tuple[RememberedDedupKey, ...]:
+        values = tuple(self._dedup.values())
+        if kind is None:
+            return values
+        return tuple(record for record in values if record.kind.value == kind)
+
+    async def record_duplicate(self, record: DuplicateRecord) -> None:
+        self._duplicates.append(record)
+
+    async def list_duplicate_records(self) -> tuple[DuplicateRecord, ...]:
+        return tuple(self._duplicates)
 
     async def get_run_state(self, key: str) -> str | None:
         return self._state.get(key)
@@ -77,3 +97,35 @@ def test_protocol_contracts_runtime_checkable() -> None:
     assert isinstance(MinimalSink(), Sink)
     assert isinstance(MinimalStore(), Store)
     assert isinstance(MinimalLLMProvider(), LLMProvider)
+
+
+def test_minimal_store_supports_dedup_records() -> None:
+    store = MinimalStore()
+    record = RememberedDedupKey(
+        key="content:test",
+        kind=DedupKeyKind.CONTENT,
+        item_id="item-1",
+        source_kind=SourceKind.DEBUG,
+        source_name="debug",
+    )
+    duplicate = DuplicateRecord(
+        item_id="item-2",
+        source_kind=SourceKind.DEBUG,
+        source_name="debug",
+        reason=DuplicateRejectionReason.DUPLICATE_CONTENT,
+        duplicate_key="content:test",
+        matched_key="content:test",
+        matched_item_id="item-1",
+        matched_source_kind=SourceKind.DEBUG,
+        matched_source_name="debug",
+        details="duplicate",
+    )
+
+    import asyncio
+
+    asyncio.run(store.remember_dedup_key(record))
+    asyncio.run(store.record_duplicate(duplicate))
+
+    assert asyncio.run(store.has_dedup_key("content:test")) is True
+    assert asyncio.run(store.list_dedup_keys(DedupKeyKind.CONTENT.value)) == (record,)
+    assert asyncio.run(store.list_duplicate_records()) == (duplicate,)

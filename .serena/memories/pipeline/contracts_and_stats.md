@@ -11,5 +11,9 @@ Updated after Phase 3 follow-up cleanup on 2026-06-06.
 - Shared counters/reason maps live in `application.pipeline.StatsBase`.
   - `RunSummary` extends it for whole-run stats.
   - `SourceRunStats` extends it for `by_source_kind` breakdown.
+- After Phase 4, raw-item idempotency is based on `domain.processed_key_for_raw_item(...)`, not the raw `stable_id`.
+- `Pipeline` should mark processed keys for all terminal outcomes (`emit`, duplicate drop, quarantine, explicit drop) so reruns stay idempotent.
+- `DedupNode` is a normal `ProcessingNode` placed after `HeuristicTriageNode`; it owns exact URL/content dedup and fuzzy near-duplicate checks.
+- `Store` now persists remembered dedup keys and duplicate explanation records, so future store backends must preserve this behavior.
 - `RawItemRejected.to_quarantined()` assumes a real `RawItem` contract and should not reintroduce defensive `hasattr()` checks.
 - When editing pipeline/reporting logic later, keep `SanitizeNode` first and preserve stage counters `fetched -> sanitized -> triaged -> emitted`, plus per-source drop/quarantine reasons.
