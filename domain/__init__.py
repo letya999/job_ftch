@@ -2,6 +2,7 @@
 
 from domain.models import CompensationRange, Job, RawItem, SourceKind, WorkMode
 from domain.quarantine import QuarantinedRawItem, RawItemRejectionReason
+from domain.triage import TriageRejectionReason
 
 __all__ = [
     "CompensationRange",
@@ -10,5 +11,6 @@ __all__ = [
     "RawItem",
     "RawItemRejectionReason",
     "SourceKind",
+    "TriageRejectionReason",
     "WorkMode",
 ]

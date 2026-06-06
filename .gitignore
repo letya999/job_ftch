@@ -42,3 +42,4 @@ build/
 jobs.json
 jobs_*.json
 artifacts/
+plans/

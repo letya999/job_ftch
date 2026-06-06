@@ -53,8 +53,6 @@ def _normalize_url(value: str) -> str:
 
 
 class SanitizeNode:
-    is_sanitize = True
-
     def __init__(self, *, allowed_career_site_hosts: tuple[str, ...] = ()) -> None:
         self._allowed_career_site_hosts = {host.lower() for host in allowed_career_site_hosts}
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from application import LLMProvider, Node, Sink, Source, Store
+from application import LLMProvider, ProcessingNode, SanitizingNode, Sink, Source, Store
 from domain import RawItem, SourceKind
 
 if TYPE_CHECKING:
@@ -23,8 +23,11 @@ class MinimalSource:
 
 
 class MinimalSanitizeNode:
-    is_sanitize = True
+    async def process(self, item: RawItem) -> RawItem | None:
+        return item
 
+
+class MinimalProcessingNode:
     async def process(self, item: RawItem) -> RawItem | None:
         return item
 
@@ -69,7 +72,8 @@ class MinimalLLMProvider:
 
 def test_protocol_contracts_runtime_checkable() -> None:
     assert isinstance(MinimalSource(), Source)
-    assert isinstance(MinimalSanitizeNode(), Node)
+    assert isinstance(MinimalSanitizeNode(), SanitizingNode)
+    assert isinstance(MinimalProcessingNode(), ProcessingNode)
     assert isinstance(MinimalSink(), Sink)
     assert isinstance(MinimalStore(), Store)
     assert isinstance(MinimalLLMProvider(), LLMProvider)

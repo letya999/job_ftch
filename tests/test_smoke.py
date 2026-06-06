@@ -1,6 +1,9 @@
 """Smoke tests — verify project structure and imports work."""
 
 import importlib
+import os
+
+from pytest import MonkeyPatch
 
 
 def test_domain_importable() -> None:
@@ -29,11 +32,14 @@ def test_sinks_importable() -> None:
     assert mod is not None
 
 
-def test_config_loads() -> None:
+def test_config_loads(monkeypatch: MonkeyPatch) -> None:
     """Settings must load with defaults when no .env present."""
     from config import Settings
 
-    s = Settings()
+    for key in tuple(os.environ):
+        if key.startswith("JOB_FTCH_"):
+            monkeypatch.delenv(key, raising=False)
+    s = Settings(_env_file=None)
     assert s.store_backend.value == "memory"
     assert s.source_backend.value == "local_fixture"
     assert s.sink_backend.value == "json_file"

@@ -21,11 +21,13 @@ from infrastructure.sources import (
     TelegramGroupSource,
 )
 from infrastructure.stores.in_memory import InMemoryStore
-from nodes import SanitizeNode
+from nodes import HeuristicTriageNode, SanitizeNode
 from sinks.json_file import JsonFileSink
 
 if TYPE_CHECKING:
-    from application.contracts import Node, Sink, Source, Store
+    from collections.abc import Sequence
+
+    from application.contracts import ProcessingNode, SanitizingNode, Sink, Source, Store
     from domain import QuarantinedRawItem, RawItem
 
 
@@ -62,10 +64,15 @@ def build_settings(args: argparse.Namespace) -> Settings:
     if args.source_backend is not None:
         updates["source_backend"] = args.source_backend
     if args.source_path is not None:
+        updates["source_backend"] = SourceBackend.LOCAL_FIXTURE
         updates["debug_source_path"] = args.source_path
     if args.telegram_entity is not None:
+        if args.source_backend is None:
+            updates["source_backend"] = SourceBackend.TELEGRAM_CHANNEL
         updates["telegram_entity"] = args.telegram_entity
     if args.career_site_url is not None:
+        if args.source_backend is None:
+            updates["source_backend"] = SourceBackend.CAREER_SITE
         updates["career_site_url"] = args.career_site_url
     if args.output_path is not None:
         updates["output_path"] = args.output_path
@@ -143,8 +150,13 @@ def build_source(settings: Settings) -> Source[RawItem]:
     raise ValueError(msg)
 
 
-def build_nodes(settings: Settings) -> list[Node[RawItem]]:
-    return [SanitizeNode(allowed_career_site_hosts=settings.career_site_allowed_hosts)]
+def build_nodes(
+    settings: Settings,
+) -> tuple[SanitizingNode[RawItem], Sequence[ProcessingNode[RawItem]]]:
+    return (
+        SanitizeNode(allowed_career_site_hosts=settings.career_site_allowed_hosts),
+        [HeuristicTriageNode()],
+    )
 
 
 def build_sink(settings: Settings) -> Sink[RawItem]:
@@ -177,9 +189,11 @@ async def run_pipeline(settings: Settings) -> RunSummary:
         settings.telemetry_service_name,
         console_exporter=settings.telemetry_console_exporter,
     )
+    sanitize_node, nodes = build_nodes(settings)
     pipeline = Pipeline(
         source=build_source(settings),
-        nodes=build_nodes(settings),
+        sanitize_node=sanitize_node,
+        nodes=nodes,
         sink=build_sink(settings),
         store=build_store(settings),
         quarantine_sink=build_quarantine_sink(settings),

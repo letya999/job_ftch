@@ -112,7 +112,8 @@ async def test_pipeline_quarantines_disallowed_origin_host(tmp_path: Path) -> No
     )
     pipeline = Pipeline(
         source=StubSource([item]),
-        nodes=[SanitizeNode(allowed_career_site_hosts=("job-boards.greenhouse.io",))],
+        sanitize_node=SanitizeNode(allowed_career_site_hosts=("job-boards.greenhouse.io",)),
+        nodes=[],
         sink=JsonFileSink(tmp_path / "out.json"),
         store=InMemoryStore(),
         quarantine_sink=JsonFileSink(tmp_path / "quarantine.jsonl", jsonl=True),
@@ -156,7 +157,8 @@ async def test_local_fixture_source_routes_invalid_payloads_to_quarantine(tmp_pa
     )
     pipeline = Pipeline(
         source=LocalFixtureSource(fixture),
-        nodes=[SanitizeNode()],
+        sanitize_node=SanitizeNode(),
+        nodes=[],
         sink=JsonFileSink(tmp_path / "out.json"),
         store=InMemoryStore(),
         quarantine_sink=JsonFileSink(tmp_path / "quarantine.jsonl", jsonl=True),
@@ -180,7 +182,8 @@ async def test_local_fixture_source_routes_invalid_payloads_to_quarantine(tmp_pa
 async def test_pipeline_quarantines_source_fetch_failures(tmp_path: Path) -> None:
     pipeline = Pipeline(
         source=FailingSource(),
-        nodes=[SanitizeNode()],
+        sanitize_node=SanitizeNode(),
+        nodes=[],
         sink=JsonFileSink(tmp_path / "out.json"),
         store=InMemoryStore(),
         quarantine_sink=JsonFileSink(tmp_path / "quarantine.jsonl", jsonl=True),

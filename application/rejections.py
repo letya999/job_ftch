@@ -26,10 +26,10 @@ class RawItemRejected(Exception):
         return QuarantinedRawItem(
             reason=self.reason,
             details=self.details,
-            source_kind=str(self.item.source_kind) if hasattr(self.item, "source_kind") else None,
-            source_name=self.item.source_name if hasattr(self.item, "source_name") else None,
-            external_id=self.item.external_id if hasattr(self.item, "external_id") else None,
-            url=self.item.url if hasattr(self.item, "url") else None,
+            source_kind=str(self.item.source_kind),
+            source_name=self.item.source_name,
+            external_id=self.item.external_id,
+            url=self.item.url,
             snapshot=self.snapshot or _snapshot_item(self.item),
         )
 

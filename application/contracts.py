@@ -22,11 +22,19 @@ class Source(Protocol[SourceItem]):
 
 
 @runtime_checkable
-class Node(Protocol[PipelineItem]):
-    is_sanitize: bool
-
+class PipelineNode(Protocol[PipelineItem]):
     async def process(self, item: PipelineItem) -> PipelineItem | None:
         """Return the item, a transformed item, or None to drop it."""
+
+
+@runtime_checkable
+class SanitizingNode(PipelineNode[PipelineItem], Protocol[PipelineItem]):
+    """Mandatory first pipeline step."""
+
+
+@runtime_checkable
+class ProcessingNode(PipelineNode[PipelineItem], Protocol[PipelineItem]):
+    """Subsequent pipeline steps after sanitation."""
 
 
 @runtime_checkable

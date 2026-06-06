@@ -28,8 +28,6 @@ class StubSource:
 
 
 class DropSecondNode:
-    is_sanitize = False
-
     def __init__(self) -> None:
         self._seen = 0
 
@@ -49,7 +47,8 @@ async def test_pipeline_happy_path_and_drop_semantics(tmp_path: Path) -> None:
     sink = JsonFileSink(tmp_path / "out.json")
     pipeline = Pipeline(
         source=StubSource(items),
-        nodes=[SanitizeNode(), DropSecondNode()],
+        sanitize_node=SanitizeNode(),
+        nodes=[DropSecondNode()],
         sink=sink,
         store=InMemoryStore(),
     )
@@ -93,7 +92,13 @@ async def test_local_fixture_source_and_jsonl_sink(tmp_path: Path) -> None:
     )
     source = LocalFixtureSource(fixture)
     sink = JsonFileSink(tmp_path / "out.jsonl", jsonl=True)
-    pipeline = Pipeline(source=source, nodes=[SanitizeNode()], sink=sink, store=InMemoryStore())
+    pipeline = Pipeline(
+        source=source,
+        sanitize_node=SanitizeNode(),
+        nodes=[],
+        sink=sink,
+        store=InMemoryStore(),
+    )
 
     summary = await pipeline.run()
     lines = (tmp_path / "out.jsonl").read_text(encoding="utf-8").strip().splitlines()
@@ -103,22 +108,19 @@ async def test_local_fixture_source_and_jsonl_sink(tmp_path: Path) -> None:
     assert len(lines) == 2
 
 
-def test_pipeline_requires_sanitize_node_first(tmp_path: Path) -> None:
+def test_pipeline_accepts_explicit_sanitize_node_contract(tmp_path: Path) -> None:
     sink = JsonFileSink(tmp_path / "out.json")
+    pipeline = Pipeline(
+        source=StubSource(
+            [RawItem(source_kind=SourceKind.DEBUG, source_name="debug", external_id="1", text="x")]
+        ),
+        sanitize_node=SanitizeNode(),
+        nodes=[DropSecondNode()],
+        sink=sink,
+        store=InMemoryStore(),
+    )
 
-    with pytest.raises(ValueError, match="SanitizeNode must be the first node"):
-        Pipeline(
-            source=StubSource(
-                [
-                    RawItem(
-                        source_kind=SourceKind.DEBUG, source_name="debug", external_id="1", text="x"
-                    )
-                ]
-            ),
-            nodes=[DropSecondNode()],
-            sink=sink,
-            store=InMemoryStore(),
-        )
+    assert pipeline is not None
 
 
 def test_app_runs_local_pipeline_command(tmp_path: Path) -> None:

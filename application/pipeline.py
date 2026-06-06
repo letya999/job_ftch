@@ -9,11 +9,12 @@ from typing import TYPE_CHECKING, TypeVar, cast
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from application.contracts import Node, Sink, Source, Store
+    from application.contracts import ProcessingNode, SanitizingNode, Sink, Source, Store
 
 import structlog
 from opentelemetry import trace
 
+from application.drops import RawItemDropped
 from application.rejections import RawItemRejected
 from domain import QuarantinedRawItem, RawItemRejectionReason
 
@@ -21,18 +22,56 @@ PipelineItem = TypeVar("PipelineItem")
 
 
 @dataclass(slots=True)
-class RunSummary:
+class StatsBase:
     fetched: int = 0
+    sanitized: int = 0
+    triaged: int = 0
     dropped: int = 0
     emitted: int = 0
     quarantined: int = 0
+    drop_reasons: dict[str, int] = field(default_factory=dict)
+    quarantine_reasons: dict[str, int] = field(default_factory=dict)
+
+    def record_drop(self, reason: str) -> None:
+        self.dropped += 1
+        self.drop_reasons[reason] = self.drop_reasons.get(reason, 0) + 1
+
+    def record_quarantine(self, reason: str) -> None:
+        self.quarantined += 1
+        self.quarantine_reasons[reason] = self.quarantine_reasons.get(reason, 0) + 1
+
+
+@dataclass(slots=True)
+class SourceRunStats(StatsBase):
+    pass
+
+
+@dataclass(slots=True)
+class RunSummary(StatsBase):
     failed: int = 0
+    by_source_kind: dict[str, SourceRunStats] = field(default_factory=dict)
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
 
     def finish(self) -> RunSummary:
         self.finished_at = datetime.now(UTC)
         return self
+
+    def source_stats(self, source_kind: object | None) -> SourceRunStats:
+        key = str(source_kind or "unknown")
+        stats = self.by_source_kind.get(key)
+        if stats is None:
+            stats = SourceRunStats()
+            self.by_source_kind[key] = stats
+        return stats
+
+    def record_source_drop(self, source_kind: object | None, reason: str) -> None:
+        self.record_drop(reason)
+        self.source_stats(source_kind).record_drop(reason)
+
+    def record_source_quarantine(self, source_kind: object | None, reason: str) -> None:
+        self.record_quarantine(reason)
+        self.source_stats(source_kind).record_quarantine(reason)
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -42,18 +81,14 @@ class Pipeline[PipelineItem]:
     def __init__(
         self,
         source: Source[PipelineItem],
-        nodes: Sequence[Node[PipelineItem]],
+        sanitize_node: SanitizingNode[PipelineItem],
+        nodes: Sequence[ProcessingNode[PipelineItem]],
         sink: Sink[PipelineItem],
         store: Store,
         quarantine_sink: Sink[QuarantinedRawItem] | None = None,
     ) -> None:
-        if not nodes:
-            msg = "Pipeline requires at least one node."
-            raise ValueError(msg)
-        if not nodes[0].is_sanitize:
-            msg = "SanitizeNode must be the first node in the pipeline chain."
-            raise ValueError(msg)
         self._source = source
+        self._sanitize_node = sanitize_node
         self._nodes = list(nodes)
         self._sink = sink
         self._store = store
@@ -77,6 +112,8 @@ class Pipeline[PipelineItem]:
                 if max_items is not None and summary.fetched >= max_items:
                     break
                 summary.fetched += 1
+                source_kind = getattr(item, "source_kind", None)
+                summary.source_stats(source_kind).fetched += 1
                 if await self._handle_pre_quarantined_item(item, summary):
                     continue
                 item_id = getattr(item, "stable_id", None)
@@ -84,7 +121,7 @@ class Pipeline[PipelineItem]:
                     with self._tracer.start_as_current_span("pipeline.item") as item_span:
                         item_span.set_attribute("job_ftch.item_id", str(item_id or ""))
                         if item_id is not None and await self._store.has_processed(item_id):
-                            summary.dropped += 1
+                            summary.record_source_drop(source_kind, "already_processed")
                             item_span.set_attribute("job_ftch.result", "already_processed")
                             self._logger.info(
                                 "pipeline_item_skipped",
@@ -92,14 +129,26 @@ class Pipeline[PipelineItem]:
                                 reason="already_processed",
                             )
                             continue
-                        current: PipelineItem | None = cast("PipelineItem", item)
+                        sanitized = await self._sanitize_node.process(cast("PipelineItem", item))
+                        if sanitized is None:
+                            summary.record_source_drop(source_kind, "node_returned_none")
+                            item_span.set_attribute("job_ftch.result", "dropped")
+                            self._logger.info(
+                                "pipeline_item_dropped",
+                                item_id=item_id,
+                                reason="node_returned_none",
+                            )
+                            continue
+                        summary.sanitized += 1
+                        summary.source_stats(source_kind).sanitized += 1
+                        current: PipelineItem | None = sanitized
                         for node in self._nodes:
                             if current is None:
                                 break
                             next_item = await node.process(current)
                             if next_item is None:
                                 current = None
-                                summary.dropped += 1
+                                summary.record_source_drop(source_kind, "node_returned_none")
                                 item_span.set_attribute("job_ftch.result", "dropped")
                                 self._logger.info(
                                     "pipeline_item_dropped",
@@ -110,14 +159,25 @@ class Pipeline[PipelineItem]:
                             current = next_item
                         if current is None:
                             continue
+                        summary.triaged += 1
+                        summary.source_stats(source_kind).triaged += 1
                         await self._sink.emit(current)
                         summary.emitted += 1
+                        summary.source_stats(source_kind).emitted += 1
                         item_span.set_attribute("job_ftch.result", "emitted")
                         if item_id is not None:
                             await self._store.mark_processed(item_id)
+                except RawItemDropped as exc:
+                    summary.record_source_drop(source_kind, exc.reason.value)
+                    self._logger.info(
+                        "pipeline_item_dropped",
+                        item_id=item_id,
+                        reason=exc.reason.value,
+                        details=exc.details,
+                    )
                 except RawItemRejected as exc:
-                    summary.dropped += 1
-                    summary.quarantined += 1
+                    summary.record_source_drop(source_kind, exc.reason.value)
+                    summary.record_source_quarantine(source_kind, exc.reason.value)
                     self._logger.info(
                         "pipeline_item_quarantined",
                         item_id=item_id,
@@ -128,6 +188,8 @@ class Pipeline[PipelineItem]:
                         await self._quarantine_sink.emit(exc.to_quarantined())
             summary.finish()
             span.set_attribute("job_ftch.fetched", summary.fetched)
+            span.set_attribute("job_ftch.sanitized", summary.sanitized)
+            span.set_attribute("job_ftch.triaged", summary.triaged)
             span.set_attribute("job_ftch.dropped", summary.dropped)
             span.set_attribute("job_ftch.emitted", summary.emitted)
             span.set_attribute("job_ftch.quarantined", summary.quarantined)
@@ -142,8 +204,9 @@ class Pipeline[PipelineItem]:
     ) -> bool:
         if not isinstance(item, QuarantinedRawItem):
             return False
-        summary.dropped += 1
-        summary.quarantined += 1
+        source_kind = item.source_kind
+        summary.record_source_drop(source_kind, item.reason.value)
+        summary.record_source_quarantine(source_kind, item.reason.value)
         self._logger.info(
             "pipeline_source_item_quarantined",
             reason=item.reason.value,
@@ -154,7 +217,7 @@ class Pipeline[PipelineItem]:
         return True
 
     async def _emit_source_failure(self, exc: Exception, summary: RunSummary) -> None:
-        summary.quarantined += 1
+        summary.record_source_quarantine("unknown", RawItemRejectionReason.SOURCE_FETCH_ERROR.value)
         self._logger.exception("pipeline_source_failed")
         if self._quarantine_sink is None:
             return
