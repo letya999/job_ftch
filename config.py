@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     output_jsonl: bool = False
     quarantine_output_path: Path = Path("artifacts/debug/quarantine.jsonl")
     quarantine_output_jsonl: bool = True
+    postgres_dsn: str | None = None
     telegram_api_id: int | None = None
     telegram_api_hash: str | None = None
     telegram_session_path: Path = Path(".runtime/telegram.session")
@@ -72,7 +73,7 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("telegram_api_hash", "telegram_entity", "career_site_url")
+    @field_validator("telegram_api_hash", "telegram_entity", "career_site_url", "postgres_dsn")
     @classmethod
     def strip_optional_strings(cls, value: str | None) -> str | None:
         if value is None:
@@ -108,6 +109,13 @@ class Settings(BaseSettings):
             msg = f"career_site_url host must be one of: {allowed}"
             raise ValueError(msg)
 
+        return self
+
+    @model_validator(mode="after")
+    def validate_store_policy(self) -> Settings:
+        if self.store_backend == "postgres" and self.postgres_dsn is None:
+            msg = "PostgreSQL store backend requires JOB_FTCH_POSTGRES_DSN."
+            raise ValueError(msg)
         return self
 
     def quarantine_settings(self) -> Settings:

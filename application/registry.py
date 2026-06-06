@@ -92,6 +92,7 @@ def load_extensions() -> None:
                 "infrastructure.sources.career_site",
                 "infrastructure.sources.declarative",
                 "infrastructure.stores.in_memory",
+                "infrastructure.stores.postgres",
                 "sinks.json_file",
             ):
                 import_module(module_name)

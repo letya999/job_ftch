@@ -362,7 +362,7 @@ Purpose: run the pipeline over many sources in a single invocation instead of on
 ### RM-066 Per-source run state namespacing
 - Namespace store keys by source identity: `{source_kind}:{source_name}:{key}`.
 - Ensures 70 sources do not collide in the same store.
-- Update `InMemoryStore` and future `SQLiteStore` to use namespaced keys.
+- Update `InMemoryStore` and `PostgresStore` to use namespaced keys.
 
 ### RM-067 Source registry CLI integration
 - `app.py` reads `Settings.sources` and builds a `CompositeSource` when multiple sources are configured.
@@ -376,16 +376,16 @@ Purpose: run the pipeline over many sources in a single invocation instead of on
 
 Purpose: survive restarts, accumulate dedup history, and support reruns across sessions.
 
-### RM-068 SQLiteStore implementation
-- Implement `SQLiteStore` in `infrastructure/stores/sqlite.py` implementing the `Store` protocol.
-- Schema: three tables — `processed_items(item_id TEXT PK, processed_at TEXT)`, `dedup_keys(key TEXT PK, remembered_at TEXT)`, `run_state(key TEXT PK, value TEXT, updated_at TEXT)`.
-- Use `aiosqlite` for async I/O; `CREATE TABLE IF NOT EXISTS` on startup (no migration framework needed at this scale).
-- Add `StoreBackend.SQLITE` to `config.py` and wire it in `app.py`.
+### RM-068 PostgreSQL store hardening
+- Extend `PostgresStore` in `infrastructure/stores/postgres.py` as the production `Store` backend.
+- Schema covers processed raw items, dedup keys, source cursors, jobs, run summaries, rejections, and duplicate records.
+- Use `psycopg` directly with explicit SQL and PostgreSQL constraints; do not add an ORM for MVP.
+- Keep `store_backend=postgres` wired through `config.py`, `application.registry`, and `app.py`.
 
 ### RM-069 Store migration path
-- On first run with `SQLiteStore`, detect empty DB and log a clear startup message.
+- On first run with `PostgresStore`, initialize missing tables and log a clear startup message.
 - Add a `--reset-store` CLI flag that drops and recreates tables (explicit, not silent).
-- Document the store file location in config: `JOB_FTCH_STORE_PATH` env var.
+- Document the PostgreSQL DSN in config: `JOB_FTCH_POSTGRES_DSN` env var.
 
 ### RM-070 Store health check
 - Add `ping() -> bool` to the `Store` protocol.
@@ -393,7 +393,7 @@ Purpose: survive restarts, accumulate dedup history, and support reruns across s
 - Add a test that `InMemoryStore.ping()` always returns `True`.
 
 ### RM-071 Store-backed idempotency regression tests
-- Add a regression test: run the same fixture twice with `SQLiteStore`; second run emits 0 items.
+- Add a regression test: run the same fixture twice with `PostgresStore`; second run emits 0 items.
 - Verify dedup keys are persisted across instantiations.
 
 ## Phase 13. Configurable filter profiles
@@ -433,20 +433,20 @@ Purpose: let operators tune signal filtering without touching code.
 Purpose: make collected jobs queryable without exporting raw JSON files.
 
 ### RM-077 Job persistence sink
-- Add `SQLiteJobSink` in `sinks/sqlite_job.py` implementing `Sink[Job]`.
-- Schema: `jobs(stable_id TEXT PK, raw_item_id TEXT, source_kind TEXT, source_name TEXT, title TEXT, company TEXT, description TEXT, location TEXT, work_mode TEXT, canonical_url TEXT, compensation_json TEXT, metadata_json TEXT, emitted_at TEXT)`.
-- Use `INSERT OR IGNORE` for idempotent writes.
-- Wire as `SinkBackend.SQLITE_JOB` in config.
+- Add `PostgresJobSink` in `sinks/postgres_job.py` implementing `Sink[Job]`.
+- Schema extends the PostgreSQL `jobs` table with queryable columns plus JSONB payload metadata.
+- Use `INSERT ... ON CONFLICT DO NOTHING` for idempotent writes.
+- Wire as `sink_backend=postgres_job` in config.
 - Implement as `Stage[Job, Job]`-compatible downstream sink flow per ADR-006.
 
-### RM-078 SQLite FTS5 fulltext index
-- Add a `jobs_fts` virtual table (FTS5) on `title || ' ' || company || ' ' || description`.
-- Populated via trigger on `jobs` insert.
-- No extra dependencies — SQLite ships FTS5.
-- Add a `search_jobs(query: str, limit: int) -> list[Job]` function in `infrastructure/stores/sqlite.py`.
+### RM-078 PostgreSQL full-text index
+- Add a generated `tsvector` or maintained `search_vector` over `title`, `company`, and `description`.
+- Populate/update it on job insert or update.
+- Use built-in PostgreSQL full-text search; no separate search engine is required for MVP.
+- Add a `search_jobs(query: str, limit: int) -> list[Job]` function in `infrastructure/stores/postgres.py`.
 
 ### RM-079 CLI search command
-- Add `--search "query"` mode to `app.py` that queries `SQLiteJobSink` FTS5 and prints results as JSON.
+- Add `--search "query"` mode to `app.py` that queries PostgreSQL full-text search and prints results as JSON.
 - Support `--limit <N>` and `--source-kind` filters.
 
 ### RM-080 Embedding sink (optional, gated)
@@ -458,7 +458,7 @@ Purpose: make collected jobs queryable without exporting raw JSON files.
 ### RM-081 Semantic search command
 - When `EmbeddingBackend != NONE`, add `--semantic-search "query"` CLI flag.
 - Compute query embedding, rank by cosine similarity using `numpy` (no vector DB dependency).
-- Return top-K results merged with FTS5 results (union, deduplicated by `stable_id`).
+- Return top-K results merged with PostgreSQL full-text results (union, deduplicated by `stable_id`).
 - Match/search refinement nodes should stay in `Stage[Job, Job]` form.
 
 ### RM-082 Search result export

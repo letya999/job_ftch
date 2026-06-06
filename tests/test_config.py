@@ -47,3 +47,20 @@ def test_quarantine_settings_switch_output_targets() -> None:
 
     assert quarantine.output_path == settings.quarantine_output_path
     assert quarantine.output_jsonl is True
+
+
+def test_postgres_store_backend_requires_dsn() -> None:
+    with pytest.raises(ValueError, match="JOB_FTCH_POSTGRES_DSN"):
+        Settings.model_validate({"store_backend": "postgres"})
+
+
+def test_postgres_store_backend_allows_explicit_dsn() -> None:
+    settings = Settings.model_validate(
+        {
+            "store_backend": "postgres",
+            "postgres_dsn": "postgresql://job_ftch:job_ftch@localhost:5432/job_ftch",
+        }
+    )
+
+    assert settings.store_backend == "postgres"
+    assert settings.postgres_dsn == "postgresql://job_ftch:job_ftch@localhost:5432/job_ftch"
