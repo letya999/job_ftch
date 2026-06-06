@@ -38,16 +38,18 @@ def test_app_processes_multisource_fixture_end_to_end(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    emitted = json.loads(output_path.read_text(encoding="utf-8"))
+    emitted_payload = json.loads(output_path.read_text(encoding="utf-8"))
+    emitted = emitted_payload["items"]
 
-    assert len(emitted) == 8
+    assert len(emitted) == 5
+    assert emitted_payload["schema_version"] == "job_ftch.job.v1"
     assert Counter(item["source_kind"] for item in emitted) == {
         "telegram_channel": 2,
         "telegram_group": 2,
-        "telegram_comment": 2,
-        "career_site": 2,
+        "career_site": 1,
     }
-    assert all(item["text"] for item in emitted)
+    assert all(item["description"] for item in emitted)
+    assert all(item["relevance_score"] > 0 for item in emitted)
     assert quarantine_path.read_text(encoding="utf-8") == ""
 
 
@@ -80,12 +82,14 @@ def test_app_quarantines_multisource_negative_fixture_end_to_end(tmp_path: Path)
     quarantine_lines = quarantine_path.read_text(encoding="utf-8").splitlines()
     quarantine_records = [json.loads(line) for line in quarantine_lines]
 
-    assert not output_path.exists()
+    output_payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert output_payload["schema_version"] == "job_ftch.job.v1"
+    assert output_payload["items"] == []
     assert len(quarantine_records) == 6
-    assert Counter(record["reason"] for record in quarantine_records) == {
+    assert Counter(record["payload"]["reason"] for record in quarantine_records) == {
         "disallowed_url_host": 2,
         "invalid_raw_item": 2,
         "invalid_origin_url": 1,
         "empty_source_name": 1,
     }
-    assert any(record["snapshot"].get("line_number") == 6 for record in quarantine_records)
+    assert any(record["payload"]["snapshot"].get("line_number") == 6 for record in quarantine_records)

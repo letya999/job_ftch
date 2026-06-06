@@ -22,7 +22,16 @@ from opentelemetry import trace
 
 from application.drops import RawItemDropped
 from application.rejections import RawItemRejected
-from domain import QuarantinedRawItem, RawItem, RawItemRejectionReason, processed_key_for_raw_item
+from domain import (
+    Job,
+    JobExtractionStatus,
+    QuarantinedRawItem,
+    RawItem,
+    RawItemRejectionReason,
+    RejectedItem,
+    RejectedOutcome,
+    processed_key_for_raw_item,
+)
 
 PipelineInput = TypeVar("PipelineInput")
 PipelineOutput = TypeVar("PipelineOutput")
@@ -33,8 +42,14 @@ class StatsBase:
     fetched: int = 0
     sanitized: int = 0
     triaged: int = 0
+    extracted: int = 0
+    partial: int = 0
+    review: int = 0
+    duplicates: int = 0
     dropped: int = 0
     emitted: int = 0
+    posted: int = 0
+    rejected: int = 0
     quarantined: int = 0
     drop_reasons: dict[str, int] = field(default_factory=dict)
     quarantine_reasons: dict[str, int] = field(default_factory=dict)
@@ -46,6 +61,12 @@ class StatsBase:
     def record_quarantine(self, reason: str) -> None:
         self.quarantined += 1
         self.quarantine_reasons[reason] = self.quarantine_reasons.get(reason, 0) + 1
+
+    def record_rejected(self) -> None:
+        self.rejected += 1
+
+    def record_duplicate(self) -> None:
+        self.duplicates += 1
 
 
 @dataclass(slots=True)
@@ -93,6 +114,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         sink: Sink[PipelineOutput] | Sequence[Sink[PipelineOutput]],
         store: Store,
         quarantine_sink: Sink[QuarantinedRawItem] | None = None,
+        rejected_sink: Sink[RejectedItem] | None = None,
     ) -> None:
         self._source = source
         self._sanitize_node = sanitize_node
@@ -100,6 +122,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self._sink = self._coerce_sink(sink)
         self._store = store
         self._quarantine_sink = quarantine_sink
+        self._rejected_sink = rejected_sink
         self._logger = structlog.get_logger("job_ftch.pipeline")
         self._tracer = trace.get_tracer("job_ftch.pipeline")
 
@@ -176,6 +199,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
                             continue
                         summary.triaged += 1
                         summary.source_stats(source_kind).triaged += 1
+                        self._record_output_stats(current, summary, source_kind)
                         await self._sink.emit(cast("PipelineOutput", current))
                         summary.emitted += 1
                         summary.source_stats(source_kind).emitted += 1
@@ -183,21 +207,42 @@ class Pipeline[PipelineInput, PipelineOutput]:
                         finalized = True
                 except RawItemDropped as exc:
                     summary.record_source_drop(source_kind, exc.reason.value)
+                    summary.record_rejected()
+                    summary.source_stats(source_kind).record_rejected()
+                    if exc.reason.value.startswith("duplicate_"):
+                        summary.record_duplicate()
+                        summary.source_stats(source_kind).record_duplicate()
                     self._logger.info(
                         "pipeline_item_dropped",
                         item_id=item_id,
                         reason=exc.reason.value,
                         details=exc.details,
                     )
+                    await self._emit_rejected_item(
+                        item=exc.item,
+                        outcome=RejectedOutcome.DROPPED,
+                        reason=exc.reason.value,
+                        details=exc.details,
+                        stage=exc.stage,
+                    )
                     finalized = True
                 except RawItemRejected as exc:
                     summary.record_source_drop(source_kind, exc.reason.value)
                     summary.record_source_quarantine(source_kind, exc.reason.value)
+                    summary.record_rejected()
+                    summary.source_stats(source_kind).record_rejected()
                     self._logger.info(
                         "pipeline_item_quarantined",
                         item_id=item_id,
                         reason=exc.reason.value,
                         details=exc.details,
+                    )
+                    await self._emit_rejected_item(
+                        item=exc.item,
+                        outcome=RejectedOutcome.QUARANTINED,
+                        reason=exc.reason.value,
+                        details=exc.details,
+                        stage="SanitizeNode",
                     )
                     if self._quarantine_sink is not None:
                         await self._quarantine_sink.emit(exc.to_quarantined())
@@ -209,11 +254,18 @@ class Pipeline[PipelineInput, PipelineOutput]:
             await self._flush_if_supported(self._sink)
             if self._quarantine_sink is not None:
                 await self._flush_if_supported(self._quarantine_sink)
+            if self._rejected_sink is not None:
+                await self._flush_if_supported(self._rejected_sink)
             span.set_attribute("job_ftch.fetched", summary.fetched)
             span.set_attribute("job_ftch.sanitized", summary.sanitized)
             span.set_attribute("job_ftch.triaged", summary.triaged)
+            span.set_attribute("job_ftch.extracted", summary.extracted)
+            span.set_attribute("job_ftch.partial", summary.partial)
+            span.set_attribute("job_ftch.review", summary.review)
+            span.set_attribute("job_ftch.duplicates", summary.duplicates)
             span.set_attribute("job_ftch.dropped", summary.dropped)
             span.set_attribute("job_ftch.emitted", summary.emitted)
+            span.set_attribute("job_ftch.rejected", summary.rejected)
             span.set_attribute("job_ftch.quarantined", summary.quarantined)
             span.set_attribute("job_ftch.failed", summary.failed)
         self._logger.info("pipeline_run_summary", **summary.as_dict())
@@ -234,13 +286,38 @@ class Pipeline[PipelineInput, PipelineOutput]:
             reason=item.reason.value,
             details=item.details,
         )
+        summary.record_rejected()
+        summary.source_stats(source_kind).record_rejected()
+        await self._emit_rejected_item(
+            item=item,
+            outcome=RejectedOutcome.QUARANTINED,
+            reason=item.reason.value,
+            details=item.details,
+            stage="source",
+        )
         if self._quarantine_sink is not None:
             await self._quarantine_sink.emit(item)
         return True
 
     async def _emit_source_failure(self, exc: Exception, summary: RunSummary) -> None:
         summary.record_source_quarantine("unknown", RawItemRejectionReason.SOURCE_FETCH_ERROR.value)
+        summary.record_rejected()
+        summary.source_stats("unknown").record_rejected()
         self._logger.exception("pipeline_source_failed")
+        await self._emit_rejected_item(
+            item=QuarantinedRawItem(
+                reason=RawItemRejectionReason.SOURCE_FETCH_ERROR,
+                details=str(exc) or exc.__class__.__name__,
+                snapshot={
+                    "error_type": exc.__class__.__name__,
+                    "error_message": str(exc),
+                },
+            ),
+            outcome=RejectedOutcome.FAILED,
+            reason=RawItemRejectionReason.SOURCE_FETCH_ERROR.value,
+            details=str(exc) or exc.__class__.__name__,
+            stage="source",
+        )
         if self._quarantine_sink is None:
             return
         await self._quarantine_sink.emit(
@@ -253,6 +330,56 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 },
             )
         )
+
+    def _record_output_stats(
+        self,
+        item: object,
+        summary: RunSummary,
+        source_kind: object | None,
+    ) -> None:
+        if not isinstance(item, Job):
+            return
+        summary.extracted += 1
+        summary.source_stats(source_kind).extracted += 1
+        if item.extraction_status is JobExtractionStatus.PARTIAL:
+            summary.partial += 1
+            summary.source_stats(source_kind).partial += 1
+        if item.review_reasons:
+            summary.review += 1
+            summary.source_stats(source_kind).review += 1
+
+    async def _emit_rejected_item(
+        self,
+        *,
+        item: object,
+        outcome: RejectedOutcome,
+        reason: str,
+        details: str,
+        stage: str | None,
+    ) -> None:
+        if self._rejected_sink is None:
+            return
+        payload = item.model_dump(mode="json") if hasattr(item, "model_dump") else {"item": str(item)}
+        rejected = RejectedItem(
+            outcome=outcome,
+            reason=reason,
+            details=details,
+            stage=stage,
+            item_type=item.__class__.__name__,
+            source_kind=self._optional_str(getattr(item, "source_kind", None)),
+            source_name=self._optional_str(getattr(item, "source_name", None)),
+            stable_id=self._optional_str(getattr(item, "stable_id", None)),
+            raw_item_id=self._optional_str(getattr(item, "raw_item_id", None)),
+            snapshot=cast("dict[str, object]", payload),
+        )
+        await self._rejected_sink.emit(rejected)
+
+    @staticmethod
+    def _optional_str(value: object) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        return normalized or None
 
     def _coerce_sink(
         self,

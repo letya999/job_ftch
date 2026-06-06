@@ -261,6 +261,73 @@ async def test_telegram_comment_source_keeps_post_lineage() -> None:
 
 
 @pytest.mark.asyncio
+async def test_telegram_comment_source_skips_invalid_reply_threads() -> None:
+    class MsgIdInvalidError(Exception):
+        pass
+
+    class ReplyErrorClient(FakeTelegramClient):
+        def iter_messages(  # type: ignore[no-untyped-def]
+            self,
+            entity: object,
+            *,
+            limit: int | None = None,
+            reply_to: int | None = None,
+            wait_time: float | None = None,
+        ):
+            if reply_to == 209:
+                async def _fail() -> Any:
+                    raise MsgIdInvalidError(
+                        "The message ID used in the peer was invalid (caused by GetRepliesRequest)"
+                    )
+                    yield  # pragma: no cover
+
+                return _fail()
+            return super().iter_messages(
+                entity,
+                limit=limit,
+                reply_to=reply_to,
+                wait_time=wait_time,
+            )
+
+    payload = json.loads(
+        _real_world_path("telegram_comment_messages.json").read_text(encoding="utf-8")
+    )
+    posts = [_parse_message(message) for message in payload["posts"]]
+    extra_post = FakeMessage(
+        id=210,
+        message="follow-up post",
+        date=posts[0].date,
+        sender_id=posts[0].sender_id,
+        sender=posts[0].sender,
+    )
+    comments_by_post_id = {
+        210: [
+            FakeMessage(
+                id=310,
+                message="Candidate here",
+                date=posts[0].date,
+                sender_id=1,
+                sender=FakeSender(id=1, username="reply_user"),
+                reply_to=FakeReplyTo(210),
+            )
+        ]
+    }
+    client = ReplyErrorClient(
+        _parse_chat(payload["chat"]),
+        [posts[0], extra_post],
+        comments_by_post_id,
+    )
+
+    items = await _collect(
+        TelegramCommentSource(client, "TelegramTips", post_limit=5, comment_limit_per_post=5)
+    )
+
+    assert len(items) == 1
+    assert items[0].external_id == "310"
+    assert items[0].metadata["post_message_id"] == 210
+
+
+@pytest.mark.asyncio
 async def test_telegram_sources_skip_blank_or_service_messages() -> None:
     client = FakeTelegramClient(
         FakeChat(id=1, title="Blanky", username="blanky"),

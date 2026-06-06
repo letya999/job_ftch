@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _VALID_LOG_LEVELS = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}
 
@@ -17,26 +19,45 @@ class Settings(BaseSettings):
     source_backend: str = "local_fixture"
     sink_backend: str = "json_file"
     store_backend: str = "memory"
+    llm_backend: str = "heuristic"
+    posting_backend: str = "none"
     log_level: str = "INFO"
     telemetry_service_name: str = "job_ftch"
     telemetry_console_exporter: bool = False
     pipeline_max_items_per_run: int = Field(default=200, gt=0)
+    dry_run: bool = False
     debug_source_path: Path = Path("fixtures/debug/raw_items.json")
     output_path: Path = Path("artifacts/debug/raw_items.json")
     output_jsonl: bool = False
+    output_schema_version: str | None = "job_ftch.job.v1"
     quarantine_output_path: Path = Path("artifacts/debug/quarantine.jsonl")
     quarantine_output_jsonl: bool = True
+    quarantine_output_schema_version: str | None = "job_ftch.quarantine.v1"
+    review_output_path: Path = Path("artifacts/debug/review.jsonl")
+    review_output_jsonl: bool = True
+    review_output_schema_version: str | None = "job_ftch.job.v1"
+    rejected_output_path: Path = Path("artifacts/debug/rejected.jsonl")
+    rejected_output_jsonl: bool = True
+    rejected_output_schema_version: str | None = "job_ftch.rejected.v1"
+    review_max_quality_score: float = Field(default=0.65, ge=0.0, le=1.0)
+    posting_min_quality_score: float = Field(default=0.8, ge=0.0, le=1.0)
     telegram_api_id: int | None = None
     telegram_api_hash: str | None = None
     telegram_session_path: Path = Path(".runtime/telegram.session")
     telegram_entity: str | None = None
+    telegram_publish_entity: str | None = None
     telegram_message_limit: int = Field(default=100, gt=0)
     telegram_comment_post_limit: int = Field(default=20, gt=0)
     telegram_comment_limit_per_post: int = Field(default=50, gt=0)
     telegram_history_wait_time_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
     telegram_flood_sleep_threshold_seconds: int = Field(default=60, ge=0, le=86400)
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4.1-mini"
+    openai_base_url: str | None = None
+    openai_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+    openai_max_retries: int = Field(default=2, ge=0, le=10)
     career_site_url: str | None = None
-    career_site_allowed_hosts: tuple[str, ...] = ()
+    career_site_allowed_hosts: Annotated[tuple[str, ...], NoDecode] = ()
 
     model_config = SettingsConfigDict(
         env_file=(".env", ".env.dev"),
@@ -54,7 +75,13 @@ class Settings(BaseSettings):
             raise ValueError(msg)
         return normalized
 
-    @field_validator("source_backend", "sink_backend", "store_backend")
+    @field_validator(
+        "source_backend",
+        "sink_backend",
+        "store_backend",
+        "llm_backend",
+        "posting_backend",
+    )
     @classmethod
     def normalize_backend_keys(cls, value: str) -> str:
         normalized = value.strip()
@@ -72,7 +99,19 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("telegram_api_hash", "telegram_entity", "career_site_url")
+    @field_validator(
+        "telegram_api_hash",
+        "telegram_entity",
+        "career_site_url",
+        "openai_api_key",
+        "openai_model",
+        "openai_base_url",
+        "telegram_publish_entity",
+        "output_schema_version",
+        "quarantine_output_schema_version",
+        "review_output_schema_version",
+        "rejected_output_schema_version",
+    )
     @classmethod
     def strip_optional_strings(cls, value: str | None) -> str | None:
         if value is None:
@@ -86,6 +125,12 @@ class Settings(BaseSettings):
         if value is None:
             return ()
         if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return ()
+            if stripped.startswith("["):
+                decoded = json.loads(stripped)
+                return cls.normalize_career_site_allowed_hosts(decoded)
             parts = [part.strip().lower() for part in value.split(",")]
             return tuple(part for part in parts if part)
         if isinstance(value, (list, tuple)):
@@ -94,6 +139,20 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_career_site_policy(self) -> Settings:
+        if self.llm_backend == "openai":
+            if self.openai_api_key is None:
+                msg = "openai_api_key is required when llm_backend=openai."
+                raise ValueError(msg)
+            if self.openai_model is None:
+                msg = "openai_model is required when llm_backend=openai."
+                raise ValueError(msg)
+        if self.posting_backend == "telegram_posting":
+            if self.telegram_publish_entity is None:
+                msg = "telegram_publish_entity is required when posting_backend=telegram_posting."
+                raise ValueError(msg)
+            if self.telegram_api_id is None or self.telegram_api_hash is None:
+                msg = "Telegram posting requires JOB_FTCH_TELEGRAM_API_ID and JOB_FTCH_TELEGRAM_API_HASH."
+                raise ValueError(msg)
         if self.source_backend != "career_site" or self.career_site_url is None:
             return self
 
@@ -110,11 +169,50 @@ class Settings(BaseSettings):
 
         return self
 
-    def quarantine_settings(self) -> Settings:
+    def _variant_settings(
+        self,
+        *,
+        output_path: Path,
+        output_jsonl: bool,
+        output_schema_version: str | None,
+        sink_backend: str | None = None,
+    ) -> Settings:
         payload = self.model_dump(mode="python")
-        payload["output_path"] = self.quarantine_output_path
-        payload["output_jsonl"] = self.quarantine_output_jsonl
+        payload["output_path"] = output_path
+        payload["output_jsonl"] = output_jsonl
+        payload["output_schema_version"] = output_schema_version
+        if sink_backend is not None:
+            payload["sink_backend"] = sink_backend
         return self.__class__.model_validate(payload)
+
+    def quarantine_settings(self) -> Settings:
+        return self._variant_settings(
+            output_path=self.quarantine_output_path,
+            output_jsonl=self.quarantine_output_jsonl,
+            output_schema_version=self.quarantine_output_schema_version,
+        )
+
+    def review_settings(self) -> Settings:
+        return self._variant_settings(
+            output_path=self.review_output_path,
+            output_jsonl=self.review_output_jsonl,
+            output_schema_version=self.review_output_schema_version,
+        )
+
+    def rejected_settings(self) -> Settings:
+        return self._variant_settings(
+            output_path=self.rejected_output_path,
+            output_jsonl=self.rejected_output_jsonl,
+            output_schema_version=self.rejected_output_schema_version,
+        )
+
+    def posting_settings(self) -> Settings:
+        return self._variant_settings(
+            output_path=self.output_path,
+            output_jsonl=self.output_jsonl,
+            output_schema_version=self.output_schema_version,
+            sink_backend=self.posting_backend,
+        )
 
 
 def get_settings() -> Settings:

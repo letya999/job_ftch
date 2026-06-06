@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
-from domain import CompensationRange, Job, RawItem, SourceKind, WorkMode
+from domain import CompensationRange, Job, JobExtractionStatus, RawItem, SourceKind, WorkMode
 
 
 def test_raw_item_valid_payload_has_stable_id() -> None:
@@ -69,6 +69,24 @@ def test_job_valid_payload_has_serializable_output() -> None:
     assert job.company == "Example Corp"
     assert dumped["stable_id"] == job.stable_id
     assert dumped["compensation"]["currency"] == "USD"
+
+
+def test_job_allows_partial_extraction_payload() -> None:
+    job = Job(
+        raw_item_id="raw-2",
+        source_kind=SourceKind.TELEGRAM_GROUP,
+        source_name="ai-hiring",
+        title="Founding AI engineer",
+        description="Founding AI engineer role with agentic systems focus.",
+        extraction_status=JobExtractionStatus.PARTIAL,
+        review_reasons=("partial_extraction", "missing_company"),
+    )
+
+    dumped = job.model_dump(mode="json")
+
+    assert job.company is None
+    assert dumped["extraction_status"] == "partial"
+    assert dumped["review_reasons"] == ["partial_extraction", "missing_company"]
 
 
 def test_compensation_rejects_invalid_bounds() -> None:

@@ -14,33 +14,64 @@ if TYPE_CHECKING:
 
 
 class JsonFileSink:
-    def __init__(self, output_path: Path, *, jsonl: bool = False) -> None:
+    def __init__(
+        self,
+        output_path: Path,
+        *,
+        jsonl: bool = False,
+        schema_version: str | None = None,
+    ) -> None:
         self._output_path = output_path
+        self._tmp_path = self._build_tmp_path(output_path)
         self._jsonl = jsonl
+        self._schema_version = schema_version
         self._buffer: list[object] = []
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
         if self._jsonl:
-            self._output_path.write_text("", encoding="utf-8")
+            self._tmp_path.write_text("", encoding="utf-8")
 
     async def emit(self, item: object) -> None:
-        payload = item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+        payload = self._serialize(item)
         if self._jsonl:
-            with self._output_path.open("a", encoding="utf-8") as handle:
+            with self._tmp_path.open("a", encoding="utf-8") as handle:
                 handle.write(f"{json.dumps(payload, ensure_ascii=True, sort_keys=True)}\n")
             return
         self._buffer.append(payload)
 
     async def flush(self) -> None:
         if self._jsonl:
+            if not self._tmp_path.exists():
+                self._tmp_path.write_text("", encoding="utf-8")
+            self._tmp_path.replace(self._output_path)
             return
-        if not self._buffer:
-            return
-        self._output_path.write_text(
-            json.dumps(self._buffer, ensure_ascii=True, indent=2, sort_keys=True),
+        payload: object = self._buffer
+        if self._schema_version is not None:
+            payload = {"schema_version": self._schema_version, "items": self._buffer}
+        self._tmp_path.write_text(
+            json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True),
             encoding="utf-8",
         )
+        self._tmp_path.replace(self._output_path)
+
+    def _serialize(self, item: object) -> object:
+        payload = item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+        if self._schema_version is None:
+            return payload
+        if not self._jsonl:
+            return payload
+        return {"schema_version": self._schema_version, "payload": payload}
+
+    @staticmethod
+    def _build_tmp_path(output_path: Path) -> Path:
+        suffix = "".join(output_path.suffixes)
+        stem = output_path.name[: -len(suffix)] if suffix else output_path.name
+        return output_path.with_name(f"{stem}.tmp{suffix}")
 
 
 @register_sink("json_file")
 def _build_json_file_sink(settings: Settings) -> JsonFileSink:
-    return JsonFileSink(settings.output_path, jsonl=settings.output_jsonl)
+    return JsonFileSink(
+        settings.output_path,
+        jsonl=settings.output_jsonl,
+        schema_version=settings.output_schema_version,
+    )

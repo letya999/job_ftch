@@ -13,8 +13,14 @@ from domain.dedup import (
     dedup_url_for_raw_item,
     processed_key_for_raw_item,
 )
-from domain.models import CompensationRange, Job, RawItem, SourceKind, WorkMode
+from domain.job_quality import (
+    ExtractionRejectionReason,
+    JobReviewReason,
+    JobValidationRejectionReason,
+)
+from domain.models import CompensationRange, Job, JobExtractionStatus, RawItem, SourceKind, WorkMode
 from domain.quarantine import QuarantinedRawItem, RawItemRejectionReason
+from domain.rejected import RejectedItem, RejectedOutcome
 from domain.triage import TriageRejectionReason
 
 __all__ = [
@@ -22,10 +28,16 @@ __all__ = [
     "DedupKeyKind",
     "DuplicateRecord",
     "DuplicateRejectionReason",
+    "ExtractionRejectionReason",
     "Job",
+    "JobExtractionStatus",
+    "JobReviewReason",
+    "JobValidationRejectionReason",
     "QuarantinedRawItem",
     "RawItem",
     "RawItemRejectionReason",
+    "RejectedItem",
+    "RejectedOutcome",
     "RememberedDedupKey",
     "SourceKind",
     "TriageRejectionReason",

@@ -1,7 +1,28 @@
 """Node implementations — each file implements the Node Protocol."""
 
 from nodes.dedup import DedupNode
+from nodes.extraction import ExtractionNode
+from nodes.extraction_validation import ExtractionValidationNode
+from nodes.job_normalization import (
+    CompensationParsingNode,
+    LocationWorkModeNormalizationNode,
+    TitleCompanyNormalizationNode,
+)
+from nodes.quality import JobValidationNode, QualityScoringNode
+from nodes.relevance import AIRoleRelevanceNode
 from nodes.sanitize import SanitizeNode
 from nodes.triage import HeuristicTriageNode
 
-__all__ = ["DedupNode", "HeuristicTriageNode", "SanitizeNode"]
+__all__ = [
+    "AIRoleRelevanceNode",
+    "CompensationParsingNode",
+    "DedupNode",
+    "ExtractionNode",
+    "ExtractionValidationNode",
+    "HeuristicTriageNode",
+    "JobValidationNode",
+    "LocationWorkModeNormalizationNode",
+    "QualityScoringNode",
+    "SanitizeNode",
+    "TitleCompanyNormalizationNode",
+]

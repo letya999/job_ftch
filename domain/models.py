@@ -30,6 +30,11 @@ class WorkMode(StrEnum):
     UNKNOWN = "unknown"
 
 
+class JobExtractionStatus(StrEnum):
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+
+
 class CompensationRange(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -99,34 +104,50 @@ class Job(BaseModel):
     raw_item_id: str = Field(min_length=1)
     source_kind: SourceKind
     source_name: str = Field(min_length=1)
-    title: str = Field(min_length=1)
-    company: str = Field(min_length=1)
+    title: str | None = None
+    company: str | None = None
     description: str = Field(min_length=1)
     canonical_url: AnyHttpUrl | None = None
     location: str | None = None
     work_mode: WorkMode = WorkMode.UNKNOWN
     compensation: CompensationRange | None = None
+    extraction_status: JobExtractionStatus = JobExtractionStatus.COMPLETE
+    quality_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    relevance_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    review_reasons: tuple[str, ...] = ()
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_job(self) -> Job:
-        for field_name in ("raw_item_id", "source_name", "title", "company", "description"):
+        for field_name in ("raw_item_id", "source_name", "description"):
             value = getattr(self, field_name)
             if isinstance(value, str):
                 stripped = value.strip()
                 if not stripped:
                     raise ValueError(f"{field_name} must not be blank.")
                 object.__setattr__(self, field_name, stripped)
+        for field_name in ("title", "company"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            stripped = value.strip()
+            object.__setattr__(self, field_name, stripped or None)
         if self.location is not None:
             stripped_location = self.location.strip()
             object.__setattr__(self, "location", stripped_location or None)
+        normalized_reasons = tuple(
+            reason.strip()
+            for reason in self.review_reasons
+            if isinstance(reason, str) and reason.strip()
+        )
+        object.__setattr__(self, "review_reasons", normalized_reasons)
         object.__setattr__(
             self,
             "stable_id",
             _stable_hash(
                 str(self.canonical_url or ""),
-                self.title,
-                self.company,
+                self.title or "",
+                self.company or "",
                 self.raw_item_id,
             ),
         )

@@ -169,6 +169,10 @@ def _message_to_raw_item(
     )
 
 
+def _is_skippable_comment_thread_error(exc: Exception) -> bool:
+    return exc.__class__.__name__ == "MsgIdInvalidError" and "GetRepliesRequest" in str(exc)
+
+
 class TelegramChannelSource:
     def __init__(
         self,
@@ -266,24 +270,29 @@ class TelegramCommentSource:
                 post_id = _get_attr(post, "id")
                 if not isinstance(post_id, int):
                     continue
-                async for comment in client.iter_messages(
-                    chat,
-                    limit=self._comment_limit_per_post,
-                    reply_to=post_id,
-                    wait_time=self._wait_time,
-                ):
-                    item = _message_to_raw_item(
-                        source_kind=SourceKind.TELEGRAM_COMMENT,
-                        chat=chat,
-                        message=comment,
-                        public_handle=self._channel,
-                        extra_metadata={
-                            "post_message_id": post_id,
-                            "post_url": _message_url(chat, post_id, self._channel),
-                        },
-                    )
-                    if item is not None:
-                        yield item
+                try:
+                    async for comment in client.iter_messages(
+                        chat,
+                        limit=self._comment_limit_per_post,
+                        reply_to=post_id,
+                        wait_time=self._wait_time,
+                    ):
+                        item = _message_to_raw_item(
+                            source_kind=SourceKind.TELEGRAM_COMMENT,
+                            chat=chat,
+                            message=comment,
+                            public_handle=self._channel,
+                            extra_metadata={
+                                "post_message_id": post_id,
+                                "post_url": _message_url(chat, post_id, self._channel),
+                            },
+                        )
+                        if item is not None:
+                            yield item
+                except Exception as exc:
+                    if _is_skippable_comment_thread_error(exc):
+                        continue
+                    raise
 
 
 def _build_telegram_client(settings: Settings) -> Any:

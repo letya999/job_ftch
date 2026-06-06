@@ -167,4 +167,5 @@ def test_app_runs_local_pipeline_command(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     payload = json.loads(output_path.read_text(encoding="utf-8"))
-    assert len(payload) == 1
+    assert payload["schema_version"] == "job_ftch.job.v1"
+    assert len(payload["items"]) == 1

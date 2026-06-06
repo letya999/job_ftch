@@ -26,12 +26,14 @@ class CareerSiteParser(Protocol):
 SourceFactory = Callable[[Settings], object]
 SinkFactory = Callable[[Settings], object]
 StoreFactory = Callable[[Settings], object]
+LLMFactory = Callable[[Settings], object]
 ParserMatcher = Callable[[str, str], bool]
 ParserFactory = Callable[[], object]
 
 _source_factories: dict[str, SourceFactory] = {}
 _sink_factories: dict[str, SinkFactory] = {}
 _store_factories: dict[str, StoreFactory] = {}
+_llm_factories: dict[str, LLMFactory] = {}
 _parser_factories: list[tuple[str, ParserMatcher, ParserFactory]] = []
 _lock = Lock()
 _builtins_loaded = False
@@ -68,6 +70,16 @@ def register_store(kind: str) -> Callable[[StoreFactory], StoreFactory]:
     return decorator
 
 
+def register_llm(kind: str) -> Callable[[LLMFactory], LLMFactory]:
+    normalized = kind.strip()
+
+    def decorator(factory: LLMFactory) -> LLMFactory:
+        _llm_factories[normalized] = factory
+        return factory
+
+    return decorator
+
+
 def register_parser(
     kind: str,
     *,
@@ -92,7 +104,10 @@ def load_extensions() -> None:
                 "infrastructure.sources.career_site",
                 "infrastructure.sources.declarative",
                 "infrastructure.stores.in_memory",
+                "infrastructure.llm.heuristic",
+                "infrastructure.llm.openai_provider",
                 "sinks.json_file",
+                "sinks.telegram_posting",
             ):
                 import_module(module_name)
             _builtins_loaded = True
@@ -134,6 +149,15 @@ def create_store(settings: Settings) -> object:
     factory = _store_factories.get(settings.store_backend)
     if factory is None:
         msg = f"Unsupported store backend: {settings.store_backend}"
+        raise ValueError(msg)
+    return factory(settings)
+
+
+def create_llm(settings: Settings) -> object:
+    load_extensions()
+    factory = _llm_factories.get(settings.llm_backend)
+    if factory is None:
+        msg = f"Unsupported llm backend: {settings.llm_backend}"
         raise ValueError(msg)
     return factory(settings)
 

@@ -14,7 +14,8 @@
 - `selectolax` — быстрый парсинг HTML.
 - `telethon` — клиент для работы с Telegram MTProto.
 - `rapidfuzz` — нечеткое сравнение строк для дедупликации.
-- `openai` + `instructor` — работа с LLM и получение структурированных данных.
+- `openai` + `instructor` — production extraction backend для структурированного извлечения `RawItem -> Job`.
+- Локальный heuristic extractor остаётся допустимым dev/test backend без внешних вызовов.
 
 ## Observability (Наблюдаемость)
 - `opentelemetry-api` + `opentelemetry-sdk` — стандартный API/SDK слой для трейсинга без привязки к вендору.
