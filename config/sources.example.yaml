@@ -1,0 +1,20 @@
+sources:
+  - type: telegram_channel
+    entity: ai_jobs_channel
+    limit: 50
+
+  - type: telegram_group
+    entity: some_group
+    limit: 100
+
+  - type: declarative_html
+    url: https://boards.greenhouse.io/companyname
+    parser_kind: greenhouse
+    limit: 50
+
+  - type: career_site
+    url: https://jobs.example.com/
+    limit: 100
+
+  - type: local_fixture
+    path: fixtures/debug/raw_items.json

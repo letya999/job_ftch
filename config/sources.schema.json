@@ -1,0 +1,313 @@
+{
+  "$defs": {
+    "CareerSiteSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "career_site",
+          "default": "career_site",
+          "title": "Type",
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "exclusiveMinimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "CareerSiteSpec",
+      "type": "object"
+    },
+    "DeclarativeHtmlSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "declarative_html",
+          "default": "declarative_html",
+          "title": "Type",
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "parser_kind": {
+          "default": "auto",
+          "title": "Parser Kind",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "exclusiveMinimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "DeclarativeHtmlSpec",
+      "type": "object"
+    },
+    "LocalFixtureSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "local_fixture",
+          "default": "local_fixture",
+          "title": "Type",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "LocalFixtureSpec",
+      "type": "object"
+    },
+    "TelegramChannelSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "telegram_channel",
+          "default": "telegram_channel",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity": {
+          "minLength": 1,
+          "title": "Entity",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "exclusiveMinimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "auth_source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth Source Id"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "title": "TelegramChannelSpec",
+      "type": "object"
+    },
+    "TelegramCommentsSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "telegram_comments",
+          "default": "telegram_comments",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity": {
+          "minLength": 1,
+          "title": "Entity",
+          "type": "string"
+        },
+        "post_limit": {
+          "default": 20,
+          "exclusiveMinimum": 0,
+          "title": "Post Limit",
+          "type": "integer"
+        },
+        "comment_limit_per_post": {
+          "default": 50,
+          "exclusiveMinimum": 0,
+          "title": "Comment Limit Per Post",
+          "type": "integer"
+        },
+        "auth_source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth Source Id"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "title": "TelegramCommentsSpec",
+      "type": "object"
+    },
+    "TelegramGroupSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "telegram_group",
+          "default": "telegram_group",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity": {
+          "minLength": 1,
+          "title": "Entity",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "exclusiveMinimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "auth_source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth Source Id"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "title": "TelegramGroupSpec",
+      "type": "object"
+    }
+  },
+  "items": {
+    "discriminator": {
+      "mapping": {
+        "career_site": "#/$defs/CareerSiteSpec",
+        "declarative_html": "#/$defs/DeclarativeHtmlSpec",
+        "local_fixture": "#/$defs/LocalFixtureSpec",
+        "telegram_channel": "#/$defs/TelegramChannelSpec",
+        "telegram_comments": "#/$defs/TelegramCommentsSpec",
+        "telegram_group": "#/$defs/TelegramGroupSpec"
+      },
+      "propertyName": "type"
+    },
+    "oneOf": [
+      {
+        "$ref": "#/$defs/TelegramChannelSpec"
+      },
+      {
+        "$ref": "#/$defs/TelegramGroupSpec"
+      },
+      {
+        "$ref": "#/$defs/TelegramCommentsSpec"
+      },
+      {
+        "$ref": "#/$defs/DeclarativeHtmlSpec"
+      },
+      {
+        "$ref": "#/$defs/CareerSiteSpec"
+      },
+      {
+        "$ref": "#/$defs/LocalFixtureSpec"
+      }
+    ]
+  },
+  "type": "array"
+}

@@ -79,11 +79,30 @@ class Store(Protocol):
     async def list_duplicate_records(self) -> tuple[DuplicateRecord, ...]:
         """List duplicate decisions recorded by the pipeline."""
 
-    async def get_run_state(self, key: str) -> str | None:
+    async def get_run_state(
+        self,
+        key: str,
+        *,
+        source_kind: str | None = None,
+        source_name: str | None = None,
+    ) -> str | None:
         """Read arbitrary run state."""
 
-    async def set_run_state(self, key: str, value: str) -> None:
+    async def set_run_state(
+        self,
+        key: str,
+        value: str,
+        *,
+        source_kind: str | None = None,
+        source_name: str | None = None,
+    ) -> None:
         """Persist arbitrary run state."""
+
+
+@runtime_checkable
+class AuthProvider(Protocol):
+    def resolve(self, source_id: str) -> dict[str, str]:
+        """Resolve credentials for a source by its auth_source_id."""
 
 
 @runtime_checkable

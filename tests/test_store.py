@@ -65,3 +65,13 @@ async def test_in_memory_store_persists_duplicate_explainability() -> None:
     await store.record_duplicate(duplicate)
 
     assert await store.list_duplicate_records() == (duplicate,)
+
+
+@pytest.mark.asyncio
+async def test_in_memory_store_run_state_backward_compat_without_namespace():
+    store = InMemoryStore()
+    await store.set_run_state("cursor", "xyz")
+    val = await store.get_run_state("cursor")
+    assert val == "xyz"
+    # With namespace, should NOT see the value set without namespace
+    assert await store.get_run_state("cursor", source_kind="tg", source_name="ch") is None

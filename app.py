@@ -29,6 +29,7 @@ from nodes import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from pathlib import Path
 
     from application.contracts import (
         LLMProvider,
@@ -50,6 +51,11 @@ def parse_args() -> argparse.Namespace:
         "--source-backend",
         default=None,
         help="Source backend: local_fixture, telegram_channel, telegram_group, telegram_comment, career_site.",
+    )
+    parser.add_argument(
+        "--sources-file",
+        default=None,
+        help="Path to YAML or JSON file with a list of source configs.",
     )
     parser.add_argument(
         "--source-path", default=None, help="Path to a JSON or JSONL RawItem fixture."
@@ -89,6 +95,10 @@ def build_settings(args: argparse.Namespace) -> Settings:
     updates: dict[str, object] = {}
     if args.source_backend is not None:
         updates["source_backend"] = args.source_backend
+    if args.sources_file is not None:
+        from pathlib import Path
+
+        updates["sources_file_path"] = Path(args.sources_file)
     if args.source_path is not None:
         updates["source_backend"] = "local_fixture"
         updates["debug_source_path"] = args.source_path
@@ -120,7 +130,21 @@ def build_settings(args: argparse.Namespace) -> Settings:
     return Settings.model_validate(payload)
 
 
+def build_composite_source_from_file(path: Path) -> Source[RawItem]:
+    from application.registry import create_source_from_spec
+    from application.source_loader import load_sources
+    from infrastructure.auth.env_auth import EnvAuthProvider
+    from infrastructure.sources.composite import CompositeSource
+
+    auth = EnvAuthProvider()
+    specs = load_sources(path)
+    child_sources = [create_source_from_spec(spec, auth) for spec in specs]
+    return CompositeSource(cast("Sequence[Source[RawItem]]", child_sources))
+
+
 def build_source(settings: Settings) -> Source[RawItem]:
+    if settings.sources_file_path:
+        return build_composite_source_from_file(settings.sources_file_path)
     return create_source(settings)  # type: ignore[return-value]
 
 

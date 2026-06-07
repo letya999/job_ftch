@@ -78,11 +78,30 @@ class MinimalStore:
     async def list_duplicate_records(self) -> tuple[DuplicateRecord, ...]:
         return tuple(self._duplicates)
 
-    async def get_run_state(self, key: str) -> str | None:
-        return self._state.get(key)
+    async def get_run_state(
+        self,
+        key: str,
+        *,
+        source_kind: str | None = None,
+        source_name: str | None = None,
+    ) -> str | None:
+        actual_key = key
+        if source_kind and source_name:
+            actual_key = f"{source_kind}:{source_name}:{key}"
+        return self._state.get(actual_key)
 
-    async def set_run_state(self, key: str, value: str) -> None:
-        self._state[key] = value
+    async def set_run_state(
+        self,
+        key: str,
+        value: str,
+        *,
+        source_kind: str | None = None,
+        source_name: str | None = None,
+    ) -> None:
+        actual_key = key
+        if source_kind and source_name:
+            actual_key = f"{source_kind}:{source_name}:{key}"
+        self._state[actual_key] = value
 
 
 class MinimalLLMProvider:
@@ -98,6 +117,15 @@ def test_protocol_contracts_runtime_checkable() -> None:
     assert isinstance(MinimalSink(), Sink)
     assert isinstance(MinimalStore(), Store)
     assert isinstance(MinimalLLMProvider(), LLMProvider)
+
+
+def test_minimal_store_implements_namespaced_run_state() -> None:
+    store = MinimalStore()
+    import asyncio
+
+    asyncio.run(store.set_run_state("cursor", "123", source_kind="tg", source_name="chan"))
+    assert asyncio.run(store.get_run_state("cursor", source_kind="tg", source_name="chan")) == "123"
+    assert asyncio.run(store.get_run_state("cursor")) is None
 
 
 def test_minimal_store_supports_dedup_records() -> None:
