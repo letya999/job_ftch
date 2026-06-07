@@ -32,6 +32,8 @@ def test_app_processes_multisource_fixture_end_to_end(tmp_path: Path) -> None:
         check=False,
         env={
             **os.environ,
+            "JOB_FTCH_STORE_BACKEND": "memory",
+            "JOB_FTCH_JOB_GROUP_STORE_BACKEND": "memory",
             "JOB_FTCH_QUARANTINE_OUTPUT_PATH": str(quarantine_path),
             "JOB_FTCH_CAREER_SITE_ALLOWED_HOSTS": '["job-boards.greenhouse.io","www.bcc.kz","bcc.kz"]',
         },
@@ -73,6 +75,8 @@ def test_app_quarantines_multisource_negative_fixture_end_to_end(tmp_path: Path)
         check=False,
         env={
             **os.environ,
+            "JOB_FTCH_STORE_BACKEND": "memory",
+            "JOB_FTCH_JOB_GROUP_STORE_BACKEND": "memory",
             "JOB_FTCH_QUARANTINE_OUTPUT_PATH": str(quarantine_path),
             "JOB_FTCH_CAREER_SITE_ALLOWED_HOSTS": '["job-boards.greenhouse.io","www.bcc.kz","bcc.kz"]',
         },

@@ -144,6 +144,7 @@ async def test_run_pipeline_summary_reports_extracted_review_and_rejected(tmp_pa
     settings = Settings.model_validate(
         {
             "source_backend": "local_fixture",
+            "store_backend": "memory",
             "debug_source_path": "fixtures/e2e/multisource_positive.jsonl",
             "output_path": str(tmp_path / "jobs.json"),
             "quarantine_output_path": str(tmp_path / "quarantine.jsonl"),

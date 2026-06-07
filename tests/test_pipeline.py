@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -163,6 +164,11 @@ def test_app_runs_local_pipeline_command(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         check=False,
+        env={
+            **os.environ,
+            "JOB_FTCH_STORE_BACKEND": "memory",
+            "JOB_FTCH_JOB_GROUP_STORE_BACKEND": "memory",
+        },
     )
 
     assert result.returncode == 0, result.stderr
