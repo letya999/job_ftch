@@ -11,6 +11,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 class RawItemRejectionReason(StrEnum):
     EMPTY_TEXT = "empty_text"
+    TEXT_TOO_LONG = "text_too_long"
     EMPTY_SOURCE_NAME = "empty_source_name"
     MISSING_LOCATOR = "missing_locator"
     INVALID_URL = "invalid_url"

@@ -309,6 +309,10 @@ def _build_telegram_client(settings: Settings) -> Any:
         str(settings.telegram_session_path),
         settings.telegram_api_id,
         settings.telegram_api_hash,
+        timeout=settings.telegram_timeout_seconds,
+        request_retries=settings.telegram_request_retries,
+        connection_retries=settings.telegram_connection_retries,
+        retry_delay=settings.telegram_retry_delay_seconds,
     )
     client.flood_sleep_threshold = settings.telegram_flood_sleep_threshold_seconds
     return client

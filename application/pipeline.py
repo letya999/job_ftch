@@ -51,6 +51,7 @@ class StatsBase:
     posted: int = 0
     rejected: int = 0
     quarantined: int = 0
+    failed: int = 0
     drop_reasons: dict[str, int] = field(default_factory=dict)
     quarantine_reasons: dict[str, int] = field(default_factory=dict)
 
@@ -68,6 +69,9 @@ class StatsBase:
     def record_duplicate(self) -> None:
         self.duplicates += 1
 
+    def record_failure(self) -> None:
+        self.failed += 1
+
 
 @dataclass(slots=True)
 class SourceRunStats(StatsBase):
@@ -76,7 +80,6 @@ class SourceRunStats(StatsBase):
 
 @dataclass(slots=True)
 class RunSummary(StatsBase):
-    failed: int = 0
     by_source_kind: dict[str, SourceRunStats] = field(default_factory=dict)
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
@@ -128,6 +131,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
 
     async def run(self, max_items: int | None = None) -> RunSummary:
         summary = RunSummary()
+        await self._set_run_state("pipeline.started_at", summary.started_at.isoformat())
+        await self._set_run_state("pipeline.status", "running")
+        run_interrupted = False
         with self._tracer.start_as_current_span("pipeline.run") as span:
             source_iter = self._source.fetch().__aiter__()
             while True:
@@ -136,8 +142,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 except StopAsyncIteration:
                     break
                 except Exception as exc:
-                    summary.failed += 1
+                    summary.record_failure()
                     await self._emit_source_failure(exc, summary)
+                    run_interrupted = True
                     break
                 if max_items is not None and summary.fetched >= max_items:
                     break
@@ -151,6 +158,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     processed_key_for_raw_item(item) if isinstance(item, RawItem) else item_id
                 )
                 finalized = False
+                failure_item: object = item
+                failure_reason = "item_processing_failed"
+                failure_stage = self._sanitize_node.__class__.__name__
                 try:
                     with self._tracer.start_as_current_span("pipeline.item") as item_span:
                         item_span.set_attribute("job_ftch.item_id", str(item_id or ""))
@@ -165,6 +175,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
                                 reason="already_processed",
                             )
                             continue
+                        failure_item = item
                         sanitized = await self._sanitize_node.process(cast("PipelineInput", item))
                         if sanitized is None:
                             summary.record_source_drop(source_kind, "node_returned_none")
@@ -179,9 +190,11 @@ class Pipeline[PipelineInput, PipelineOutput]:
                         summary.sanitized += 1
                         summary.source_stats(source_kind).sanitized += 1
                         current: Any = sanitized
+                        failure_item = current
                         for node in self._nodes:
                             if current is None:
                                 break
+                            failure_stage = node.__class__.__name__
                             next_item = await node.process(current)
                             if next_item is None:
                                 current = None
@@ -195,11 +208,15 @@ class Pipeline[PipelineInput, PipelineOutput]:
                                 finalized = True
                                 break
                             current = next_item
+                            failure_item = current
                         if current is None:
                             continue
                         summary.triaged += 1
                         summary.source_stats(source_kind).triaged += 1
                         self._record_output_stats(current, summary, source_kind)
+                        failure_reason = "sink_emit_failed"
+                        failure_stage = self._sink.__class__.__name__
+                        failure_item = current
                         await self._sink.emit(cast("PipelineOutput", current))
                         summary.emitted += 1
                         summary.source_stats(source_kind).emitted += 1
@@ -247,11 +264,39 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     if self._quarantine_sink is not None:
                         await self._quarantine_sink.emit(exc.to_quarantined())
                     finalized = True
+                except Exception as exc:
+                    summary.record_failure()
+                    summary.record_rejected()
+                    summary.source_stats(source_kind).record_failure()
+                    summary.source_stats(source_kind).record_rejected()
+                    self._logger.exception(
+                        "pipeline_item_failed",
+                        item_id=item_id,
+                        reason=failure_reason,
+                        stage=failure_stage,
+                    )
+                    await self._emit_rejected_item(
+                        item=failure_item,
+                        outcome=RejectedOutcome.FAILED,
+                        reason=failure_reason,
+                        details=str(exc) or exc.__class__.__name__,
+                        stage=failure_stage,
+                    )
+                    finalized = failure_reason != "sink_emit_failed"
                 finally:
                     if finalized and processed_key is not None:
                         await self._store.mark_processed(processed_key)
+                        await self._set_run_state("pipeline.last_processed_key", processed_key)
             summary.finish()
-            await self._flush_if_supported(self._sink)
+            try:
+                await self._flush_if_supported(self._sink)
+            except Exception:
+                summary.record_failure()
+                run_interrupted = True
+                self._logger.exception(
+                    "pipeline_sink_flush_failed",
+                    sink=self._sink.__class__.__name__,
+                )
             if self._quarantine_sink is not None:
                 await self._flush_if_supported(self._quarantine_sink)
             if self._rejected_sink is not None:
@@ -268,6 +313,14 @@ class Pipeline[PipelineInput, PipelineOutput]:
             span.set_attribute("job_ftch.rejected", summary.rejected)
             span.set_attribute("job_ftch.quarantined", summary.quarantined)
             span.set_attribute("job_ftch.failed", summary.failed)
+        finished_at = summary.finished_at or datetime.now(UTC)
+        await self._set_run_state("pipeline.finished_at", finished_at.isoformat())
+        if run_interrupted:
+            await self._set_run_state("pipeline.status", "failed")
+        elif summary.failed > 0:
+            await self._set_run_state("pipeline.status", "completed_with_failures")
+        else:
+            await self._set_run_state("pipeline.status", "completed")
         self._logger.info("pipeline_run_summary", **summary.as_dict())
         return summary
 
@@ -302,6 +355,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
     async def _emit_source_failure(self, exc: Exception, summary: RunSummary) -> None:
         summary.record_source_quarantine("unknown", RawItemRejectionReason.SOURCE_FETCH_ERROR.value)
         summary.record_rejected()
+        summary.source_stats("unknown").record_failure()
         summary.source_stats("unknown").record_rejected()
         self._logger.exception("pipeline_source_failed")
         await self._emit_rejected_item(
@@ -397,3 +451,6 @@ class Pipeline[PipelineInput, PipelineOutput]:
         flushable = cast("FlushableSink[object] | None", sink if hasattr(sink, "flush") else None)
         if flushable is not None:
             await flushable.flush()
+
+    async def _set_run_state(self, key: str, value: str) -> None:
+        await self._store.set_run_state(key, value)

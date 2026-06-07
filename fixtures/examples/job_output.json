@@ -1,0 +1,24 @@
+{
+  "schema_version": "job_ftch.job.v1",
+  "items": [
+    {
+      "canonical_url": "https://example.com/jobs/1",
+      "company": "Example Corp",
+      "compensation": null,
+      "description": "Build LLM infrastructure and evaluation systems.",
+      "extraction_status": "complete",
+      "location": null,
+      "metadata": {
+        "extraction_backend": "HeuristicLLMProvider"
+      },
+      "quality_score": 0.85,
+      "raw_item_id": "raw-1",
+      "relevance_score": 1.0,
+      "review_reasons": [],
+      "source_kind": "telegram_channel",
+      "source_name": "ai-jobs",
+      "title": "LLM Platform Engineer",
+      "work_mode": "remote"
+    }
+  ]
+}
