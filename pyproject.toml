@@ -50,6 +50,7 @@ dev = [
     "bandit[toml]>=1.7",
     "httpx",
     "types-setuptools",
+    "aiosqlite>=0.20",
 ]
 
 # Tell hatchling which Python packages to include in the wheel
