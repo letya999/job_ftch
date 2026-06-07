@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
-from application.registry import register_source
+from application.registry import register_source, register_source_v2
 from domain import QuarantinedRawItem, RawItem, RawItemRejectionReason
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from pathlib import Path
 
+    from application.contracts import AuthProvider
     from config import Settings
+    from domain.source_spec import LocalFixtureSpec
 
 
 class LocalFixtureSource:
@@ -127,3 +129,12 @@ class LocalFixtureSource:
 @register_source("local_fixture")
 def _build_local_fixture_source(settings: Settings) -> LocalFixtureSource:
     return LocalFixtureSource(settings.debug_source_path)
+
+
+@register_source_v2("local_fixture")
+def _build_local_fixture_source_v2(
+    spec: LocalFixtureSpec,
+    auth: AuthProvider,
+) -> LocalFixtureSource:
+    del auth
+    return LocalFixtureSource(Path(spec.path))

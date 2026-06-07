@@ -6,9 +6,13 @@ from collections.abc import Callable
 from importlib import import_module
 from importlib.metadata import entry_points
 from threading import Lock
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 from config import Settings
+
+if TYPE_CHECKING:
+    from application.contracts import AuthProvider
+    from domain.source_spec import SourceSpec
 
 
 class CareerSiteParser(Protocol):
@@ -27,53 +31,80 @@ SourceFactory = Callable[[Settings], object]
 SinkFactory = Callable[[Settings], object]
 StoreFactory = Callable[[Settings], object]
 LLMFactory = Callable[[Settings], object]
+SourceSpecFactory = Callable[[Any, "AuthProvider"], object]
 ParserMatcher = Callable[[str, str], bool]
 ParserFactory = Callable[[], object]
 
+FSource = TypeVar("FSource", bound=SourceFactory)
+FSourceV2 = TypeVar("FSourceV2", bound=SourceSpecFactory)
+FSink = TypeVar("FSink", bound=SinkFactory)
+FStore = TypeVar("FStore", bound=StoreFactory)
+FLLM = TypeVar("FLLM", bound=LLMFactory)
+FParser = TypeVar("FParser", bound=ParserFactory)
+FAny = TypeVar("FAny", bound=Callable[..., Any])
+
+
 _source_factories: dict[str, SourceFactory] = {}
+_source_spec_factories: dict[str, SourceSpecFactory] = {}
 _sink_factories: dict[str, SinkFactory] = {}
 _store_factories: dict[str, StoreFactory] = {}
 _llm_factories: dict[str, LLMFactory] = {}
 _parser_factories: list[tuple[str, ParserMatcher, ParserFactory]] = []
+
+_bypass_factories: dict[str, Callable[..., Any]] = {}
+_job_backend_factories: dict[str, Callable[..., Any]] = {}
+_search_backend_factories: dict[str, Callable[..., Any]] = {}
+_embedding_provider_factories: dict[str, Callable[..., Any]] = {}
+_vector_backend_factories: dict[str, Callable[..., Any]] = {}
 _lock = Lock()
 _builtins_loaded = False
 _entry_points_loaded = False
 
 
-def register_source(kind: str) -> Callable[[SourceFactory], SourceFactory]:
+def register_source(kind: str) -> Callable[[FSource], FSource]:
     normalized = kind.strip()
 
-    def decorator(factory: SourceFactory) -> SourceFactory:
+    def decorator(factory: FSource) -> FSource:
         _source_factories[normalized] = factory
         return factory
 
     return decorator
 
 
-def register_sink(kind: str) -> Callable[[SinkFactory], SinkFactory]:
+def register_source_v2(kind: str) -> Callable[[FSourceV2], FSourceV2]:
     normalized = kind.strip()
 
-    def decorator(factory: SinkFactory) -> SinkFactory:
+    def decorator(factory: FSourceV2) -> FSourceV2:
+        _source_spec_factories[normalized] = factory
+        return factory
+
+    return decorator
+
+
+def register_sink(kind: str) -> Callable[[FSink], FSink]:
+    normalized = kind.strip()
+
+    def decorator(factory: FSink) -> FSink:
         _sink_factories[normalized] = factory
         return factory
 
     return decorator
 
 
-def register_store(kind: str) -> Callable[[StoreFactory], StoreFactory]:
+def register_store(kind: str) -> Callable[[FStore], FStore]:
     normalized = kind.strip()
 
-    def decorator(factory: StoreFactory) -> StoreFactory:
+    def decorator(factory: FStore) -> FStore:
         _store_factories[normalized] = factory
         return factory
 
     return decorator
 
 
-def register_llm(kind: str) -> Callable[[LLMFactory], LLMFactory]:
+def register_llm(kind: str) -> Callable[[FLLM], FLLM]:
     normalized = kind.strip()
 
-    def decorator(factory: LLMFactory) -> LLMFactory:
+    def decorator(factory: FLLM) -> FLLM:
         _llm_factories[normalized] = factory
         return factory
 
@@ -84,11 +115,51 @@ def register_parser(
     kind: str,
     *,
     matcher: ParserMatcher,
-) -> Callable[[ParserFactory], ParserFactory]:
+) -> Callable[[FParser], FParser]:
     normalized = kind.strip()
 
-    def decorator(factory: ParserFactory) -> ParserFactory:
+    def decorator(factory: FParser) -> FParser:
         _parser_factories.append((normalized, matcher, factory))
+        return factory
+
+    return decorator
+
+
+def register_bypass(name: str) -> Callable[[FAny], FAny]:
+    def decorator(factory: FAny) -> FAny:
+        _bypass_factories[name] = factory
+        return factory
+
+    return decorator
+
+
+def register_job_backend(name: str) -> Callable[[FAny], FAny]:
+    def decorator(factory: FAny) -> FAny:
+        _job_backend_factories[name] = factory
+        return factory
+
+    return decorator
+
+
+def register_search_backend(name: str) -> Callable[[FAny], FAny]:
+    def decorator(factory: FAny) -> FAny:
+        _search_backend_factories[name] = factory
+        return factory
+
+    return decorator
+
+
+def register_embedding_provider(name: str) -> Callable[[FAny], FAny]:
+    def decorator(factory: FAny) -> FAny:
+        _embedding_provider_factories[name] = factory
+        return factory
+
+    return decorator
+
+
+def register_vector_backend(name: str) -> Callable[[FAny], FAny]:
+    def decorator(factory: FAny) -> FAny:
+        _vector_backend_factories[name] = factory
         return factory
 
     return decorator
@@ -118,6 +189,11 @@ def load_extensions() -> None:
             "job_ftch.parsers",
             "job_ftch.sinks",
             "job_ftch.stores",
+            "job_ftch.bypass",
+            "job_ftch.job_backends",
+            "job_ftch.search_backends",
+            "job_ftch.embedding_providers",
+            "job_ftch.vector_backends",
         ):
             for candidate in entry_points(group=group):
                 loaded = candidate.load()
@@ -133,6 +209,24 @@ def create_source(settings: Settings) -> object:
         msg = f"Unsupported source backend: {settings.source_backend}"
         raise ValueError(msg)
     return factory(settings)
+
+
+class _NullAuthProvider:
+    """Fallback auth provider used when no auth is configured."""
+
+    def resolve(self, source_id: str) -> dict[str, str]:
+        del source_id
+        return {}
+
+
+def create_source_from_spec(spec: SourceSpec, auth: AuthProvider | None = None) -> object:
+    load_extensions()
+    effective_auth: AuthProvider = auth if auth is not None else _NullAuthProvider()
+    factory = _source_spec_factories.get(spec.type)
+    if factory is None:
+        msg = f"Unsupported source type: {spec.type}"
+        raise ValueError(msg)
+    return factory(spec, effective_auth)
 
 
 def create_sink(settings: Settings, *, quarantine: bool = False) -> object:

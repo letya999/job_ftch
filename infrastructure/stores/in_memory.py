@@ -11,6 +11,12 @@ if TYPE_CHECKING:
     from domain import DuplicateRecord, RememberedDedupKey
 
 
+def _ns(source_kind: str | None, source_name: str | None, key: str) -> str:
+    if source_kind and source_name:
+        return f"{source_kind}:{source_name}:{key}"
+    return key
+
+
 class InMemoryStore:
     def __init__(self) -> None:
         self._processed_ids: set[str] = set()
@@ -42,11 +48,26 @@ class InMemoryStore:
     async def list_duplicate_records(self) -> tuple[DuplicateRecord, ...]:
         return tuple(self._duplicate_records)
 
-    async def get_run_state(self, key: str) -> str | None:
-        return self._run_state.get(key)
+    async def get_run_state(
+        self,
+        key: str,
+        *,
+        source_kind: str | None = None,
+        source_name: str | None = None,
+    ) -> str | None:
+        actual_key = _ns(source_kind, source_name, key)
+        return self._run_state.get(actual_key)
 
-    async def set_run_state(self, key: str, value: str) -> None:
-        self._run_state[key] = value
+    async def set_run_state(
+        self,
+        key: str,
+        value: str,
+        *,
+        source_kind: str | None = None,
+        source_name: str | None = None,
+    ) -> None:
+        actual_key = _ns(source_kind, source_name, key)
+        self._run_state[actual_key] = value
 
 
 @register_store("memory")
