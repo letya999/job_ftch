@@ -7,10 +7,9 @@ from typing import TYPE_CHECKING
 from application.registry import register_job_group_store
 from domain import (
     JobGroup,
-    SourceAttribution,
-    compute_group_id,
     compute_identity_fingerprint,
-    merge_jobs,
+    create_job_group,
+    merge_job_into_group,
 )
 
 if TYPE_CHECKING:
@@ -36,40 +35,13 @@ class InMemoryJobGroupStore:
         self.by_source_kind_new: dict[str, int] = {}
         self.by_source_kind_merged: dict[str, int] = {}
 
-    async def get(self, group_id: str) -> JobGroup | None:
+    async def get_group(self, group_id: str) -> JobGroup | None:
         return self._groups.get(group_id)
 
     async def create(self, job: Job) -> JobGroup:
-        group_id = compute_group_id(job)
+        group = create_job_group(job)
+        group_id = group.group_id
         fingerprint = compute_identity_fingerprint(job)
-
-        now = job.metadata.get("fetched_at")
-        if isinstance(now, str):
-            from datetime import datetime
-
-            now = datetime.fromisoformat(now)
-        else:
-            from datetime import UTC, datetime
-
-            now = datetime.now(UTC)
-
-        attribution = SourceAttribution(
-            source_kind=job.source_kind,
-            source_name=job.source_name,
-            url=job.canonical_url,
-            first_seen_at=now,
-            last_seen_at=now,
-        )
-
-        group = JobGroup(
-            group_id=group_id,
-            canonical_job=job,
-            jobs=[job],
-            source_attributions=[attribution],
-            source_count=1,
-            first_seen_at=now,
-            last_seen_at=now,
-        )
 
         self._groups[group_id] = group
         self._fingerprint_index[fingerprint] = group_id
@@ -87,74 +59,7 @@ class InMemoryJobGroupStore:
         if not group:
             raise ValueError(f"Group {group_id} not found.")
 
-        # Check if this source is already in the group
-        existing_job_idx = -1
-        for i, existing_job in enumerate(group.jobs):
-            if (
-                existing_job.source_kind == job.source_kind
-                and existing_job.source_name == job.source_name
-            ):
-                existing_job_idx = i
-                break
-
-        new_jobs = list(group.jobs)
-        if existing_job_idx >= 0:
-            # Update existing job from this source
-            new_jobs[existing_job_idx] = job
-        else:
-            # Add new source to group
-            new_jobs.append(job)
-
-        # Re-merge to get canonical record
-        canonical_job = merge_jobs(new_jobs)
-
-        # Update attributions
-        now = job.metadata.get("fetched_at")
-        if isinstance(now, str):
-            from datetime import datetime
-
-            now = datetime.fromisoformat(now)
-        else:
-            from datetime import UTC, datetime
-
-            now = datetime.now(UTC)
-
-        new_attributions = list(group.source_attributions)
-        attr_idx = -1
-        for i, attr in enumerate(new_attributions):
-            if attr.source_kind == job.source_kind and attr.source_name == job.source_name:
-                attr_idx = i
-                break
-
-        if attr_idx >= 0:
-            old_attr = new_attributions[attr_idx]
-            new_attributions[attr_idx] = SourceAttribution(
-                source_kind=old_attr.source_kind,
-                source_name=old_attr.source_name,
-                url=job.canonical_url or old_attr.url,
-                first_seen_at=old_attr.first_seen_at,
-                last_seen_at=now,
-            )
-        else:
-            new_attributions.append(
-                SourceAttribution(
-                    source_kind=job.source_kind,
-                    source_name=job.source_name,
-                    url=job.canonical_url,
-                    first_seen_at=now,
-                    last_seen_at=now,
-                )
-            )
-
-        updated_group = JobGroup(
-            group_id=group.group_id,
-            canonical_job=canonical_job,
-            jobs=new_jobs,
-            source_attributions=new_attributions,
-            source_count=len(new_jobs),
-            first_seen_at=group.first_seen_at,
-            last_seen_at=now,
-        )
+        updated_group = merge_job_into_group(group, job)
 
         self._groups[group_id] = updated_group
 

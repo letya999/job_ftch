@@ -31,6 +31,10 @@ dependencies = [
 [project.optional-dependencies]
 sqlite = ["aiosqlite>=0.20"]
 postgres = ["asyncpg>=0.29"]
+embeddings = ["sentence-transformers>=3.0", "torch>=2.3"]
+qdrant = ["qdrant-client>=1.9"]
+pgvector = ["pgvector>=0.3"]
+ollama = ["httpx>=0.27"]
 
 [project.entry-points."job_ftch.sources"]
 
@@ -39,6 +43,14 @@ postgres = ["asyncpg>=0.29"]
 [project.entry-points."job_ftch.sinks"]
 
 [project.entry-points."job_ftch.stores"]
+
+[project.entry-points."job_ftch.job_backends"]
+
+[project.entry-points."job_ftch.search_backends"]
+
+[project.entry-points."job_ftch.embedding_providers"]
+
+[project.entry-points."job_ftch.vector_backends"]
 
 [dependency-groups]
 dev = [

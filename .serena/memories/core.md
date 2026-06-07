@@ -7,15 +7,17 @@
   `mem:task_completion` for required verification gates before closing coding work.
 - Repo state: pre-alpha scaffold. Docs are ahead of implementation.
 - Top-level source map:
-  `domain/` pure models only.
-  `application/` pipeline engine, protocols, use cases.
-  `infrastructure/` adapters for Telegram/HTTP/store/LLM.
-  `nodes/` processing steps implementing Node protocol.
+  `domain/` pure models only. `JobGroup` is the aggregate root for search/persistence.
+  `application/` pipeline engine, protocols, use cases, and registry.
+  `infrastructure/` adapters for Telegram/HTTP/store/LLM/embeddings.
+  `infrastructure/backends/jobs/` persistence for Jobs and Groups.
+  `infrastructure/backends/search/` Hybrid search (FTS + Vector) with RRF.
+  `nodes/` processing steps implementing Node protocol (added `EmbeddingNode`).
   `sinks/` output adapters implementing Sink protocol.
-  `app.py` composition root entrypoint.
+  `app.py` composition root entrypoint, supports `pipeline` and `search` subcommands.
   `config.py` pydantic-settings config with `.env` loading.
-  `tests/` currently smoke/import checks, not behavior coverage.
-- Architectural target is hexagonal with 5 ports: Source, Node, Sink, Store, LLMProvider.
+  `tests/` comprehensive behavior coverage for core components.
+- Architectural target is hexagonal with expanded ports: Source, Node, Sink, Store, JobPersistence, SearchBackend, EmbeddingProvider, VectorBackend.
 - Stable invariants from project docs:
   `domain/` may import only stdlib and `pydantic`.
   `SanitizeNode` must be first in any pipeline chain.

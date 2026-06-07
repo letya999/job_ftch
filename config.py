@@ -77,6 +77,19 @@ class Settings(BaseSettings):
     store_pool_min: int = Field(default=2, gt=0)
     store_pool_max: int = Field(default=10, gt=0)
     store_fallback_on_error: bool = True
+    job_backend: str = "sqlite"
+    search_backend: str = "sqlite"
+    job_store_path: Path | None = None
+    search_language: str = "simple"
+    embedding_enabled: bool = False
+    embedding_provider: str = "openai"
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int | None = None
+    vector_backend: str | None = None
+    qdrant_url: str | None = None
+    qdrant_api_key: str | None = None
+    qdrant_collection: str = "job_ftch_jobs"
+    ollama_base_url: str = "http://localhost:11434"
 
     model_config = SettingsConfigDict(
         env_file=(".env", ".env.dev"),
@@ -101,6 +114,9 @@ class Settings(BaseSettings):
         "job_group_store_backend",
         "llm_backend",
         "posting_backend",
+        "job_backend",
+        "search_backend",
+        "embedding_provider",
     )
     @classmethod
     def normalize_backend_keys(cls, value: str) -> str:
@@ -132,6 +148,13 @@ class Settings(BaseSettings):
         "review_output_schema_version",
         "rejected_output_schema_version",
         "store_dsn",
+        "vector_backend",
+        "qdrant_url",
+        "qdrant_api_key",
+        "qdrant_collection",
+        "ollama_base_url",
+        "embedding_model",
+        "search_language",
     )
     @classmethod
     def strip_optional_strings(cls, value: str | None) -> str | None:
@@ -159,7 +182,7 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def validate_career_site_policy(self) -> Settings:
+    def validate_dependencies(self) -> Settings:
         if self.llm_backend == "openai":
             if self.openai_api_key is None:
                 msg = "openai_api_key is required when llm_backend=openai."
@@ -174,6 +197,26 @@ class Settings(BaseSettings):
             if self.telegram_api_id is None or self.telegram_api_hash is None:
                 msg = "Telegram posting requires JOB_FTCH_TELEGRAM_API_ID and JOB_FTCH_TELEGRAM_API_HASH."
                 raise ValueError(msg)
+                
+        if self.job_backend == "postgres" and not self.store_dsn:
+            msg = "store_dsn is required when job_backend=postgres."
+            raise ValueError(msg)
+        if self.search_backend == "postgres" and not self.store_dsn:
+            msg = "store_dsn is required when search_backend=postgres."
+            raise ValueError(msg)
+        if self.vector_backend == "pgvector" and not self.store_dsn:
+            msg = "store_dsn is required when vector_backend=pgvector."
+            raise ValueError(msg)
+        if self.vector_backend == "qdrant" and not self.qdrant_url:
+            msg = "qdrant_url is required when vector_backend=qdrant."
+            raise ValueError(msg)
+        if self.embedding_enabled and not self.vector_backend:
+            msg = "vector_backend is required when embedding_enabled=True."
+            raise ValueError(msg)
+        if self.embedding_enabled and self.embedding_provider == "openai" and not self.openai_api_key:
+            msg = "openai_api_key is required when embedding_provider=openai."
+            raise ValueError(msg)
+
         if self.source_backend != "career_site" or self.career_site_url is None:
             return self
 
