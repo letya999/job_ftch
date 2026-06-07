@@ -6,14 +6,20 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-from application.registry import register_source
+from application.registry import register_source, register_source_v2
 from domain import RawItem, SourceKind
 from infrastructure.sources.raw_item_factory import build_raw_item
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from application.contracts import AuthProvider
     from config import Settings
+    from domain.source_spec import (
+        TelegramChannelSpec,
+        TelegramCommentsSpec,
+        TelegramGroupSpec,
+    )
 
 
 class TelegramClientLike(Protocol):
@@ -348,5 +354,75 @@ def _build_telegram_comment_source(settings: Settings) -> TelegramCommentSource:
         post_limit=settings.telegram_comment_post_limit,
         comment_limit_per_post=settings.telegram_comment_limit_per_post,
         wait_time=settings.telegram_history_wait_time_seconds,
+        own_client=True,
+    )
+
+
+def _build_client_v2(auth_id: str | None, auth: AuthProvider) -> Any:
+    from pathlib import Path
+
+    from telethon import TelegramClient
+
+    from config import get_settings
+
+    settings = get_settings()
+    creds = auth.resolve(auth_id or "telegram")
+
+    # Fallback to Settings-style env vars when AuthProvider returns nothing
+    api_id_val = creds.get("api_id") or (
+        str(settings.telegram_api_id) if settings.telegram_api_id else None
+    )
+    api_hash = creds.get("api_hash") or settings.telegram_api_hash
+
+    if not api_id_val or not api_hash:
+        msg = f"Telegram credentials (api_id, api_hash) missing for auth_source_id: {auth_id!r}"
+        raise ValueError(msg)
+
+    if not auth_id:
+        # Reuse the configured session (already authenticated)
+        session_path = Path(str(settings.telegram_session_path).removesuffix(".session"))
+    else:
+        session_path = Path(".runtime/telegram") / auth_id
+
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    return TelegramClient(str(session_path), int(api_id_val), api_hash)
+
+
+@register_source_v2("telegram_channel")
+def _build_telegram_channel_source_v2(
+    spec: TelegramChannelSpec,
+    auth: AuthProvider,
+) -> TelegramChannelSource:
+    return TelegramChannelSource(
+        _build_client_v2(spec.auth_source_id, auth),
+        spec.entity,
+        limit=spec.limit,
+        own_client=True,
+    )
+
+
+@register_source_v2("telegram_group")
+def _build_telegram_group_source_v2(
+    spec: TelegramGroupSpec,
+    auth: AuthProvider,
+) -> TelegramGroupSource:
+    return TelegramGroupSource(
+        _build_client_v2(spec.auth_source_id, auth),
+        spec.entity,
+        limit=spec.limit,
+        own_client=True,
+    )
+
+
+@register_source_v2("telegram_comments")
+def _build_telegram_comments_source_v2(
+    spec: TelegramCommentsSpec,
+    auth: AuthProvider,
+) -> TelegramCommentSource:
+    return TelegramCommentSource(
+        _build_client_v2(spec.auth_source_id, auth),
+        spec.entity,
+        post_limit=spec.post_limit,
+        comment_limit_per_post=spec.comment_limit_per_post,
         own_client=True,
     )
