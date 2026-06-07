@@ -1,243 +1,267 @@
-"""Regression tests for Phase 14 — Cross-source job aggregation."""
+"""Comprehensive unit and integration tests for Phase 14 — Cross-source job aggregation."""
 
 import pytest
 from pydantic import AnyHttpUrl
 
+from application.identity import JobIdentityMatcher
 from domain import (
     Job,
     SourceKind,
     WorkMode,
 )
+from domain.job_group import compute_identity_fingerprint, merge_jobs
 from infrastructure.stores.job_group_store import InMemoryJobGroupStore
 from nodes.aggregation import JobAggregationNode
 
+# --- Unit Tests: compute_identity_fingerprint ---
 
-@pytest.fixture
-def store():
-    return InMemoryJobGroupStore()
-
-
-@pytest.fixture
-def node(store):
-    return JobAggregationNode(store)
-
-
-@pytest.mark.asyncio
-async def test_three_source_merge(node, store):
-    """
-    Scenario: Same job from career_site, telegram_channel, and telegram_group.
-    Expected: 1 JobGroup with source_count=3, canonical_job from career_site.
-    """
-    common_url = "https://example.com/job1"
-
-    job_cs = Job(
-        raw_item_id="item1",
-        source_kind=SourceKind.CAREER_SITE,
-        source_name="career_portal",
-        title="Software Engineer",
+def test_fingerprint_normalization():
+    """Test that title is normalized (lowercase, punctuation stripped, sorted words)."""
+    job1 = Job(
+        raw_item_id="1",
+        source_kind=SourceKind.TELEGRAM_CHANNEL,
+        source_name="ch1",
+        title="Senior Python Developer, Backend!",
         company="TechCorp",
-        description="Detailed description from career site.",
-        canonical_url=AnyHttpUrl(common_url),
+        description="desc"
+    )
+    job2 = Job(
+        raw_item_id="2",
+        source_kind=SourceKind.TELEGRAM_GROUP,
+        source_name="gr1",
+        title="backend developer python senior",
+        company="TechCorp",
+        description="desc"
+    )
+    assert compute_identity_fingerprint(job1) == compute_identity_fingerprint(job2)
+
+
+def test_fingerprint_company_fallback():
+    """Test that company is used if company_canonical is missing."""
+    job1 = Job(
+        raw_item_id="1",
+        source_kind=SourceKind.TELEGRAM_CHANNEL,
+        source_name="ch1",
+        title="Dev",
+        company="TechCorp",
+        company_canonical="techcorp",
+        description="desc"
+    )
+    job2 = Job(
+        raw_item_id="2",
+        source_kind=SourceKind.TELEGRAM_GROUP,
+        source_name="gr1",
+        title="Dev",
+        company="TechCorp ", # trailing space
+        description="desc"
+    )
+    assert compute_identity_fingerprint(job1) == compute_identity_fingerprint(job2)
+
+
+def test_fingerprint_location():
+    """Test that location is case-insensitive and stripped."""
+    job1 = Job(
+        raw_item_id="1",
+        source_kind=SourceKind.TELEGRAM_CHANNEL,
+        source_name="ch1",
+        title="Dev",
+        company="TechCorp",
+        location=" New York ",
+        description="desc"
+    )
+    job2 = Job(
+        raw_item_id="2",
+        source_kind=SourceKind.TELEGRAM_GROUP,
+        source_name="gr1",
+        title="Dev",
+        company="TechCorp",
+        location="new york",
+        description="desc"
+    )
+    assert compute_identity_fingerprint(job1) == compute_identity_fingerprint(job2)
+
+
+# --- Unit Tests: merge_jobs ---
+
+def test_merge_jobs_priority():
+    """Test that highest priority source (CAREER_SITE) wins most fields."""
+    job_cs = Job(
+        raw_item_id="1",
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="cs",
+        title="SE",
+        company="Corp",
         location="Berlin",
         work_mode=WorkMode.HYBRID,
+        description="Short description",
+        metadata={"key": "cs_val"}
     )
-
-    job_tg_ch = Job(
-        raw_item_id="item2",
+    job_tg = Job(
+        raw_item_id="2",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
-        source_name="jobs_channel",
+        source_name="tg",
         title="Software Engineer",
-        company="TechCorp",
-        description="Short description.",
-        canonical_url=AnyHttpUrl(common_url),
+        company="Corp LLC",
+        location="Germany",
+        work_mode=WorkMode.REMOTE,
+        description="A very long description that should win because it is longer.",
+        metadata={"key": "tg_val", "other": "val"}
     )
+    
+    merged = merge_jobs([job_tg, job_cs])
+    
+    assert merged.source_kind == SourceKind.CAREER_SITE
+    assert merged.title == "SE"
+    assert merged.company == "Corp"
+    assert merged.location == "Berlin"
+    assert merged.work_mode == WorkMode.HYBRID
+    # Longest description wins
+    assert merged.description == "A very long description that should win because it is longer."
+    # Metadata higher priority overwrites
+    assert merged.metadata["key"] == "cs_val"
+    assert merged.metadata["other"] == "val"
 
-    job_tg_gr = Job(
-        raw_item_id="item3",
-        source_kind=SourceKind.TELEGRAM_GROUP,
-        source_name="jobs_group",
-        title="Software Engineer (Berlin)",
-        company="TechCorp",
-        description="Another description.",
-        canonical_url=AnyHttpUrl(common_url),
-    )
 
-    # Process in mixed order
-    await node.process(job_tg_ch)
-    await node.process(job_cs)
-    await node.process(job_tg_gr)
+def test_merge_jobs_max_scores():
+    """Test that quality_score and relevance_score take the maximum."""
+    job1 = Job(raw_item_id="1", source_kind=SourceKind.DEBUG, source_name="d1", title="A", company="B", description="C", quality_score=0.5, relevance_score=0.2)
+    job2 = Job(raw_item_id="2", source_kind=SourceKind.DEBUG, source_name="d2", title="A", company="B", description="C", quality_score=0.8, relevance_score=0.1)
+    
+    merged = merge_jobs([job1, job2])
+    assert merged.quality_score == 0.8
+    assert merged.relevance_score == 0.2
 
-    assert await store.count() == 1
-    groups = await store.list_groups()
-    group = groups[0]
 
-    assert group.source_count == 3
-    assert len(group.jobs) == 3
-    assert group.canonical_job.source_kind == SourceKind.CAREER_SITE
-    assert group.canonical_job.location == "Berlin"
-    assert group.canonical_job.work_mode == WorkMode.HYBRID
-    assert group.canonical_job.description == "Detailed description from career site."
+def test_merge_jobs_empty():
+    with pytest.raises(ValueError, match="Cannot merge empty list"):
+        merge_jobs([])
+
+
+# --- Unit Tests: JobIdentityMatcher ---
+
+@pytest.mark.asyncio
+async def test_matcher_url_exact():
+    store = InMemoryJobGroupStore()
+    matcher = JobIdentityMatcher(store)
+    
+    job = Job(raw_item_id="1", source_kind=SourceKind.DEBUG, source_name="d", title="A", company="B", description="C", canonical_url=AnyHttpUrl("https://example.com/1"))
+    await store.create(job)
+    
+    group_id = await matcher.find_matching_group(job)
+    assert group_id is not None
+    
+    job_diff_url = Job(raw_item_id="2", source_kind=SourceKind.DEBUG, source_name="d", title="Different Title", company="B", description="C", canonical_url=AnyHttpUrl("https://example.com/2"))
+    assert await matcher.find_matching_group(job_diff_url) is None
+
+
+# --- Integration Tests: InMemoryJobGroupStore ---
+
+@pytest.mark.asyncio
+async def test_store_merge_existing_source():
+    """Merge job from the same source updates the job in the group instead of appending."""
+    store = InMemoryJobGroupStore()
+    job1 = Job(raw_item_id="1", source_kind=SourceKind.TELEGRAM_CHANNEL, source_name="ch1", title="A", company="B", description="Desc 1")
+    group = await store.create(job1)
+    
+    job1_updated = Job(raw_item_id="2", source_kind=SourceKind.TELEGRAM_CHANNEL, source_name="ch1", title="A", company="B", description="Desc 2")
+    updated_group = await store.merge(group.group_id, job1_updated)
+    
+    assert updated_group.source_count == 1
+    assert updated_group.canonical_job.description == "Desc 2"
 
 
 @pytest.mark.asyncio
-async def test_url_matching(node, store):
-    """Scenario: Two jobs with same canonical_url from different sources."""
-    url = "https://example.com/unique-job"
+async def test_store_merge_new_source():
+    """Merge job from a different source appends to the group."""
+    store = InMemoryJobGroupStore()
+    job1 = Job(raw_item_id="1", source_kind=SourceKind.TELEGRAM_CHANNEL, source_name="ch1", title="A", company="B", description="Desc 1")
+    group = await store.create(job1)
+    
+    job2 = Job(raw_item_id="2", source_kind=SourceKind.TELEGRAM_GROUP, source_name="gr1", title="A", company="B", description="Desc 2 is much longer")
+    updated_group = await store.merge(group.group_id, job2)
+    
+    assert updated_group.source_count == 2
+    assert updated_group.canonical_job.description == "Desc 2 is much longer"
 
-    job1 = Job(
-        raw_item_id="i1",
-        source_kind=SourceKind.TELEGRAM_CHANNEL,
-        source_name="ch1",
-        title="DevOps",
-        company="CloudInc",
-        description="desc1",
-        canonical_url=AnyHttpUrl(url),
-    )
 
-    job2 = Job(
-        raw_item_id="i2",
-        source_kind=SourceKind.TELEGRAM_GROUP,
-        source_name="gr1",
-        title="DevOps Engineer",
-        company="CloudInc",
-        description="desc2",
-        canonical_url=AnyHttpUrl(url),
-    )
+# --- Integration Tests: JobAggregationNode ---
 
+@pytest.mark.asyncio
+async def test_node_fuzzy_match():
+    """Verify fuzzy title matching works when enabled."""
+    store = InMemoryJobGroupStore()
+    node = JobAggregationNode(store, fuzzy_title_threshold=80.0, enable_fuzzy=True)
+    
+    job1 = Job(raw_item_id="1", source_kind=SourceKind.TELEGRAM_CHANNEL, source_name="ch1", title="Backend Engineer at OpenAI", company="OpenAI", description="desc")
+    job2 = Job(raw_item_id="2", source_kind=SourceKind.TELEGRAM_GROUP, source_name="gr1", title="Backend Engineer, OpenAI", company="OpenAI", description="desc")
+    
     await node.process(job1)
     await node.process(job2)
-
+    
     assert await store.count() == 1
-    assert (await store.list_groups())[0].source_count == 2
 
 
 @pytest.mark.asyncio
-async def test_fingerprint_matching(node, store):
-    """
-    Scenario: Two jobs with same company_canonical + normalized_title + location but different URLs.
-    Expected: Merged into one group.
-    """
-    job1 = Job(
-        raw_item_id="i1",
-        source_kind=SourceKind.TELEGRAM_CHANNEL,
-        source_name="ch1",
-        title="Python Developer",
-        company="PySoft",
-        company_canonical="pysoft",
-        location="Remote",
-        description="desc1",
-        canonical_url=AnyHttpUrl("https://pysoft.com/j1"),
-    )
-
-    job2 = Job(
-        raw_item_id="i2",
-        source_kind=SourceKind.TELEGRAM_GROUP,
-        source_name="gr1",
-        title="PYTHON developer",  # Case and extra space
-        company="PySoft Inc.",
-        company_canonical="pysoft",
-        location=" remote ",  # extra spaces
-        description="desc2",
-        canonical_url=AnyHttpUrl("https://pysoft.com/j2"),
-    )
-
+async def test_node_fuzzy_match_disabled():
+    """Verify fuzzy title matching is skipped when disabled."""
+    store = InMemoryJobGroupStore()
+    node = JobAggregationNode(store, enable_fuzzy=False)
+    
+    job1 = Job(raw_item_id="1", source_kind=SourceKind.TELEGRAM_CHANNEL, source_name="ch1", title="Backend Engineer at OpenAI", company="OpenAI", description="desc")
+    job2 = Job(raw_item_id="2", source_kind=SourceKind.TELEGRAM_GROUP, source_name="gr1", title="Backend Engineer, OpenAI", company="OpenAI", description="desc")
+    
     await node.process(job1)
     await node.process(job2)
-
-    assert await store.count() == 1
-    assert (await store.list_groups())[0].source_count == 2
-
-
-@pytest.mark.asyncio
-async def test_fuzzy_title_matching(node, store):
-    """Scenario: title 'ML Engineer, Sber' vs 'ML Engineer at Sber'."""
-    job1 = Job(
-        raw_item_id="i1",
-        source_kind=SourceKind.TELEGRAM_CHANNEL,
-        source_name="ch1",
-        title="ML Engineer, Sber",
-        company="Sber",
-        description="desc1",
-    )
-
-    job2 = Job(
-        raw_item_id="i2",
-        source_kind=SourceKind.TELEGRAM_GROUP,
-        source_name="gr1",
-        title="ML Engineer at Sber",
-        company="Sber",
-        description="desc2",
-    )
-
-    await node.process(job1)
-    await node.process(job2)
-
-    assert await store.count() == 1
-    assert (await store.list_groups())[0].source_count == 2
-
-
-@pytest.mark.asyncio
-async def test_no_false_merge(node, store):
-    """Scenario: Two genuinely different jobs (different company + title)."""
-    job1 = Job(
-        raw_item_id="i1",
-        source_kind=SourceKind.TELEGRAM_CHANNEL,
-        source_name="ch1",
-        title="Backend dev",
-        company="Company A",
-        description="desc1",
-    )
-
-    job2 = Job(
-        raw_item_id="i2",
-        source_kind=SourceKind.TELEGRAM_GROUP,
-        source_name="gr1",
-        title="Frontend dev",
-        company="Company B",
-        description="desc2",
-    )
-
-    await node.process(job1)
-    await node.process(job2)
-
+    
     assert await store.count() == 2
 
 
 @pytest.mark.asyncio
-async def test_stats_tracking(node, store):
-    """Verify that JobGroupStore tracks stats correctly."""
-    job1 = Job(
-        raw_item_id="i1",
-        source_kind=SourceKind.TELEGRAM_CHANNEL,
-        source_name="ch1",
-        title="Job 1",
-        company="Comp 1",
-        description="desc1",
-    )
+async def test_node_fuzzy_threshold():
+    """Verify jobs below the fuzzy threshold are not merged."""
+    store = InMemoryJobGroupStore()
+    node = JobAggregationNode(store, fuzzy_title_threshold=95.0, enable_fuzzy=True)
+    
+    job1 = Job(raw_item_id="1", source_kind=SourceKind.TELEGRAM_CHANNEL, source_name="ch1", title="Backend Engineer at OpenAI", company="OpenAI", description="desc")
+    job2 = Job(raw_item_id="2", source_kind=SourceKind.TELEGRAM_GROUP, source_name="gr1", title="Software Engineer, OpenAI", company="OpenAI", description="desc")
+    
+    await node.process(job1)
+    await node.process(job2)
+    
+    # Threshold is high, these shouldn't match fuzzily
+    assert await store.count() == 2
 
-    job2 = Job(
-        raw_item_id="i2",
-        source_kind=SourceKind.TELEGRAM_GROUP,
-        source_name="gr1",
-        title="Job 1",
-        company="Comp 1",
-        description="desc2",
-    )
 
-    job3 = Job(
-        raw_item_id="i3",
-        source_kind=SourceKind.TELEGRAM_CHANNEL,
-        source_name="ch1",
-        title="Job 3",
-        company="Comp 3",
-        description="desc3",
-    )
+@pytest.mark.asyncio
+async def test_node_passes_job_through():
+    """Verify that JobAggregationNode returns the job unmodified."""
+    store = InMemoryJobGroupStore()
+    node = JobAggregationNode(store)
+    
+    job = Job(raw_item_id="1", source_kind=SourceKind.TELEGRAM_CHANNEL, source_name="ch1", title="A", company="B", description="C")
+    returned_job = await node.process(job)
+    
+    assert returned_job is job
 
-    await node.process(job1)  # New group
-    await node.process(job2)  # Merge
-    await node.process(job3)  # New group
 
+@pytest.mark.asyncio
+async def test_stats_tracking_comprehensive():
+    """Verify complete stats tracking across multiple merges and creates."""
+    store = InMemoryJobGroupStore()
+    node = JobAggregationNode(store)
+    
+    job1 = Job(raw_item_id="1", source_kind=SourceKind.TELEGRAM_CHANNEL, source_name="ch1", title="Job A", company="Corp", description="desc")
+    job2 = Job(raw_item_id="2", source_kind=SourceKind.TELEGRAM_GROUP, source_name="gr1", title="Job A", company="Corp", description="desc")
+    job3 = Job(raw_item_id="3", source_kind=SourceKind.CAREER_SITE, source_name="cs", title="Job A", company="Corp", description="desc")
+    job4 = Job(raw_item_id="4", source_kind=SourceKind.TELEGRAM_CHANNEL, source_name="ch1", title="Job B", company="Inc", description="desc")
+    
+    await node.process(job1) # Create group 1
+    await node.process(job2) # Merge into 1
+    await node.process(job3) # Merge into 1
+    await node.process(job4) # Create group 2
+    
     assert store.new_groups_created == 2
-    assert store.merged_into_group == 1
+    assert store.merged_into_group == 2
     assert store.by_source_kind_new[str(SourceKind.TELEGRAM_CHANNEL)] == 2
     assert store.by_source_kind_merged[str(SourceKind.TELEGRAM_GROUP)] == 1
+    assert store.by_source_kind_merged[str(SourceKind.CAREER_SITE)] == 1
