@@ -52,6 +52,8 @@ class StatsBase:
     rejected: int = 0
     quarantined: int = 0
     failed: int = 0
+    new_groups_created: int = 0
+    merged_into_group: int = 0
     drop_reasons: dict[str, int] = field(default_factory=dict)
     quarantine_reasons: dict[str, int] = field(default_factory=dict)
 
@@ -71,6 +73,12 @@ class StatsBase:
 
     def record_failure(self) -> None:
         self.failed += 1
+
+    def record_group_created(self) -> None:
+        self.new_groups_created += 1
+
+    def record_merged_into_group(self) -> None:
+        self.merged_into_group += 1
 
 
 @dataclass(slots=True)
@@ -104,6 +112,14 @@ class RunSummary(StatsBase):
     def record_source_quarantine(self, source_kind: object | None, reason: str) -> None:
         self.record_quarantine(reason)
         self.source_stats(source_kind).record_quarantine(reason)
+
+    def record_source_group_created(self, source_kind: object | None) -> None:
+        self.record_group_created()
+        self.source_stats(source_kind).record_group_created()
+
+    def record_source_merged_into_group(self, source_kind: object | None) -> None:
+        self.record_merged_into_group()
+        self.source_stats(source_kind).record_merged_into_group()
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)

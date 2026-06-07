@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     source_backend: str = "local_fixture"
     sink_backend: str = "json_file"
     store_backend: str = "memory"
+    job_group_store_backend: str = "memory"
     llm_backend: str = "heuristic"
     posting_backend: str = "none"
     log_level: str = "INFO"
@@ -92,6 +93,7 @@ class Settings(BaseSettings):
         "source_backend",
         "sink_backend",
         "store_backend",
+        "job_group_store_backend",
         "llm_backend",
         "posting_backend",
     )

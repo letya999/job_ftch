@@ -1,5 +1,6 @@
 """Node implementations — each file implements the Node Protocol."""
 
+from nodes.aggregation import JobAggregationNode
 from nodes.dedup import DedupNode
 from nodes.extraction import ExtractionNode
 from nodes.extraction_validation import ExtractionValidationNode
@@ -20,6 +21,7 @@ __all__ = [
     "ExtractionNode",
     "ExtractionValidationNode",
     "HeuristicTriageNode",
+    "JobAggregationNode",
     "JobValidationNode",
     "LocationWorkModeNormalizationNode",
     "QualityScoringNode",

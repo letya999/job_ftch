@@ -84,3 +84,7 @@ class CompositeSource:
         finally:
             if not producer.done():
                 producer.cancel()
+                try:
+                    await producer
+                except asyncio.CancelledError:
+                    pass

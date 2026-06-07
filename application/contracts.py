@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from domain import DuplicateRecord, QuarantinedRawItem, RememberedDedupKey
+    from domain import DuplicateRecord, Job, JobGroup, QuarantinedRawItem, RememberedDedupKey
 
 SourceItem = TypeVar("SourceItem", covariant=True)
 StageInput = TypeVar("StageInput", contravariant=True)
@@ -109,3 +109,14 @@ class AuthProvider(Protocol):
 class LLMProvider(Protocol):
     async def extract(self, text: str, schema: type[ExtractedItem]) -> ExtractedItem:
         """Extract a structured object from text."""
+
+
+@runtime_checkable
+class JobGroupStore(Protocol):
+    async def get(self, group_id: str) -> JobGroup | None: ...
+    async def create(self, job: Job) -> JobGroup: ...
+    async def merge(self, group_id: str, job: Job) -> JobGroup: ...
+    async def find_by_url(self, canonical_url: str) -> JobGroup | None: ...
+    async def find_by_fingerprint(self, fingerprint: str) -> JobGroup | None: ...
+    async def list_groups(self, limit: int = 100) -> list[JobGroup]: ...
+    async def count(self) -> int: ...
