@@ -408,3 +408,40 @@ async def test_career_site_source_parses_bcc_list_and_detail_pages() -> None:
     assert items[0].metadata["location"] == "Алматы"
     assert items[0].metadata["badges"] == ["Горящая вакансия"]
     assert "Обязанности" in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_career_site_source_parses_yandex_jobs_cards() -> None:
+    html = """
+    <div class="lc-jobs-vacancies-list">
+      <span class="lc-jobs-vacancy-card" data-vacancy-card="true" data-position="0" data-vacancy-id="40981">
+        <a class="lc-jobs-vacancy-card__link" href="/jobs/vacancies/timlid-mlkomandi-ai-search-v-mlservisi-yandex-cloud-40981"></a>
+        <div class="lc-jobs-vacancy-card__tags">
+          <span class="lc-jobs-vacancy-card__tag">Yandex Cloud</span>
+          <span class="lc-jobs-vacancy-card__tag">Санкт-Петербург</span>
+          <span class="lc-jobs-vacancy-card__tag">Офис</span>
+        </div>
+        <div class="lc-jobs-vacancy-card__header">Тимлид ML-команды (AI Search) в AI Studio Yandex Cloud</div>
+        <div class="lc-jobs-vacancy-card__description">Вы возглавите ML-команду и будете отвечать за разработку AI-сервисов.</div>
+      </span>
+    </div>
+    """
+
+    items = await _collect(
+        CareerSiteSource(
+            FakeHttpClient(html),
+            "https://yandex.ru/jobs/vacancies?text=AI",
+            limit=10,
+        )
+    )
+
+    assert len(items) == 1
+    assert items[0].source_kind is SourceKind.CAREER_SITE
+    assert items[0].source_name == "Yandex"
+    assert items[0].external_id == "40981"
+    assert str(items[0].url) == (
+        "https://yandex.ru/jobs/vacancies/timlid-mlkomandi-ai-search-v-mlservisi-yandex-cloud-40981"
+    )
+    assert items[0].metadata["service"] == "Yandex Cloud"
+    assert items[0].metadata["parser"] == "yandex_jobs"
+    assert "AI Studio Yandex Cloud" in items[0].text

@@ -102,6 +102,25 @@ async def test_sanitize_node_rejects_empty_source_name_after_normalization() -> 
 
 
 @pytest.mark.asyncio
+async def test_sanitize_node_rejects_overlong_text() -> None:
+    node = SanitizeNode(max_text_length=12)
+    malformed = RawItem.model_construct(
+        stable_id="",
+        source_kind=SourceKind.DEBUG,
+        source_name="debug",
+        external_id="item-1",
+        url=None,
+        text="0123456789ABCDEF",
+        metadata={},
+    )
+
+    with pytest.raises(RawItemRejected) as exc_info:
+        await node.process(malformed)
+
+    assert exc_info.value.reason == RawItemRejectionReason.TEXT_TOO_LONG
+
+
+@pytest.mark.asyncio
 async def test_pipeline_quarantines_disallowed_origin_host(tmp_path: Path) -> None:
     item = RawItem(
         source_kind=SourceKind.CAREER_SITE,
