@@ -1,0 +1,110 @@
+sources:
+  - type: telegram_channel
+    entity: neuraldeep
+    limit: 50
+    source_name: neuraldeep
+  - type: telegram_comments
+    entity: neuraldeep
+    post_limit: 10
+    comment_limit_per_post: 50
+    source_name: neuraldeep_comments
+
+  - type: telegram_channel
+    entity: ai_grably
+    limit: 50
+    source_name: ai_grably
+  - type: telegram_comments
+    entity: ai_grably
+    post_limit: 10
+    comment_limit_per_post: 50
+    source_name: ai_grably_comments
+
+  - type: telegram_channel
+    entity: kdoronin
+    limit: 50
+    source_name: kdoronin
+  - type: telegram_comments
+    entity: kdoronin
+    post_limit: 10
+    comment_limit_per_post: 50
+    source_name: kdoronin_comments
+
+  - type: telegram_channel
+    entity: max_about_ai
+    limit: 50
+    source_name: max_about_ai
+  - type: telegram_comments
+    entity: max_about_ai
+    post_limit: 10
+    comment_limit_per_post: 50
+    source_name: max_about_ai_comments
+
+  - type: telegram_channel
+    entity: ai_driven
+    limit: 50
+    source_name: ai_driven
+  - type: telegram_comments
+    entity: ai_driven
+    post_limit: 10
+    comment_limit_per_post: 50
+    source_name: ai_driven_comments
+
+  - type: telegram_channel
+    entity: the_ai_architect
+    limit: 50
+    source_name: the_ai_architect
+  - type: telegram_comments
+    entity: the_ai_architect
+    post_limit: 10
+    comment_limit_per_post: 50
+    source_name: the_ai_architect_comments
+
+  - type: telegram_channel
+    entity: deksden_notes
+    limit: 50
+    source_name: deksden_notes
+  - type: telegram_comments
+    entity: deksden_notes
+    post_limit: 10
+    comment_limit_per_post: 50
+    source_name: deksden_notes_comments
+
+  - type: telegram_channel
+    entity: drugoi_dev
+    limit: 50
+    source_name: drugoi_dev
+  - type: telegram_comments
+    entity: drugoi_dev
+    post_limit: 10
+    comment_limit_per_post: 50
+    source_name: drugoi_dev_comments
+
+  - type: telegram_channel
+    entity: meetdeadlines
+    limit: 50
+    source_name: meetdeadlines
+  - type: telegram_comments
+    entity: meetdeadlines
+    post_limit: 10
+    comment_limit_per_post: 50
+    source_name: meetdeadlines_comments
+
+  - type: telegram_channel
+    entity: nobilix
+    limit: 50
+    source_name: nobilix
+  - type: telegram_comments
+    entity: nobilix
+    post_limit: 10
+    comment_limit_per_post: 50
+    source_name: nobilix_comments
+
+  - type: telegram_channel
+    entity: countwithsasha
+    limit: 50
+    source_name: countwithsasha
+  - type: telegram_comments
+    entity: countwithsasha
+    post_limit: 10
+    comment_limit_per_post: 50
+    source_name: countwithsasha_comments

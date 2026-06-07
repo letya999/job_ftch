@@ -39,7 +39,7 @@ if TYPE_CHECKING:
         Source,
         Store,
     )
-    from domain import Job, QuarantinedRawItem, RawItem, RejectedItem
+    from domain import FilterProfile, Job, QuarantinedRawItem, RawItem, RejectedItem
     from sinks import CountedSink
 
 from sinks import FailureTolerantSink, FanOutSink, RoutingSink
@@ -148,20 +148,29 @@ def build_source(settings: Settings) -> Source[RawItem]:
     return create_source(settings)  # type: ignore[return-value]
 
 
+def load_filter_profile(settings: Settings) -> FilterProfile | None:
+    if settings.filter_profile_path is None:
+        return None
+    from application.filter_profile_loader import load_filter_profile as _load
+
+    return _load(settings.filter_profile_path)
+
+
 def build_nodes(
     settings: Settings,
     store: Store,
     llm: LLMProvider,
+    profile: FilterProfile | None = None,
 ) -> tuple[SanitizingNode[RawItem], Sequence[ProcessingNode[object]]]:
     nodes: list[ProcessingNode[Any]] = [
-        HeuristicTriageNode(),
+        HeuristicTriageNode(profile=profile),
         DedupNode(store),
         ExtractionNode(llm),
         ExtractionValidationNode(),
         TitleCompanyNormalizationNode(),
         LocationWorkModeNormalizationNode(),
         CompensationParsingNode(),
-        AIRoleRelevanceNode(),
+        AIRoleRelevanceNode(profile=profile),
         QualityScoringNode(),
         JobValidationNode(),
     ]
@@ -267,7 +276,8 @@ async def run_pipeline(settings: Settings) -> RunSummary:
     )
     store = build_store(settings)
     llm = build_llm(settings)
-    sanitize_node, nodes = build_nodes(settings, store, llm)
+    profile = load_filter_profile(settings)
+    sanitize_node, nodes = build_nodes(settings, store, llm, profile=profile)
     output_sink, review_sink, posting_sink = build_output_sinks(settings)
     rejected_counted, rejected_sink = build_rejected_sink(settings)
     pipeline = Pipeline(
@@ -280,6 +290,8 @@ async def run_pipeline(settings: Settings) -> RunSummary:
         rejected_sink=rejected_sink,
     )
     summary = await pipeline.run(max_items=settings.pipeline_max_items_per_run)
+    if profile is not None:
+        summary.applied_profile = profile.name
     summary.review = review_sink.emit_count
     summary.posted = posting_sink.emit_count if posting_sink is not None else 0
     summary.rejected = rejected_counted.emit_count
