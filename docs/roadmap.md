@@ -283,7 +283,7 @@ Purpose: make the project usable by someone other than the author.
 ### RM-061 Troubleshooting guide
 ### RM-062 Release checklist
 
-## Phase 11. Multi-source orchestration
+## Phase 11. Multi-source orchestration  ‹PARALLEL-OK: sources are independent›
 
 Purpose: run the pipeline over many sources in a single invocation.
 
@@ -560,7 +560,7 @@ PostgreSQLJobGroupBackend and the JobGroup schema are designed here together wit
 - Verify `SQLStoreAdapter` is independently testable with a SQLite in-memory connection
   (substitute driver) — confirms DBMS-agnostic design.
 
-## Phase 16. Fulltext and semantic search layer
+## Phase 16. Fulltext and semantic search layer  ‹fulltext = core (Postgres FTS); semantic/vector = HEAVY, optional extras›
 
 Purpose: make collected jobs queryable without exporting raw JSON.
 Search is built group-aware from day one (search_jobs returns JobGroup by default).
@@ -650,7 +650,7 @@ SQLite (single file, default, lightweight) and PostgreSQL (server, scale) are bo
 - Telegram bot `/search` command (Phase 25 RM-129) uses same injection.
 - Search result export: `--output jobs.jsonl` writes `list[Job]` as JSONL.
 
-## Phase 17. Scheduler and daemon mode
+## Phase 17. Scheduler and daemon mode  ‹PARALLEL-OK›
 
 Purpose: run the pipeline continuously over many sources without manual CLI invocations.
 
@@ -678,7 +678,7 @@ Purpose: run the pipeline continuously over many sources without manual CLI invo
 
 ### RM-091 Scheduler regression and load tests
 
-## Phase 18. Source configuration system v2 — credentials, ingestion modes, bypass
+## Phase 18. Source configuration system v2 — credentials, ingestion modes, bypass  ‹auth/ingest = core; bypass = HEAVY/RISKY, COMMUNITY-MAINTAINED›
 
 Purpose: clean separation of source config, credentials, ingestion strategy, and protection
 bypass. Modelled after the dlt secrets / source / destination separation pattern.
@@ -739,7 +739,7 @@ bypass. Modelled after the dlt secrets / source / destination separation pattern
 - Add `config/sources.example.yaml` with one example per source type.
 - Document the full config reference in `docs/source_config.md`.
 
-## Phase 19. Official API sources
+## Phase 19. Official API sources  ‹PARALLEL-OK: each adapter independent›
 
 Purpose: right-path adapters for job boards that offer structured APIs. Preferred over
 HTML scraping wherever available: stable, no bypass needed, structured output.
@@ -779,7 +779,7 @@ HTML scraping wherever available: stable, no bypass needed, structured output.
 - No auth for public postings.
 - Add contract test against recorded fixture.
 
-## Phase 20. Browser and hard scraper sources
+## Phase 20. Browser and hard scraper sources  ‹HEAVY/RISKY · COMMUNITY-MAINTAINED (best-effort, does not gate core)›
 
 Purpose: reach JS-rendered, CloudFlare-protected, and behavior-gated job pages.
 Browser automation is an optional, heavyweight dependency — never imported in core.
@@ -815,7 +815,7 @@ Browser automation is an optional, heavyweight dependency — never imported in 
   browser farm and proxy rotation.
 - `api_key` always resolved via `AuthProvider`, never in config files.
 
-## Phase 21. Realtime and push ingestion
+## Phase 21. Realtime and push ingestion  ‹HEAVY: long-running connections›
 
 Purpose: replace polling with push or event-listener where the source supports it.
 Reduces latency from 3 hours to seconds for Telegram; enables webhook-driven career sites.
@@ -850,7 +850,7 @@ Reduces latency from 3 hours to seconds for Telegram; enables webhook-driven car
   backoff.
 - Maps incoming frames to `RawItem` via a configurable field mapping.
 
-## Phase 22. Library packaging and runtime adapters
+## Phase 22. Library packaging and runtime adapters  ‹LIBRARY-FIRST: start RM-110 namespace EARLY (can begin right after Phase 11)›
 
 Purpose: make `job_ftch` a proper installable library — clean namespace, programmatic API,
 zero namespace pollution, and enforceable module boundaries. BLOCKER for any public release.
@@ -1095,7 +1095,7 @@ that bridges Telegram ↔ job_ftch core.
 - Send `/search "machine learning"` → assert search endpoint called →
   assert job cards returned as inline keyboard.
 
-## Phase 26. Observability, lineage, and unified watermark
+## Phase 26. Observability, lineage, and unified watermark  ‹PARALLEL-OK›
 
 Purpose: production-grade operational visibility — metrics dashboards, job lineage tracing,
 and an efficient unified incremental fetch primitive that replaces scattered per-source

@@ -51,7 +51,7 @@ def test_quarantine_settings_switch_output_targets() -> None:
 
 def test_openai_backend_requires_api_key() -> None:
     with pytest.raises(ValueError, match="openai_api_key is required"):
-        Settings.model_validate({"llm_backend": "openai"})
+        Settings.model_validate({"llm_backend": "openai", "openai_api_key": None})
 
 
 def test_review_and_rejected_settings_switch_output_targets() -> None:
