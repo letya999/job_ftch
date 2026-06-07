@@ -13,6 +13,7 @@ from domain.dedup import (
     dedup_url_for_raw_item,
     processed_key_for_raw_item,
 )
+from domain.filter_profile import FilterProfile
 from domain.job_quality import (
     ExtractionRejectionReason,
     JobReviewReason,
@@ -29,6 +30,7 @@ __all__ = [
     "DuplicateRecord",
     "DuplicateRejectionReason",
     "ExtractionRejectionReason",
+    "FilterProfile",
     "Job",
     "JobExtractionStatus",
     "JobReviewReason",

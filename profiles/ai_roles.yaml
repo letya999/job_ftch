@@ -1,0 +1,41 @@
+name: ai_roles
+required_keywords: []
+exclude_keywords:
+  - subscribe
+  - follow us
+  - webinar
+  - meetup
+  - conference
+  - course
+  - training
+  - newsletter
+  - digest
+  - news
+  - podcast
+  - like and share
+allowed_source_kinds: null
+min_text_tokens: 3
+min_text_chars: 18
+positive_relevance_keywords:
+  - ai
+  - llm
+  - genai
+  - mlops
+  - ml 
+  - machine learning
+  - agent
+  - rag
+  - prompt
+  - infra
+  - platform
+  - data scientist
+  - ai pm
+  - ai product
+negative_relevance_keywords:
+  - sales
+  - account executive
+  - hr
+  - recruiter
+  - office manager
+  - marketing
+relevance_threshold: 0.0
