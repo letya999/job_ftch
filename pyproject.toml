@@ -78,6 +78,14 @@ exclude = [
     "^\\.venv/",
 ]
 
+[[tool.mypy.overrides]]
+# Optional drivers (aiosqlite, asyncpg) may or may not be installed.
+# The try/except ImportError + assignment-to-None pattern triggers
+# unused-ignore in envs without the package and assignment-error in envs with it.
+# Disabling warn_unused_ignores here keeps both envs happy.
+module = ["infrastructure.stores.sqlite", "infrastructure.stores.postgres"]
+warn_unused_ignores = false
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

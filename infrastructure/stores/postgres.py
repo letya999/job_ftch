@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 try:
     import asyncpg
 except ImportError:
-    asyncpg = None
+    asyncpg = None  # type: ignore[assignment]
 
 from application.registry import register_store
 from infrastructure.stores.sql_adapter import SQLStoreAdapter
