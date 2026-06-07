@@ -165,3 +165,120 @@ def merge_jobs(jobs: list[Job]) -> Job:
         review_reasons=review_reasons,
         metadata=metadata,
     )
+
+
+def job_seen_at(job: Job) -> datetime:
+    now = job.metadata.get("fetched_at")
+    if isinstance(now, str):
+        return datetime.fromisoformat(now)
+    if isinstance(now, datetime):
+        return now
+    from datetime import UTC
+    return datetime.now(UTC)
+
+
+def create_job_group(job: Job) -> JobGroup:
+    group_id = compute_group_id(job)
+    now = job_seen_at(job)
+
+    attribution = SourceAttribution(
+        source_kind=job.source_kind,
+        source_name=job.source_name,
+        url=job.canonical_url,
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+
+    return JobGroup(
+        group_id=group_id,
+        canonical_job=job,
+        jobs=[job],
+        source_attributions=[attribution],
+        source_count=1,
+        first_seen_at=now,
+        last_seen_at=now,
+    )
+
+
+def merge_job_into_group(group: JobGroup, job: Job) -> JobGroup:
+    # Check if this source is already in the group
+    existing_job_idx = -1
+    for i, existing_job in enumerate(group.jobs):
+        if (
+            existing_job.source_kind == job.source_kind
+            and existing_job.source_name == job.source_name
+        ):
+            existing_job_idx = i
+            break
+
+    new_jobs = list(group.jobs)
+    if existing_job_idx >= 0:
+        new_jobs[existing_job_idx] = job
+    else:
+        new_jobs.append(job)
+
+    canonical_job = merge_jobs(new_jobs)
+    now = job_seen_at(job)
+
+    new_attributions = list(group.source_attributions)
+    attr_idx = -1
+    for i, attr in enumerate(new_attributions):
+        if attr.source_kind == job.source_kind and attr.source_name == job.source_name:
+            attr_idx = i
+            break
+
+    if attr_idx >= 0:
+        old_attr = new_attributions[attr_idx]
+        new_attributions[attr_idx] = SourceAttribution(
+            source_kind=old_attr.source_kind,
+            source_name=old_attr.source_name,
+            url=job.canonical_url or old_attr.url,
+            first_seen_at=old_attr.first_seen_at,
+            last_seen_at=now,
+        )
+    else:
+        new_attributions.append(
+            SourceAttribution(
+                source_kind=job.source_kind,
+                source_name=job.source_name,
+                url=job.canonical_url,
+                first_seen_at=now,
+                last_seen_at=now,
+            )
+        )
+
+    return JobGroup(
+        group_id=group.group_id,
+        canonical_job=canonical_job,
+        jobs=new_jobs,
+        source_attributions=new_attributions,
+        source_count=len(new_jobs),
+        first_seen_at=group.first_seen_at,
+        last_seen_at=now,
+    )
+
+
+def remove_job_from_group(group: JobGroup, job_id: str) -> JobGroup | None:
+    new_jobs = [j for j in group.jobs if j.raw_item_id != job_id]
+    if not new_jobs:
+        return None
+
+    canonical_job = merge_jobs(new_jobs)
+    
+    # We must also keep source_attributions strictly matching the current jobs, 
+    # or just rebuild them. Rebuilding them is safer:
+    kept_kinds_names = {(j.source_kind, j.source_name) for j in new_jobs}
+    new_attributions = [
+        attr for attr in group.source_attributions
+        if (attr.source_kind, attr.source_name) in kept_kinds_names
+    ]
+
+    return JobGroup(
+        group_id=group.group_id,
+        canonical_job=canonical_job,
+        jobs=new_jobs,
+        source_attributions=new_attributions,
+        source_count=len(new_jobs),
+        first_seen_at=group.first_seen_at,
+        last_seen_at=group.last_seen_at,
+    )

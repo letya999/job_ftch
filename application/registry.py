@@ -195,6 +195,14 @@ def load_extensions() -> None:
                 "infrastructure.llm.openai_provider",
                 "sinks.json_file",
                 "sinks.telegram_posting",
+                "infrastructure.backends.jobs.sqlite",
+                "infrastructure.backends.jobs.postgres",
+                "infrastructure.embeddings.openai_provider",
+                "infrastructure.embeddings.sentence_transformers_provider",
+                "infrastructure.embeddings.ollama_provider",
+                "infrastructure.backends.vector.pgvector",
+                "infrastructure.backends.vector.qdrant",
+                "infrastructure.backends.search.hybrid",
             ):
                 import_module(module_name)
             _builtins_loaded = True
@@ -323,3 +331,41 @@ def resolve_career_site_parser(*, url: str, html: str) -> CareerSiteParser:
             return cast("CareerSiteParser", factory())
     msg = f"Unsupported career site layout for URL: {url}"
     raise ValueError(msg)
+
+
+def create_job_backend(settings: Settings) -> object:
+    load_extensions()
+    factory = _job_backend_factories.get(settings.job_backend)
+    if factory is None:
+        msg = f"Unsupported job backend: {settings.job_backend}"
+        raise ValueError(msg)
+    return factory(settings)
+
+
+def create_search_backend(settings: Settings) -> object:
+    load_extensions()
+    factory = _search_backend_factories.get(settings.search_backend)
+    if factory is None:
+        msg = f"Unsupported search backend: {settings.search_backend}"
+        raise ValueError(msg)
+    return factory(settings)
+
+
+def create_embedding_provider(settings: Settings) -> object:
+    load_extensions()
+    factory = _embedding_provider_factories.get(settings.embedding_provider)
+    if factory is None:
+        msg = f"Unsupported embedding provider: {settings.embedding_provider}"
+        raise ValueError(msg)
+    return factory(settings)
+
+
+def create_vector_backend(settings: Settings) -> object | None:
+    load_extensions()
+    if not settings.vector_backend:
+        return None
+    factory = _vector_backend_factories.get(settings.vector_backend)
+    if factory is None:
+        msg = f"Unsupported vector backend: {settings.vector_backend}"
+        raise ValueError(msg)
+    return cast("object", factory(settings))

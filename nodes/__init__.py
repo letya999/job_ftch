@@ -2,6 +2,7 @@
 
 from nodes.aggregation import JobAggregationNode
 from nodes.dedup import DedupNode
+from nodes.embedding import EmbeddingNode
 from nodes.extraction import ExtractionNode
 from nodes.extraction_validation import ExtractionValidationNode
 from nodes.job_normalization import (
@@ -18,6 +19,7 @@ __all__ = [
     "AIRoleRelevanceNode",
     "CompensationParsingNode",
     "DedupNode",
+    "EmbeddingNode",
     "ExtractionNode",
     "ExtractionValidationNode",
     "HeuristicTriageNode",

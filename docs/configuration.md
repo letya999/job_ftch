@@ -43,6 +43,23 @@
 - `JOB_FTCH_OPENAI_TIMEOUT_SECONDS`
 - `JOB_FTCH_OPENAI_MAX_RETRIES`
 
+## Job Catalog and Search
+- `JOB_FTCH_JOB_BACKEND`: `sqlite`, `postgres`
+- `JOB_FTCH_SEARCH_BACKEND`: `sqlite`, `postgres`, `hybrid`
+- `JOB_FTCH_JOB_STORE_PATH`: path to SQLite file (if different from store_path)
+- `JOB_FTCH_SEARCH_LANGUAGE`: language for PostgreSQL FTS (e.g. `simple`, `english`, `russian`)
+
+## Embeddings and Vector Search
+- `JOB_FTCH_EMBEDDING_ENABLED`: `true` or `false`
+- `JOB_FTCH_EMBEDDING_PROVIDER`: `openai`, `sentence_transformers`, `ollama`
+- `JOB_FTCH_EMBEDDING_MODEL`: name of the model
+- `JOB_FTCH_EMBEDDING_DIMENSIONS`: number of dimensions (optional, inferred if not set)
+- `JOB_FTCH_VECTOR_BACKEND`: `pgvector` or `qdrant`
+- `JOB_FTCH_QDRANT_URL`: URL to Qdrant instance
+- `JOB_FTCH_QDRANT_API_KEY`: API key for Qdrant
+- `JOB_FTCH_QDRANT_COLLECTION`: name of the Qdrant collection
+- `JOB_FTCH_OLLAMA_BASE_URL`: base URL for Ollama
+
 ## Output targets
 - `JOB_FTCH_OUTPUT_PATH`
 - `JOB_FTCH_OUTPUT_JSONL`
