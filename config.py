@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     pipeline_max_text_length: int = Field(default=20_000, ge=256, le=500_000)
     dry_run: bool = False
     sources_file_path: Path | None = None
+    filter_profile_path: Path | None = None
     debug_source_path: Path = Path("fixtures/debug/raw_items.json")
     output_path: Path = Path("artifacts/debug/raw_items.json")
     output_jsonl: bool = False

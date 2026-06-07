@@ -385,7 +385,17 @@ def _build_client_v2(auth_id: str | None, auth: AuthProvider) -> Any:
         session_path = Path(".runtime/telegram") / auth_id
 
     session_path.parent.mkdir(parents=True, exist_ok=True)
-    return TelegramClient(str(session_path), int(api_id_val), api_hash)
+    client = TelegramClient(
+        str(session_path),
+        int(api_id_val),
+        api_hash,
+        timeout=settings.telegram_timeout_seconds,
+        request_retries=settings.telegram_request_retries,
+        connection_retries=settings.telegram_connection_retries,
+        retry_delay=settings.telegram_retry_delay_seconds,
+    )
+    client.flood_sleep_threshold = settings.telegram_flood_sleep_threshold_seconds
+    return client
 
 
 @register_source_v2("telegram_channel")
@@ -393,10 +403,14 @@ def _build_telegram_channel_source_v2(
     spec: TelegramChannelSpec,
     auth: AuthProvider,
 ) -> TelegramChannelSource:
+    from config import get_settings
+
+    settings = get_settings()
     return TelegramChannelSource(
         _build_client_v2(spec.auth_source_id, auth),
         spec.entity,
         limit=spec.limit,
+        wait_time=settings.telegram_history_wait_time_seconds,
         own_client=True,
     )
 
@@ -406,10 +420,14 @@ def _build_telegram_group_source_v2(
     spec: TelegramGroupSpec,
     auth: AuthProvider,
 ) -> TelegramGroupSource:
+    from config import get_settings
+
+    settings = get_settings()
     return TelegramGroupSource(
         _build_client_v2(spec.auth_source_id, auth),
         spec.entity,
         limit=spec.limit,
+        wait_time=settings.telegram_history_wait_time_seconds,
         own_client=True,
     )
 
@@ -419,10 +437,14 @@ def _build_telegram_comments_source_v2(
     spec: TelegramCommentsSpec,
     auth: AuthProvider,
 ) -> TelegramCommentSource:
+    from config import get_settings
+
+    settings = get_settings()
     return TelegramCommentSource(
         _build_client_v2(spec.auth_source_id, auth),
         spec.entity,
         post_limit=spec.post_limit,
         comment_limit_per_post=spec.comment_limit_per_post,
+        wait_time=settings.telegram_history_wait_time_seconds,
         own_client=True,
     )
