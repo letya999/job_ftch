@@ -23,6 +23,35 @@ class InMemoryStore:
         self._dedup_keys: dict[str, RememberedDedupKey] = {}
         self._duplicate_records: list[DuplicateRecord] = []
         self._run_state: dict[str, str] = {}
+        self._sets: dict[str, set[str]] = {}
+
+    async def get(self, key: str) -> str | None:
+        """StoreConnector implementation."""
+        return self._run_state.get(key)
+
+    async def set(self, key: str, value: str) -> None:
+        """StoreConnector implementation."""
+        self._run_state[key] = value
+
+    async def delete(self, key: str) -> None:
+        """StoreConnector implementation."""
+        self._run_state.pop(key, None)
+
+    async def set_add(self, key: str, member: str) -> None:
+        """StoreConnector implementation."""
+        self._sets.setdefault(key, set()).add(member)
+
+    async def set_contains(self, key: str, member: str) -> bool:
+        """StoreConnector implementation."""
+        return member in self._sets.get(key, set())
+
+    async def set_members(self, key: str) -> frozenset[str]:
+        """StoreConnector implementation."""
+        return frozenset(self._sets.get(key, set()))
+
+    async def ping(self) -> bool:
+        """StoreConnector implementation."""
+        return True
 
     async def has_processed(self, item_id: str) -> bool:
         return item_id in self._processed_ids

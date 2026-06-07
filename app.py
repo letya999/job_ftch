@@ -15,7 +15,6 @@ from application.registry import (
     create_llm,
     create_sink,
     create_source,
-    create_store,
 )
 from application.telemetry import configure_telemetry
 from config import Settings, get_settings
@@ -250,8 +249,10 @@ def build_output_sinks(
     return FanOutSink(sink_chain), review_counted, posting_sink
 
 
-def build_store(settings: Settings) -> Store:
-    return create_store(settings)  # type: ignore[return-value]
+async def build_store(settings: Settings) -> Store:
+    from application.registry import create_store_with_fallback
+
+    return cast("Store", await create_store_with_fallback(settings))
 
 
 def build_llm(settings: Settings) -> LLMProvider:
@@ -284,7 +285,7 @@ async def run_pipeline(settings: Settings) -> RunSummary:
         settings.telemetry_service_name,
         console_exporter=settings.telemetry_console_exporter,
     )
-    store = build_store(settings)
+    store = await build_store(settings)
     job_group_store = cast("JobGroupStore", create_job_group_store(settings))
     llm = build_llm(settings)
     profile = load_filter_profile(settings)

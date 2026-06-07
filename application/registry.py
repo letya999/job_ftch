@@ -8,6 +8,8 @@ from importlib.metadata import entry_points
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
+import structlog
+
 from config import Settings
 
 if TYPE_CHECKING:
@@ -186,6 +188,8 @@ def load_extensions() -> None:
                 "infrastructure.sources.career_site",
                 "infrastructure.sources.declarative",
                 "infrastructure.stores.in_memory",
+                "infrastructure.stores.sqlite",
+                "infrastructure.stores.postgres",
                 "infrastructure.stores.job_group_store",
                 "infrastructure.llm.heuristic",
                 "infrastructure.llm.openai_provider",
@@ -257,6 +261,31 @@ def create_store(settings: Settings) -> object:
         msg = f"Unsupported store backend: {settings.store_backend}"
         raise ValueError(msg)
     return factory(settings)
+
+
+async def create_store_with_fallback(settings: Settings) -> object:
+    """Create a store with async health check and fallback to InMemoryStore."""
+    load_extensions()
+
+    from application.contracts import StoreConnector
+    from infrastructure.stores.in_memory import InMemoryStore
+
+    primary_store = create_store(settings)
+
+    # If it supports StoreConnector (ping), check health
+    if isinstance(primary_store, StoreConnector):
+        if await primary_store.ping():
+            return primary_store
+
+        # Health check failed
+        if settings.store_fallback_on_error:
+            structlog.get_logger("job_ftch.registry").warning(
+                "store_health_check_failed_falling_back_to_in_memory",
+                backend=settings.store_backend,
+            )
+            return InMemoryStore()
+
+    return primary_store
 
 
 def create_job_group_store(settings: Settings) -> object:

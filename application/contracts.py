@@ -100,6 +100,32 @@ class Store(Protocol):
 
 
 @runtime_checkable
+class StoreConnector(Protocol):
+    """Universal KV + set connector - any backend (SQL, Redis, filesystem) implements it."""
+
+    async def get(self, key: str) -> str | None:
+        """Fetch a string value by key, or None if absent."""
+
+    async def set(self, key: str, value: str) -> None:
+        """Upsert a string value by key."""
+
+    async def delete(self, key: str) -> None:
+        """Remove a key-value pair. No-op if absent."""
+
+    async def set_add(self, key: str, member: str) -> None:
+        """Add a member to the named set. Idempotent."""
+
+    async def set_contains(self, key: str, member: str) -> bool:
+        """Return True if member is in the named set."""
+
+    async def set_members(self, key: str) -> frozenset[str]:
+        """Return all members of the named set."""
+
+    async def ping(self) -> bool:
+        """Return True if the backend is reachable and ready."""
+
+
+@runtime_checkable
 class AuthProvider(Protocol):
     def resolve(self, source_id: str) -> dict[str, str]:
         """Resolve credentials for a source by its auth_source_id."""

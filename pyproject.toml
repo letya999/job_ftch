@@ -28,6 +28,10 @@ dependencies = [
     "structlog>=24.2",
 ]
 
+[project.optional-dependencies]
+sqlite = ["aiosqlite>=0.20"]
+postgres = ["asyncpg>=0.29"]
+
 [project.entry-points."job_ftch.sources"]
 
 [project.entry-points."job_ftch.parsers"]

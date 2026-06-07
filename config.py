@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     career_site_max_keepalive_connections: int = Field(default=5, gt=0, le=200)
     career_site_detail_concurrency: int = Field(default=5, gt=0, le=50)
     career_site_allowed_hosts: Annotated[tuple[str, ...], NoDecode] = ()
+    store_path: Path = Path(".runtime/job_ftch.db")
+    store_dsn: str | None = None
+    store_pool_min: int = Field(default=2, gt=0)
+    store_pool_max: int = Field(default=10, gt=0)
+    store_fallback_on_error: bool = True
 
     model_config = SettingsConfigDict(
         env_file=(".env", ".env.dev"),
@@ -126,6 +131,7 @@ class Settings(BaseSettings):
         "quarantine_output_schema_version",
         "review_output_schema_version",
         "rejected_output_schema_version",
+        "store_dsn",
     )
     @classmethod
     def strip_optional_strings(cls, value: str | None) -> str | None:

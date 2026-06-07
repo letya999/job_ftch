@@ -53,8 +53,8 @@
 
 | Библиотека | Extras group | Фаза | Назначение |
 |---|---|---|---|
-| `aiosqlite` | `[sqlite]` | 12a | SQLiteStore и SQLiteJobBackend (dev / self-hosted) |
-| `asyncpg` | `[postgres]` | 12 | PostgreSQL без ORM (быстрее SQLAlchemy в async) |
+| `aiosqlite` | `[sqlite]` | 15 | SQLiteStore и SQLiteJobBackend (dev / self-hosted) |
+| `asyncpg` | `[postgres]` | 15 | PostgreSQL без ORM (быстрее SQLAlchemy в async) |
 | `qdrant-client` | `[qdrant]` | 14 | VectorBackend: индексация и запросы эмбеддингов |
 
 SQLAlchemy не используется: `asyncpg` на прямых запросах быстрее, проще тестировать, нет N+1 скрытых запросов.
