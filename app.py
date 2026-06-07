@@ -10,7 +10,13 @@ import structlog
 
 from application.logging import configure_logging
 from application.pipeline import Pipeline, RunSummary
-from application.registry import create_llm, create_sink, create_source, create_store
+from application.registry import (
+    create_job_group_store,
+    create_llm,
+    create_sink,
+    create_source,
+    create_store,
+)
 from application.telemetry import configure_telemetry
 from config import Settings, get_settings
 from nodes import (
@@ -20,6 +26,7 @@ from nodes import (
     ExtractionNode,
     ExtractionValidationNode,
     HeuristicTriageNode,
+    JobAggregationNode,
     JobValidationNode,
     LocationWorkModeNormalizationNode,
     QualityScoringNode,
@@ -32,6 +39,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from application.contracts import (
+        JobGroupStore,
         LLMProvider,
         ProcessingNode,
         SanitizingNode,
@@ -160,12 +168,14 @@ def build_nodes(
     settings: Settings,
     store: Store,
     llm: LLMProvider,
+    job_group_store: JobGroupStore,
     profile: FilterProfile | None = None,
 ) -> tuple[SanitizingNode[RawItem], Sequence[ProcessingNode[object]]]:
     nodes: list[ProcessingNode[Any]] = [
         HeuristicTriageNode(profile=profile),
         DedupNode(store),
         ExtractionNode(llm),
+        JobAggregationNode(job_group_store),
         ExtractionValidationNode(),
         TitleCompanyNormalizationNode(),
         LocationWorkModeNormalizationNode(),
@@ -275,9 +285,10 @@ async def run_pipeline(settings: Settings) -> RunSummary:
         console_exporter=settings.telemetry_console_exporter,
     )
     store = build_store(settings)
+    job_group_store = cast("JobGroupStore", create_job_group_store(settings))
     llm = build_llm(settings)
     profile = load_filter_profile(settings)
-    sanitize_node, nodes = build_nodes(settings, store, llm, profile=profile)
+    sanitize_node, nodes = build_nodes(settings, store, llm, job_group_store, profile=profile)
     output_sink, review_sink, posting_sink = build_output_sinks(settings)
     rejected_counted, rejected_sink = build_rejected_sink(settings)
     pipeline = Pipeline(
@@ -292,6 +303,16 @@ async def run_pipeline(settings: Settings) -> RunSummary:
     summary = await pipeline.run(max_items=settings.pipeline_max_items_per_run)
     if profile is not None:
         summary.applied_profile = profile.name
+
+    # Aggregation stats
+    if hasattr(job_group_store, "new_groups_created"):
+        summary.new_groups_created = getattr(job_group_store, "new_groups_created", 0)
+        summary.merged_into_group = getattr(job_group_store, "merged_into_group", 0)
+        for source_kind, count in getattr(job_group_store, "by_source_kind_new", {}).items():
+            summary.source_stats(source_kind).new_groups_created = count
+        for source_kind, count in getattr(job_group_store, "by_source_kind_merged", {}).items():
+            summary.source_stats(source_kind).merged_into_group = count
+
     summary.review = review_sink.emit_count
     summary.posted = posting_sink.emit_count if posting_sink is not None else 0
     summary.rejected = rejected_counted.emit_count

@@ -106,6 +106,7 @@ class Job(BaseModel):
     source_name: str = Field(min_length=1)
     title: str | None = None
     company: str | None = None
+    company_canonical: str | None = None
     description: str = Field(min_length=1)
     canonical_url: AnyHttpUrl | None = None
     location: str | None = None
@@ -126,7 +127,7 @@ class Job(BaseModel):
                 if not stripped:
                     raise ValueError(f"{field_name} must not be blank.")
                 object.__setattr__(self, field_name, stripped)
-        for field_name in ("title", "company"):
+        for field_name in ("title", "company", "company_canonical"):
             value = getattr(self, field_name)
             if value is None:
                 continue

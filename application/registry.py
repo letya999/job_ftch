@@ -48,6 +48,7 @@ _source_factories: dict[str, SourceFactory] = {}
 _source_spec_factories: dict[str, SourceSpecFactory] = {}
 _sink_factories: dict[str, SinkFactory] = {}
 _store_factories: dict[str, StoreFactory] = {}
+_job_group_store_factories: dict[str, StoreFactory] = {}
 _llm_factories: dict[str, LLMFactory] = {}
 _parser_factories: list[tuple[str, ParserMatcher, ParserFactory]] = []
 
@@ -96,6 +97,16 @@ def register_store(kind: str) -> Callable[[FStore], FStore]:
 
     def decorator(factory: FStore) -> FStore:
         _store_factories[normalized] = factory
+        return factory
+
+    return decorator
+
+
+def register_job_group_store(kind: str) -> Callable[[FStore], FStore]:
+    normalized = kind.strip()
+
+    def decorator(factory: FStore) -> FStore:
+        _job_group_store_factories[normalized] = factory
         return factory
 
     return decorator
@@ -175,6 +186,7 @@ def load_extensions() -> None:
                 "infrastructure.sources.career_site",
                 "infrastructure.sources.declarative",
                 "infrastructure.stores.in_memory",
+                "infrastructure.stores.job_group_store",
                 "infrastructure.llm.heuristic",
                 "infrastructure.llm.openai_provider",
                 "sinks.json_file",
@@ -243,6 +255,15 @@ def create_store(settings: Settings) -> object:
     factory = _store_factories.get(settings.store_backend)
     if factory is None:
         msg = f"Unsupported store backend: {settings.store_backend}"
+        raise ValueError(msg)
+    return factory(settings)
+
+
+def create_job_group_store(settings: Settings) -> object:
+    load_extensions()
+    factory = _job_group_store_factories.get(settings.job_group_store_backend)
+    if factory is None:
+        msg = f"Unsupported job group store backend: {settings.job_group_store_backend}"
         raise ValueError(msg)
     return factory(settings)
 
