@@ -54,11 +54,27 @@ class CareerSiteConfig(BaseModel):
         )
 
     @classmethod
+    def alfabank(cls) -> CareerSiteConfig:
+        return cls(
+            kind="alfabank",
+            row_selector=".vacancy, [aria-label='vacancy']",
+            link_selector="a[href*='/vacancies/']",
+            title_selector=".vacancy__title",
+            location_selector=".vacancy__city, .vacancy__location",
+            metadata_defaults={"parser": "alfabank"},
+        )
+
+    @classmethod
     def from_spec(cls, spec: DeclarativeHtmlSpec) -> CareerSiteConfig:
+        url_lower = spec.url.lower()
         if spec.parser_kind == "greenhouse" or (
-            spec.parser_kind == "auto" and "greenhouse.io" in spec.url.lower()
+            spec.parser_kind == "auto" and "greenhouse.io" in url_lower
         ):
             return cls.greenhouse()
+        if spec.parser_kind == "alfabank" or (
+            spec.parser_kind == "auto" and "alfabank.ru" in url_lower
+        ):
+            return cls.alfabank()
 
         return cls(
             kind="generic",

@@ -270,7 +270,17 @@ async def create_store_with_fallback(settings: Settings) -> object:
     from application.contracts import StoreConnector
     from infrastructure.stores.in_memory import InMemoryStore
 
-    primary_store = create_store(settings)
+    try:
+        primary_store = create_store(settings)
+    except Exception as exc:
+        if settings.store_fallback_on_error:
+            structlog.get_logger("job_ftch.registry").warning(
+                "store_creation_failed_falling_back_to_in_memory",
+                backend=settings.store_backend,
+                error=str(exc),
+            )
+            return InMemoryStore()
+        raise
 
     # If it supports StoreConnector (ping), check health
     if isinstance(primary_store, StoreConnector):

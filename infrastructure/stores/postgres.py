@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 try:
     import asyncpg
@@ -41,10 +41,10 @@ class PostgreSQLStore(SQLStoreAdapter):
         self._dsn = dsn
         self._pool_min = pool_min
         self._pool_max = pool_max
-        self._pool: asyncpg.Pool | None = None
+        self._pool: Any = None
         self._init_lock = asyncio.Lock()
 
-    async def _ensure_initialized(self) -> None:
+    async def _ensure_initialized(self) -> Any:
         if asyncpg is None:
             raise ImportError(
                 "asyncpg is required for PostgreSQLStore. Install with [postgres] extra."
@@ -56,50 +56,46 @@ class PostgreSQLStore(SQLStoreAdapter):
                     self._dsn, min_size=self._pool_min, max_size=self._pool_max
                 )
                 await self._initialize()
+        return self._pool
 
     async def _initialize(self) -> None:
         schema_path = Path(__file__).parent / "migrations" / "001_initial_schema_pg.sql"
         if not schema_path.exists():
             raise FileNotFoundError(f"Migration file not found: {schema_path}")
 
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
+        async with self._pool.acquire() as conn:  # type: ignore[union-attr]
             await conn.execute(schema_path.read_text())
 
     async def _execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
-        await self._ensure_initialized()
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
+        pool = await self._ensure_initialized()
+        async with pool.acquire() as conn:
             await conn.execute(sql, *params)
 
     async def _fetchone(
         self, sql: str, params: tuple[object, ...] = ()
     ) -> tuple[object, ...] | None:
-        await self._ensure_initialized()
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
+        pool = await self._ensure_initialized()
+        async with pool.acquire() as conn:
             row = await conn.fetchrow(sql, *params)
             return tuple(row) if row else None
 
     async def _fetchall(
         self, sql: str, params: tuple[object, ...] = ()
     ) -> list[tuple[object, ...]]:
-        await self._ensure_initialized()
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
+        pool = await self._ensure_initialized()
+        async with pool.acquire() as conn:
             rows = await conn.fetch(sql, *params)
             return [tuple(row) for row in rows]
 
     async def close(self) -> None:
         """Close the connection pool."""
-        if self._pool:
+        if self._pool is not None:
             await self._pool.close()
             self._pool = None
 
     async def ping(self) -> bool:
         """Check connection health."""
         try:
-            await self._ensure_initialized()
             await self._fetchone("SELECT 1")
             return True
         except Exception:

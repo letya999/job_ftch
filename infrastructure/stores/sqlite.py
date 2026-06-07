@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 try:
     import aiosqlite
@@ -34,10 +34,10 @@ class SQLiteStore(SQLStoreAdapter):
 
     def __init__(self, path: str | Path = ":memory:") -> None:
         self._path = str(path)
-        self._conn: aiosqlite.Connection | None = None
+        self._conn: Any = None
         self._init_lock = asyncio.Lock()
 
-    async def _ensure_initialized(self) -> None:
+    async def _ensure_initialized(self) -> Any:
         if aiosqlite is None:
             raise ImportError("aiosqlite is required for SQLiteStore. Install with [sqlite] extra.")
 
@@ -46,51 +46,47 @@ class SQLiteStore(SQLStoreAdapter):
                 self._conn = await aiosqlite.connect(self._path)
                 self._conn.row_factory = aiosqlite.Row
                 await self._initialize()
+        return self._conn
 
     async def _initialize(self) -> None:
         schema_path = Path(__file__).parent / "migrations" / "001_initial_schema.sql"
         if not schema_path.exists():
             raise FileNotFoundError(f"Migration file not found: {schema_path}")
 
-        # Executescript handles multiple statements and commits automatically
-        assert self._conn is not None
-        await self._conn.executescript(schema_path.read_text())
-        await self._conn.commit()
+        # executescript() issues an implicit COMMIT before running, so no separate
+        # commit is needed. Only call this during initialization (no pending txns).
+        await self._conn.executescript(schema_path.read_text())  # type: ignore[union-attr]
 
     async def _execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
-        await self._ensure_initialized()
-        assert self._conn is not None
-        await self._conn.execute(sql, params)
-        await self._conn.commit()
+        conn = await self._ensure_initialized()
+        await conn.execute(sql, params)
+        await conn.commit()
 
     async def _fetchone(
         self, sql: str, params: tuple[object, ...] = ()
     ) -> tuple[object, ...] | None:
-        await self._ensure_initialized()
-        assert self._conn is not None
-        async with self._conn.execute(sql, params) as cursor:
+        conn = await self._ensure_initialized()
+        async with conn.execute(sql, params) as cursor:
             row = await cursor.fetchone()
             return tuple(row) if row else None
 
     async def _fetchall(
         self, sql: str, params: tuple[object, ...] = ()
     ) -> list[tuple[object, ...]]:
-        await self._ensure_initialized()
-        assert self._conn is not None
-        async with self._conn.execute(sql, params) as cursor:
+        conn = await self._ensure_initialized()
+        async with conn.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
             return [tuple(row) for row in rows]
 
     async def close(self) -> None:
         """Close the database connection."""
-        if self._conn:
+        if self._conn is not None:
             await self._conn.close()
             self._conn = None
 
     async def ping(self) -> bool:
         """Check connection health."""
         try:
-            await self._ensure_initialized()
             await self._fetchone("SELECT 1")
             return True
         except Exception:

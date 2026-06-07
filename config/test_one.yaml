@@ -1,0 +1,5 @@
+sources:
+  - type: telegram_channel
+    entity: ai_grably
+    limit: 5
+    source_name: ai_grably_channel

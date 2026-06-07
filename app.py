@@ -286,22 +286,27 @@ async def run_pipeline(settings: Settings) -> RunSummary:
         console_exporter=settings.telemetry_console_exporter,
     )
     store = await build_store(settings)
-    job_group_store = cast("JobGroupStore", create_job_group_store(settings))
-    llm = build_llm(settings)
-    profile = load_filter_profile(settings)
-    sanitize_node, nodes = build_nodes(settings, store, llm, job_group_store, profile=profile)
-    output_sink, review_sink, posting_sink = build_output_sinks(settings)
-    rejected_counted, rejected_sink = build_rejected_sink(settings)
-    pipeline = Pipeline(
-        source=build_source(settings),
-        sanitize_node=sanitize_node,
-        nodes=nodes,
-        sink=output_sink,
-        store=store,
-        quarantine_sink=build_quarantine_sink(settings),
-        rejected_sink=rejected_sink,
-    )
-    summary = await pipeline.run(max_items=settings.pipeline_max_items_per_run)
+    try:
+        job_group_store = cast("JobGroupStore", create_job_group_store(settings))
+        llm = build_llm(settings)
+        profile = load_filter_profile(settings)
+        sanitize_node, nodes = build_nodes(settings, store, llm, job_group_store, profile=profile)
+        output_sink, review_sink, posting_sink = build_output_sinks(settings)
+        rejected_counted, rejected_sink = build_rejected_sink(settings)
+        pipeline = Pipeline(
+            source=build_source(settings),
+            sanitize_node=sanitize_node,
+            nodes=nodes,
+            sink=output_sink,
+            store=store,
+            quarantine_sink=build_quarantine_sink(settings),
+            rejected_sink=rejected_sink,
+        )
+        summary = await pipeline.run(max_items=settings.pipeline_max_items_per_run)
+    finally:
+        _close = getattr(store, "close", None)
+        if callable(_close):
+            await _close()
     if profile is not None:
         summary.applied_profile = profile.name
 

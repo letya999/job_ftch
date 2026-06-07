@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from application.registry import register_store
+from domain import DuplicateRecord, RememberedDedupKey
 
 if TYPE_CHECKING:
     from config import Settings
-    from domain import DuplicateRecord, RememberedDedupKey
 
 
 def _ns(source_kind: str | None, source_name: str | None, key: str) -> str:
@@ -18,64 +18,81 @@ def _ns(source_kind: str | None, source_name: str | None, key: str) -> str:
 
 
 class InMemoryStore:
+    """In-memory Store + StoreConnector backed by a single unified KV/set pair.
+
+    Store methods are implemented on top of StoreConnector primitives so both
+    interfaces see the same underlying data — no split-brain between callers
+    of has_processed() and set_members("processed").
+    """
+
     def __init__(self) -> None:
-        self._processed_ids: set[str] = set()
-        self._dedup_keys: dict[str, RememberedDedupKey] = {}
-        self._duplicate_records: list[DuplicateRecord] = []
-        self._run_state: dict[str, str] = {}
+        self._kv: dict[str, str] = {}
         self._sets: dict[str, set[str]] = {}
 
+    # StoreConnector primitives
+
     async def get(self, key: str) -> str | None:
-        """StoreConnector implementation."""
-        return self._run_state.get(key)
+        return self._kv.get(key)
 
     async def set(self, key: str, value: str) -> None:
-        """StoreConnector implementation."""
-        self._run_state[key] = value
+        self._kv[key] = value
 
     async def delete(self, key: str) -> None:
-        """StoreConnector implementation."""
-        self._run_state.pop(key, None)
+        self._kv.pop(key, None)
 
     async def set_add(self, key: str, member: str) -> None:
-        """StoreConnector implementation."""
         self._sets.setdefault(key, set()).add(member)
 
     async def set_contains(self, key: str, member: str) -> bool:
-        """StoreConnector implementation."""
         return member in self._sets.get(key, set())
 
     async def set_members(self, key: str) -> frozenset[str]:
-        """StoreConnector implementation."""
         return frozenset(self._sets.get(key, set()))
 
     async def ping(self) -> bool:
-        """StoreConnector implementation."""
         return True
 
+    async def close(self) -> None:
+        pass
+
+    # Store methods — built on top of StoreConnector primitives
+
     async def has_processed(self, item_id: str) -> bool:
-        return item_id in self._processed_ids
+        return await self.set_contains("processed", item_id)
 
     async def mark_processed(self, item_id: str) -> None:
-        self._processed_ids.add(item_id)
+        await self.set_add("processed", item_id)
 
     async def has_dedup_key(self, key: str) -> bool:
-        return key in self._dedup_keys
+        return await self.set_contains("dedup_keys", key)
 
     async def remember_dedup_key(self, record: RememberedDedupKey) -> None:
-        self._dedup_keys[record.key] = record
+        await self.set_add("dedup_keys", record.key)
+        await self.set_add(f"dedup_keys:{record.kind.value}", record.key)
+        await self.set(f"dedup_record:{record.key}", record.model_dump_json())
 
     async def list_dedup_keys(self, kind: str | None = None) -> tuple[RememberedDedupKey, ...]:
-        records = tuple(self._dedup_keys.values())
-        if kind is None:
-            return records
-        return tuple(record for record in records if record.kind.value == kind)
+        set_key = "dedup_keys" if kind is None else f"dedup_keys:{kind}"
+        members = await self.set_members(set_key)
+        results = []
+        for m in sorted(members):
+            raw = await self.get(f"dedup_record:{m}")
+            if raw:
+                results.append(RememberedDedupKey.model_validate_json(raw))
+        return tuple(results)
 
     async def record_duplicate(self, record: DuplicateRecord) -> None:
-        self._duplicate_records.append(record)
+        await self.set_add("dup_records", record.item_id)
+        await self.set(f"dup_record:{record.item_id}", record.model_dump_json())
 
     async def list_duplicate_records(self) -> tuple[DuplicateRecord, ...]:
-        return tuple(self._duplicate_records)
+        members = await self.set_members("dup_records")
+        results = []
+        for m in sorted(members):
+            raw = await self.get(f"dup_record:{m}")
+            if raw:
+                results.append(DuplicateRecord.model_validate_json(raw))
+        return tuple(results)
 
     async def get_run_state(
         self,
@@ -84,8 +101,7 @@ class InMemoryStore:
         source_kind: str | None = None,
         source_name: str | None = None,
     ) -> str | None:
-        actual_key = _ns(source_kind, source_name, key)
-        return self._run_state.get(actual_key)
+        return await self.get(_ns(source_kind, source_name, key))
 
     async def set_run_state(
         self,
@@ -95,8 +111,7 @@ class InMemoryStore:
         source_kind: str | None = None,
         source_name: str | None = None,
     ) -> None:
-        actual_key = _ns(source_kind, source_name, key)
-        self._run_state[actual_key] = value
+        await self.set(_ns(source_kind, source_name, key), value)
 
 
 @register_store("memory")

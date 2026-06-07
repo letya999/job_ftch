@@ -9,7 +9,7 @@ sources:
     entity: vibe_coding_community
     limit: 10
   - type: telegram_group
-    entity: +tKjQsEgRPqY0ZGMy
+    entity: https://t.me/+tKjQsEgRPqY0ZGMy
     limit: 10
 
   # Telegram Channels & Comments
@@ -19,7 +19,7 @@ sources:
   - type: telegram_comments
     entity: neuraldeep
     post_limit: 3
-    comment_limit_per_post: 10
+    comment_limit_per_post: 50
 
   - type: telegram_channel
     entity: ai_grably
@@ -27,7 +27,7 @@ sources:
   - type: telegram_comments
     entity: ai_grably
     post_limit: 3
-    comment_limit_per_post: 10
+    comment_limit_per_post: 50
 
   - type: telegram_channel
     entity: kdoronin
@@ -35,7 +35,7 @@ sources:
   - type: telegram_comments
     entity: kdoronin
     post_limit: 3
-    comment_limit_per_post: 10
+    comment_limit_per_post: 50
 
   - type: telegram_channel
     entity: max_about_ai
@@ -43,7 +43,7 @@ sources:
   - type: telegram_comments
     entity: max_about_ai
     post_limit: 3
-    comment_limit_per_post: 10
+    comment_limit_per_post: 50
 
   - type: telegram_channel
     entity: ai_driven
@@ -51,7 +51,7 @@ sources:
   - type: telegram_comments
     entity: ai_driven
     post_limit: 3
-    comment_limit_per_post: 10
+    comment_limit_per_post: 50
 
   - type: telegram_channel
     entity: the_ai_architect
@@ -59,7 +59,7 @@ sources:
   - type: telegram_comments
     entity: the_ai_architect
     post_limit: 3
-    comment_limit_per_post: 10
+    comment_limit_per_post: 50
 
   - type: telegram_channel
     entity: deksden_notes
@@ -67,7 +67,7 @@ sources:
   - type: telegram_comments
     entity: deksden_notes
     post_limit: 3
-    comment_limit_per_post: 10
+    comment_limit_per_post: 50
 
   - type: telegram_channel
     entity: drugoi_dev
@@ -75,7 +75,7 @@ sources:
   - type: telegram_comments
     entity: drugoi_dev
     post_limit: 3
-    comment_limit_per_post: 10
+    comment_limit_per_post: 50
 
   - type: telegram_channel
     entity: meetdeadlines
@@ -83,7 +83,7 @@ sources:
   - type: telegram_comments
     entity: meetdeadlines
     post_limit: 3
-    comment_limit_per_post: 10
+    comment_limit_per_post: 50
 
   - type: telegram_channel
     entity: nobilix
@@ -91,7 +91,7 @@ sources:
   - type: telegram_comments
     entity: nobilix
     post_limit: 3
-    comment_limit_per_post: 10
+    comment_limit_per_post: 50
 
   - type: telegram_channel
     entity: countwithsasha
@@ -99,4 +99,4 @@ sources:
   - type: telegram_comments
     entity: countwithsasha
     post_limit: 3
-    comment_limit_per_post: 10
+    comment_limit_per_post: 50
