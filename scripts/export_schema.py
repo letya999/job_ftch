@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
-from domain.source_spec import SourceSpec
+from job_ftch.domain.source_spec import SourceSpec
 
 if __name__ == "__main__":
     adapter = TypeAdapter(SourceSpec)

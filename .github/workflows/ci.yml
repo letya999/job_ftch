@@ -27,6 +27,16 @@ jobs:
       - name: Ruff lint
         run: uv run ruff check .
 
+      - name: Legacy import gate
+        run: |
+          if rg -n '^from (domain|application|nodes|sinks|infrastructure|config)\b|^import (domain|application|nodes|sinks|infrastructure|config)\b' . -g '*.py' -g '!job_ftch/**'; then
+            echo "Legacy flat imports remain outside job_ftch/"
+            exit 1
+          fi
+
+      - name: Module boundaries
+        run: uv run python scripts/check_module_boundaries.py
+
       - name: Ruff format check
         run: uv run ruff format --check .
 
@@ -45,7 +55,7 @@ jobs:
         run: uv sync
 
       - name: mypy
-        run: uv run mypy domain application infrastructure nodes sinks config.py
+        run: uv run mypy job_ftch
 
   test:
     name: Tests
@@ -86,4 +96,4 @@ jobs:
         run: uv sync
 
       - name: Bandit security scan
-        run: uv run bandit -r domain application infrastructure nodes sinks app.py config.py -ll
+        run: uv run bandit -r job_ftch scripts/check_module_boundaries.py -ll

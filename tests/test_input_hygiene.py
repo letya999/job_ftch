@@ -5,13 +5,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from application import Pipeline
-from application.rejections import RawItemRejected
-from domain import RawItem, RawItemRejectionReason, SourceKind
-from infrastructure.sources.local_fixture import LocalFixtureSource
-from infrastructure.stores.in_memory import InMemoryStore
-from nodes import SanitizeNode
-from sinks.json_file import JsonFileSink
+from job_ftch.application import Pipeline
+from job_ftch.application.rejections import RawItemRejected
+from job_ftch.domain import RawItem, RawItemRejectionReason, SourceKind
+from job_ftch.infrastructure.sources.local_fixture import LocalFixtureSource
+from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+from job_ftch.nodes import SanitizeNode
+from job_ftch.sinks.json_file import JsonFileSink
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -146,6 +146,23 @@ async def test_pipeline_quarantines_disallowed_origin_host(tmp_path: Path) -> No
     assert summary.dropped == 1
     assert summary.quarantined == 1
     assert quarantine_record["reason"] == RawItemRejectionReason.DISALLOWED_URL_HOST
+
+
+@pytest.mark.asyncio
+async def test_sanitize_node_allows_career_site_subdomains() -> None:
+    node = SanitizeNode(allowed_career_site_hosts=("yandex.cloud",))
+    item = RawItem(
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="Yandex Cloud",
+        external_id="job-1",
+        url="https://kz.console.yandex.cloud/jobs/job-1",
+        text="ML Engineer role with enough text to survive sanitation.",
+    )
+
+    sanitized = await node.process(item)
+
+    assert sanitized is not None
+    assert str(sanitized.url) == "https://kz.console.yandex.cloud/jobs/job-1"
 
 
 @pytest.mark.asyncio

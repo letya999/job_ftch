@@ -1,6 +1,6 @@
-from domain import RawItem
-from domain.source_spec import LeverSourceSpec
-from infrastructure.sources.api.lever import LeverAPISource
+from job_ftch.domain import RawItem
+from job_ftch.domain.source_spec import LeverSourceSpec
+from job_ftch.infrastructure.sources.api.lever import LeverAPISource
 
 
 def test_lever_api_source_maps_fields():

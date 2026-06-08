@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from infrastructure.stores.in_memory import InMemoryStore
+from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
 
 class NullAuth:

@@ -2,9 +2,9 @@ from datetime import UTC, datetime
 
 import pytest
 
-from application.registry import create_job_backend
-from config import Settings
-from domain import Job, SourceKind
+from job_ftch.application.registry import create_job_backend
+from job_ftch.config import Settings
+from job_ftch.domain import Job, SourceKind
 
 
 @pytest.fixture

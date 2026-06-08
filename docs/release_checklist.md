@@ -5,7 +5,7 @@
 2. `uv run ruff format --check .`
 3. `uv run mypy .`
 4. `uv run pytest tests/`
-5. `uv run bandit -r app.py config.py application domain infrastructure nodes sinks -ll`
+5. `uv run bandit -r job_ftch scripts/check_module_boundaries.py -ll`
 
 ## Pipeline verification
 1. Run the local fixture flow from `README.md`.

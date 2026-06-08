@@ -2,12 +2,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from application.contracts import ClassificationResult, LLMProvider
-from application.drops import RawItemDropped
-from domain import FilterProfile, PostType, RawItem, SourceKind
-from infrastructure.classifiers.keyword_classifier import KeywordClassifierProvider
-from infrastructure.classifiers.llm_classifier import LLMClassifierProvider, _PostTypeSchema
-from nodes.source_classifier import SourceClassifierNode
+from job_ftch.application.contracts import ClassificationResult, LLMProvider
+from job_ftch.application.drops import RawItemDropped
+from job_ftch.domain import FilterProfile, PostType, RawItem, SourceKind
+from job_ftch.infrastructure.classifiers.keyword_classifier import KeywordClassifierProvider
+from job_ftch.infrastructure.classifiers.llm_classifier import (
+    LLMClassifierProvider,
+    _PostTypeSchema,
+)
+from job_ftch.nodes.source_classifier import SourceClassifierNode
 
 
 @pytest.fixture

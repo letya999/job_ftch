@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from config import Settings
+from job_ftch.config import Settings
 
 
 def test_settings_allow_blank_optional_telegram_credentials_for_non_telegram_backends() -> None:

@@ -85,6 +85,7 @@ SQLAlchemy не используется: `asyncpg` на прямых запро
 | `nats.py` | `[nats]` | 27 | NATSTarget для рассылки job-событий |
 | `aiokafka` | `[kafka]` | 27 | KafkaTarget для рассылки job-событий |
 | `faststream` | `[faststream]` | 20 | Обёртка пайплайна как воркер очереди сообщений |
+| `dagster` | `[dagster]` | 22 | Runtime adapter: assets/materializations поверх `Pipeline.run()` |
 
 ---
 

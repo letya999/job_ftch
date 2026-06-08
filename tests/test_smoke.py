@@ -7,34 +7,34 @@ from pytest import MonkeyPatch
 
 
 def test_domain_importable() -> None:
-    """domain package must be importable with zero side effects."""
-    mod = importlib.import_module("domain")
+    """job_ftch.domain package must be importable with zero side effects."""
+    mod = importlib.import_module("job_ftch.domain")
     assert mod is not None
 
 
 def test_application_importable() -> None:
-    mod = importlib.import_module("application")
+    mod = importlib.import_module("job_ftch.application")
     assert mod is not None
 
 
 def test_infrastructure_importable() -> None:
-    mod = importlib.import_module("infrastructure")
+    mod = importlib.import_module("job_ftch.infrastructure")
     assert mod is not None
 
 
 def test_nodes_importable() -> None:
-    mod = importlib.import_module("nodes")
+    mod = importlib.import_module("job_ftch.nodes")
     assert mod is not None
 
 
 def test_sinks_importable() -> None:
-    mod = importlib.import_module("sinks")
+    mod = importlib.import_module("job_ftch.sinks")
     assert mod is not None
 
 
 def test_config_loads(monkeypatch: MonkeyPatch) -> None:
     """Settings must load with defaults when no .env present."""
-    from config import Settings
+    from job_ftch.config import Settings
 
     for key in tuple(os.environ):
         if key.startswith("JOB_FTCH_"):

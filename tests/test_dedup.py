@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from application import Pipeline
-from domain import DuplicateRejectionReason, RawItem, SourceKind, processed_key_for_raw_item
-from infrastructure.stores.in_memory import InMemoryStore
-from nodes import DedupNode, HeuristicTriageNode, SanitizeNode
+from job_ftch.application import Pipeline
+from job_ftch.domain import (
+    DuplicateRejectionReason,
+    RawItem,
+    SourceKind,
+    processed_key_for_raw_item,
+)
+from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+from job_ftch.nodes import DedupNode, HeuristicTriageNode, SanitizeNode
 
 
 class StubSource:

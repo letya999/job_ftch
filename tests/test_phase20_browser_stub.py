@@ -1,7 +1,7 @@
 import pytest
 from pydantic import TypeAdapter
 
-from domain.source_spec import BrowserSourceSpec, SourceSpec
+from job_ftch.domain.source_spec import BrowserSourceSpec, SourceSpec
 
 
 def test_browser_source_spec_roundtrip():
@@ -16,8 +16,8 @@ def test_browser_source_raises_without_playwright():
     import asyncio
     from unittest.mock import MagicMock
 
-    from domain.source_spec import BrowserSourceSpec
-    from infrastructure.sources.browser.base import BrowserSource
+    from job_ftch.domain.source_spec import BrowserSourceSpec
+    from job_ftch.infrastructure.sources.browser.base import BrowserSource
 
     spec = BrowserSourceSpec(url="https://example.com/careers")
     source = BrowserSource(spec, MagicMock())

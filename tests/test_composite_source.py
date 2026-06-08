@@ -2,8 +2,8 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from domain import RawItem, SourceKind
-from infrastructure.sources.composite import CompositeSource
+from job_ftch.domain import RawItem, SourceKind
+from job_ftch.infrastructure.sources.composite import CompositeSource
 
 
 class FakeSource:

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from domain.source_spec import (
+from job_ftch.domain.source_spec import (
     RestAPISourceSpec,
     RSSFeedSourceSpec,
     SourceSpec,
@@ -61,7 +61,7 @@ def test_telegram_getmatch_spec_parses(specs_dir: Path) -> None:
     path = specs_dir / "telegram_getmatch.yaml"
     with path.open(encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    from domain.source_spec import TelegramChannelSpec
+    from job_ftch.domain.source_spec import TelegramChannelSpec
 
     spec = TelegramChannelSpec(**data)
     assert spec.type == "telegram_channel"

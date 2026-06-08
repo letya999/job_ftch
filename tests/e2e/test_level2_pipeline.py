@@ -7,13 +7,13 @@ import httpx
 import pytest
 import yaml
 
-from application.pipeline import Pipeline
-from domain.source_spec import RSSFeedSourceSpec
-from infrastructure.llm.heuristic import HeuristicLLMProvider
-from infrastructure.sources.realtime.rss import RSSFeedSource
-from nodes.extraction import ExtractionNode
-from nodes.sanitize import SanitizeNode
-from sinks.json_file import JsonFileSink
+from job_ftch.application.pipeline import Pipeline
+from job_ftch.domain.source_spec import RSSFeedSourceSpec
+from job_ftch.infrastructure.llm.heuristic import HeuristicLLMProvider
+from job_ftch.infrastructure.sources.realtime.rss import RSSFeedSource
+from job_ftch.nodes.extraction import ExtractionNode
+from job_ftch.nodes.sanitize import SanitizeNode
+from job_ftch.sinks.json_file import JsonFileSink
 
 
 @pytest.fixture

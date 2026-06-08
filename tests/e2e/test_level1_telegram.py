@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yaml
 
-from domain.source_spec import TelegramChannelSpec
-from infrastructure.sources.telegram import TelegramChannelSource
+from job_ftch.domain.source_spec import TelegramChannelSpec
+from job_ftch.infrastructure.sources.telegram import TelegramChannelSource
 
 
 @pytest.fixture

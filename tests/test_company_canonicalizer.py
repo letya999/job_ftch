@@ -3,9 +3,9 @@ from pathlib import Path
 import pytest
 import yaml
 
-from domain import Job, SourceKind
-from domain.company import normalize_company_name
-from nodes.company import CompanyCanonicalizer
+from job_ftch.domain import Job, SourceKind
+from job_ftch.domain.company import normalize_company_name
+from job_ftch.nodes.company import CompanyCanonicalizer
 
 
 @pytest.fixture

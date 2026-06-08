@@ -2,8 +2,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from domain import Job, SourceKind
-from domain.job_group import (
+from job_ftch.domain import Job, SourceKind
+from job_ftch.domain.job_group import (
     create_job_group,
     merge_job_into_group,
     remove_job_from_group,
