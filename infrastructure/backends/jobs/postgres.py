@@ -230,7 +230,7 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 raw_json=EXCLUDED.raw_json,
                 updated_at=NOW(),
                 fts_vector={fts_query}
-            """,
+            """,  # nosec B608
             job.stable_id,
             group_id,
             str(job.source_kind),
