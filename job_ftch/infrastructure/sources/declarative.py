@@ -262,9 +262,9 @@ def _build_declarative_html_source_v2(
     auth: AuthProvider,
 ) -> DeclarativeCareerSiteSource:
     del auth
-    import httpx
+    from job_ftch.infrastructure.sources.career_site import build_default_http_client
 
-    client = httpx.AsyncClient(timeout=10.0)
+    client = build_default_http_client()
     config = CareerSiteConfig.from_spec(spec)
     return DeclarativeCareerSiteSource(
         client,
@@ -279,15 +279,16 @@ def _build_declarative_html_source_v2(
 def _build_career_site_source_v2(
     spec: CareerSiteSpec,
     auth: AuthProvider,
-) -> DeclarativeCareerSiteSource:
-    # career_site spec is just a specialized declarative_html with auto-detection
-    from job_ftch.domain.source_spec import DeclarativeHtmlSpec as InternalSpec
-
-    html_spec = InternalSpec(
-        type="declarative_html",
-        url=spec.url,
-        parser_kind="auto",
-        limit=spec.limit,
-        source_name=spec.source_name,
+) -> object:
+    del auth
+    from job_ftch.infrastructure.sources.career_site import (
+        CareerSiteSource,
+        build_default_http_client,
     )
-    return _build_declarative_html_source_v2(html_spec, auth)
+
+    return CareerSiteSource(
+        build_default_http_client(),
+        spec.url,
+        limit=spec.limit,
+        own_client=True,
+    )

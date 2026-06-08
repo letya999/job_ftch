@@ -235,6 +235,19 @@ def load_extensions() -> None:
 
 def create_source(settings: Settings) -> object:
     load_extensions()
+    if settings.source_backend == "career_site":
+        from job_ftch.domain.source_spec import CareerSiteSpec
+
+        if settings.career_site_url is None:
+            msg = "Career site source requires JOB_FTCH_CAREER_SITE_URL."
+            raise ValueError(msg)
+        return create_source_from_spec(
+            CareerSiteSpec(
+                type="career_site",
+                url=settings.career_site_url,
+                limit=settings.pipeline_max_items_per_run,
+            )
+        )
     factory = _source_factories.get(settings.source_backend)
     if factory is None:
         msg = f"Unsupported source backend: {settings.source_backend}"

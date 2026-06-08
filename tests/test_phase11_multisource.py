@@ -7,8 +7,14 @@ from pydantic import TypeAdapter, ValidationError
 from job_ftch.application.registry import create_source_from_spec
 from job_ftch.application.source_loader import load_sources
 from job_ftch.config import Settings
-from job_ftch.domain.source_spec import LocalFixtureSpec, SourceSpec, TelegramChannelSpec
+from job_ftch.domain.source_spec import (
+    CareerSiteSpec,
+    LocalFixtureSpec,
+    SourceSpec,
+    TelegramChannelSpec,
+)
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
+from job_ftch.infrastructure.sources.career_site import CareerSiteSource
 from job_ftch.infrastructure.sources.local_fixture import LocalFixtureSource
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
@@ -130,6 +136,15 @@ def test_create_source_from_spec_unknown_type_raises():
     fake_spec.type = "does_not_exist"
     with pytest.raises(ValueError, match="Unsupported source type"):
         create_source_from_spec(fake_spec)
+
+
+def test_create_source_from_spec_career_site_uses_runtime_auto_detection():
+    spec = CareerSiteSpec(url="https://www.bcc.kz/career/vacancies/")
+
+    source = create_source_from_spec(spec)
+
+    assert isinstance(source, CareerSiteSource)
+    assert source._parser is None
 
 
 def test_env_auth_provider_resolve_no_matching_vars(monkeypatch):
