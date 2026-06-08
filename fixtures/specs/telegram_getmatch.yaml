@@ -1,0 +1,5 @@
+type: telegram_channel
+entity: "@getmatch"
+limit: 50
+source_name: tg_getmatch
+auth_source_id: telegram

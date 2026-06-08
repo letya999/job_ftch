@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from application.drops import RawItemDropped
 from domain import FilterProfile, RawItem, SourceKind, TriageRejectionReason
@@ -52,8 +53,18 @@ def _token_count(text: str) -> int:
     return len(_TOKEN_RE.findall(text))
 
 
+@lru_cache(maxsize=256)
+def _compile_keyword(kw: str) -> re.Pattern[str]:
+    # Use word boundary for keywords <=5 chars with no spaces (e.g. "ai", "ml", "rag")
+    # Use substring match for multi-word phrases (e.g. "machine learning")
+    stripped = kw.strip()
+    if len(stripped) <= 5 and " " not in stripped:
+        return re.compile(rf"\b{re.escape(stripped)}\b", re.IGNORECASE)
+    return re.compile(re.escape(stripped), re.IGNORECASE)
+
+
 def _has_any(text: str, patterns: list[str] | tuple[str, ...]) -> bool:
-    return any(pattern in text for pattern in patterns)
+    return any(_compile_keyword(p).search(text) for p in patterns)
 
 
 class HeuristicTriageNode:

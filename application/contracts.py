@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     from domain import DuplicateRecord, Job, JobGroup, QuarantinedRawItem, RememberedDedupKey
 
@@ -137,6 +138,26 @@ class LLMProvider(Protocol):
         """Extract a structured object from text."""
 
 
+@dataclass(frozen=True)
+class ClassificationResult:
+    label: str  # PostType string value
+    confidence: float  # 0.0-1.0
+    model_id: str
+
+
+@runtime_checkable
+class ClassifierProvider(Protocol):
+    async def classify(self, text: str) -> ClassificationResult:
+        """Classify a single text item. Returns PostType label + confidence."""
+
+    async def classify_batch(self, texts: list[str]) -> list[ClassificationResult]:
+        """Classify multiple texts. Default impl can call classify() in a loop."""
+
+    @property
+    def model_id(self) -> str:
+        """Identifier for logging and metrics."""
+
+
 @runtime_checkable
 class JobGroupStore(Protocol):
     async def get_group(self, group_id: str) -> JobGroup | None: ...
@@ -180,12 +201,22 @@ class VectorBackend(Protocol):
         self,
         job_id: str,
         vector: list[float],
-        payload: dict[str, object],
+        payload: dict[str, Any],
     ) -> None: ...
 
     async def search(
         self,
         vector: list[float],
         limit: int,
-        filter: dict[str, object] | None = None,
+        filter: dict[str, Any] | None = None,
     ) -> list[str]: ...
+
+
+@runtime_checkable
+class IngestMode(Protocol):
+    async def run(
+        self,
+        source: Source[Any],
+        on_item: Callable[[Any], Awaitable[None]],
+    ) -> None:
+        """Drive source fetch and call on_item for each yielded item."""

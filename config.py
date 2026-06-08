@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     telemetry_console_exporter: bool = False
     pipeline_max_items_per_run: int = Field(default=200, gt=0)
     pipeline_max_text_length: int = Field(default=20_000, ge=256, le=500_000)
+    schedule_interval_seconds: int | None = None
     dry_run: bool = False
     sources_file_path: Path | None = None
     filter_profile_path: Path | None = None

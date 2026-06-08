@@ -1,0 +1,18 @@
+type: rest_api
+base_url: "https://api.superjob.ru/2.0"
+jobs_endpoint: "/vacancies/"
+params:
+  keyword: "machine learning"
+  count: "20"
+  page: "0"
+headers:
+  X-Api-App-Id: "__from_auth__"
+field_map:
+  title: profession
+  url: link
+  company: firm_name
+  location: town.title
+  description: candidat
+incremental_cursor_field: id
+auth_source_id: superjob
+source_name: superjob_ml

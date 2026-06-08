@@ -1,0 +1,32 @@
+[
+  {
+    "id": 10001,
+    "message": "ML Engineer | Яндекс | Москва | до 400k\nPython, PyTorch, рекомендательные системы\nhttps://getmatch.ru/v/12345",
+    "date": "2026-06-08T10:00:00+00:00",
+    "peer_id": {"channel_id": 123456789}
+  },
+  {
+    "id": 10002,
+    "message": "Data Scientist | Сбер | Москва | от 300k\nML, SQL, A/B тесты\nhttps://getmatch.ru/v/12346",
+    "date": "2026-06-08T11:00:00+00:00",
+    "peer_id": {"channel_id": 123456789}
+  },
+  {
+    "id": 10003,
+    "message": "NLP Engineer | VK | Санкт-Петербург | по договоренности\nTransformers, BERT, Python\nhttps://getmatch.ru/v/12347",
+    "date": "2026-06-08T12:00:00+00:00",
+    "peer_id": {"channel_id": 123456789}
+  },
+  {
+    "id": 10004,
+    "message": "CV Engineer | Тинькофф | Удаленно | до 350k\nComputer Vision, OpenCV, PyTorch\nhttps://getmatch.ru/v/12348",
+    "date": "2026-06-08T13:00:00+00:00",
+    "peer_id": {"channel_id": 123456789}
+  },
+  {
+    "id": 10005,
+    "message": "AI Product Manager | Озон | Москва | от 250k\nProduct Management, ML basics\nhttps://getmatch.ru/v/12349",
+    "date": "2026-06-08T14:00:00+00:00",
+    "peer_id": {"channel_id": 123456789}
+  }
+]

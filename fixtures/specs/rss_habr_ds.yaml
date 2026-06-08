@@ -1,0 +1,4 @@
+type: rss_feed
+feed_url: "https://career.habr.com/vacancies/rss?q=data+scientist&type=1"
+incremental: true
+source_name: habr_ds

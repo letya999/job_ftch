@@ -260,7 +260,7 @@ def merge_job_into_group(group: JobGroup, job: Job) -> JobGroup:
 
 
 def remove_job_from_group(group: JobGroup, job_id: str) -> JobGroup | None:
-    new_jobs = [j for j in group.jobs if j.raw_item_id != job_id]
+    new_jobs = [j for j in group.jobs if j.stable_id != job_id]
     if not new_jobs:
         return None
 

@@ -1,0 +1,5 @@
+type: telegram_channel
+entity: "@habr_career"
+limit: 50
+source_name: tg_habr_career
+auth_source_id: telegram

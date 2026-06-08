@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, TypeAdapter
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, TypeAdapter
 
 from application.drops import RawItemDropped
 from domain import (
@@ -13,6 +13,7 @@ from domain import (
     Job,
     JobExtractionStatus,
     JobReviewReason,
+    PostType,
     RawItem,
     SourceKind,
     WorkMode,
@@ -38,6 +39,13 @@ class ExtractedJobFields(BaseModel):
     location: str | None = None
     work_mode: WorkMode | None = None
     compensation: CompensationRange | None = None
+    post_type: PostType = PostType.UNKNOWN
+    ai_relevance: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="0.0 = not an AI/ML role. 1.0 = clearly AI/ML role.",
+    )
 
 
 def _metadata_text(item: RawItem, keys: tuple[str, ...]) -> str | None:
@@ -147,6 +155,8 @@ class ExtractionNode:
             extraction_status=extraction_status,
             review_reasons=tuple(review_reasons),
             metadata=metadata,
+            post_type=extracted.post_type,
+            ai_relevance=extracted.ai_relevance,
         )
 
     async def _extract_fields(self, item: RawItem) -> tuple[ExtractedJobFields, bool]:

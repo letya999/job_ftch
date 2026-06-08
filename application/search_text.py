@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from domain import Job
+from domain import Job, WorkMode
 
 
 def build_job_embedding_text(job: Job) -> str:
@@ -26,7 +23,7 @@ def build_job_embedding_text(job: Job) -> str:
     if job.location:
         parts.append(job.location)
 
-    if job.work_mode and str(job.work_mode) != "UNKNOWN":
+    if job.work_mode != WorkMode.UNKNOWN:
         parts.append(str(job.work_mode))
 
     if job.description:
