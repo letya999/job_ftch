@@ -61,8 +61,12 @@ class OfficialAPISource:
                 response.raise_for_status()
                 data = response.json()
 
-                # Assume data is a list or has a jobs key
-                items = data if isinstance(data, list) else data.get("jobs", [])
+                # Assume data is a list or has a jobs/objects key
+                items = (
+                    data
+                    if isinstance(data, list)
+                    else (data.get("jobs") or data.get("objects") or [])
+                )
 
                 for item in items:
                     yield self._map_to_raw_item(item)
@@ -87,7 +91,16 @@ class OfficialAPISource:
                 mapped_data[target] = val
 
         # Mandatory fields
-        text = mapped_data.get("text") or item.get("description") or item.get("text") or str(item)
+        # If 'text' is not explicitly mapped, compose it from title/description/company if available
+        text = mapped_data.get("text")
+        if not text:
+            parts = []
+            for key in ["title", "company", "location", "description"]:
+                if mapped_data.get(key):
+                    parts.append(str(mapped_data[key]))
+            if not parts:
+                parts = [item.get("description") or item.get("text") or str(item)]
+            text = "\n".join(parts)
 
         return RawItem(
             source_kind=self.source_kind,

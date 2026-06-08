@@ -27,6 +27,7 @@ dependencies = [
     "opentelemetry-sdk>=1.25",
     "structlog>=24.2",
     "aiosqlite>=0.20",
+    "feedparser>=6.0.12",
 ]
 
 [project.optional-dependencies]
@@ -111,6 +112,12 @@ warn_unused_ignores = false
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-v"
+markers = [
+    "e2e: marks tests as end-to-end (deselect with -m 'not e2e')",
+    "network: marks tests requiring real network access",
+    "telegram: marks tests requiring Telegram credentials",
+    "superjob: marks tests requiring SUPERJOB_API_KEY",
+]
 
 [tool.coverage.run]
 source = ["domain", "application", "infrastructure", "nodes", "sinks"]

@@ -1,7 +1,9 @@
 import asyncio
 import contextlib
+import os
 import signal
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 import structlog
 
@@ -24,8 +26,12 @@ class Scheduler:
         self._run_index = 0
         self._interval: int | None = None
 
+    def stop(self) -> None:
+        self._stop_event.set()
+
     async def run_forever(self) -> None:
         """Loop: run pipeline, sleep interval, repeat. Handles SIGINT/SIGTERM."""
+        self._write_pid_file()
         # Handle signals
         loop = asyncio.get_running_loop()
         try:
@@ -61,10 +67,11 @@ class Scheduler:
                 interval = self._calculate_interval()
                 logger.debug("scheduler_sleeping", interval_seconds=interval)
 
-                with contextlib.suppress(TimeoutError):
+                with contextlib.suppress(TimeoutError, asyncio.TimeoutError):
                     await asyncio.wait_for(self._stop_event.wait(), timeout=float(interval))
         finally:
             logger.info("scheduler_shutting_down")
+            self._remove_pid_file()
             # Clean up signal handlers
             try:
                 for sig in (signal.SIGINT, signal.SIGTERM):
@@ -90,3 +97,15 @@ class Scheduler:
             min(intervals) if intervals else (self.settings.schedule_interval_seconds or 3600)
         )
         return self._interval
+
+    def _write_pid_file(self) -> None:
+        pid_dir = Path(".runtime")
+        pid_dir.mkdir(parents=True, exist_ok=True)
+        pid_file = pid_dir / ".pid"
+        with open(pid_file, "w") as f:
+            f.write(str(os.getpid()))
+
+    def _remove_pid_file(self) -> None:
+        pid_file = Path(".runtime/.pid")
+        if pid_file.exists():
+            pid_file.unlink()

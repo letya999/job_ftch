@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
@@ -442,24 +441,6 @@ async def show_status(settings: Settings) -> None:
         await _close()
 
 
-def _write_pid_file() -> None:
-    from pathlib import Path
-
-    pid_dir = Path(".runtime")
-    pid_dir.mkdir(parents=True, exist_ok=True)
-    pid_file = pid_dir / ".pid"
-    with open(pid_file, "w") as f:
-        f.write(str(os.getpid()))
-
-
-def _remove_pid_file() -> None:
-    from pathlib import Path
-
-    pid_file = Path(".runtime/.pid")
-    if pid_file.exists():
-        pid_file.unlink()
-
-
 def main() -> int:
     args = parse_args()
     settings = build_settings(args)
@@ -469,12 +450,8 @@ def main() -> int:
     elif args.command == "pipeline" and args.status:
         asyncio.run(show_status(settings))
     elif args.command == "pipeline" and args.daemon:
-        _write_pid_file()
-        try:
-            scheduler = Scheduler(settings, run_pipeline)
-            asyncio.run(scheduler.run_forever())
-        finally:
-            _remove_pid_file()
+        scheduler = Scheduler(settings, run_pipeline)
+        asyncio.run(scheduler.run_forever())
     else:
         # Default or "pipeline"
         asyncio.run(run_pipeline(settings))
