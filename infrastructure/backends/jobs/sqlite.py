@@ -49,6 +49,12 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         self.db_path = settings.job_store_path or settings.store_path
         self._conn: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
+        
+        # Stats tracking for RunSummary (Compatibility with InMemoryJobGroupStore)
+        self.new_groups_created = 0
+        self.merged_into_group = 0
+        self.by_source_kind_new: dict[str, int] = {}
+        self.by_source_kind_merged: dict[str, int] = {}
 
     async def _get_conn(self) -> aiosqlite.Connection:
         if self._conn is None:
@@ -119,11 +125,22 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                     if row:
                         group = load_group(row[0])
                         updated_group = merge_job_into_group(group, job)
+                        
+                        # Update stats
+                        self.merged_into_group += 1
+                        sk = str(job.source_kind)
+                        self.by_source_kind_merged[sk] = self.by_source_kind_merged.get(sk, 0) + 1
                     else:
                         updated_group = create_job_group(job)
+                        self.new_groups_created += 1
+                        sk = str(job.source_kind)
+                        self.by_source_kind_new[sk] = self.by_source_kind_new.get(sk, 0) + 1
                 else:
                     updated_group = create_job_group(job)
-                
+                    self.new_groups_created += 1
+                    sk = str(job.source_kind)
+                    self.by_source_kind_new[sk] = self.by_source_kind_new.get(sk, 0) + 1
+
                 await self._persist_group(conn, updated_group)
                 await self._persist_job(conn, job, updated_group.group_id)
                 await conn.commit()
@@ -139,6 +156,12 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 group = create_job_group(job)
                 await self._persist_group(conn, group)
                 await self._persist_job(conn, job, group.group_id)
+                
+                # Update stats
+                self.new_groups_created += 1
+                sk = str(job.source_kind)
+                self.by_source_kind_new[sk] = self.by_source_kind_new.get(sk, 0) + 1
+                
                 await conn.commit()
                 return group
             except Exception:
@@ -158,6 +181,12 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 updated_group = merge_job_into_group(group, job)
                 await self._persist_group(conn, updated_group)
                 await self._persist_job(conn, job, updated_group.group_id)
+                
+                # Update stats
+                self.merged_into_group += 1
+                sk = str(job.source_kind)
+                self.by_source_kind_merged[sk] = self.by_source_kind_merged.get(sk, 0) + 1
+                
                 await conn.commit()
                 return updated_group
             except Exception:
@@ -167,7 +196,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
     async def _persist_group(self, conn: aiosqlite.Connection, group: JobGroup) -> None:
         raw_json = dump_group(group)
         await conn.execute(
-            """INSERT INTO jf_job_groups (group_id, raw_json, updated_at) 
+            """INSERT INTO jf_job_groups (group_id, raw_json, updated_at)
                VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
                ON CONFLICT(group_id) DO UPDATE SET raw_json=excluded.raw_json, updated_at=excluded.updated_at""",
             (group.group_id, raw_json)
@@ -187,13 +216,15 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             )
 
     async def _persist_job(self, conn: aiosqlite.Connection, job: Job, group_id: str) -> None:
-        raw_json = dump_job(job)
-        # Update metadata locally to store group_id inside db only
-        # Actually ADR says metadata contains group_id but we just store group_id as column
-        # Wait, the spec says: "persist job with group_id in metadata"
-        
-        job_copy = job.model_copy()
-        job_copy.metadata["group_id"] = group_id
+        # Deep copy metadata to avoid mutation of original job
+        job_copy = job.model_copy(
+            update={
+                "metadata": {
+                    **job.metadata,
+                    "group_id": group_id,
+                }
+            }
+        )
         raw_json = dump_job(job_copy)
 
         await conn.execute(
@@ -216,7 +247,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 updated_at=excluded.updated_at
             """,
             (
-                job.raw_item_id, group_id, str(job.source_kind), job.source_name,
+                job.stable_id, group_id, str(job.source_kind), job.source_name,
                 job.title, job.company, job.company_canonical, job.description,
                 str(job.canonical_url) if job.canonical_url else None,
                 job.location, str(job.work_mode), raw_json
@@ -224,11 +255,11 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         )
         
         # update FTS
-        await conn.execute("DELETE FROM jf_jobs_fts WHERE job_id = ?", (job.raw_item_id,))
+        await conn.execute("DELETE FROM jf_jobs_fts WHERE job_id = ?", (job.stable_id,))
         await conn.execute(
             """INSERT INTO jf_jobs_fts (job_id, group_id, title, company, company_canonical, description)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (job.raw_item_id, group_id, job.title, job.company, job.company_canonical, job.description)
+            (job.stable_id, group_id, job.title, job.company, job.company_canonical, job.description)
         )
 
     async def get_job(self, job_id: str) -> Job | None:
@@ -258,7 +289,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             conn = await self._get_conn()
             await conn.execute("BEGIN IMMEDIATE")
             try:
-                # 1. load job
+                # 1. load job to find group_id
                 async with conn.execute("SELECT group_id FROM jf_jobs WHERE job_id = ?", (job_id,)) as cur:
                     row = await cur.fetchone()
                 if not row:
@@ -267,25 +298,26 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
 
                 group_id = row[0]
                 
-                # 3. load group
+                # 2. delete job row
+                await conn.execute("DELETE FROM jf_jobs WHERE job_id = ?", (job_id,))
+                # 3. delete FTS row
+                await conn.execute("DELETE FROM jf_jobs_fts WHERE job_id = ?", (job_id,))
+                
+                # 4. load group to update it
                 async with conn.execute("SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (group_id,)) as cur:
                     grow = await cur.fetchone()
                 if grow:
                     group = load_group(grow[0])
-                    # 4. delete job row
-                    await conn.execute("DELETE FROM jf_jobs WHERE job_id = ?", (job_id,))
-                    # 5. delete FTS row
-                    await conn.execute("DELETE FROM jf_jobs_fts WHERE job_id = ?", (job_id,))
-                    # 6. remove job from group
+                    # 5. remove job from group
                     updated_group = remove_job_from_group(group, job_id)
                     if updated_group is None:
-                        # 7. if group becomes empty, delete group and its URL/fingerprint indexes
+                        # 6. if group becomes empty, delete group and its URL/fingerprint indexes
                         await conn.execute("DELETE FROM jf_job_groups WHERE group_id = ?", (group_id,))
                         await conn.execute("DELETE FROM jf_job_group_urls WHERE group_id = ?", (group_id,))
                         await conn.execute("DELETE FROM jf_job_group_fingerprints WHERE group_id = ?", (group_id,))
                     else:
-                        # 8. otherwise persist updated group and refresh indexes
-                        # wait, old fingerprints or urls might stay in the tables if not deleted
+                        # 7. otherwise persist updated group and refresh indexes
+                        # Clear old index entries for this group
                         await conn.execute("DELETE FROM jf_job_group_urls WHERE group_id = ?", (group_id,))
                         await conn.execute("DELETE FROM jf_job_group_fingerprints WHERE group_id = ?", (group_id,))
                         await self._persist_group(conn, updated_group)

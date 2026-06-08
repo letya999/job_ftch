@@ -1,11 +1,8 @@
-"""Text builder for job embeddings."""
+"""Utility for building text representation of a job for embedding/search."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from domain import Job
+from domain import Job
 
 
 def build_job_embedding_text(job: Job) -> str:
@@ -26,10 +23,10 @@ def build_job_embedding_text(job: Job) -> str:
     if job.location:
         parts.append(job.location)
         
-    if job.work_mode and job.work_mode != "UNKNOWN":
+    if job.work_mode and str(job.work_mode) != "UNKNOWN":
         parts.append(str(job.work_mode))
         
     if job.description:
         parts.append(job.description)
         
-    return "\n\n".join(parts)
+    return "\n\n".join(parts).strip()

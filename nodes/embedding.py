@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 from application.contracts import ProcessingNode
+from application.search_text import build_job_embedding_text
 from domain import Job
 
 if TYPE_CHECKING:
@@ -28,7 +29,6 @@ class EmbeddingNode(ProcessingNode[Job]):
         if not group_id:
             raise ValueError("group_id is required in job.metadata for EmbeddingNode")
 
-        from infrastructure.embeddings.text import build_job_embedding_text
         text = build_job_embedding_text(job)
         if not text:
             return job
@@ -37,7 +37,7 @@ class EmbeddingNode(ProcessingNode[Job]):
             vectors = await self.provider.embed([text])
             if vectors and vectors[0]:
                 payload: dict[str, object] = {
-                    "job_id": job.raw_item_id,
+                    "job_id": job.stable_id,
                     "group_id": str(group_id),
                     "source_kind": str(job.source_kind),
                     "source_name": job.source_name,
@@ -49,12 +49,12 @@ class EmbeddingNode(ProcessingNode[Job]):
                 }
                 
                 await self.vector_backend.upsert(
-                    job_id=job.raw_item_id,
+                    job_id=job.stable_id,
                     vector=vectors[0],
                     payload=payload,
                 )
         except Exception as e:
-            self._logger.warning("embedding_failed", job_id=job.raw_item_id, error=str(e))
+            self._logger.warning("embedding_failed", job_id=job.stable_id, error=str(e))
             # Continue pipeline, vector embeddings are optional infrastructure enhancement
             
         return job
