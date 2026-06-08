@@ -59,14 +59,13 @@ class QdrantVectorBackend(VectorBackend):
     async def search(
         self, vector: list[float], limit: int, filter: dict[str, Any] | None = None
     ) -> list[str]:
-        # In newer versions it might be different, but let's assume search works if imported
-        results = await self.client.search(  # type: ignore[attr-defined]
+        result = await self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=vector,
+            query=vector,
             limit=limit,
-            # we don't handle filter yet for simplicity but signature matches
+            with_payload=True,
         )
-        return [cast("str", hit.payload["job_id"]) for hit in results if hit.payload]
+        return [cast("str", hit.payload["job_id"]) for hit in result.points if hit.payload]
 
     async def close(self) -> None:
         await self.client.close()

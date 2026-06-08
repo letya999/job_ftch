@@ -43,12 +43,12 @@ class OfficialAPISource:
                 headers[k] = v
 
         params = self.spec.params.copy()
+        cursor_key = f"{self.source_kind}:{self.source_name}:cursor"
 
         # Load incremental cursor
-        if self.store:
-            cursor_key = f"{self.source_kind}:{self.source_name}:cursor"
+        if self.store and self.spec.incremental_cursor_field:
             last_cursor = await self.store.get_run_state(cursor_key)
-            if last_cursor and self.spec.incremental_cursor_field:
+            if last_cursor:
                 params[self.spec.incremental_cursor_field] = last_cursor
 
         url = f"{self.spec.base_url}{self.spec.jobs_endpoint}"
@@ -67,11 +67,11 @@ class OfficialAPISource:
                 for item in items:
                     yield self._map_to_raw_item(item)
 
-                # Update cursor if needed
-                if items and self.spec.incremental_cursor_field:
-                    # Very simple: use id of first item as next cursor
-                    # (Implementation detail depends on specific API)
-                    pass
+                # Persist incremental cursor (id of first item as next lower bound)
+                if items and self.spec.incremental_cursor_field and self.store:
+                    first_id = items[0].get("id")
+                    if first_id is not None:
+                        await self.store.set_run_state(cursor_key, str(first_id))
 
             except Exception as e:
                 logger.exception("api_fetch_failed", url=url, error=str(e))
