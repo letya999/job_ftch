@@ -106,3 +106,9 @@ class HybridSearchBackend(SearchBackend):
                 result.append(group)
 
         return result
+
+    async def close(self) -> None:
+        for component in (self.fts_backend, self.vector_backend):
+            close_fn = getattr(component, "close", None)
+            if callable(close_fn):
+                await close_fn()

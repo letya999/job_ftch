@@ -92,6 +92,8 @@ class RunSummary(StatsBase):
     applied_profile: str | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
+    scheduled_run_index: int = 0
+    source_run_id: str | None = None
 
     def finish(self) -> RunSummary:
         self.finished_at = datetime.now(UTC)
