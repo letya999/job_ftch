@@ -30,6 +30,14 @@ class WorkMode(StrEnum):
     UNKNOWN = "unknown"
 
 
+class PostType(StrEnum):
+    JOB_POSTING = "job_posting"
+    CANDIDATE_SEEKING = "candidate_seeking"
+    ANNOUNCEMENT = "announcement"
+    SPAM = "spam"
+    UNKNOWN = "unknown"
+
+
 class JobExtractionStatus(StrEnum):
     COMPLETE = "complete"
     PARTIAL = "partial"
@@ -115,6 +123,8 @@ class Job(BaseModel):
     extraction_status: JobExtractionStatus = JobExtractionStatus.COMPLETE
     quality_score: float | None = Field(default=None, ge=0.0, le=1.0)
     relevance_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    post_type: PostType = PostType.UNKNOWN
+    ai_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
     review_reasons: tuple[str, ...] = ()
     metadata: dict[str, Any] = Field(default_factory=dict)
 

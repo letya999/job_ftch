@@ -16,6 +16,7 @@ from application.registry import (
     create_sink,
     create_source,
 )
+from application.scheduler import Scheduler
 from application.telemetry import configure_telemetry
 from config import Settings, get_settings
 from nodes import (
@@ -60,7 +61,9 @@ def parse_args() -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Pipeline subcommand
-    subparsers.add_parser("pipeline", help="Run the extraction pipeline")
+    pipeline_parser = subparsers.add_parser("pipeline", help="Run the extraction pipeline")
+    pipeline_parser.add_argument("--daemon", action="store_true", help="Run in background loop.")
+    pipeline_parser.add_argument("--status", action="store_true", help="Show last run status.")
 
     # We add arguments to the main parser to keep backward compatibility
     # (so `python app.py --source-backend X` still works).
@@ -341,8 +344,13 @@ async def run_pipeline(settings: Settings) -> RunSummary:
         _close = getattr(store, "close", None)
         if callable(_close):
             await _close()
-    if profile is not None:
-        summary.applied_profile = profile.name
+    summary.applied_profile = profile.name if profile is not None else "default"
+
+    # RM-090: save status to store
+    await store.set_run_state("pipeline.status", "finished")
+    if summary.finished_at:
+        await store.set_run_state("pipeline.finished_at", summary.finished_at.isoformat())
+    await store.set_run_state("pipeline.emitted", str(summary.emitted))
 
     # Aggregation stats
     if hasattr(job_group_store, "new_groups_created"):
@@ -413,12 +421,37 @@ async def run_search(settings: Settings, args: argparse.Namespace) -> None:
             await _close()
 
 
+async def show_status(settings: Settings) -> None:
+    from application.registry import create_store_with_fallback
+
+    store = cast("Store", await create_store_with_fallback(settings))
+    status = await store.get_run_state("pipeline.status")
+    finished_at = await store.get_run_state("pipeline.finished_at")
+    emitted = await store.get_run_state("pipeline.emitted")
+
+    if status:
+        print(f"Pipeline status: {status}")
+        print(f"Last finished at: {finished_at or 'unknown'}")
+        print(f"Items emitted: {emitted or 0}")
+    else:
+        print("No run status found in store.")
+
+    _close = getattr(store, "close", None)
+    if callable(_close):
+        await _close()
+
+
 def main() -> int:
     args = parse_args()
     settings = build_settings(args)
 
     if args.command == "search":
         asyncio.run(run_search(settings, args))
+    elif args.command == "pipeline" and args.status:
+        asyncio.run(show_status(settings))
+    elif args.command == "pipeline" and args.daemon:
+        scheduler = Scheduler(settings, run_pipeline)
+        asyncio.run(scheduler.run_forever())
     else:
         # Default or "pipeline"
         asyncio.run(run_pipeline(settings))

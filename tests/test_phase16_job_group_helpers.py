@@ -53,7 +53,7 @@ def test_remove_job_from_group(sample_job):
     group = create_job_group(sample_job)
 
     # Remove the only job
-    res = remove_job_from_group(group, "1")
+    res = remove_job_from_group(group, sample_job.stable_id)
     assert res is None
 
     # Remove non-existent job

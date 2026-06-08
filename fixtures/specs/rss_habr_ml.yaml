@@ -1,0 +1,4 @@
+type: rss_feed
+feed_url: "https://career.habr.com/vacancies/rss?q=machine+learning&type=1"
+incremental: true
+source_name: habr_ml

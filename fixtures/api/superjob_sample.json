@@ -1,0 +1,34 @@
+{
+  "objects": [
+    {
+      "id": 12345678,
+      "profession": "ML Engineer",
+      "firm_name": "ООО Технологии",
+      "link": "https://www.superjob.ru/vakansii/ml-engineer-12345678.html",
+      "town": {"id": 4, "title": "Москва"},
+      "candidat": "Разработка ML-моделей для рекомендательных систем...",
+      "date_published": 1749340800
+    },
+    {
+      "id": 12345679,
+      "profession": "Data Scientist",
+      "firm_name": "AI Solutions",
+      "link": "https://www.superjob.ru/vakansii/data-scientist-12345679.html",
+      "town": {"id": 4, "title": "Москва"},
+      "candidat": "Построение предсказательных моделей на Python, sklearn, torch.",
+      "date_published": 1749254400
+    },
+    {
+      "id": 12345680,
+      "profession": "MLOps инженер",
+      "firm_name": "FinTech Corp",
+      "link": "https://www.superjob.ru/vakansii/mlops-12345680.html",
+      "town": {"id": 4, "title": "Санкт-Петербург"},
+      "candidat": "Поддержка ML-платформы: Kubernetes, MLflow, Airflow.",
+      "date_published": 1749168000
+    }
+  ],
+  "total": 3,
+  "more": false,
+  "request_id": "test-request-id-001"
+}

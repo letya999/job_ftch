@@ -61,3 +61,39 @@ async def test_sqlite_backend_search(settings, sample_job):
     assert len(res2) == 0
 
     await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_backend_delete(settings, sample_job):
+    backend = create_job_backend(settings)
+
+    # Save two jobs that land in one group (same title and company, different source)
+    job1 = sample_job
+    job2 = sample_job.model_copy(update={"raw_item_id": "2", "source_name": "chan2"})
+
+    await backend.save(job1)
+    await backend.save(job2)
+
+    # Assert group has 2 jobs
+    groups = await backend.list_groups()
+    assert len(groups) == 1
+    assert groups[0].source_count == 2
+
+    # Delete one job
+    await backend.delete(job1.stable_id)
+
+    # Assert group has 1 job
+    updated_group = await backend.get_group(groups[0].group_id)
+    assert updated_group is not None
+    assert updated_group.source_count == 1
+    assert len(updated_group.jobs) == 1
+    assert updated_group.jobs[0].stable_id == job2.stable_id
+
+    # Assert find_by_fingerprint works for remaining, and no longer returns deleted job's stale group (if it were different, but here it's same group)
+    # Actually, if we deleted the only job that had a certain URL/FP, we should check that.
+    # But here they have same FP.
+
+    # Assert get_job(deleted_id) returns None
+    assert await backend.get_job(job1.stable_id) is None
+
+    await backend.close()

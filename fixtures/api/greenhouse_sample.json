@@ -1,0 +1,22 @@
+{
+  "jobs": [
+    {
+      "id": 4001,
+      "title": "Senior ML Engineer",
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/4001",
+      "content": "We are looking for a Senior ML Engineer to join our AI team.",
+      "location": {"name": "Remote"},
+      "departments": [{"id": 10, "name": "Engineering"}],
+      "updated_at": "2026-06-01T12:00:00Z"
+    },
+    {
+      "id": 4002,
+      "title": "MLOps Engineer",
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/4002",
+      "content": "Own our ML infrastructure and deployment pipelines.",
+      "location": {"name": "New York, NY"},
+      "departments": [{"id": 10, "name": "Engineering"}],
+      "updated_at": "2026-06-02T09:00:00Z"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Habr Career Vacancies</title>
+    <link>https://career.habr.com/vacancies</link>
+    <description>Vacancies from Habr Career</description>
+    <item>
+      <title>ML Engineer (NLP) в Сбер</title>
+      <link>https://career.habr.com/vacancies/1000000001</link>
+      <description>Разработка NLP моделей для экосистемы Сбера.</description>
+      <guid>https://career.habr.com/vacancies/1000000001</guid>
+      <pubDate>Mon, 08 Jun 2026 10:00:00 +0300</pubDate>
+    </item>
+    <item>
+      <title>Data Scientist — рекомендательные системы — Яндекс</title>
+      <link>https://career.habr.com/vacancies/1000000002</link>
+      <description>Улучшение рекомендательных алгоритмов в Яндекс.Музыке.</description>
+      <guid>https://career.habr.com/vacancies/1000000002</guid>
+      <pubDate>Mon, 08 Jun 2026 09:00:00 +0300</pubDate>
+    </item>
+    <item>
+      <title>Python Developer / ML в СберТех</title>
+      <link>https://career.habr.com/vacancies/1000000003</link>
+      <description>Бэкенд разработка с элементами машинного обучения.</description>
+      <guid>https://career.habr.com/vacancies/1000000003</guid>
+      <pubDate>Mon, 08 Jun 2026 08:00:00 +0300</pubDate>
+    </item>
+    <item>
+      <title>AI Product Manager — VK</title>
+      <link>https://career.habr.com/vacancies/1000000004</link>
+      <description>Управление продуктами на базе искусственного интеллекта.</description>
+      <guid>https://career.habr.com/vacancies/1000000004</guid>
+      <pubDate>Sun, 07 Jun 2026 21:00:00 +0300</pubDate>
+    </item>
+    <item>
+      <title>Исследователь ML / Deep Learning — Тинькофф</title>
+      <link>https://career.habr.com/vacancies/1000000005</link>
+      <description>R&amp;D в области глубокого обучения.</description>
+      <guid>https://career.habr.com/vacancies/1000000005</guid>
+      <pubDate>Sun, 07 Jun 2026 20:00:00 +0300</pubDate>
+    </item>
+  </channel>
+</rss>

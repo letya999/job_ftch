@@ -203,6 +203,13 @@ def load_extensions() -> None:
                 "infrastructure.backends.vector.pgvector",
                 "infrastructure.backends.vector.qdrant",
                 "infrastructure.backends.search.hybrid",
+                "infrastructure.sources.api.greenhouse",
+                "infrastructure.sources.api.hh",
+                "infrastructure.sources.browser.base",
+                "infrastructure.sources.realtime.rss",
+                "infrastructure.sources.realtime.webhook",
+                "infrastructure.sources.realtime.websocket",
+                "infrastructure.sources.telegram_realtime",
             ):
                 import_module(module_name)
             _builtins_loaded = True
@@ -271,12 +278,22 @@ def create_store(settings: Settings) -> object:
     return factory(settings)
 
 
+_FALLBACK_STORE_BACKEND = "memory"
+
+
+def _create_fallback_store(settings: Settings) -> object:
+    factory = _store_factories.get(_FALLBACK_STORE_BACKEND)
+    if factory is None:
+        msg = f"Fallback store '{_FALLBACK_STORE_BACKEND}' not registered. Ensure load_extensions() ran."
+        raise RuntimeError(msg)
+    return factory(settings)
+
+
 async def create_store_with_fallback(settings: Settings) -> object:
-    """Create a store with async health check and fallback to InMemoryStore."""
+    """Create a store with async health check and fallback to the in_memory backend."""
     load_extensions()
 
     from application.contracts import StoreConnector
-    from infrastructure.stores.in_memory import InMemoryStore
 
     try:
         primary_store = create_store(settings)
@@ -287,7 +304,7 @@ async def create_store_with_fallback(settings: Settings) -> object:
                 backend=settings.store_backend,
                 error=str(exc),
             )
-            return InMemoryStore()
+            return _create_fallback_store(settings)
         raise
 
     # If it supports StoreConnector (ping), check health
@@ -301,7 +318,7 @@ async def create_store_with_fallback(settings: Settings) -> object:
                 "store_health_check_failed_falling_back_to_in_memory",
                 backend=settings.store_backend,
             )
-            return InMemoryStore()
+            return _create_fallback_store(settings)
 
     return primary_store
 
