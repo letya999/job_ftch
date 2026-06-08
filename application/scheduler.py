@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import signal
 from collections.abc import Awaitable, Callable
 
@@ -21,6 +22,7 @@ class Scheduler:
         self.run_fn = run_fn
         self._stop_event = asyncio.Event()
         self._run_index = 0
+        self._interval: int | None = None
 
     async def run_forever(self) -> None:
         """Loop: run pipeline, sleep interval, repeat. Handles SIGINT/SIGTERM."""
@@ -59,8 +61,6 @@ class Scheduler:
                 interval = self._calculate_interval()
                 logger.debug("scheduler_sleeping", interval_seconds=interval)
 
-                import contextlib
-
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._stop_event.wait(), timeout=float(interval))
         finally:
@@ -73,10 +73,9 @@ class Scheduler:
                 pass
 
     def _calculate_interval(self) -> int:
-        """
-        Calculate effective interval.
-        Minimum across all sources, or fallback to settings.
-        """
+        if self._interval is not None:
+            return self._interval
+
         intervals = []
         if self.settings.sources_file_path and self.settings.sources_file_path.exists():
             try:
@@ -87,7 +86,7 @@ class Scheduler:
             except Exception:
                 logger.exception("failed_to_load_sources_for_interval_calculation")
 
-        if intervals:
-            return min(intervals)
-
-        return self.settings.schedule_interval_seconds or 3600
+        self._interval = (
+            min(intervals) if intervals else (self.settings.schedule_interval_seconds or 3600)
+        )
+        return self._interval

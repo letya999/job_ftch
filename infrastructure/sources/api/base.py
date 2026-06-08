@@ -75,8 +75,7 @@ class OfficialAPISource:
 
             except Exception as e:
                 logger.exception("api_fetch_failed", url=url, error=str(e))
-                # Yield quarantined item or just raise?
-                # The protocol says yield RawItem | QuarantinedRawItem
+                raise
 
     def _map_to_raw_item(self, item: dict[str, Any]) -> RawItem:
         # Simple field mapping

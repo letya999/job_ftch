@@ -38,14 +38,7 @@ class HHAPISource(OfficialAPISource):
         super().__init__(spec, auth, store, source_kind=SourceKind.CAREER_SITE)
 
     def _map_to_raw_item(self, item: dict[str, Any]) -> RawItem:
-        raw = super()._map_to_raw_item(item)
-
-        # HH specific metadata enrichment
-        # salary = item.get("salary")
-        # if salary:
-        #     raw.metadata["compensation_hint"] = salary
-
-        return raw
+        return super()._map_to_raw_item(item)
 
 
 @register_source_v2("hh")

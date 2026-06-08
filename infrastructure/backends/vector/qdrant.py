@@ -43,7 +43,7 @@ class QdrantVectorBackend(VectorBackend):
 
     async def upsert(self, job_id: str, vector: list[float], payload: dict[str, Any]) -> None:
         # We use a stable UUID derived from job_id
-        point_id = str(uuid.UUID(hashlib.md5(job_id.encode()).hexdigest()))
+        point_id = str(uuid.UUID(hashlib.md5(job_id.encode(), usedforsecurity=False).hexdigest()))
 
         await self.client.upsert(
             collection_name=self.collection_name,
