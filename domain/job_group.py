@@ -174,6 +174,7 @@ def job_seen_at(job: Job) -> datetime:
     if isinstance(now, datetime):
         return now
     from datetime import UTC
+
     return datetime.now(UTC)
 
 
@@ -264,12 +265,13 @@ def remove_job_from_group(group: JobGroup, job_id: str) -> JobGroup | None:
         return None
 
     canonical_job = merge_jobs(new_jobs)
-    
-    # We must also keep source_attributions strictly matching the current jobs, 
+
+    # We must also keep source_attributions strictly matching the current jobs,
     # or just rebuild them. Rebuilding them is safer:
     kept_kinds_names = {(j.source_kind, j.source_name) for j in new_jobs}
     new_attributions = [
-        attr for attr in group.source_attributions
+        attr
+        for attr in group.source_attributions
         if (attr.source_kind, attr.source_name) in kept_kinds_names
     ]
 

@@ -197,7 +197,7 @@ class Settings(BaseSettings):
             if self.telegram_api_id is None or self.telegram_api_hash is None:
                 msg = "Telegram posting requires JOB_FTCH_TELEGRAM_API_ID and JOB_FTCH_TELEGRAM_API_HASH."
                 raise ValueError(msg)
-                
+
         if self.job_backend == "postgres" and not self.store_dsn:
             msg = "store_dsn is required when job_backend=postgres."
             raise ValueError(msg)
@@ -213,7 +213,11 @@ class Settings(BaseSettings):
         if self.embedding_enabled and not self.vector_backend:
             msg = "vector_backend is required when embedding_enabled=True."
             raise ValueError(msg)
-        if self.embedding_enabled and self.embedding_provider == "openai" and not self.openai_api_key:
+        if (
+            self.embedding_enabled
+            and self.embedding_provider == "openai"
+            and not self.openai_api_key
+        ):
             msg = "openai_api_key is required when embedding_provider=openai."
             raise ValueError(msg)
 

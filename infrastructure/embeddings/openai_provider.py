@@ -19,10 +19,10 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def __init__(self, settings: Settings) -> None:
         if not settings.openai_api_key:
             raise ValueError("openai_api_key is required for OpenAIEmbeddingProvider")
-            
+
         self.model = settings.embedding_model or "text-embedding-3-small"
         self._dimensions = settings.embedding_dimensions
-        
+
         self.client = AsyncOpenAI(
             api_key=settings.openai_api_key,
             base_url=settings.openai_base_url,
@@ -45,10 +45,12 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-            
+
         try:
             if self._dimensions is not None:
-                response = await self.client.embeddings.create(input=texts, model=self.model, dimensions=self._dimensions)
+                response = await self.client.embeddings.create(
+                    input=texts, model=self.model, dimensions=self._dimensions
+                )
             else:
                 response = await self.client.embeddings.create(input=texts, model=self.model)
             return [data.embedding for data in response.data]

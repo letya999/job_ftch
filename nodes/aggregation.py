@@ -36,7 +36,7 @@ class JobAggregationNode:
 
     async def process(self, job: Job) -> Job:
         group_id = await self._find_or_create_group(job)
-        
+
         if not self._attach_group_id:
             return job
 

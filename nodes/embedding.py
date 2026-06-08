@@ -47,7 +47,7 @@ class EmbeddingNode(ProcessingNode[Job]):
                     "location": job.location or "",
                     "work_mode": str(job.work_mode) if job.work_mode else "",
                 }
-                
+
                 await self.vector_backend.upsert(
                     job_id=job.stable_id,
                     vector=vectors[0],
@@ -56,5 +56,5 @@ class EmbeddingNode(ProcessingNode[Job]):
         except Exception as e:
             self._logger.warning("embedding_failed", job_id=job.stable_id, error=str(e))
             # Continue pipeline, vector embeddings are optional infrastructure enhancement
-            
+
         return job

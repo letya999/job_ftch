@@ -58,22 +58,46 @@ from sinks import FailureTolerantSink, FanOutSink, RoutingSink
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the local job_ftch debug pipeline.")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
-    
+
     # Pipeline subcommand
     subparsers.add_parser("pipeline", help="Run the extraction pipeline")
-    
-    # We add arguments to the main parser to keep backward compatibility 
+
+    # We add arguments to the main parser to keep backward compatibility
     # (so `python app.py --source-backend X` still works).
-    parser.add_argument("--source-backend", default=None, help="Source backend: local_fixture, telegram_channel, telegram_group, telegram_comment, career_site.")
-    parser.add_argument("--sources-file", default=None, help="Path to YAML or JSON file with a list of source configs.")
-    parser.add_argument("--source-path", default=None, help="Path to a JSON or JSONL RawItem fixture.")
-    parser.add_argument("--telegram-entity", default=None, help="Telegram channel/group username or invite-style entity for Telegram sources.")
-    parser.add_argument("--career-site-url", default=None, help="Career-site URL for auto-detected career site parsing.")
+    parser.add_argument(
+        "--source-backend",
+        default=None,
+        help="Source backend: local_fixture, telegram_channel, telegram_group, telegram_comment, career_site.",
+    )
+    parser.add_argument(
+        "--sources-file",
+        default=None,
+        help="Path to YAML or JSON file with a list of source configs.",
+    )
+    parser.add_argument(
+        "--source-path", default=None, help="Path to a JSON or JSONL RawItem fixture."
+    )
+    parser.add_argument(
+        "--telegram-entity",
+        default=None,
+        help="Telegram channel/group username or invite-style entity for Telegram sources.",
+    )
+    parser.add_argument(
+        "--career-site-url",
+        default=None,
+        help="Career-site URL for auto-detected career site parsing.",
+    )
     parser.add_argument("--output-path", default=None, help="Path to JSON or JSONL output.")
-    parser.add_argument("--jsonl", action="store_true", help="Write JSON Lines instead of a JSON array.")
+    parser.add_argument(
+        "--jsonl", action="store_true", help="Write JSON Lines instead of a JSON array."
+    )
     parser.add_argument("--review-output-path", default=None, help="Path to review JSONL output.")
-    parser.add_argument("--rejected-output-path", default=None, help="Path to rejected-items JSONL output.")
-    parser.add_argument("--posting-backend", default=None, help="Optional posting backend, e.g. telegram_posting.")
+    parser.add_argument(
+        "--rejected-output-path", default=None, help="Path to rejected-items JSONL output."
+    )
+    parser.add_argument(
+        "--posting-backend", default=None, help="Optional posting backend, e.g. telegram_posting."
+    )
     parser.add_argument("--dry-run", action="store_true", help="Skip outbound posting sinks.")
     parser.add_argument("--once", action="store_true", help="Run a single pass (default mode).")
     parser.add_argument("--max-items", type=int, default=None, help="Maximum items to process.")
@@ -82,9 +106,16 @@ def parse_args() -> argparse.Namespace:
     search_parser = subparsers.add_parser("search", help="Search the job catalog")
     search_parser.add_argument("query", type=str, help="Search query")
     search_parser.add_argument("--limit", type=int, default=20, help="Maximum results to return")
-    search_parser.add_argument("--backend", type=str, default=None, help="Search backend to use (e.g. sqlite, postgres, hybrid)")
+    search_parser.add_argument(
+        "--backend",
+        type=str,
+        default=None,
+        help="Search backend to use (e.g. sqlite, postgres, hybrid)",
+    )
     search_parser.add_argument("--json", action="store_true", help="Output results as JSON")
-    search_parser.add_argument("--output", type=str, default=None, help="Write canonical jobs to JSONL file")
+    search_parser.add_argument(
+        "--output", type=str, default=None, help="Write canonical jobs to JSONL file"
+    )
 
     return parser.parse_args()
 
@@ -176,10 +207,11 @@ def build_nodes(
         JobValidationNode(),
         JobAggregationNode(job_group_store, attach_group_id=True),
     ]
-    
+
     if settings.embedding_enabled and settings.vector_backend:
         from application.registry import create_embedding_provider, create_vector_backend
         from nodes.embedding import EmbeddingNode
+
         provider = cast("EmbeddingProvider", create_embedding_provider(settings))
         vector_backend = cast("VectorBackend", create_vector_backend(settings))
         if vector_backend:
@@ -339,29 +371,40 @@ async def run_pipeline(settings: Settings) -> RunSummary:
 
 async def run_search(settings: Settings, args: argparse.Namespace) -> None:
     from application.registry import create_search_backend
-    
+
     configure_logging(settings.log_level)
     search_backend = create_search_backend(settings)
-    
+
     try:
         backend = cast("SearchBackend", search_backend)
         results = await backend.search(args.query, limit=args.limit)
-        
+
         if args.json:
             import json
-            print(json.dumps([g.model_dump(mode="json") for g in results], ensure_ascii=False, indent=2))
+
+            print(
+                json.dumps(
+                    [g.model_dump(mode="json") for g in results], ensure_ascii=False, indent=2
+                )
+            )
         elif args.output:
             import json
+
             with open(args.output, "w", encoding="utf-8") as f:
                 for group in results:
-                    f.write(json.dumps(group.canonical_job.model_dump(mode="json"), ensure_ascii=False) + "\n")
+                    f.write(
+                        json.dumps(group.canonical_job.model_dump(mode="json"), ensure_ascii=False)
+                        + "\n"
+                    )
             print(f"Wrote {len(results)} canonical jobs to {args.output}")
         else:
             print(f"Found {len(results)} job groups:\n")
             for g in results:
-                print(f"- {g.canonical_job.title} at {g.canonical_job.company} ({g.source_count} sources)")
+                print(
+                    f"- {g.canonical_job.title} at {g.canonical_job.company} ({g.source_count} sources)"
+                )
                 if g.canonical_job.description:
-                    desc_preview = g.canonical_job.description[:100].replace('\n', ' ')
+                    desc_preview = g.canonical_job.description[:100].replace("\n", " ")
                     print(f"  {desc_preview}...")
                 print()
     finally:
@@ -373,7 +416,7 @@ async def run_search(settings: Settings, args: argparse.Namespace) -> None:
 def main() -> int:
     args = parse_args()
     settings = build_settings(args)
-    
+
     if args.command == "search":
         asyncio.run(run_search(settings, args))
     else:

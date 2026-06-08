@@ -36,7 +36,7 @@ def normalize_fts5_query(query: str) -> str:
     q = query.strip()
     # Replace punctuation/operators with spaces
     # FTS5 uses specific operators (*, ^, OR, AND, NOT, etc)
-    q = re.sub(r'[^\w\s]', ' ', q, flags=re.UNICODE)
+    q = re.sub(r"[^\w\s]", " ", q, flags=re.UNICODE)
     q = " ".join(q.split())
     return q
 
@@ -49,7 +49,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         self.db_path = settings.job_store_path or settings.store_path
         self._conn: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
-        
+
         # Stats tracking for RunSummary (Compatibility with InMemoryJobGroupStore)
         self.new_groups_created = 0
         self.merged_into_group = 0
@@ -102,30 +102,38 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             await conn.execute("BEGIN IMMEDIATE")
             try:
                 group_id: str | None = None
-                
+
                 # Check url index
                 if job.canonical_url:
-                    async with conn.execute("SELECT group_id FROM jf_job_group_urls WHERE canonical_url = ?", (str(job.canonical_url),)) as cur:
+                    async with conn.execute(
+                        "SELECT group_id FROM jf_job_group_urls WHERE canonical_url = ?",
+                        (str(job.canonical_url),),
+                    ) as cur:
                         row = await cur.fetchone()
                         if row:
                             group_id = row[0]
-                
+
                 # Check fingerprint index
                 fingerprint = compute_identity_fingerprint(job)
                 if not group_id:
-                    async with conn.execute("SELECT group_id FROM jf_job_group_fingerprints WHERE fingerprint = ?", (fingerprint,)) as cur:
+                    async with conn.execute(
+                        "SELECT group_id FROM jf_job_group_fingerprints WHERE fingerprint = ?",
+                        (fingerprint,),
+                    ) as cur:
                         row = await cur.fetchone()
                         if row:
                             group_id = row[0]
 
                 if group_id:
                     # load existing group
-                    async with conn.execute("SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (group_id,)) as cur:
+                    async with conn.execute(
+                        "SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (group_id,)
+                    ) as cur:
                         row = await cur.fetchone()
                     if row:
                         group = load_group(row[0])
                         updated_group = merge_job_into_group(group, job)
-                        
+
                         # Update stats
                         self.merged_into_group += 1
                         sk = str(job.source_kind)
@@ -156,12 +164,12 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 group = create_job_group(job)
                 await self._persist_group(conn, group)
                 await self._persist_job(conn, job, group.group_id)
-                
+
                 # Update stats
                 self.new_groups_created += 1
                 sk = str(job.source_kind)
                 self.by_source_kind_new[sk] = self.by_source_kind_new.get(sk, 0) + 1
-                
+
                 await conn.commit()
                 return group
             except Exception:
@@ -173,7 +181,9 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             conn = await self._get_conn()
             await conn.execute("BEGIN IMMEDIATE")
             try:
-                async with conn.execute("SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (group_id,)) as cur:
+                async with conn.execute(
+                    "SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (group_id,)
+                ) as cur:
                     row = await cur.fetchone()
                 if not row:
                     raise ValueError(f"Group {group_id} not found.")
@@ -181,12 +191,12 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 updated_group = merge_job_into_group(group, job)
                 await self._persist_group(conn, updated_group)
                 await self._persist_job(conn, job, updated_group.group_id)
-                
+
                 # Update stats
                 self.merged_into_group += 1
                 sk = str(job.source_kind)
                 self.by_source_kind_merged[sk] = self.by_source_kind_merged.get(sk, 0) + 1
-                
+
                 await conn.commit()
                 return updated_group
             except Exception:
@@ -199,20 +209,20 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             """INSERT INTO jf_job_groups (group_id, raw_json, updated_at)
                VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
                ON CONFLICT(group_id) DO UPDATE SET raw_json=excluded.raw_json, updated_at=excluded.updated_at""",
-            (group.group_id, raw_json)
+            (group.group_id, raw_json),
         )
-        
+
         # update URL/fingerprint indexes
         for job in group.jobs:
             if job.canonical_url:
                 await conn.execute(
                     "INSERT OR REPLACE INTO jf_job_group_urls (canonical_url, group_id) VALUES (?, ?)",
-                    (str(job.canonical_url), group.group_id)
+                    (str(job.canonical_url), group.group_id),
                 )
             fp = compute_identity_fingerprint(job)
             await conn.execute(
                 "INSERT OR REPLACE INTO jf_job_group_fingerprints (fingerprint, group_id) VALUES (?, ?)",
-                (fp, group.group_id)
+                (fp, group.group_id),
             )
 
     async def _persist_job(self, conn: aiosqlite.Connection, job: Job, group_id: str) -> None:
@@ -247,19 +257,34 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 updated_at=excluded.updated_at
             """,
             (
-                job.stable_id, group_id, str(job.source_kind), job.source_name,
-                job.title, job.company, job.company_canonical, job.description,
+                job.stable_id,
+                group_id,
+                str(job.source_kind),
+                job.source_name,
+                job.title,
+                job.company,
+                job.company_canonical,
+                job.description,
                 str(job.canonical_url) if job.canonical_url else None,
-                job.location, str(job.work_mode), raw_json
-            )
+                job.location,
+                str(job.work_mode),
+                raw_json,
+            ),
         )
-        
+
         # update FTS
         await conn.execute("DELETE FROM jf_jobs_fts WHERE job_id = ?", (job.stable_id,))
         await conn.execute(
             """INSERT INTO jf_jobs_fts (job_id, group_id, title, company, company_canonical, description)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (job.stable_id, group_id, job.title, job.company, job.company_canonical, job.description)
+            (
+                job.stable_id,
+                group_id,
+                job.title,
+                job.company,
+                job.company_canonical,
+                job.description,
+            ),
         )
 
     async def get_job(self, job_id: str) -> Job | None:
@@ -272,13 +297,18 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
 
     async def list_jobs(self, limit: int, offset: int) -> list[Job]:
         conn = await self._get_conn()
-        async with conn.execute("SELECT raw_json FROM jf_jobs ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset)) as cur:
+        async with conn.execute(
+            "SELECT raw_json FROM jf_jobs ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ) as cur:
             rows = await cur.fetchall()
         return [load_job(row[0]) for row in rows]
 
     async def get_group(self, group_id: str) -> JobGroup | None:
         conn = await self._get_conn()
-        async with conn.execute("SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (group_id,)) as cur:
+        async with conn.execute(
+            "SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (group_id,)
+        ) as cur:
             row = await cur.fetchone()
         if row:
             return load_group(row[0])
@@ -290,21 +320,25 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             await conn.execute("BEGIN IMMEDIATE")
             try:
                 # 1. load job to find group_id
-                async with conn.execute("SELECT group_id FROM jf_jobs WHERE job_id = ?", (job_id,)) as cur:
+                async with conn.execute(
+                    "SELECT group_id FROM jf_jobs WHERE job_id = ?", (job_id,)
+                ) as cur:
                     row = await cur.fetchone()
                 if not row:
                     await conn.commit()
-                    return # no-op
+                    return  # no-op
 
                 group_id = row[0]
-                
+
                 # 2. delete job row
                 await conn.execute("DELETE FROM jf_jobs WHERE job_id = ?", (job_id,))
                 # 3. delete FTS row
                 await conn.execute("DELETE FROM jf_jobs_fts WHERE job_id = ?", (job_id,))
-                
+
                 # 4. load group to update it
-                async with conn.execute("SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (group_id,)) as cur:
+                async with conn.execute(
+                    "SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (group_id,)
+                ) as cur:
                     grow = await cur.fetchone()
                 if grow:
                     group = load_group(grow[0])
@@ -312,14 +346,24 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                     updated_group = remove_job_from_group(group, job_id)
                     if updated_group is None:
                         # 6. if group becomes empty, delete group and its URL/fingerprint indexes
-                        await conn.execute("DELETE FROM jf_job_groups WHERE group_id = ?", (group_id,))
-                        await conn.execute("DELETE FROM jf_job_group_urls WHERE group_id = ?", (group_id,))
-                        await conn.execute("DELETE FROM jf_job_group_fingerprints WHERE group_id = ?", (group_id,))
+                        await conn.execute(
+                            "DELETE FROM jf_job_groups WHERE group_id = ?", (group_id,)
+                        )
+                        await conn.execute(
+                            "DELETE FROM jf_job_group_urls WHERE group_id = ?", (group_id,)
+                        )
+                        await conn.execute(
+                            "DELETE FROM jf_job_group_fingerprints WHERE group_id = ?", (group_id,)
+                        )
                     else:
                         # 7. otherwise persist updated group and refresh indexes
                         # Clear old index entries for this group
-                        await conn.execute("DELETE FROM jf_job_group_urls WHERE group_id = ?", (group_id,))
-                        await conn.execute("DELETE FROM jf_job_group_fingerprints WHERE group_id = ?", (group_id,))
+                        await conn.execute(
+                            "DELETE FROM jf_job_group_urls WHERE group_id = ?", (group_id,)
+                        )
+                        await conn.execute(
+                            "DELETE FROM jf_job_group_fingerprints WHERE group_id = ?", (group_id,)
+                        )
                         await self._persist_group(conn, updated_group)
 
                 await conn.commit()
@@ -329,27 +373,37 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
 
     async def find_by_url(self, canonical_url: str) -> JobGroup | None:
         conn = await self._get_conn()
-        async with conn.execute("SELECT group_id FROM jf_job_group_urls WHERE canonical_url = ?", (str(canonical_url),)) as cur:
+        async with conn.execute(
+            "SELECT group_id FROM jf_job_group_urls WHERE canonical_url = ?", (str(canonical_url),)
+        ) as cur:
             row = await cur.fetchone()
         if not row:
             return None
-        async with conn.execute("SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (row[0],)) as cur:
+        async with conn.execute(
+            "SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (row[0],)
+        ) as cur:
             grow = await cur.fetchone()
         return load_group(grow[0]) if grow else None
 
     async def find_by_fingerprint(self, fingerprint: str) -> JobGroup | None:
         conn = await self._get_conn()
-        async with conn.execute("SELECT group_id FROM jf_job_group_fingerprints WHERE fingerprint = ?", (fingerprint,)) as cur:
+        async with conn.execute(
+            "SELECT group_id FROM jf_job_group_fingerprints WHERE fingerprint = ?", (fingerprint,)
+        ) as cur:
             row = await cur.fetchone()
         if not row:
             return None
-        async with conn.execute("SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (row[0],)) as cur:
+        async with conn.execute(
+            "SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (row[0],)
+        ) as cur:
             grow = await cur.fetchone()
         return load_group(grow[0]) if grow else None
 
     async def list_groups(self, limit: int = 100) -> list[JobGroup]:
         conn = await self._get_conn()
-        async with conn.execute("SELECT raw_json FROM jf_job_groups ORDER BY updated_at DESC LIMIT ?", (limit,)) as cur:
+        async with conn.execute(
+            "SELECT raw_json FROM jf_job_groups ORDER BY updated_at DESC LIMIT ?", (limit,)
+        ) as cur:
             rows = await cur.fetchall()
         return [load_group(row[0]) for row in rows]
 
@@ -362,20 +416,20 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
     async def search(self, query: str, limit: int = 20) -> list[JobGroup]:
         norm_query = normalize_fts5_query(query)
         conn = await self._get_conn()
-        
+
         if not norm_query:
             return await self.list_groups(limit)
-            
+
         overfetch = limit * 5
         async with conn.execute(
             """SELECT group_id FROM jf_jobs_fts 
                WHERE jf_jobs_fts MATCH ? 
                ORDER BY bm25(jf_jobs_fts) 
                LIMIT ?""",
-            (norm_query, overfetch)
+            (norm_query, overfetch),
         ) as cur:
             rows = await cur.fetchall()
-            
+
         # dedupe group_id preserving rank order
         seen = set()
         group_ids = []
@@ -385,17 +439,17 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 group_ids.append(gid)
                 if len(group_ids) >= limit:
                     break
-                    
+
         if not group_ids:
             return []
-            
+
         # load groups
         placeholders = ",".join("?" * len(group_ids))
         async with conn.execute(
             f"SELECT group_id, raw_json FROM jf_job_groups WHERE group_id IN ({placeholders})",
-            group_ids
+            group_ids,
         ) as cur:
             grows = await cur.fetchall()
-            
+
         group_map = {row[0]: load_group(row[1]) for row in grows}
         return [group_map[gid] for gid in group_ids if gid in group_map]
