@@ -1,20 +1,65 @@
+# sources.yaml — safe to commit, no credentials here
+# See config/sources.schema.json for full schema reference
+
 sources:
+  # Telegram channels (polling)
   - type: telegram_channel
-    entity: ai_jobs_channel
-    limit: 50
-
-  - type: telegram_group
-    entity: some_group
+    entity: "@ai_jobs_ru"
     limit: 100
+    auth_source_id: telegram
+    interval_seconds: 3600
 
+  # Telegram realtime (event listener mode)
+  - type: telegram_realtime
+    entity: "@getmatch"
+    auth_source_id: telegram
+    ingest_mode: event_listener
+
+  # RSS feed (incremental)
+  - type: rss_feed
+    feed_url: "https://career.habr.com/vacancies/rss?q=machine+learning&type=1"
+    incremental: true
+    source_name: habr_ml
+
+  # Official REST API (Greenhouse)
+  - type: rest_api
+    base_url: "https://api.greenhouse.io/v1/boards/example/"
+    jobs_endpoint: "jobs"
+    source_name: greenhouse_example
+
+  # Lever public board
+  - type: lever
+    company: "acme-inc"
+    source_name: lever_acme
+
+  # HH.ru API
+  - type: rest_api
+    base_url: "https://api.hh.ru/"
+    jobs_endpoint: "vacancies"
+    params:
+      text: "machine learning"
+      area: "1"
+    source_name: hh_ml
+
+  # Career site (declarative HTML)
   - type: declarative_html
-    url: https://boards.greenhouse.io/companyname
-    parser_kind: greenhouse
-    limit: 50
+    url: "https://company.com/careers"
+    parser_kind: auto
+    source_name: company_careers
 
-  - type: career_site
-    url: https://jobs.example.com/
-    limit: 100
+  # Browser source (requires playwright)
+  - type: browser
+    url: "https://protected-company.com/jobs"
+    bypass: stealth_browser
+    source_name: protected_jobs
 
-  - type: local_fixture
-    path: fixtures/debug/raw_items.json
+  # Webhook (receives pushed job data)
+  - type: webhook
+    path: "/ingest/jobs"
+    port: 8080
+    source_name: pushed_jobs
+
+  # WebSocket (streaming job data)
+  - type: websocket
+    url: "wss://realtime.jobboard.com/stream"
+    source_name: ws_jobs

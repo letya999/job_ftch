@@ -13,6 +13,8 @@ class BaseSourceSpec(BaseModel):
     rate_limit_min_interval_seconds: float = 0.0
     rate_limit_backoff_multiplier: float = 2.0
     ingest_mode: str = "polling"
+    bypass: str | None = None  # registered bypass strategy name, e.g. "proxy_rotator"
+    bypass_config: dict[str, str] = Field(default_factory=dict)
 
 
 class TelegramChannelSpec(BaseSourceSpec):
@@ -120,9 +122,17 @@ class TelegramRealtimeSourceSpec(BaseSourceSpec):
     source_name: str | None = None
 
 
+class LeverSourceSpec(BaseSourceSpec):
+    type: Literal["lever"] = "lever"
+    company: str = Field(min_length=1, description="Lever company slug, e.g. 'acme'")
+    source_name: str | None = None
+
+
 class WebhookSourceSpec(BaseSourceSpec):
     type: Literal["webhook"] = "webhook"
     path: str = "/webhook"
+    host: str = "0.0.0.0"
+    port: int = 8080
     source_name: str | None = None
 
 
@@ -143,6 +153,7 @@ SourceSpec = Annotated[
     | BrowserSourceSpec
     | RSSFeedSourceSpec
     | TelegramRealtimeSourceSpec
+    | LeverSourceSpec
     | WebhookSourceSpec
     | WebSocketSourceSpec,
     Field(discriminator="type"),

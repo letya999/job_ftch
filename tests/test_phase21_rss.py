@@ -169,32 +169,29 @@ def test_websocket_spec_roundtrip():
     assert isinstance(spec, WebSocketSourceSpec)
 
 
-def test_webhook_source_raises_not_implemented():
-    import asyncio
-    from unittest.mock import MagicMock
+def test_webhook_source_requires_aiohttp_dep():
+    from unittest.mock import MagicMock, patch
 
     from domain.source_spec import WebhookSourceSpec
     from infrastructure.sources.realtime.webhook import WebhookSource
 
     spec = WebhookSourceSpec(path="/test")
-    src = WebhookSource(spec, MagicMock())
-    with pytest.raises(NotImplementedError):
-        asyncio.run(_drain(src))
+    with (
+        patch("infrastructure.sources.realtime.webhook._AIOHTTP_AVAILABLE", False),
+        pytest.raises(ImportError, match="aiohttp"),
+    ):
+        WebhookSource(spec, MagicMock())
 
 
-def test_websocket_source_raises_not_implemented():
-    import asyncio
-    from unittest.mock import MagicMock
+def test_websocket_source_requires_websockets_dep():
+    from unittest.mock import MagicMock, patch
 
     from domain.source_spec import WebSocketSourceSpec
     from infrastructure.sources.realtime.websocket import WebSocketSource
 
     spec = WebSocketSourceSpec(url="wss://example.com/stream")
-    src = WebSocketSource(spec, MagicMock())
-    with pytest.raises(NotImplementedError):
-        asyncio.run(_drain(src))
-
-
-async def _drain(src):
-    async for _ in src.fetch():
-        pass
+    with (
+        patch("infrastructure.sources.realtime.websocket._WEBSOCKETS_AVAILABLE", False),
+        pytest.raises(ImportError, match="websockets"),
+    ):
+        WebSocketSource(spec, MagicMock())

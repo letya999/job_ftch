@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
+from pydantic import AnyHttpUrl
 
 from domain import RawItem, SourceKind
 
@@ -12,7 +13,6 @@ if TYPE_CHECKING:
 
     from application.contracts import AuthProvider, Store
     from domain import QuarantinedRawItem
-    from domain.source_spec import RestAPISourceSpec
 
 logger = structlog.get_logger(__name__)
 
@@ -22,7 +22,7 @@ class OfficialAPISource:
 
     def __init__(
         self,
-        spec: RestAPISourceSpec,
+        spec: Any,
         auth: AuthProvider,
         store: Store | None = None,
         source_kind: SourceKind = SourceKind.CAREER_SITE,
@@ -31,7 +31,17 @@ class OfficialAPISource:
         self.auth = auth
         self.store = store
         self.source_kind = source_kind
-        self.source_name = spec.source_name or spec.base_url.host or "api"
+        self.source_name = getattr(spec, "source_name", None)
+        if not self.source_name:
+            base_url = getattr(self, "base_url", None) or getattr(spec, "base_url", None)
+            if base_url:
+                from pydantic import TypeAdapter
+
+                url_adapter = TypeAdapter(AnyHttpUrl)
+                url_obj = url_adapter.validate_python(str(base_url))
+                self.source_name = url_obj.host or "api"
+            else:
+                self.source_name = "api"
 
     async def fetch(self) -> AsyncIterator[RawItem | QuarantinedRawItem]:
         headers = self.spec.headers.copy()
