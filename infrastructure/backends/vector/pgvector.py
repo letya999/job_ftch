@@ -20,6 +20,19 @@ if TYPE_CHECKING:
     from config import Settings
 
 
+ALLOWED_FILTER_KEYS = {
+    "job_id",
+    "group_id",
+    "source_kind",
+    "source_name",
+    "company",
+    "company_canonical",
+    "title",
+    "location",
+    "work_mode",
+}
+
+
 @register_vector_backend("pgvector")
 class PgVectorBackend(VectorBackend):
     def __init__(self, settings: Settings) -> None:
@@ -69,7 +82,7 @@ class PgVectorBackend(VectorBackend):
             """)
             
             await conn.execute("""
-                CREATE INDEX IF NOT EXISTS jf_job_vectors_group_idx
+                CREATE INDEX IF NOT EXISTS jf_job_vectors_group_idx 
                 ON jf_job_vectors (group_id);
             """)
             
@@ -123,23 +136,24 @@ class PgVectorBackend(VectorBackend):
                 await self._init_schema(self._dimensions)
             else:
                 await self._init_schema(len(vector))
+        
+        dim = len(vector)
+        if self._dimensions and self._dimensions != dim:
+            raise ValueError(f"Query vector dimension mismatch. Expected {self._dimensions}, got {dim}")
 
         pool = await self._get_pool()
         vector_str = "[" + ",".join(str(f) for f in vector) + "]"
         
-        # L2 distance operator is <->
-        # Cosine distance is <=>
-        # Inner product is <#>
-        # We use Cosine distance for text embeddings generally
-        
         async with pool.acquire() as conn:
-            # We skip filter for now since it's optional and pgvector filtering requires JSONB paths.
-            # We can implement basic key-value exact match if needed.
             if filter:
                 conditions = []
                 args = [vector_str, limit]
                 idx = 3
                 for k, v in filter.items():
+                    if k not in ALLOWED_FILTER_KEYS:
+                        raise ValueError(f"Filter key '{k}' is not allowed for security reasons.")
+                    
+                    # k is now safe (from whitelist)
                     conditions.append(f"payload->>'{k}' = ${idx}")
                     args.append(str(v))
                     idx += 1

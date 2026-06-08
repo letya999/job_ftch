@@ -66,8 +66,9 @@ class QdrantBackend(VectorBackend):
 
     def _job_id_to_uuid(self, job_id: str) -> str:
         # Qdrant requires UUID or integer for point IDs.
-        # We can hash the job_id into a UUID.
-        m = hashlib.md5(job_id.encode("utf-8"))
+        # Deterministic UUID from stable job_id.
+        # usedforsecurity=False for python 3.9+ compatibility and intent
+        m = hashlib.md5(job_id.encode("utf-8"), usedforsecurity=False)
         return str(uuid.UUID(bytes=m.digest()))
 
     async def upsert(
@@ -79,6 +80,8 @@ class QdrantBackend(VectorBackend):
         dim = len(vector)
         if self._dimensions is None:
             await self._ensure_collection(dim)
+        elif self._dimensions != dim:
+            raise ValueError(f"Vector dimension mismatch. Expected {self._dimensions}, got {dim}")
         elif not self._collection_ensured:
             await self._ensure_collection(self._dimensions)
             
@@ -110,6 +113,10 @@ class QdrantBackend(VectorBackend):
                 await self._ensure_collection(self._dimensions)
             else:
                 await self._ensure_collection(len(vector))
+
+        dim = len(vector)
+        if self._dimensions and self._dimensions != dim:
+            raise ValueError(f"Query vector dimension mismatch. Expected {self._dimensions}, got {dim}")
 
         query_filter = None
         if filter:

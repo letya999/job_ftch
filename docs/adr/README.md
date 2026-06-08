@@ -47,3 +47,5 @@ What are the trade-offs?
 15. [015-ingestion-mode-bypass-strategy.md](015-ingestion-mode-bypass-strategy.md) — IngestMode and BypassStrategy protocols
 16. [016-job-group-cross-source-aggregation.md](016-job-group-cross-source-aggregation.md) — JobGroup: cross-source aggregation
 17. [017-notification-sink-event-broadcasting.md](017-notification-sink-event-broadcasting.md) — NotificationSink: configurable event broadcasting
+18. [018-job-catalog-and-search-architecture.md](018-job-catalog-and-search-architecture.md) — Job Catalog and Persistent Search architecture
+19. [019-embeddings-and-vector-storage-boundary.md](019-embeddings-and-vector-storage-boundary.md) — Embeddings and Vector Storage boundary
