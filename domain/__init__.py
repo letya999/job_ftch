@@ -19,7 +19,15 @@ from domain.job_quality import (
     JobReviewReason,
     JobValidationRejectionReason,
 )
-from domain.models import CompensationRange, Job, JobExtractionStatus, RawItem, SourceKind, WorkMode
+from domain.models import (
+    CompensationRange,
+    Job,
+    JobExtractionStatus,
+    PostType,
+    RawItem,
+    SourceKind,
+    WorkMode,
+)
 from domain.quarantine import QuarantinedRawItem, RawItemRejectionReason
 from domain.rejected import RejectedItem, RejectedOutcome
 from domain.triage import TriageRejectionReason
@@ -47,6 +55,7 @@ __all__ = [
     "JobGroup",
     "JobReviewReason",
     "JobValidationRejectionReason",
+    "PostType",
     "QuarantinedRawItem",
     "RawItem",
     "RawItemRejectionReason",

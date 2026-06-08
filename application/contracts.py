@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
 if TYPE_CHECKING:
@@ -135,6 +136,26 @@ class AuthProvider(Protocol):
 class LLMProvider(Protocol):
     async def extract(self, text: str, schema: type[ExtractedItem]) -> ExtractedItem:
         """Extract a structured object from text."""
+
+
+@dataclass(frozen=True)
+class ClassificationResult:
+    label: str  # PostType string value
+    confidence: float  # 0.0-1.0
+    model_id: str
+
+
+@runtime_checkable
+class ClassifierProvider(Protocol):
+    async def classify(self, text: str) -> ClassificationResult:
+        """Classify a single text item. Returns PostType label + confidence."""
+
+    async def classify_batch(self, texts: list[str]) -> list[ClassificationResult]:
+        """Classify multiple texts. Default impl can call classify() in a loop."""
+
+    @property
+    def model_id(self) -> str:
+        """Identifier for logging and metrics."""
 
 
 @runtime_checkable

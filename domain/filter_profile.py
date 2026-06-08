@@ -17,6 +17,32 @@ class FilterProfile(BaseModel):
     positive_relevance_keywords: list[str] = Field(default_factory=list)
     negative_relevance_keywords: list[str] = Field(default_factory=list)
     relevance_threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    candidate_signal_patterns: list[str] = Field(
+        default_factory=lambda: [
+            "#candidate",
+            "#резюме",
+            "#ищуработу",
+            "#opentowork",
+            "about me:",
+            "looking for opportunities",
+            "open to work",
+            "hi, i'm",
+            "привет, меня зовут",
+            "ищу работу",
+            "в поиске работы",
+        ]
+    )
+    spam_signal_patterns: list[str] = Field(
+        default_factory=lambda: [
+            r"\d{3,}\.\d{2}\s*odds",
+            "скачать музыку",
+            "скачать песню",
+            r"нажми.{0,20}скачать",
+            "casino",
+            "betting",
+            "букмекер",
+        ]
+    )
 
     @classmethod
     def default(cls) -> FilterProfile:
@@ -50,7 +76,7 @@ class FilterProfile(BaseModel):
                 "llm",
                 "genai",
                 "mlops",
-                "ml ",
+                "ml",
                 "machine learning",
                 "agent",
                 "rag",
@@ -60,6 +86,19 @@ class FilterProfile(BaseModel):
                 "data scientist",
                 "ai pm",
                 "ai product",
+                "deep learning",
+                "neural",
+                "nlp",
+                "computer vision",
+                "data science",
+                # Russian
+                "машинное обучение",
+                "нейронные сети",
+                "большие языковые модели",
+                "искусственный интеллект",
+                "нлп",
+                "глубокое обучение",
+                "языковая модель",
             ],
             negative_relevance_keywords=[
                 "sales",
@@ -70,4 +109,26 @@ class FilterProfile(BaseModel):
                 "marketing",
             ],
             relevance_threshold=0.0,
+            candidate_signal_patterns=[
+                "#candidate",
+                "#резюме",
+                "#ищуработу",
+                "#opentowork",
+                "about me:",
+                "looking for opportunities",
+                "open to work",
+                "hi, i'm",
+                "привет, меня зовут",
+                "ищу работу",
+                "в поиске работы",
+            ],
+            spam_signal_patterns=[
+                r"\d{3,}\.\d{2}\s*odds",
+                "скачать музыку",
+                "скачать песню",
+                r"нажми.{0,20}скачать",
+                "casino",
+                "betting",
+                "букмекер",
+            ],
         )
