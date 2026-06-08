@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from domain import JobExtractionStatus, RawItem, SourceKind, WorkMode
-from infrastructure.llm.heuristic import HeuristicLLMProvider
-from nodes.extraction import ExtractionNode
+from job_ftch.domain import JobExtractionStatus, RawItem, SourceKind, WorkMode
+from job_ftch.infrastructure.llm.heuristic import HeuristicLLMProvider
+from job_ftch.nodes.extraction import ExtractionNode
 
 
 class ExplodingLLMProvider:

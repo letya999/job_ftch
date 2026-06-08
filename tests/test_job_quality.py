@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from application.drops import RawItemDropped
-from domain import Job, SourceKind, WorkMode
-from nodes import (
+from job_ftch.application.drops import RawItemDropped
+from job_ftch.domain import Job, SourceKind, WorkMode
+from job_ftch.nodes import (
     AIRoleRelevanceNode,
     CompensationParsingNode,
     JobValidationNode,

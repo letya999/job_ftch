@@ -3,15 +3,15 @@
 import pytest
 from pydantic import AnyHttpUrl
 
-from application.identity import JobIdentityMatcher
-from domain import (
+from job_ftch.application.identity import JobIdentityMatcher
+from job_ftch.domain import (
     Job,
     SourceKind,
     WorkMode,
 )
-from domain.job_group import compute_identity_fingerprint, merge_jobs
-from infrastructure.stores.job_group_store import InMemoryJobGroupStore
-from nodes.aggregation import JobAggregationNode
+from job_ftch.domain.job_group import compute_identity_fingerprint, merge_jobs
+from job_ftch.infrastructure.stores.job_group_store import InMemoryJobGroupStore
+from job_ftch.nodes.aggregation import JobAggregationNode
 
 # --- Unit Tests: compute_identity_fingerprint ---
 

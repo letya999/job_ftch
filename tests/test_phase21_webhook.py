@@ -1,11 +1,11 @@
 import pytest
 
-from domain.source_spec import WebhookSourceSpec
-from infrastructure.sources.realtime.webhook import WebhookSource, _payload_to_text
+from job_ftch.domain.source_spec import WebhookSourceSpec
+from job_ftch.infrastructure.sources.realtime.webhook import WebhookSource, _payload_to_text
 
 
 def test_webhook_source_requires_aiohttp(monkeypatch):
-    import infrastructure.sources.realtime.webhook as webhook
+    import job_ftch.infrastructure.sources.realtime.webhook as webhook
 
     monkeypatch.setattr(webhook, "_AIOHTTP_AVAILABLE", False)
 

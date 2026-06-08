@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import pytest
 
-from application.registry import (
+from job_ftch.application.registry import (
     _FALLBACK_STORE_BACKEND,
     _store_factories,
     create_store_with_fallback,
 )
-from config import Settings
+from job_ftch.config import Settings
 
 
 @pytest.mark.asyncio
 async def test_fallback_store_backend_is_registered() -> None:
     """memory must always be registered after load_extensions."""
-    from application.registry import load_extensions
+    from job_ftch.application.registry import load_extensions
 
     load_extensions()
     assert _FALLBACK_STORE_BACKEND in _store_factories, (
@@ -29,7 +29,7 @@ async def test_healthy_primary_store_is_returned() -> None:
     settings = Settings(store_backend="memory", store_fallback_on_error=True)
     store = await create_store_with_fallback(settings)
     # InMemoryStore is returned directly because ping() succeeds (returns True)
-    from infrastructure.stores.in_memory import InMemoryStore
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
     assert isinstance(store, InMemoryStore)
 
@@ -37,7 +37,7 @@ async def test_healthy_primary_store_is_returned() -> None:
 @pytest.mark.asyncio
 async def test_fallback_on_creation_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """If primary store creation raises, fallback to memory when flag is set."""
-    from application.registry import load_extensions
+    from job_ftch.application.registry import load_extensions
 
     load_extensions()
 
@@ -49,7 +49,7 @@ async def test_fallback_on_creation_failure(monkeypatch: pytest.MonkeyPatch) -> 
     try:
         settings = Settings(store_backend="__test_broken__", store_fallback_on_error=True)
         store = await create_store_with_fallback(settings)
-        from infrastructure.stores.in_memory import InMemoryStore
+        from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
         assert isinstance(store, InMemoryStore)
     finally:
@@ -59,7 +59,7 @@ async def test_fallback_on_creation_failure(monkeypatch: pytest.MonkeyPatch) -> 
 @pytest.mark.asyncio
 async def test_no_fallback_when_flag_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """If store_fallback_on_error is False, the original exception propagates."""
-    from application.registry import load_extensions
+    from job_ftch.application.registry import load_extensions
 
     load_extensions()
 
@@ -77,21 +77,21 @@ async def test_no_fallback_when_flag_off(monkeypatch: pytest.MonkeyPatch) -> Non
 
 @pytest.mark.asyncio
 async def test_fallback_not_an_infra_import() -> None:
-    """application/registry.py must not import from infrastructure at module level."""
+    """application/registry.py must not import from job_ftch.infrastructure at module level."""
     import importlib
     import inspect
 
-    registry_module = importlib.import_module("application.registry")
+    registry_module = importlib.import_module("job_ftch.application.registry")
     source = inspect.getsource(registry_module)
 
     # Top-level (non-TYPE_CHECKING) infrastructure imports must not exist
     lines = source.splitlines()
     for i, line in enumerate(lines):
         stripped = line.strip()
-        if "from infrastructure" in stripped and "TYPE_CHECKING" not in stripped:
+        if "from job_ftch.infrastructure" in stripped and "TYPE_CHECKING" not in stripped:
             # Allow inside function bodies only if it's the known pre-existing one
             # (there should be none after ADR-020)
             pytest.fail(
                 f"Forbidden infrastructure import at line {i + 1}: {line!r}\n"
-                "application/ must not import infrastructure/ — see ADR-020."
+                "application/ must not import job_ftch.infrastructure/ — see ADR-020."
             )

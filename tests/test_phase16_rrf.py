@@ -1,4 +1,4 @@
-from infrastructure.backends.search.rrf import reciprocal_rank_fusion
+from job_ftch.infrastructure.backends.search.rrf import reciprocal_rank_fusion
 
 
 def test_reciprocal_rank_fusion():

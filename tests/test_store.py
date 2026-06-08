@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from domain import (
+from job_ftch.domain import (
     DedupKeyKind,
     DuplicateRecord,
     DuplicateRejectionReason,
     RememberedDedupKey,
     SourceKind,
 )
-from infrastructure.stores.in_memory import InMemoryStore
+from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
 
 @pytest.mark.asyncio

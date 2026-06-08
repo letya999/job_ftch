@@ -6,11 +6,11 @@ import pytest
 
 import app as app_module
 from app import build_output_sinks
-from application.drops import RawItemDropped
-from config import Settings
-from domain import DuplicateRejectionReason, Job, SourceKind, WorkMode
-from infrastructure.llm.openai_provider import OpenAIInstructorLLMProvider
-from nodes.extraction_validation import ExtractionValidationNode
+from job_ftch.application.drops import RawItemDropped
+from job_ftch.config import Settings
+from job_ftch.domain import DuplicateRejectionReason, Job, SourceKind, WorkMode
+from job_ftch.infrastructure.llm.openai_provider import OpenAIInstructorLLMProvider
+from job_ftch.nodes.extraction_validation import ExtractionValidationNode
 
 
 def _job(**overrides: object) -> Job:
@@ -64,7 +64,7 @@ async def test_openai_provider_forwards_timeout_retry_and_prompt(
         return FakeClient()
 
     monkeypatch.setattr(
-        "infrastructure.llm.openai_provider.instructor.from_provider", fake_from_provider
+        "job_ftch.infrastructure.llm.openai_provider.instructor.from_provider", fake_from_provider
     )
 
     provider = OpenAIInstructorLLMProvider(
@@ -227,11 +227,11 @@ async def test_build_output_sinks_routes_strong_jobs_to_posting(
 
 @pytest.mark.asyncio
 async def test_duplicate_drop_is_reported_as_dedicated_summary_metric(tmp_path: Path) -> None:
-    from application.pipeline import Pipeline
-    from domain import RawItem
-    from infrastructure.stores.in_memory import InMemoryStore
-    from nodes import DedupNode, SanitizeNode
-    from sinks.json_file import JsonFileSink
+    from job_ftch.application.pipeline import Pipeline
+    from job_ftch.domain import RawItem
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+    from job_ftch.nodes import DedupNode, SanitizeNode
+    from job_ftch.sinks.json_file import JsonFileSink
 
     class StubSource:
         def __init__(self, items: list[RawItem]) -> None:

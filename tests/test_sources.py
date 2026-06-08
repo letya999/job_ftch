@@ -8,10 +8,10 @@ from typing import Any
 
 import pytest
 
-from domain import RawItem, SourceKind
-from infrastructure.sources.career_site import CareerSiteSource
-from infrastructure.sources.raw_item_factory import build_raw_item
-from infrastructure.sources.telegram import (
+from job_ftch.domain import RawItem, SourceKind
+from job_ftch.infrastructure.sources.career_site import CareerSiteSource
+from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
+from job_ftch.infrastructure.sources.telegram import (
     TelegramChannelSource,
     TelegramCommentSource,
     TelegramGroupSource,

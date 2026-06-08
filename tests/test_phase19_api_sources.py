@@ -2,10 +2,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from domain import SourceKind
-from domain.source_spec import RestAPISourceSpec
-from infrastructure.sources.api.greenhouse import GreenhouseAPISource
-from infrastructure.sources.api.hh import HHAPISource
+from job_ftch.domain import SourceKind
+from job_ftch.domain.source_spec import RestAPISourceSpec
+from job_ftch.infrastructure.sources.api.greenhouse import GreenhouseAPISource
+from job_ftch.infrastructure.sources.api.hh import HHAPISource
 
 
 @pytest.mark.asyncio

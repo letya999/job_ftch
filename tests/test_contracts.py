@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from application import LLMProvider, ProcessingNode, SanitizingNode, Sink, Source, Stage, Store
-from domain import (
+from job_ftch.application import (
+    LLMProvider,
+    ProcessingNode,
+    SanitizingNode,
+    Sink,
+    Source,
+    Stage,
+    Store,
+)
+from job_ftch.domain import (
     DedupKeyKind,
     DuplicateRecord,
     DuplicateRejectionReason,

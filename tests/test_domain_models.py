@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from pydantic import ValidationError
 
-from domain import CompensationRange, Job, JobExtractionStatus, RawItem, SourceKind, WorkMode
+from job_ftch.domain import (
+    CompensationRange,
+    Job,
+    JobExtractionStatus,
+    RawItem,
+    SourceKind,
+    WorkMode,
+)
 
 
 def test_raw_item_valid_payload_has_stable_id() -> None:

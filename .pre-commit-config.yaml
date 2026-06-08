@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: job-ftch-module-boundaries
+        name: job_ftch module boundaries
+        entry: uv run python scripts/check_module_boundaries.py
+        language: system
+        pass_filenames: false

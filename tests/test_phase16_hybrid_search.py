@@ -1,9 +1,9 @@
 import pytest
 
-from application.registry import register_embedding_provider, register_vector_backend
-from config import Settings
-from domain import Job, SourceKind
-from infrastructure.backends.search.hybrid import HybridSearchBackend
+from job_ftch.application.registry import register_embedding_provider, register_vector_backend
+from job_ftch.config import Settings
+from job_ftch.domain import Job, SourceKind
+from job_ftch.infrastructure.backends.search.hybrid import HybridSearchBackend
 
 
 class FakeVectorBackend:

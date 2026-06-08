@@ -5,16 +5,16 @@ from pathlib import Path
 
 import pytest
 
-from application.contracts import StoreConnector
-from domain import (
+from job_ftch.application.contracts import StoreConnector
+from job_ftch.domain import (
     DedupKeyKind,
     DuplicateRecord,
     DuplicateRejectionReason,
     RememberedDedupKey,
     SourceKind,
 )
-from infrastructure.stores.in_memory import InMemoryStore
-from infrastructure.stores.sqlite import SQLiteStore
+from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+from job_ftch.infrastructure.stores.sqlite import SQLiteStore
 
 # ---------------------------------------------------------------------------
 # SQLiteStore — basic contracts

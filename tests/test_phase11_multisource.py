@@ -4,13 +4,13 @@ from pathlib import Path
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from application.registry import create_source_from_spec
-from application.source_loader import load_sources
-from config import Settings
-from domain.source_spec import LocalFixtureSpec, SourceSpec, TelegramChannelSpec
-from infrastructure.auth.env_auth import EnvAuthProvider
-from infrastructure.sources.local_fixture import LocalFixtureSource
-from infrastructure.stores.in_memory import InMemoryStore
+from job_ftch.application.registry import create_source_from_spec
+from job_ftch.application.source_loader import load_sources
+from job_ftch.config import Settings
+from job_ftch.domain.source_spec import LocalFixtureSpec, SourceSpec, TelegramChannelSpec
+from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
+from job_ftch.infrastructure.sources.local_fixture import LocalFixtureSource
+from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
 
 def test_source_spec_telegram_channel_valid():
@@ -93,8 +93,8 @@ async def test_store_namespaced_run_state():
 
 
 def test_career_site_config_from_spec_detects_greenhouse():
-    from domain.source_spec import DeclarativeHtmlSpec
-    from infrastructure.sources.declarative import CareerSiteConfig
+    from job_ftch.domain.source_spec import DeclarativeHtmlSpec
+    from job_ftch.infrastructure.sources.declarative import CareerSiteConfig
 
     spec = DeclarativeHtmlSpec(url="https://boards.greenhouse.io/myco")
     config = CareerSiteConfig.from_spec(spec)
@@ -103,8 +103,8 @@ def test_career_site_config_from_spec_detects_greenhouse():
 
 
 def test_career_site_config_from_spec_generic_fallback():
-    from domain.source_spec import DeclarativeHtmlSpec
-    from infrastructure.sources.declarative import CareerSiteConfig
+    from job_ftch.domain.source_spec import DeclarativeHtmlSpec
+    from job_ftch.infrastructure.sources.declarative import CareerSiteConfig
 
     spec = DeclarativeHtmlSpec(url="https://jobs.example.com")
     config = CareerSiteConfig.from_spec(spec)
@@ -112,8 +112,8 @@ def test_career_site_config_from_spec_generic_fallback():
 
 
 def test_career_site_config_from_spec_explicit_greenhouse_kind():
-    from domain.source_spec import DeclarativeHtmlSpec
-    from infrastructure.sources.declarative import CareerSiteConfig
+    from job_ftch.domain.source_spec import DeclarativeHtmlSpec
+    from job_ftch.infrastructure.sources.declarative import CareerSiteConfig
 
     spec = DeclarativeHtmlSpec(url="https://other.com", parser_kind="greenhouse")
     config = CareerSiteConfig.from_spec(spec)
@@ -123,7 +123,7 @@ def test_career_site_config_from_spec_explicit_greenhouse_kind():
 def test_create_source_from_spec_unknown_type_raises():
     from unittest.mock import MagicMock
 
-    from application.registry import create_source_from_spec, load_extensions
+    from job_ftch.application.registry import create_source_from_spec, load_extensions
 
     load_extensions()
     fake_spec = MagicMock()

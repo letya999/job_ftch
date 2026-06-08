@@ -7,9 +7,9 @@ import httpx
 import pytest
 import yaml
 
-from domain.models import RawItem
-from domain.source_spec import RSSFeedSourceSpec
-from infrastructure.sources.realtime.rss import RSSFeedSource
+from job_ftch.domain.models import RawItem
+from job_ftch.domain.source_spec import RSSFeedSourceSpec
+from job_ftch.infrastructure.sources.realtime.rss import RSSFeedSource
 
 
 @pytest.fixture

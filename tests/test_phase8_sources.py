@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from config import Settings
-from infrastructure.sources.career_site import _RetryingHttpClient
-from infrastructure.sources.telegram import _build_telegram_client
+from job_ftch.config import Settings
+from job_ftch.infrastructure.sources.career_site import _RetryingHttpClient
+from job_ftch.infrastructure.sources.telegram import _build_telegram_client
 
 
 class FlakyHttpClient:

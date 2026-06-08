@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from infrastructure.auth.env_auth import EnvAuthProvider
-from infrastructure.auth.file_auth import FileAuthProvider
-from infrastructure.ingest.polling import PollingMode
+from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
+from job_ftch.infrastructure.auth.file_auth import FileAuthProvider
+from job_ftch.infrastructure.ingest.polling import PollingMode
 
 
 def test_env_auth_provider():

@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from application.pipeline import Pipeline
-from domain import RawItem, SourceKind, processed_key_for_raw_item
-from infrastructure.stores.in_memory import InMemoryStore
-from nodes import SanitizeNode
-from sinks.failure_tolerant import FailureTolerantSink
-from sinks.json_file import JsonFileSink
+from job_ftch.application.pipeline import Pipeline
+from job_ftch.domain import RawItem, SourceKind, processed_key_for_raw_item
+from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+from job_ftch.nodes import SanitizeNode
+from job_ftch.sinks.failure_tolerant import FailureTolerantSink
+from job_ftch.sinks.json_file import JsonFileSink
 
 
 class StubSource:
