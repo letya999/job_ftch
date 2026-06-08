@@ -12,7 +12,7 @@ try:
     from qdrant_client import AsyncQdrantClient
     from qdrant_client.http import models as rest
 except ImportError:
-    AsyncQdrantClient = cast("Any", None)  # type: ignore[misc]
+    AsyncQdrantClient = cast("Any", None)
     rest = cast("Any", None)
 
 from application.contracts import VectorBackend
