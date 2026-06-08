@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     from domain import DuplicateRecord, Job, JobGroup, QuarantinedRawItem, RememberedDedupKey
 
@@ -180,12 +180,22 @@ class VectorBackend(Protocol):
         self,
         job_id: str,
         vector: list[float],
-        payload: dict[str, object],
+        payload: dict[str, Any],
     ) -> None: ...
 
     async def search(
         self,
         vector: list[float],
         limit: int,
-        filter: dict[str, object] | None = None,
+        filter: dict[str, Any] | None = None,
     ) -> list[str]: ...
+
+
+@runtime_checkable
+class IngestMode(Protocol):
+    async def run(
+        self,
+        source: Source[Any],
+        on_item: Callable[[Any], Awaitable[None]],
+    ) -> None:
+        """Drive source fetch and call on_item for each yielded item."""
