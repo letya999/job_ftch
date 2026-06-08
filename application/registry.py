@@ -203,6 +203,8 @@ def load_extensions() -> None:
                 "infrastructure.backends.vector.pgvector",
                 "infrastructure.backends.vector.qdrant",
                 "infrastructure.backends.search.hybrid",
+                "infrastructure.sources.api.greenhouse",
+                "infrastructure.sources.api.hh",
             ):
                 import_module(module_name)
             _builtins_loaded = True

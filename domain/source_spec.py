@@ -4,11 +4,18 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 
-class TelegramChannelSpec(BaseModel):
+class BaseSourceSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    interval_seconds: int | None = None
+    rate_limit_min_interval_seconds: float = 0.0
+    rate_limit_backoff_multiplier: float = 2.0
+    ingest_mode: str = "polling"
+
+
+class TelegramChannelSpec(BaseSourceSpec):
     type: Literal["telegram_channel"] = "telegram_channel"
     entity: str = Field(min_length=1)
     limit: int = Field(default=100, gt=0)
@@ -16,8 +23,7 @@ class TelegramChannelSpec(BaseModel):
     source_name: str | None = None  # override display name
 
 
-class TelegramGroupSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class TelegramGroupSpec(BaseSourceSpec):
     type: Literal["telegram_group"] = "telegram_group"
     entity: str = Field(min_length=1)
     limit: int = Field(default=100, gt=0)
@@ -25,8 +31,7 @@ class TelegramGroupSpec(BaseModel):
     source_name: str | None = None
 
 
-class TelegramCommentsSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class TelegramCommentsSpec(BaseSourceSpec):
     type: Literal["telegram_comments"] = "telegram_comments"
     entity: str = Field(min_length=1)
     post_limit: int = Field(default=20, gt=0)
@@ -35,8 +40,7 @@ class TelegramCommentsSpec(BaseModel):
     source_name: str | None = None
 
 
-class DeclarativeHtmlSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class DeclarativeHtmlSpec(BaseSourceSpec):
     type: Literal["declarative_html"] = "declarative_html"
     url: str = Field(min_length=1)
     parser_kind: str = "auto"  # "auto", "greenhouse", or any registered parser kind
@@ -44,19 +48,55 @@ class DeclarativeHtmlSpec(BaseModel):
     source_name: str | None = None
 
 
-class CareerSiteSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class CareerSiteSpec(BaseSourceSpec):
     type: Literal["career_site"] = "career_site"
     url: str = Field(min_length=1)
     limit: int = Field(default=100, gt=0)
     source_name: str | None = None
 
 
-class LocalFixtureSpec(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class LocalFixtureSpec(BaseSourceSpec):
     type: Literal["local_fixture"] = "local_fixture"
     path: str = Field(min_length=1)
     source_name: str | None = None
+
+
+# RM-098: RestAPISourceSpec
+class CursorPagination(BaseModel):
+    type: Literal["cursor"] = "cursor"
+    cursor_param: str
+    next_cursor_path: str  # JSON path to next cursor in response
+
+
+class OffsetPagination(BaseModel):
+    type: Literal["offset"] = "offset"
+    offset_param: str = "offset"
+    limit_param: str = "limit"
+    page_size: int = 20
+
+
+class LinkHeaderPagination(BaseModel):
+    type: Literal["link_header"] = "link_header"
+    rel: str = "next"
+
+
+PaginationConfig = Annotated[
+    CursorPagination | OffsetPagination | LinkHeaderPagination,
+    Field(discriminator="type"),
+]
+
+
+class RestAPISourceSpec(BaseSourceSpec):
+    type: Literal["rest_api"] = "rest_api"
+    base_url: AnyHttpUrl
+    jobs_endpoint: str
+    pagination: PaginationConfig | None = None
+    field_map: dict[str, str] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
+    params: dict[str, str] = Field(default_factory=dict)
+    incremental_cursor_field: str | None = None
+    source_name: str | None = None
+    auth_source_id: str | None = None
 
 
 SourceSpec = Annotated[
@@ -65,6 +105,7 @@ SourceSpec = Annotated[
     | TelegramCommentsSpec
     | DeclarativeHtmlSpec
     | CareerSiteSpec
-    | LocalFixtureSpec,
+    | LocalFixtureSpec
+    | RestAPISourceSpec,
     Field(discriminator="type"),
 ]
