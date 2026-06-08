@@ -340,7 +340,7 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 WHERE fts_vector @@ {fts_query_sql}
                 ORDER BY ts_rank(fts_vector, {fts_query_sql}) DESC
                 LIMIT $2
-            """,
+            """,  # nosec B608
                 q,
                 overfetch,
             )

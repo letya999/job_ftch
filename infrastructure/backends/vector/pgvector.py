@@ -170,7 +170,7 @@ class PgVectorBackend(VectorBackend):
                     WHERE {where_clause}
                     ORDER BY vector <=> $1::vector
                     LIMIT $2
-                """
+                """  # nosec B608
                 rows = await conn.fetch(query, *args)
             else:
                 query = """

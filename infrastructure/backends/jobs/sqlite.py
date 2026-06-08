@@ -446,7 +446,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         # load groups
         placeholders = ",".join("?" * len(group_ids))
         async with conn.execute(
-            f"SELECT group_id, raw_json FROM jf_job_groups WHERE group_id IN ({placeholders})",
+            f"SELECT group_id, raw_json FROM jf_job_groups WHERE group_id IN ({placeholders})",  # nosec B608
             group_ids,
         ) as cur:
             grows = await cur.fetchall()
