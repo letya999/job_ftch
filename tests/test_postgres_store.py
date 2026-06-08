@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from application.contracts import StoreConnector
-from infrastructure.stores.postgres import PostgreSQLStore
+from job_ftch.application.contracts import StoreConnector
+from job_ftch.infrastructure.stores.postgres import PostgreSQLStore
 
 
 @pytest.mark.asyncio

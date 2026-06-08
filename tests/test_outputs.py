@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 
 from app import run_pipeline
-from application.pipeline import Pipeline
-from config import Settings
-from domain import Job, RawItem, SourceKind, WorkMode
-from infrastructure.stores.in_memory import InMemoryStore
-from nodes import HeuristicTriageNode, SanitizeNode
-from sinks.counted import CountedSink
-from sinks.json_file import JsonFileSink
-from sinks.telegram_posting import TelegramPostingSink
+from job_ftch.application.pipeline import Pipeline
+from job_ftch.config import Settings
+from job_ftch.domain import Job, RawItem, SourceKind, WorkMode
+from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+from job_ftch.nodes import HeuristicTriageNode, SanitizeNode
+from job_ftch.sinks.counted import CountedSink
+from job_ftch.sinks.json_file import JsonFileSink
+from job_ftch.sinks.telegram_posting import TelegramPostingSink
 
 
 class StubSource:

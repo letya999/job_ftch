@@ -31,6 +31,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+browser = ["playwright>=1.45"]
+bot = ["aiogram>=3.0"]
+dagster = ["dagster>=1.8"]
+faststream = ["faststream>=0.5"]
+api = ["fastapi>=0.115", "uvicorn>=0.30"]
+mcp = ["fastmcp>=2.4"]
 sqlite = ["aiosqlite>=0.20"]
 postgres = ["asyncpg>=0.29"]
 embeddings = ["sentence-transformers>=3.0", "torch>=2.3"]
@@ -42,22 +48,27 @@ realtime = [
     "aiohttp>=3.9.0",
     "websockets>=12.0",
 ]
-classifiers = [
-    "setfit>=0.6.0",
-    "sentence-transformers>=2.6.0",
-]
 all = [
+    "aiogram>=3.0",
     "aiosqlite>=0.20",
     "asyncpg>=0.29",
+    "dagster>=1.8",
+    "fastapi>=0.115",
+    "fastmcp>=2.4",
+    "faststream>=0.5",
+    "playwright>=1.45",
     "sentence-transformers>=3.0",
     "torch>=2.3",
     "qdrant-client>=1.9",
     "pgvector>=0.3",
     "feedparser>=6.0",
-    "setfit>=0.6.0",
     "aiohttp>=3.9.0",
+    "uvicorn>=0.30",
     "websockets>=12.0",
 ]
+
+[project.scripts]
+job_ftch = "job_ftch.cli:main"
 
 [project.entry-points."job_ftch.sources"]
 
@@ -77,6 +88,7 @@ all = [
 
 [dependency-groups]
 dev = [
+    "pre-commit>=3.7",
     "ruff>=0.4",
     "mypy>=1.10",
     "pytest>=8.2",
@@ -90,7 +102,7 @@ dev = [
 
 # Tell hatchling which Python packages to include in the wheel
 [tool.hatch.build.targets.wheel]
-packages = ["domain", "application", "infrastructure", "nodes", "sinks"]
+packages = ["job_ftch"]
 
 [tool.ruff]
 target-version = "py312"
@@ -102,6 +114,8 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # allow assert in tests
+"job_ftch/adapters/*.py" = ["TC001"]
+"job_ftch/application/builder.py" = ["TC001", "TC006"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -120,11 +134,11 @@ exclude = [
 # unused-ignore in envs without the package and assignment-error in envs with it.
 # Disabling warn_unused_ignores here keeps both envs happy.
 module = [
-    "infrastructure.stores.sqlite",
-    "infrastructure.stores.postgres",
-    "infrastructure.sources.realtime.rss",
-    "infrastructure.sources.telegram_realtime",
-    "infrastructure.sources.browser.base",
+    "job_ftch.infrastructure.stores.sqlite",
+    "job_ftch.infrastructure.stores.postgres",
+    "job_ftch.infrastructure.sources.realtime.rss",
+    "job_ftch.infrastructure.sources.telegram_realtime",
+    "job_ftch.infrastructure.sources.browser.base",
 ]
 warn_unused_ignores = false
 
@@ -140,8 +154,8 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["domain", "application", "infrastructure", "nodes", "sinks"]
-omit = ["tests/*", "app.py", "config.py"]
+source = ["job_ftch"]
+omit = ["tests/*"]
 
 [tool.bandit]
 exclude_dirs = [".venv", "tests"]

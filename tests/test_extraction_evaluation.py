@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from config import Settings
+from job_ftch.config import Settings
 from scripts.evaluate_extraction import evaluate_fixture
 
 

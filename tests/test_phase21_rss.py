@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import TypeAdapter
 
-from domain import RawItem
-from domain.source_spec import RSSFeedSourceSpec, SourceSpec
+from job_ftch.domain import RawItem
+from job_ftch.domain.source_spec import RSSFeedSourceSpec, SourceSpec
 
 SAMPLE_FEED_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
@@ -36,7 +36,7 @@ def test_rss_feed_spec_roundtrip():
 
 @pytest.mark.asyncio
 async def test_rss_source_yields_items():
-    from infrastructure.sources.realtime.rss import RSSFeedSource
+    from job_ftch.infrastructure.sources.realtime.rss import RSSFeedSource
 
     spec = RSSFeedSourceSpec(feed_url="https://example.com/feed.xml")
     auth = MagicMock()
@@ -62,8 +62,8 @@ async def test_rss_source_yields_items():
     ]
 
     with (
-        patch("infrastructure.sources.realtime.rss._FEEDPARSER_AVAILABLE", True),
-        patch("infrastructure.sources.realtime.rss.feedparser") as mock_fp,
+        patch("job_ftch.infrastructure.sources.realtime.rss._FEEDPARSER_AVAILABLE", True),
+        patch("job_ftch.infrastructure.sources.realtime.rss.feedparser") as mock_fp,
     ):
         mock_fp.parse.return_value = mock_feed
 
@@ -90,7 +90,7 @@ async def test_rss_source_yields_items():
 @pytest.mark.asyncio
 async def test_rss_source_incremental_dedup():
     """Second run with same IDs yields 0 items."""
-    from infrastructure.sources.realtime.rss import RSSFeedSource
+    from job_ftch.infrastructure.sources.realtime.rss import RSSFeedSource
 
     spec = RSSFeedSourceSpec(feed_url="https://example.com/feed.xml", incremental=True)
     auth = MagicMock()
@@ -117,8 +117,8 @@ async def test_rss_source_incremental_dedup():
     ]
 
     with (
-        patch("infrastructure.sources.realtime.rss._FEEDPARSER_AVAILABLE", True),
-        patch("infrastructure.sources.realtime.rss.feedparser") as mock_fp,
+        patch("job_ftch.infrastructure.sources.realtime.rss._FEEDPARSER_AVAILABLE", True),
+        patch("job_ftch.infrastructure.sources.realtime.rss.feedparser") as mock_fp,
     ):
         mock_fp.parse.return_value = mock_feed
 
@@ -141,7 +141,7 @@ async def test_rss_source_incremental_dedup():
 
 
 def test_telegram_realtime_spec_roundtrip():
-    from domain.source_spec import TelegramRealtimeSourceSpec
+    from job_ftch.domain.source_spec import TelegramRealtimeSourceSpec
 
     raw = {"type": "telegram_realtime", "entity": "@ai_jobs_ru"}
     adapter = TypeAdapter(SourceSpec)
@@ -151,7 +151,7 @@ def test_telegram_realtime_spec_roundtrip():
 
 
 def test_webhook_spec_roundtrip():
-    from domain.source_spec import WebhookSourceSpec
+    from job_ftch.domain.source_spec import WebhookSourceSpec
 
     raw = {"type": "webhook", "path": "/ingest/jobs"}
     adapter = TypeAdapter(SourceSpec)
@@ -161,7 +161,7 @@ def test_webhook_spec_roundtrip():
 
 
 def test_websocket_spec_roundtrip():
-    from domain.source_spec import WebSocketSourceSpec
+    from job_ftch.domain.source_spec import WebSocketSourceSpec
 
     raw = {"type": "websocket", "url": "wss://example.com/stream"}
     adapter = TypeAdapter(SourceSpec)
@@ -172,12 +172,12 @@ def test_websocket_spec_roundtrip():
 def test_webhook_source_requires_aiohttp_dep():
     from unittest.mock import MagicMock, patch
 
-    from domain.source_spec import WebhookSourceSpec
-    from infrastructure.sources.realtime.webhook import WebhookSource
+    from job_ftch.domain.source_spec import WebhookSourceSpec
+    from job_ftch.infrastructure.sources.realtime.webhook import WebhookSource
 
     spec = WebhookSourceSpec(path="/test")
     with (
-        patch("infrastructure.sources.realtime.webhook._AIOHTTP_AVAILABLE", False),
+        patch("job_ftch.infrastructure.sources.realtime.webhook._AIOHTTP_AVAILABLE", False),
         pytest.raises(ImportError, match="aiohttp"),
     ):
         WebhookSource(spec, MagicMock())
@@ -186,12 +186,12 @@ def test_webhook_source_requires_aiohttp_dep():
 def test_websocket_source_requires_websockets_dep():
     from unittest.mock import MagicMock, patch
 
-    from domain.source_spec import WebSocketSourceSpec
-    from infrastructure.sources.realtime.websocket import WebSocketSource
+    from job_ftch.domain.source_spec import WebSocketSourceSpec
+    from job_ftch.infrastructure.sources.realtime.websocket import WebSocketSource
 
     spec = WebSocketSourceSpec(url="wss://example.com/stream")
     with (
-        patch("infrastructure.sources.realtime.websocket._WEBSOCKETS_AVAILABLE", False),
+        patch("job_ftch.infrastructure.sources.realtime.websocket._WEBSOCKETS_AVAILABLE", False),
         pytest.raises(ImportError, match="websockets"),
     ):
         WebSocketSource(spec, MagicMock())

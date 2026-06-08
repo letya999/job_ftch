@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from application.registry import create_job_backend, create_search_backend
-from config import Settings
-from domain import Job, SourceKind
+from job_ftch.application.registry import create_job_backend, create_search_backend
+from job_ftch.config import Settings
+from job_ftch.domain import Job, SourceKind
 
 
 @pytest.mark.asyncio
@@ -64,8 +64,8 @@ async def test_phase16_sqlite_persistence_restart_search(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_phase16_metadata_no_mutation():
     """Verify that backend save does not mutate original job metadata."""
-    from domain import Job, SourceKind
-    from infrastructure.backends.jobs.sqlite import SQLiteJobBackend
+    from job_ftch.domain import Job, SourceKind
+    from job_ftch.infrastructure.backends.jobs.sqlite import SQLiteJobBackend
 
     # Mock settings
     class MockSettings:

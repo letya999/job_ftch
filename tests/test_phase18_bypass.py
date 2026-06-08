@@ -3,10 +3,10 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from infrastructure.bypass.managed import ManagedScraperBypass
-from infrastructure.bypass.noop import NoopBypass
-from infrastructure.bypass.proxy_rotator import ProxyRotatorBypass
-from infrastructure.bypass.stealth_browser import StealthBrowserBypass
+from job_ftch.infrastructure.bypass.managed import ManagedScraperBypass
+from job_ftch.infrastructure.bypass.noop import NoopBypass
+from job_ftch.infrastructure.bypass.proxy_rotator import ProxyRotatorBypass
+from job_ftch.infrastructure.bypass.stealth_browser import StealthBrowserBypass
 
 
 def test_noop_bypass_returns_client_unchanged():
@@ -47,7 +47,7 @@ def test_managed_scraper_bypass_scrapfly_sets_headers():
 
 
 def test_stealth_browser_raises_without_dep(monkeypatch):
-    import infrastructure.bypass.stealth_browser as stealth_browser
+    import job_ftch.infrastructure.bypass.stealth_browser as stealth_browser
 
     monkeypatch.setattr(stealth_browser, "_STEALTH_AVAILABLE", False)
 

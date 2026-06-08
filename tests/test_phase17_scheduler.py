@@ -3,9 +3,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from application.pipeline import RunSummary
-from application.scheduler import Scheduler
-from config import Settings
+from job_ftch.application.pipeline import RunSummary
+from job_ftch.application.scheduler import Scheduler
+from job_ftch.config import Settings
 
 
 @pytest.mark.asyncio

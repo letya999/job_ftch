@@ -8,10 +8,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from application.registry import create_llm
-from config import Settings
-from domain import RawItem
-from nodes.extraction import ExtractionNode
+from job_ftch.application.registry import create_llm
+from job_ftch.config import Settings
+from job_ftch.domain import RawItem
+from job_ftch.nodes.extraction import ExtractionNode
 
 
 def parse_args() -> argparse.Namespace:

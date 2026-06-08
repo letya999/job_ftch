@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from application import Pipeline
-from domain import RawItem, SourceKind, TriageRejectionReason
-from infrastructure.sources.local_fixture import LocalFixtureSource
-from infrastructure.stores.in_memory import InMemoryStore
-from nodes import HeuristicTriageNode, SanitizeNode
-from sinks.json_file import JsonFileSink
+from job_ftch.application import Pipeline
+from job_ftch.domain import RawItem, SourceKind, TriageRejectionReason
+from job_ftch.infrastructure.sources.local_fixture import LocalFixtureSource
+from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+from job_ftch.nodes import HeuristicTriageNode, SanitizeNode
+from job_ftch.sinks.json_file import JsonFileSink
 
 
 class StubSource:

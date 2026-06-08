@@ -8,8 +8,8 @@ import httpx
 import pytest
 import yaml
 
-from domain.source_spec import RestAPISourceSpec
-from infrastructure.sources.api.base import OfficialAPISource
+from job_ftch.domain.source_spec import RestAPISourceSpec
+from job_ftch.infrastructure.sources.api.base import OfficialAPISource
 
 
 @pytest.fixture

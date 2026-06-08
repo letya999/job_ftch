@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+import re
+
+from job_ftch.application.contracts import ClassificationResult
+from job_ftch.domain import FilterProfile
+
+
+class KeywordClassifierProvider:
+    model_id = "keyword_v1"
+
+    def __init__(self, *, profile: FilterProfile | None = None) -> None:
+        self._profile = profile or FilterProfile.default()
+
+    async def classify(self, text: str) -> ClassificationResult:
+        lowered = text.casefold()
+        # Check spam patterns (regex-based)
+        for pattern in self._profile.spam_signal_patterns:
+            if re.search(pattern, lowered):
+                return ClassificationResult("spam", 0.95, self.model_id)
+        # Check candidate patterns (substring)
+        if any(p.casefold() in lowered for p in self._profile.candidate_signal_patterns):
+            return ClassificationResult("candidate_seeking", 0.90, self.model_id)
+        return ClassificationResult("unknown", 0.5, self.model_id)
+
+    async def classify_batch(self, texts: list[str]) -> list[ClassificationResult]:
+        results = []
+        for text in texts:
+            results.append(await self.classify(text))
+        return results

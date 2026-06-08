@@ -3,9 +3,9 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from application.drops import RawItemDropped
-from application.filter_profile_loader import load_filter_profile
-from domain import (
+from job_ftch.application.drops import RawItemDropped
+from job_ftch.application.filter_profile_loader import load_filter_profile
+from job_ftch.domain import (
     FilterProfile,
     Job,
     JobValidationRejectionReason,
@@ -13,8 +13,8 @@ from domain import (
     SourceKind,
     TriageRejectionReason,
 )
-from nodes.relevance import AIRoleRelevanceNode
-from nodes.triage import HeuristicTriageNode
+from job_ftch.nodes.relevance import AIRoleRelevanceNode
+from job_ftch.nodes.triage import HeuristicTriageNode
 
 # Note: JobValidationRelevanceReason is not in domain/__init__.py, let's check domain/job_quality.py
 # Actually, the plan uses JobValidationRejectionReason.JOB_OUT_OF_SCOPE.

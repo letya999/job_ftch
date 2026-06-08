@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from application import Pipeline
-from domain import RawItem, SourceKind
-from infrastructure.sources.local_fixture import LocalFixtureSource
-from infrastructure.stores.in_memory import InMemoryStore
-from nodes import SanitizeNode
-from sinks.fanout import FanOutSink
-from sinks.json_file import JsonFileSink
+from job_ftch.application import Pipeline
+from job_ftch.domain import RawItem, SourceKind
+from job_ftch.infrastructure.sources.local_fixture import LocalFixtureSource
+from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+from job_ftch.nodes import SanitizeNode
+from job_ftch.sinks.fanout import FanOutSink
+from job_ftch.sinks.json_file import JsonFileSink
 
 
 class StubSource:
