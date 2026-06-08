@@ -66,6 +66,9 @@ class HybridSearchBackend(SearchBackend):
 
         # 3. Run Vector search
         try:
+            if not self.embedding_provider or not self.vector_backend:
+                return fts_groups[:limit]
+
             vectors = await self.embedding_provider.embed([query])
             if not vectors or not vectors[0]:
                 return fts_groups[:limit]

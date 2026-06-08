@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 try:
     from sentence_transformers import SentenceTransformer
 except ImportError:
-    SentenceTransformer = cast("Any", None)  # type: ignore[misc]
+    SentenceTransformer = cast("Any", None)
 
 from application.contracts import EmbeddingProvider
 from application.registry import register_embedding_provider
