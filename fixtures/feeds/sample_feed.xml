@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>AI Jobs Feed</title>
+    <link>https://example.com/jobs</link>
+    <description>Sample RSS feed for testing</description>
+    <item>
+      <title>LLM Engineer at AI Corp</title>
+      <link>https://example.com/jobs/llm-engineer</link>
+      <description>Build production LLM systems. Python, PyTorch, transformers.</description>
+      <guid>https://example.com/jobs/llm-engineer</guid>
+      <pubDate>Mon, 08 Jun 2026 10:00:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>MLOps Engineer at DataCo</title>
+      <link>https://example.com/jobs/mlops-engineer</link>
+      <description>Manage ML infrastructure, Kubernetes, MLflow.</description>
+      <guid>https://example.com/jobs/mlops-engineer</guid>
+      <pubDate>Sun, 07 Jun 2026 15:00:00 +0000</pubDate>
+    </item>
+  </channel>
+</rss>
