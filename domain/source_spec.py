@@ -99,6 +99,39 @@ class RestAPISourceSpec(BaseSourceSpec):
     auth_source_id: str | None = None
 
 
+class BrowserSourceSpec(BaseSourceSpec):
+    type: Literal["browser"] = "browser"
+    url: AnyHttpUrl
+    parser: str = "generic"
+    source_name: str | None = None
+
+
+class RSSFeedSourceSpec(BaseSourceSpec):
+    type: Literal["rss_feed"] = "rss_feed"
+    feed_url: AnyHttpUrl
+    incremental: bool = True
+    source_name: str | None = None
+
+
+class TelegramRealtimeSourceSpec(BaseSourceSpec):
+    type: Literal["telegram_realtime"] = "telegram_realtime"
+    entity: str = Field(min_length=1)
+    auth_source_id: str | None = None
+    source_name: str | None = None
+
+
+class WebhookSourceSpec(BaseSourceSpec):
+    type: Literal["webhook"] = "webhook"
+    path: str = "/webhook"
+    source_name: str | None = None
+
+
+class WebSocketSourceSpec(BaseSourceSpec):
+    type: Literal["websocket"] = "websocket"
+    url: str = Field(min_length=1)
+    source_name: str | None = None
+
+
 SourceSpec = Annotated[
     TelegramChannelSpec
     | TelegramGroupSpec
@@ -106,6 +139,11 @@ SourceSpec = Annotated[
     | DeclarativeHtmlSpec
     | CareerSiteSpec
     | LocalFixtureSpec
-    | RestAPISourceSpec,
+    | RestAPISourceSpec
+    | BrowserSourceSpec
+    | RSSFeedSourceSpec
+    | TelegramRealtimeSourceSpec
+    | WebhookSourceSpec
+    | WebSocketSourceSpec,
     Field(discriminator="type"),
 ]

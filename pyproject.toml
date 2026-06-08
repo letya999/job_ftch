@@ -36,6 +36,7 @@ embeddings = ["sentence-transformers>=3.0", "torch>=2.3"]
 qdrant = ["qdrant-client>=1.9"]
 pgvector = ["pgvector>=0.3"]
 ollama = ["httpx>=0.27"]
+feeds = ["feedparser>=6.0"]
 
 [project.entry-points."job_ftch.sources"]
 
@@ -97,7 +98,13 @@ exclude = [
 # The try/except ImportError + assignment-to-None pattern triggers
 # unused-ignore in envs without the package and assignment-error in envs with it.
 # Disabling warn_unused_ignores here keeps both envs happy.
-module = ["infrastructure.stores.sqlite", "infrastructure.stores.postgres"]
+module = [
+    "infrastructure.stores.sqlite",
+    "infrastructure.stores.postgres",
+    "infrastructure.sources.realtime.rss",
+    "infrastructure.sources.telegram_realtime",
+    "infrastructure.sources.browser.base",
+]
 warn_unused_ignores = false
 
 [tool.pytest.ini_options]

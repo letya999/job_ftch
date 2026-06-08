@@ -205,6 +205,11 @@ def load_extensions() -> None:
                 "infrastructure.backends.search.hybrid",
                 "infrastructure.sources.api.greenhouse",
                 "infrastructure.sources.api.hh",
+                "infrastructure.sources.browser.base",
+                "infrastructure.sources.realtime.rss",
+                "infrastructure.sources.realtime.webhook",
+                "infrastructure.sources.realtime.websocket",
+                "infrastructure.sources.telegram_realtime",
             ):
                 import_module(module_name)
             _builtins_loaded = True
