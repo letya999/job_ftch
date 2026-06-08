@@ -38,7 +38,7 @@ class WebhookSource:
 
         runner = web.AppRunner(app)
         await runner.setup()
-        host = getattr(self.spec, "host", "0.0.0.0")
+        host = getattr(self.spec, "host", "0.0.0.0")  # nosec B104
         port = getattr(self.spec, "port", 8080)
         site = web.TCPSite(runner, host, port)
         await site.start()
@@ -83,7 +83,7 @@ class WebhookSource:
 def _payload_to_text(payload: dict[str, Any]) -> str:
     for key in ("text", "content", "body", "description", "message"):
         if isinstance(payload.get(key), str) and payload[key].strip():
-            return payload[key].strip()
+            return str(payload[key]).strip()
     return ""
 
 

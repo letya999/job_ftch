@@ -47,8 +47,9 @@ class LeverAPISource(OfficialAPISource):
     def _extract_items(self, response_data: Any) -> list[dict[str, Any]]:
         # Lever returns a JSON array at root, not {"data": [...]}
         if isinstance(response_data, list):
-            return response_data
-        return response_data.get("data", [])
+            return list(response_data)
+        result = response_data.get("data", [])
+        return list(result)
 
     def _extract_cursor(self, response_data: Any) -> str | None:
         return None  # Lever uses limit param, no cursor pagination for public API

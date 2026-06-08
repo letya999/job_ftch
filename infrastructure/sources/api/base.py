@@ -114,7 +114,7 @@ class OfficialAPISource:
 
         return RawItem(
             source_kind=self.source_kind,
-            source_name=self.source_name,
+            source_name=self.source_name or "api",
             external_id=str(item.get("id") or mapped_data.get("external_id") or ""),
             url=mapped_data.get("url") or item.get("url") or item.get("absolute_url"),
             text=text,

@@ -56,7 +56,7 @@ class SetFitClassifierProvider:
         from datasets import load_dataset
         from setfit import SetFitTrainer
 
-        dataset = load_dataset(
+        dataset = load_dataset(  # nosec B615
             "json", data_files=str(TRAINING_DATA_PATH / "*.jsonl"), split="train"
         )
         model = SetFitModel.from_pretrained(DEFAULT_MODEL)

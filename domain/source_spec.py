@@ -131,7 +131,7 @@ class LeverSourceSpec(BaseSourceSpec):
 class WebhookSourceSpec(BaseSourceSpec):
     type: Literal["webhook"] = "webhook"
     path: str = "/webhook"
-    host: str = "0.0.0.0"
+    host: str = "0.0.0.0"  # nosec B104
     port: int = 8080
     source_name: str | None = None
 

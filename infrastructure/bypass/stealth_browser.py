@@ -3,7 +3,7 @@ from typing import Any
 from application.registry import register_bypass
 
 try:
-    import playwright_stealth  # type: ignore[import-untyped]
+    import playwright_stealth
 
     _STEALTH_AVAILABLE = True
 except ImportError:
