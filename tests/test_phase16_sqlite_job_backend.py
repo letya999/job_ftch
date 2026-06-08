@@ -33,7 +33,7 @@ async def test_sqlite_backend_save_get(settings, sample_job):
 
     await backend.save(sample_job)
 
-    saved_job = await backend.get_job("1")
+    saved_job = await backend.get_job(sample_job.stable_id)
     assert saved_job is not None
     assert saved_job.title == "Python Dev"
 

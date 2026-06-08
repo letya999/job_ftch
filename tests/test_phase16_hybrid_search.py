@@ -7,8 +7,11 @@ from infrastructure.backends.search.hybrid import HybridSearchBackend
 
 
 class FakeVectorBackend:
+    def __init__(self, job_v_id):
+        self.job_v_id = job_v_id
+
     async def search(self, vector, limit, filter=None):
-        return ["v1"]
+        return [self.job_v_id]
 
     async def upsert(self, job_id, vector, payload):
         pass
@@ -25,10 +28,20 @@ class FakeEmbeddingProvider:
 
 @pytest.fixture
 def hybrid_settings(tmp_path):
+    # Setup job ids
+    job_vec = Job(
+        raw_item_id="v1",
+        source_kind=SourceKind.DEBUG,
+        source_name="debug",
+        title="Vector match",
+        description="something else",
+        company="Acme",
+    )
+
     # Register fakes
     @register_vector_backend("fake")
     def _fake_v(s):
-        return FakeVectorBackend()
+        return FakeVectorBackend(job_vec.stable_id)
 
     @register_embedding_provider("fake")
     def _fake_e(s):
@@ -72,7 +85,7 @@ async def test_hybrid_search_flow(hybrid_settings):
 
     # 3. Search
     # Our FTS will match "keyword" -> "f1"
-    # Our FakeVector will always return -> "v1"
+    # Our FakeVector will always return -> stable_id of "v1"
     results = await backend.search("keyword", limit=10)
 
     assert len(results) >= 1
