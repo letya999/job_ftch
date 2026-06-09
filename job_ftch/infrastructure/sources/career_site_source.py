@@ -171,13 +171,7 @@ class CareerSiteSource(Source["RawItem"]):
         for i, scraper_name in enumerate(scraper_chain):
             try:
                 scraper_entry = resolve_scraper(scraper_name)
-                # Factory might return a coroutine (scrape) or an object with scrape()
-                scraper_impl = scraper_entry.factory(self.spec.scraper_config, self.http)
-                
-                if hasattr(scraper_impl, "scrape"):
-                    payload = await scraper_impl.scrape(url, self.spec.scraper_config, self.http)
-                else:
-                    payload = await scraper_impl(url, self.spec.scraper_config, self.http)
+                payload = await scraper_entry.factory(url, self.spec.scraper_config, self.http)
 
                 typed_payload = cast("ScrapedPostingPayload | None", payload)
                 if typed_payload and (typed_payload.title or typed_payload.description):
