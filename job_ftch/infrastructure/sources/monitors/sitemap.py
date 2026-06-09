@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlencode, urlparse
 

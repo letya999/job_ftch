@@ -29,6 +29,7 @@ dependencies = [
     "aiosqlite>=0.20",
     "feedparser>=6.0.12",
     "jmespath>=1.0",
+    "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]

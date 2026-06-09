@@ -7,8 +7,11 @@ from typing import TYPE_CHECKING
 from . import (
     ashby as ashby,
     breezy as breezy,
+    deel as deel,
     dom as dom,
+    eightfold as eightfold,
     greenhouse as greenhouse,
+    join as join,
     lever as lever,
     nextdata as nextdata,
     personio as personio,
@@ -17,6 +20,7 @@ from . import (
     rss_board as rss_board,
     sitemap as sitemap,
     smartrecruiters as smartrecruiters,
+    softgarden as softgarden,
     workable as workable,
     workday as workday,
 )
@@ -42,6 +46,10 @@ def load_monitors() -> None:
         "job_ftch.infrastructure.sources.monitors.rss_board",
         "job_ftch.infrastructure.sources.monitors.rippling",
         "job_ftch.infrastructure.sources.monitors.workable",
+        "job_ftch.infrastructure.sources.monitors.deel",
+        "job_ftch.infrastructure.sources.monitors.softgarden",
+        "job_ftch.infrastructure.sources.monitors.join",
+        "job_ftch.infrastructure.sources.monitors.eightfold",
     ):
         try:
             import_module(module_name)

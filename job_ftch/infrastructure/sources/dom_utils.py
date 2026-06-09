@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import warnings
+from typing import Any
 from html import escape
 from html.parser import HTMLParser
 
@@ -104,21 +105,21 @@ VOID_TAGS = frozenset(
 class FlattenParser(HTMLParser):
     """Parse HTML and emit flat contentful elements."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.elements: list[dict] = []
+        self.elements: list[dict[str, Any]] = []
         # Stack of (tag, attrs_dict, is_skipped)
-        self._stack: list[tuple[str, dict, bool]] = []
+        self._stack: list[tuple[str, dict[str, Any], bool]] = []
         self._skip_depth = 0  # > 0 means we're inside a skipped subtree
         self._current_text: list[str] = []
         self._current_block_tag: str | None = None
-        self._current_block_attrs: dict = {}
+        self._current_block_attrs: dict[str, Any] = {}
         self._block_depth = 0
         # Special <title> capture — works even inside <head> (SKIP_TAGS)
         self._in_title = False
         self._title_text: list[str] = []
 
-    def _flush_text(self):
+    def _flush_text(self) -> None:
         """Flush accumulated text as an element."""
         text = " ".join(self._current_text).strip()
         # Collapse whitespace
@@ -133,7 +134,7 @@ class FlattenParser(HTMLParser):
             )
         self._current_text = []
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_dict = {k: v or "" for k, v in attrs}
 
         # Special case: track <title> even inside skipped subtrees (e.g. <head>)
@@ -170,7 +171,7 @@ class FlattenParser(HTMLParser):
             self._current_block_attrs = attr_dict
             self._block_depth = len(self._stack)
 
-    def handle_endtag(self, tag: str):
+    def handle_endtag(self, tag: str) -> None:
         if tag == "title":
             self._in_title = False
 
@@ -207,7 +208,7 @@ class FlattenParser(HTMLParser):
                 self._current_block_tag = None
                 self._current_block_attrs = {}
 
-    def handle_data(self, data: str):
+    def handle_data(self, data: str) -> None:
         # Capture <title> text even inside skipped subtrees
         if self._in_title:
             stripped = data.strip()
@@ -219,7 +220,7 @@ class FlattenParser(HTMLParser):
         if stripped:
             self._current_text.append(stripped)
 
-    def finish(self):
+    def finish(self) -> None:
         self._flush_text()
         # Prepend <title> element if captured (even from inside <head>)
         if self._title_text:
@@ -236,7 +237,7 @@ class FlattenParser(HTMLParser):
                 )
 
 
-def flatten(html: str) -> list[dict]:
+def flatten(html: str) -> list[dict[str, Any]]:
     """Return flat list of contentful elements from HTML."""
     parser = FlattenParser()
     parser.feed(html)
@@ -266,7 +267,7 @@ def _norm(s: str) -> str:
     return s.translate(_UNICODE_PUNCT).lower()
 
 
-def _join_html(collected: list[dict]) -> str:
+def _join_html(collected: list[dict[str, Any]]) -> str:
     """Join collected elements into an HTML string, preserving tag structure.
 
     Consecutive ``li`` elements are grouped inside ``<ul>`` tags.
@@ -292,8 +293,8 @@ def _join_html(collected: list[dict]) -> str:
 
 
 def walk_steps(
-    elements: list[dict],
-    steps: list[dict],
+    elements: list[dict[str, Any]],
+    steps: list[dict[str, Any]],
     *,
     start: int = 0,
 ) -> tuple[dict[str, str | list[str] | None], int]:
@@ -355,7 +356,7 @@ def walk_steps(
 
         if field and is_range:
             # Collect elements from match, stopping on stop text / stop tag / stop count
-            collected_els: list[dict] = []
+            collected_els: list[dict[str, Any]] = []
             stop_idx = None
             for collected, i in enumerate(range(match_idx, len(elements))):
                 # Stop-text and stop-tag checks skip the matched element itself
