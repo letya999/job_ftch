@@ -6,7 +6,7 @@ structured fields from the HTML.
 
 from __future__ import annotations
 
-import logging
+import structlog
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -17,7 +17,7 @@ from job_ftch.infrastructure.sources.site_models import ScrapedPostingPayload
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.scrapers.dom")
+logger = structlog.get_logger("job_ftch.scrapers.dom")
 
 # ── Heuristic stop markers ────────────────────────────────────────────
 

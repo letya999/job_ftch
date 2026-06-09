@@ -1,0 +1,158 @@
+sources:
+  # --- Habr Career ---
+  - type: career_site
+    url: https://career.habr.com/vacancies/data_scientist
+    source_name: habr_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "career\\.habr\\.com/vacancies/\\d{5,}"
+    limit: 50
+
+  - type: career_site
+    url: "https://career.habr.com/vacancies?skills[]=296"
+    source_name: habr_ml_skill
+    monitor: dom
+    monitor_config:
+      url_filter: "career\\.habr\\.com/vacancies/\\d{5,}"
+    limit: 50
+
+  # --- GetMatch ---
+  - type: career_site
+    url: https://getmatch.ru/vacancies/data-scientist-machine-learning
+    source_name: getmatch_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "getmatch\\.ru/vacancies/\\d+"
+    limit: 50
+
+  # --- GeekJob ---
+  - type: career_site
+    url: https://geekjob.ru/vacancies
+    source_name: geekjob
+    monitor: dom
+    monitor_config:
+      url_filter: "geekjob\\.ru/vacancy/\\d+"
+    limit: 50
+
+  # --- Hirify ---
+  - type: career_site
+    url: https://hirify.me/jobs-in-russia
+    source_name: hirify_russia
+    monitor: dom
+    monitor_config:
+      url_filter: "hirify\\.me/jobs?/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: https://hirify.me/jobs-in-product-company
+    source_name: hirify_product
+    monitor: dom
+    monitor_config:
+      url_filter: "hirify\\.me/jobs?/\\d+"
+    limit: 50
+
+  # --- HH.ru ---
+  - type: career_site
+    url: "https://hh.ru/search/vacancy?text=machine+learning+engineer"
+    source_name: hh_mle
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.ru/vacancy/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: "https://hh.ru/search/vacancy?text=LLM+engineer"
+    source_name: hh_llm
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.ru/vacancy/\\d+"
+    limit: 50
+
+  # --- HH.kz ---
+  - type: career_site
+    url: https://hh.kz/vacancies/data-scientist
+    source_name: hhkz_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.kz/vacancy/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: https://hh.kz/vacancies/machine-learning-engineer
+    source_name: hhkz_mle
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.kz/vacancy/\\d+"
+    limit: 50
+
+  # --- KZ job boards ---
+  - type: career_site
+    url: "https://qyzmet.kz/%D0%B2%D0%B0%D0%BA%D0%B0%D0%BD%D1%81%D0%B8%D0%B8/Data-scientist"
+    source_name: qyzmet_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "qyzmet\\.kz/.*/(\\d+|[a-z0-9-]+-\\d+)"
+    limit: 50
+
+  - type: career_site
+    url: https://kazahstan.gorodrabot.kz/data_scientist
+    source_name: gorodrabot_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "gorodrabot\\.kz/.*/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: "https://gderabota.ru/%D0%B2%D0%B0%D0%BA%D0%B0%D0%BD%D1%81%D0%B8%D0%B8/data-scientist"
+    source_name: gderabota_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "gderabota\\.ru/.*/(\\d+|[a-z0-9-]+-\\d+)"
+    limit: 50
+
+  # --- Company career pages ---
+  - type: career_site
+    url: https://www.tbank.ru/career/it/vacancies/
+    source_name: tbank_it
+    monitor: auto
+    limit: 50
+
+  - type: career_site
+    url: https://www.tbank.ru/career/it/ml/
+    source_name: tbank_ml
+    monitor: auto
+    limit: 50
+
+  - type: career_site
+    url: https://career.avito.com/vacancies/
+    source_name: avito_career
+    monitor: auto
+    limit: 50
+
+  - type: career_site
+    url: https://ozon.tech/vacancies/
+    source_name: ozon_tech
+    monitor: auto
+    limit: 50
+
+  - type: career_site
+    url: https://h.careers/company/vk
+    source_name: vk_careers
+    monitor: dom
+    monitor_config:
+      url_filter: "h\\.careers/(job|vacancy)/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: https://kolesa.group/career/job
+    source_name: kolesa_career
+    monitor: auto
+    limit: 50
+
+  - type: career_site
+    url: https://people.beeline.kz/
+    source_name: beeline_kz
+    monitor: dom
+    monitor_config:
+      url_filter: "beeline\\.kz/(vacancy|job)/\\d+"
+    limit: 50

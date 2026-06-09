@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
+from job_ftch.domain.models import SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_models import (
     DiscoveredPostingPayload,
@@ -137,21 +138,31 @@ def payload_to_raw_item(
 ) -> RawItem:
     """Convert infra-layer payload to domain-layer RawItem."""
     description = enrich_description(payload)
+    title = payload.title or "Unknown Job"
+    text = f"{title}\n\n{description}" if description else title
+
+    meta: dict[str, Any] = {**(payload.metadata or {}), **(payload.localizations or {})}
+    meta["title"] = title
+    if payload.locations:
+        meta["locations"] = payload.locations
+    if payload.employment_type:
+        meta["employment_type"] = payload.employment_type
+    if payload.job_location_type:
+        meta["job_location_type"] = payload.job_location_type
+    if payload.date_posted:
+        meta["date_posted"] = payload.date_posted
+    if payload.base_salary:
+        meta["base_salary"] = payload.base_salary
+    if payload.language:
+        meta["language"] = payload.language
+    if payload.extras:
+        meta["extras"] = payload.extras
+
     return build_raw_item(
         url=payload.url,
-        title=payload.title or "Unknown Job",
-        description=description or "",
+        text=text,
         source_name=source_name,
-        source_kind="career_site",
-        locations=payload.locations,
-        employment_type=payload.employment_type,
-        job_location_type=payload.job_location_type,
-        date_posted=payload.date_posted,
-        base_salary=payload.base_salary,
-        language=payload.language,
-        metadata={
-            **(payload.metadata or {}),
-            **(payload.localizations or {}),
-            "extras": payload.extras,
-        },
+        source_kind=SourceKind.CAREER_SITE,
+        external_id=None,
+        metadata=meta,
     )
