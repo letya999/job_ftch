@@ -55,6 +55,14 @@ class CareerSiteSpec(BaseSourceSpec):
     url: str = Field(min_length=1)
     limit: int = Field(default=100, gt=0)
     source_name: str | None = None
+    monitor: str | None = "auto"  # registered monitor name, or "auto" for auto-detect
+    monitor_config: dict = Field(default_factory=dict)  # passed to monitor
+    scraper: str | None = None  # registered scraper name; None = auto from monitor
+    scraper_config: dict = Field(default_factory=dict)  # passed to scraper
+    scraper_fallback: list[str] = Field(default_factory=list)  # fallback scraper chain
+    detail_limit: int | None = None  # max detail pages to scrape (None = unlimited)
+    url_filter: str | dict | None = None  # regex or {include, exclude}
+    url_transform: dict | None = None  # {find, replace} regex rewrite
 
 
 class LocalFixtureSpec(BaseSourceSpec):

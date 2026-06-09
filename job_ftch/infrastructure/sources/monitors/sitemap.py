@@ -1,0 +1,240 @@
+"""XML sitemap monitor ported from jobseek."""
+
+from __future__ import annotations
+
+import logging
+import xml.etree.ElementTree as ET
+from typing import TYPE_CHECKING, Any
+from urllib.parse import parse_qs, urlencode, urlparse
+
+from job_ftch.application.registry import register_monitor
+
+if TYPE_CHECKING:
+    import httpx
+
+logger = logging.getLogger("job_ftch.monitors.sitemap")
+
+MAX_URLS = 50_000
+NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
+_JOB_KEYWORDS = ("job", "career", "posting", "position", "vacancy", "opening")
+
+_SITEMAP_HEADERS = {
+    "User-Agent": "jobseek-crawler (+https://jseek.co/)",
+    "Accept": "application/xml,text/xml,*/*;q=0.8",
+}
+
+
+class SitemapDiscoveryError(Exception):
+    """Raised when no sitemap URL can be found for a board."""
+
+
+def _strip_utm(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.query:
+        return url
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    filtered = {k: v for k, v in params.items() if not k.startswith("utm_")}
+    if not filtered:
+        return parsed._replace(query="").geturl()
+    return parsed._replace(query=urlencode(filtered, doseq=True)).geturl()
+
+
+def _detect_ns(root: ET.Element) -> str:
+    tag = root.tag
+    if tag.startswith("{"):
+        return tag[: tag.index("}") + 1]
+    return NS
+
+
+def _extract_urls(root: ET.Element) -> list[str]:
+    ns = _detect_ns(root)
+    urls: list[str] = []
+    for url_el in root.findall(f"{ns}url"):
+        loc = url_el.find(f"{ns}loc")
+        if loc is not None and loc.text:
+            urls.append(_strip_utm(loc.text.strip()))
+    if not urls:
+        for url_el in root.findall("url"):
+            loc = url_el.find("loc")
+            if loc is not None and loc.text:
+                urls.append(_strip_utm(loc.text.strip()))
+    return urls
+
+
+def _is_sitemap_index(root: ET.Element) -> bool:
+    tag = root.tag.lower()
+    return "sitemapindex" in tag
+
+
+def _extract_child_sitemaps(root: ET.Element) -> list[str]:
+    ns = _detect_ns(root)
+    urls: list[str] = []
+    for el in root.findall(f"{ns}sitemap"):
+        loc = el.find(f"{ns}loc")
+        if loc is not None and loc.text:
+            urls.append(el.text.strip())
+    if not urls:
+        for el in root.findall("sitemap"):
+            loc = el.find("loc")
+            if loc is not None and loc.text:
+                urls.append(el.text.strip())
+    return urls
+
+
+def _is_job_related(url: str) -> bool:
+    path = urlparse(url).path.lower()
+    return any(kw in path for kw in _JOB_KEYWORDS)
+
+
+async def _try_fetch_xml(url: str, client: httpx.AsyncClient) -> ET.Element | None:
+    try:
+        resp = await client.get(url, headers=_SITEMAP_HEADERS, follow_redirects=True)
+        if resp.status_code != 200:
+            return None
+        content_type = resp.headers.get("content-type", "")
+        if "xml" not in content_type and not resp.text.strip().startswith("<?xml"):
+            return None
+        return ET.fromstring(resp.text)
+    except Exception:
+        return None
+
+
+def _walk_up_candidates(board_url: str) -> list[str]:
+    parsed = urlparse(board_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    path = parsed.path.rstrip("/")
+
+    candidates: list[str] = []
+    candidates.append(f"{origin}{path}/sitemap.xml")
+
+    while "/" in path:
+        path = path.rsplit("/", 1)[0]
+        if path:
+            candidates.append(f"{origin}{path}/sitemap.xml")
+
+    root = f"{origin}/sitemap.xml"
+    if root not in candidates:
+        candidates.append(root)
+
+    return candidates
+
+
+def _common_nonstandard_candidates(board_url: str) -> list[str]:
+    parsed = urlparse(board_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    return [
+        f"{origin}/sitemaps/sitemapIndex",
+        f"{origin}/sitemap/sitemap.xml",
+        f"{origin}/sitemaps/sitemap.xml",
+    ]
+
+
+async def _parse_robots_sitemaps(board_url: str, client: httpx.AsyncClient) -> list[str]:
+    parsed = urlparse(board_url)
+    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+    try:
+        resp = await client.get(robots_url, headers=_SITEMAP_HEADERS, follow_redirects=True)
+        if resp.status_code != 200:
+            return []
+    except Exception:
+        return []
+
+    sitemaps: list[str] = []
+    for line in resp.text.splitlines():
+        line = line.strip()
+        if line.lower().startswith("sitemap:"):
+            url = line.split(":", 1)[1].strip()
+            if url:
+                sitemaps.append(url)
+    return sitemaps
+
+
+async def _resolve_sitemap_index(
+    root: ET.Element,
+    client: httpx.AsyncClient,
+    *,
+    seen: set[str] | None = None,
+) -> list[ET.Element]:
+    children = _extract_child_sitemaps(root)
+    if not children:
+        return []
+    job_children = [u for u in children if _is_job_related(u)]
+    targets = job_children if job_children else children
+    if seen is None:
+        seen = set()
+    results: list[ET.Element] = []
+    for target in targets:
+        if target in seen:
+            continue
+        seen.add(target)
+        child_root = await _try_fetch_xml(target, client)
+        if child_root is None:
+            continue
+        if _is_sitemap_index(child_root):
+            results.extend(await _resolve_sitemap_index(child_root, client, seen=seen))
+        else:
+            results.append(child_root)
+    return results
+
+
+async def _discover_sitemap(board_url: str, client: httpx.AsyncClient) -> tuple[str, list[ET.Element]]:
+    all_candidates = (
+        _walk_up_candidates(board_url)
+        + _common_nonstandard_candidates(board_url)
+        + await _parse_robots_sitemaps(board_url, client)
+    )
+
+    for candidate in all_candidates:
+        root = await _try_fetch_xml(candidate, client)
+        if root is not None:
+            if _is_sitemap_index(root):
+                children = await _resolve_sitemap_index(root, client)
+                if children:
+                    return candidate, children
+            else:
+                return candidate, [root]
+
+    raise SitemapDiscoveryError(f"No sitemap found for {board_url}")
+
+
+async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> tuple[set[str], str | None]:
+    board_url = spec.url
+    cached_sitemap = spec.monitor_config.get("sitemap_url")
+    new_sitemap_url: str | None = None
+
+    if cached_sitemap:
+        root = await _try_fetch_xml(cached_sitemap, client)
+        if root is None:
+            sitemap_url, roots = await _discover_sitemap(board_url, client)
+            new_sitemap_url = sitemap_url
+        else:
+            if _is_sitemap_index(root):
+                roots = await _resolve_sitemap_index(root, client)
+            else:
+                roots = [root]
+    else:
+        sitemap_url, roots = await _discover_sitemap(board_url, client)
+        new_sitemap_url = sitemap_url
+
+    urls: list[str] = []
+    for r in roots:
+        urls.extend(_extract_urls(r))
+
+    if len(urls) > MAX_URLS:
+        urls = sorted(urls)[:MAX_URLS]
+
+    return set(urls), new_sitemap_url
+
+
+async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[str, Any] | None:
+    if client is None:
+        return None
+    try:
+        sitemap_url, roots = await _discover_sitemap(url, client)
+        url_count = sum(len(_extract_urls(r)) for r in roots)
+        return {"sitemap_url": sitemap_url, "urls": url_count}
+    except Exception:
+        return None
+
+
+register_monitor("sitemap", discover, cost=20, rich=False, can_handle=can_handle)

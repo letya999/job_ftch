@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
     from job_ftch.domain import (
+        CareerSiteSpec,
         DuplicateRecord,
         Job,
         JobGroup,
@@ -226,3 +227,21 @@ class IngestMode(Protocol):
         on_item: Callable[[Any], Awaitable[None]],
     ) -> None:
         """Drive source fetch and call on_item for each yielded item."""
+
+
+@runtime_checkable
+class BoardMonitor(Protocol):
+    """Discovers what jobs exist on a board.
+
+    Returns DiscoveredPostingPayload (rich) or set[str] (URL-only).
+    Defined as Protocol to stay infra-agnostic; concrete types in infra layer.
+    """
+
+    async def discover(self, spec: CareerSiteSpec, http: Any) -> Any: ...
+
+
+@runtime_checkable
+class JobScraper(Protocol):
+    """Extracts structured content from a single job URL."""
+
+    async def scrape(self, url: str, config: dict, http: Any) -> Any: ...

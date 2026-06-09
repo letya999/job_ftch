@@ -14,7 +14,7 @@ from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import AuthProvider
-    from job_ftch.domain.source_spec import CareerSiteSpec, DeclarativeHtmlSpec
+    from job_ftch.domain.source_spec import DeclarativeHtmlSpec
 
 
 def _clean_text(value: str) -> str:
@@ -270,25 +270,6 @@ def _build_declarative_html_source_v2(
         client,
         spec.url,
         config,
-        limit=spec.limit,
-        own_client=True,
-    )
-
-
-@register_source_v2("career_site")
-def _build_career_site_source_v2(
-    spec: CareerSiteSpec,
-    auth: AuthProvider,
-) -> object:
-    del auth
-    from job_ftch.infrastructure.sources.career_site import (
-        CareerSiteSource,
-        build_default_http_client,
-    )
-
-    return CareerSiteSource(
-        build_default_http_client(),
-        spec.url,
         limit=spec.limit,
         own_client=True,
     )

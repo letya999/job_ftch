@@ -14,7 +14,7 @@ from job_ftch.domain.source_spec import (
     TelegramChannelSpec,
 )
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
-from job_ftch.infrastructure.sources.career_site import CareerSiteSource
+from job_ftch.infrastructure.sources.career_site_source import CareerSiteSource
 from job_ftch.infrastructure.sources.local_fixture import LocalFixtureSource
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
@@ -144,7 +144,7 @@ def test_create_source_from_spec_career_site_uses_runtime_auto_detection():
     source = create_source_from_spec(spec)
 
     assert isinstance(source, CareerSiteSource)
-    assert source._parser is None
+    assert source.spec.monitor in (None, "auto")
 
 
 def test_env_auth_provider_resolve_no_matching_vars(monkeypatch):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from importlib import import_module
 from importlib.metadata import entry_points
 from threading import Lock
@@ -46,6 +47,23 @@ FParser = TypeVar("FParser", bound=ParserFactory)
 FAny = TypeVar("FAny", bound=Callable[..., Any])
 
 
+@dataclass(frozen=True)
+class MonitorEntry:
+    name: str
+    cost: int  # lower = cheaper = tried first in auto-detect
+    rich: bool  # True = returns full payload, no scraper needed
+    factory: Callable  # (spec, http, auth) -> monitor instance OR discover coroutine
+    can_handle: Callable | None = None  # async (url, client) -> dict | None
+
+
+@dataclass(frozen=True)
+class ScraperEntry:
+    name: str
+    factory: Callable  # (config, http) -> scraper instance OR scrape coroutine
+    can_handle: Callable | None = None  # (list[str]) -> dict | None  (static HTML probe)
+    needs_browser: bool = False
+
+
 _source_factories: dict[str, SourceFactory] = {}
 _source_spec_factories: dict[str, SourceSpecFactory] = {}
 _sink_factories: dict[str, SinkFactory] = {}
@@ -53,6 +71,9 @@ _store_factories: dict[str, StoreFactory] = {}
 _job_group_store_factories: dict[str, StoreFactory] = {}
 _llm_factories: dict[str, LLMFactory] = {}
 _parser_factories: list[tuple[str, ParserMatcher, ParserFactory]] = []
+
+_MONITOR_REGISTRY: list[MonitorEntry] = []
+_SCRAPER_REGISTRY: dict[str, ScraperEntry] = {}
 
 _bypass_factories: dict[str, Callable[..., Any]] = {}
 _job_backend_factories: dict[str, Callable[..., Any]] = {}
@@ -178,6 +199,89 @@ def register_vector_backend(name: str) -> Callable[[FAny], FAny]:
     return decorator
 
 
+def register_monitor(
+    name: str,
+    factory: Callable,
+    cost: int,
+    rich: bool,
+    can_handle: Callable | None = None,
+) -> None:
+    """Register a board monitor and keep registry sorted by cost."""
+    entry = MonitorEntry(
+        name=name,
+        factory=factory,
+        cost=cost,
+        rich=rich,
+        can_handle=can_handle,
+    )
+    _MONITOR_REGISTRY.append(entry)
+    _MONITOR_REGISTRY.sort(key=lambda x: x.cost)
+
+
+def register_scraper(
+    name: str,
+    factory: Callable,
+    can_handle: Callable | None = None,
+    needs_browser: bool = False,
+) -> None:
+    """Register a job scraper."""
+    _SCRAPER_REGISTRY[name] = ScraperEntry(
+        name=name,
+        factory=factory,
+        can_handle=can_handle,
+        needs_browser=needs_browser,
+    )
+
+
+def resolve_monitor(name: str) -> MonitorEntry:
+    """Find a monitor by name."""
+    load_extensions()
+    for entry in _MONITOR_REGISTRY:
+        if entry.name == name:
+            return entry
+    msg = f"Unsupported monitor: {name}"
+    raise ValueError(msg)
+
+
+def resolve_scraper(name: str) -> ScraperEntry:
+    """Find a scraper by name."""
+    load_extensions()
+    entry = _SCRAPER_REGISTRY.get(name)
+    if entry is None:
+        msg = f"Unsupported scraper: {name}"
+        raise ValueError(msg)
+    return entry
+
+
+async def detect_monitor_type(url: str, client: Any, pw: Any = None) -> tuple[str, dict] | None:
+    """Iterate _MONITOR_REGISTRY sorted by cost, call can_handle() on each."""
+    load_extensions()
+    for entry in _MONITOR_REGISTRY:
+        if entry.can_handle is None:
+            continue
+        # Some can_handle may need browser (pw)
+        try:
+            # We assume can_handle is async if it takes client
+            # The plan says: async (url, client) -> dict | None
+            result = await entry.can_handle(url, client)
+            if result is not None:
+                return entry.name, result
+        except Exception:
+            # Skip if detection fails
+            continue
+    return None
+
+
+def all_monitor_names() -> frozenset[str]:
+    load_extensions()
+    return frozenset(e.name for e in _MONITOR_REGISTRY)
+
+
+def rich_monitor_names() -> frozenset[str]:
+    load_extensions()
+    return frozenset(e.name for e in _MONITOR_REGISTRY if e.rich)
+
+
 def load_extensions() -> None:
     global _builtins_loaded, _entry_points_loaded
     with _lock:
@@ -186,6 +290,7 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.sources.local_fixture",
                 "job_ftch.infrastructure.sources.telegram",
                 "job_ftch.infrastructure.sources.career_site",
+                "job_ftch.infrastructure.sources.career_site_source",
                 "job_ftch.infrastructure.sources.declarative",
                 "job_ftch.infrastructure.stores.in_memory",
                 "job_ftch.infrastructure.stores.sqlite",
@@ -210,6 +315,8 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.sources.realtime.webhook",
                 "job_ftch.infrastructure.sources.realtime.websocket",
                 "job_ftch.infrastructure.sources.telegram_realtime",
+                "job_ftch.infrastructure.sources.monitors",
+                "job_ftch.infrastructure.sources.scrapers",
             ):
                 import_module(module_name)
             _builtins_loaded = True
