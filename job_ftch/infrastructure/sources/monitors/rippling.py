@@ -17,7 +17,7 @@ from job_ftch.infrastructure.sources.monitors.shared import (
 if TYPE_CHECKING:
     import httpx
 
-    from job_ftch.infrastructure.sources.site_models import MonitorResult
+    from job_ftch.domain.site_models import MonitorResult
 
 logger = logging.getLogger("job_ftch.monitors.rippling")
 
@@ -43,7 +43,9 @@ def _posting_url(slug: str, uuid: str) -> str:
     return f"https://ats.rippling.com/{slug}/jobs/{uuid}"
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | set[str]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | set[str]:
     board_url = spec.url
     metadata = spec.monitor_config
     slug = metadata.get("slug") or _slug_from_url(board_url)
@@ -54,7 +56,7 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> Mo
     resp = await client.get(_api_list_url(slug))
     resp.raise_for_status()
 
-    job_list: list[dict] = resp.json()
+    job_list: list[dict[str, Any]] = resp.json()
     if not isinstance(job_list, list):
         return set()
 

@@ -2,27 +2,28 @@
 
 from __future__ import annotations
 
-import logging
 import re
-import defusedxml.ElementTree as ET
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+import defusedxml.ElementTree as ET
+import structlog
+
 from job_ftch.application.registry import register_monitor
+from job_ftch.domain.site_models import (
+    DiscoveredPostingPayload,
+    MonitorResult,
+)
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     fetch_page_text,
     truncated_rich_result,
 )
-from job_ftch.infrastructure.sources.site_models import (
-    DiscoveredPostingPayload,
-    MonitorResult,
-)
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.monitors.personio")
+logger = structlog.get_logger("job_ftch.monitors.personio")
 
 _DOMAIN_RE = re.compile(r"^([\w-]+)\.jobs\.personio\.(\w+)$")
 _IGNORE_SLUGS = frozenset({"www", "api", "app", "docs", "help", "support", "status"})
@@ -59,7 +60,7 @@ def _board_base(slug: str, domain: str = "de") -> str:
 def _text(el: ET.Element, tag: str) -> str | None:
     child = el.find(tag)
     if child is not None and child.text:
-        return child.text.strip()
+        return str(child.text).strip()
     return None
 
 
@@ -80,7 +81,9 @@ def _parse_description(position: ET.Element) -> str | None:
     return "\n".join(parts) if parts else None
 
 
-def _parse_job(position: ET.Element, slug: str, domain: str = "de") -> DiscoveredPostingPayload | None:
+def _parse_job(
+    position: ET.Element, slug: str, domain: str = "de"
+) -> DiscoveredPostingPayload | None:
     pos_id = _text(position, "id")
     title = _text(position, "name")
     if not pos_id:
@@ -101,7 +104,9 @@ def _parse_job(position: ET.Element, slug: str, domain: str = "de") -> Discovere
     )
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | list[DiscoveredPostingPayload]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | list[DiscoveredPostingPayload]:
     board_url = spec.url
     metadata = spec.monitor_config
     slug = metadata.get("slug") or _slug_from_url(board_url)

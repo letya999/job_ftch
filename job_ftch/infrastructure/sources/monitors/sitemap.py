@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import logging
-import defusedxml.ElementTree as ET
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlencode, urlparse
+
+import defusedxml.ElementTree as ET
+import structlog
 
 from job_ftch.application.registry import register_monitor
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.monitors.sitemap")
+logger = structlog.get_logger("job_ftch.monitors.sitemap")
 
 MAX_URLS = 50_000
 NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
@@ -42,7 +43,7 @@ def _strip_utm(url: str) -> str:
 def _detect_ns(root: ET.Element) -> str:
     tag = root.tag
     if tag.startswith("{"):
-        return tag[: tag.index("}") + 1]
+        return str(tag[: tag.index("}") + 1])
     return NS
 
 
@@ -177,7 +178,9 @@ async def _resolve_sitemap_index(
     return results
 
 
-async def _discover_sitemap(board_url: str, client: httpx.AsyncClient) -> tuple[str, list[ET.Element]]:
+async def _discover_sitemap(
+    board_url: str, client: httpx.AsyncClient
+) -> tuple[str, list[ET.Element]]:
     all_candidates = (
         _walk_up_candidates(board_url)
         + _common_nonstandard_candidates(board_url)
@@ -197,7 +200,9 @@ async def _discover_sitemap(board_url: str, client: httpx.AsyncClient) -> tuple[
     raise SitemapDiscoveryError(f"No sitemap found for {board_url}")
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> tuple[set[str], str | None]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> tuple[set[str], str | None]:
     board_url = spec.url
     cached_sitemap = spec.monitor_config.get("sitemap_url")
     new_sitemap_url: str | None = None

@@ -77,6 +77,7 @@ async def test_habr_ds_rss_returns_items(
 async def test_habr_rss_incremental_dedup(
     habr_ml_spec: RSSFeedSourceSpec, in_memory_store, null_auth
 ) -> None:
+    pytest.importorskip("feedparser")
     source = RSSFeedSource(spec=habr_ml_spec, auth=null_auth, store=in_memory_store)
 
     # First fetch
@@ -104,6 +105,7 @@ async def test_habr_rss_fixture_roundtrip(
     habr_ml_spec: RSSFeedSourceSpec, in_memory_store, habr_ml_rss_xml: str, monkeypatch, null_auth
 ) -> None:
     pytest.importorskip("feedparser")
+
     # Mock httpx.AsyncClient.get
     class MockResponse:
         def __init__(self, text: str):

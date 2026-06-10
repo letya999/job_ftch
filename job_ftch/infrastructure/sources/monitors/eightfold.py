@@ -12,8 +12,8 @@ from urllib.parse import urlparse
 import structlog
 
 from job_ftch.application.registry import register_monitor
-from job_ftch.infrastructure.sources.monitors.sitemap import discover as sitemap_discover
 from job_ftch.infrastructure.sources.monitors.shared import fetch_page_text
+from job_ftch.infrastructure.sources.monitors.sitemap import discover as sitemap_discover
 
 if TYPE_CHECKING:
     import httpx
@@ -41,9 +41,10 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> se
     config = spec.monitor_config or {}
 
     sitemap_url = config.get("sitemap_url") or _sitemap_url(board_url)
-    
+
     # Create a mock spec for sitemap monitor
     from dataclasses import dataclass
+
     @dataclass
     class MockSpec:
         url: str
@@ -53,10 +54,10 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> se
         url=board_url,
         monitor_config={"sitemap_url": sitemap_url},
     )
-    
+
     result = await sitemap_discover(sitemap_spec, client, auth=auth)
     urls, _ = result
-    
+
     # Filter to job URLs only
     job_urls = {u for u in urls if "/careers/job/" in u}
     return job_urls

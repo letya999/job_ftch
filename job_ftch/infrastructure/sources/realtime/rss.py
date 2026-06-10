@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import structlog
 
-from job_ftch.application.registry import register_source_v2
+from job_ftch.application.registry import register_source_spec
 from job_ftch.domain import RawItem, SourceKind
 
 if TYPE_CHECKING:
@@ -106,6 +106,6 @@ class RSSFeedSource:
             await self.store.set_run_state(self._seen_key, ",".join(trimmed))
 
 
-@register_source_v2("rss_feed")
-def _create_rss_source(spec: Any, auth: AuthProvider) -> RSSFeedSource:
+@register_source_spec("rss")
+def _create_rss(spec: Any, auth: AuthProvider, store: Any = None) -> RSSFeedSource:
     return RSSFeedSource(spec, auth)

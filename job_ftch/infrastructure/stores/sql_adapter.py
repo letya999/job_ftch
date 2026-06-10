@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+from typing import cast
 
 from job_ftch.domain import DuplicateRecord, RememberedDedupKey
 
@@ -137,3 +138,20 @@ class SQLStoreAdapter(abc.ABC):
     ) -> None:
         actual_key = _ns(source_kind, source_name, key)
         await self.set(actual_key, value)
+
+    async def get_source_strategy(self, domain: str) -> dict[str, str] | None:
+        import json
+
+        raw = await self.get(f"strategy:{domain}")
+        if raw:
+            try:
+                return cast("dict[str, str]", json.loads(raw))
+            except Exception:
+                return None
+        return None
+
+    async def save_source_strategy(self, domain: str, monitor: str, bypass: str) -> None:
+        import json
+
+        value = json.dumps({"monitor": monitor, "bypass": bypass})
+        await self.set(f"strategy:{domain}", value)

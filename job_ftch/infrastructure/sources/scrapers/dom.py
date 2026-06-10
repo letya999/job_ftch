@@ -6,13 +6,14 @@ structured fields from the HTML.
 
 from __future__ import annotations
 
-import structlog
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+import structlog
+
 from job_ftch.application.registry import register_scraper
+from job_ftch.domain.site_models import ScrapedPostingPayload
 from job_ftch.infrastructure.sources.dom_utils import flatten, walk_steps
-from job_ftch.infrastructure.sources.site_models import ScrapedPostingPayload
 
 if TYPE_CHECKING:
     import httpx
@@ -33,34 +34,53 @@ _STOP_MARKERS = [
 ]
 
 
-def _heuristic_steps(elements: list[dict]) -> list[dict] | None:
+def _normalize_title(text: str) -> str:
+    cleaned = " ".join(text.split())
+    for separator in (" | ", " — ", " - "):
+        if separator in cleaned:
+            left, _, _ = cleaned.partition(separator)
+            if left.strip():
+                return left.strip()
+    return cleaned
+
+
+def _heuristic_steps(elements: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
     """Generate heuristic extraction steps from flattened elements."""
     if not elements:
         return None
 
-    # Find first h1 — title
-    h1_idx = None
+    # Find first h1; fall back to <title> on pages that do not expose a body h1.
+    anchor_idx = None
+    anchor_tag = None
     for i, el in enumerate(elements):
         if el["tag"] == "h1":
-            h1_idx = i
+            anchor_idx = i
+            anchor_tag = "h1"
             break
 
-    if h1_idx is None:
+    if anchor_idx is None:
+        for i, el in enumerate(elements):
+            if el["tag"] == "title":
+                anchor_idx = i
+                anchor_tag = "title"
+                break
+
+    if anchor_idx is None or anchor_tag is None:
         return None
 
-    steps: list[dict] = [{"tag": "h1", "field": "title"}]
+    steps: list[dict[str, Any]] = [{"tag": anchor_tag, "field": "title"}]
 
-    # Description: content after h1, stop at known marker
-    desc_step: dict = {
-        "tag": "h1",
+    # Description: content after title anchor, stop at known marker.
+    desc_step: dict[str, Any] = {
+        "tag": anchor_tag,
         "offset": 1,
         "field": "description",
         "html": True,
         "optional": True,
     }
 
-    # Look for a stop marker in elements after h1
-    for i in range(h1_idx + 1, len(elements)):
+    # Look for a stop marker in elements after the anchor.
+    for i in range(anchor_idx + 1, len(elements)):
         text = elements[i]["text"]
         for marker in _STOP_MARKERS:
             if marker.lower() in text.lower() and len(text) < 60:
@@ -71,7 +91,7 @@ def _heuristic_steps(elements: list[dict]) -> list[dict] | None:
 
     # If no stop marker found, use stop_count based on remaining content
     if "stop" not in desc_step:
-        remaining = len(elements) - h1_idx - 1
+        remaining = len(elements) - anchor_idx - 1
         desc_step["stop_count"] = min(remaining, 50)
 
     steps.append(desc_step)
@@ -94,7 +114,7 @@ def _heuristic_steps(elements: list[dict]) -> list[dict] | None:
     return steps
 
 
-def can_handle(htmls: list[str]) -> dict | None:
+def can_handle(htmls: list[str]) -> dict[str, Any] | None:
     """Generate heuristic extraction steps from multiple page HTMLs."""
     best_steps = None
 
@@ -110,21 +130,21 @@ def can_handle(htmls: list[str]) -> dict | None:
     if not best_steps:
         return None
 
-    # Validate h1 exists on other pages too
-    h1_found = 0
+    anchor_tag = best_steps[0].get("tag")
+    anchor_found = 0
     for html in htmls:
         elements = flatten(html)
-        if any(el["tag"] == "h1" for el in elements):
-            h1_found += 1
+        if any(el["tag"] == anchor_tag for el in elements):
+            anchor_found += 1
 
-    if h1_found < len(htmls) / 2:
+    if anchor_found < len(htmls) / 2:
         return None
 
     return {"steps": best_steps}
 
 
 def _map_to_payload(raw: dict[str, Any]) -> ScrapedPostingPayload:
-    """Map extraction result dict to a ScrapedPostingPayload."""
+    """Map extraction result dict[str, Any] to a ScrapedPostingPayload."""
     kwargs: dict[str, Any] = {}
     metadata: dict[str, Any] = {}
     extras: dict[str, Any] = {}
@@ -143,7 +163,9 @@ def _map_to_payload(raw: dict[str, Any]) -> ScrapedPostingPayload:
             "base_salary",
             "language",
         ):
-            kwargs[key] = value
+            kwargs[key] = (
+                _normalize_title(value) if key == "title" and isinstance(value, str) else value
+            )
         elif key == "location" or key == "locations":
             kwargs["locations"] = value if isinstance(value, list) else [value]
         elif key in ("qualifications", "responsibilities", "skills", "requirements", "benefits"):
@@ -159,7 +181,7 @@ def _map_to_payload(raw: dict[str, Any]) -> ScrapedPostingPayload:
     return ScrapedPostingPayload(**kwargs)
 
 
-def _fragment_start(url: str, elements: list[dict]) -> int:
+def _fragment_start(url: str, elements: list[dict[str, Any]]) -> int:
     """Return the element index matching the URL fragment, or 0."""
     fragment = urlparse(url).fragment
     if not fragment:
@@ -172,7 +194,7 @@ def _fragment_start(url: str, elements: list[dict]) -> int:
 
 async def scrape(
     url: str,
-    config: dict,
+    config: dict[str, Any],
     http: httpx.AsyncClient,
 ) -> ScrapedPostingPayload | None:
     """Extract job data using step-based extraction."""
@@ -182,9 +204,11 @@ async def scrape(
         return None
 
     try:
-        resp = await http.get(url, follow_redirects=True)
-        resp.raise_for_status()
-        html = resp.text
+        html = config.get("prefetched_html")
+        if not isinstance(html, str):
+            resp = await http.get(url, follow_redirects=True)
+            resp.raise_for_status()
+            html = resp.text
     except Exception as exc:
         logger.error("dom.fetch_failed", url=url, error=str(exc))
         return None

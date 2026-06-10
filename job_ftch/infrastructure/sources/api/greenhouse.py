@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from job_ftch.application.registry import register_source_v2
+from job_ftch.application.registry import register_source_spec
 from job_ftch.domain import SourceKind
 
 from .base import OfficialAPISource
@@ -43,11 +43,11 @@ class GreenhouseAPISource(OfficialAPISource):
         super().__init__(spec, auth, store, source_kind=SourceKind.CAREER_SITE)
 
 
-@register_source_v2("rest_api")
-def _create_generic_rest_api_source(spec: Any, auth: AuthProvider) -> GenericRestAPISource:
+@register_source_spec("rest_api")
+def _create_rest_generic(spec: Any, auth: AuthProvider, store: Any = None) -> GenericRestAPISource:
     return GenericRestAPISource(spec, auth)
 
 
-@register_source_v2("greenhouse")
-def _create_greenhouse_source(spec: Any, auth: AuthProvider) -> GreenhouseAPISource:
+@register_source_spec("greenhouse_api")
+def _create_greenhouse(spec: Any, auth: AuthProvider, store: Any = None) -> GreenhouseAPISource:
     return GreenhouseAPISource(spec, auth)

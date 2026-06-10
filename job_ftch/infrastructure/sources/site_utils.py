@@ -4,12 +4,12 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from job_ftch.domain.models import SourceKind
-from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
-from job_ftch.infrastructure.sources.site_models import (
+from job_ftch.domain.site_models import (
     DiscoveredPostingPayload,
     MonitorResult,
     ScrapedPostingPayload,
 )
+from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 
 if TYPE_CHECKING:
     from job_ftch.domain.models import RawItem
@@ -30,12 +30,14 @@ def normalize_monitor_result(raw: Any) -> MonitorResult:
         # (URLs, discovered sitemap URL)
         return MonitorResult(
             urls=raw[0],
-            metadata_updates={"discovered_url": raw[1]} if raw[1] else None,
+            metadata_updates={"discovered_url": raw[1]} if raw[1] else {},
         )
     return MonitorResult()
 
 
-def apply_url_filter(result: MonitorResult, url_filter_config: str | dict | None) -> MonitorResult:
+def apply_url_filter(
+    result: MonitorResult, url_filter_config: str | dict[str, Any] | None
+) -> MonitorResult:
     """Apply regex include/exclude filters to discovered URLs."""
     if not url_filter_config:
         return result
@@ -48,8 +50,8 @@ def apply_url_filter(result: MonitorResult, url_filter_config: str | dict | None
         include = url_filter_config.get("include")
         exclude = url_filter_config.get("exclude")
 
-    filtered_urls = set()
-    filtered_payloads = {} if result.payloads_by_url is not None else None
+    filtered_urls: set[str] = set()
+    filtered_payloads: dict[str, DiscoveredPostingPayload] = {}
     removed_count = 0
 
     for url in result.urls:
@@ -61,7 +63,7 @@ def apply_url_filter(result: MonitorResult, url_filter_config: str | dict | None
 
         if keep:
             filtered_urls.add(url)
-            if filtered_payloads is not None and result.payloads_by_url:
+            if url in result.payloads_by_url:
                 filtered_payloads[url] = result.payloads_by_url[url]
         else:
             removed_count += 1
@@ -72,7 +74,9 @@ def apply_url_filter(result: MonitorResult, url_filter_config: str | dict | None
     return result
 
 
-def apply_url_transform(result: MonitorResult, url_transform_config: dict | None) -> MonitorResult:
+def apply_url_transform(
+    result: MonitorResult, url_transform_config: dict[str, Any] | None
+) -> MonitorResult:
     """Apply regex find/replace transforms to discovered URLs."""
     if not url_transform_config:
         return result
@@ -82,18 +86,18 @@ def apply_url_transform(result: MonitorResult, url_transform_config: dict | None
     if not find:
         return result
 
-    transformed_urls = set()
-    transformed_payloads = {} if result.payloads_by_url is not None else None
+    transformed_urls: set[str] = set()
+    transformed_payloads: dict[str, DiscoveredPostingPayload] = {}
 
     for url in result.urls:
-        new_url = re.sub(find, replace, url)
+        new_url = re.sub(str(find), str(replace), url)
         transformed_urls.add(new_url)
-        if transformed_payloads is not None and result.payloads_by_url:
+        if url in result.payloads_by_url:
             payload = result.payloads_by_url[url]
-            # DiscoveredPostingPayload is a dataclass with slots, can't just set attribute if we want to be safe
-            # but url is a field, so it's fine.
-            payload.url = new_url
-            transformed_payloads[new_url] = payload
+            import dataclasses
+
+            new_payload = dataclasses.replace(payload, url=new_url)
+            transformed_payloads[new_url] = new_payload
 
     result.urls = transformed_urls
     result.payloads_by_url = transformed_payloads

@@ -73,6 +73,23 @@ async def _http_session(client: Any, *, own_client: bool) -> AsyncIterator[Any]:
     yield client
 
 
+@asynccontextmanager
+async def client_for_config(
+    client: Any, config: dict[str, Any] | None = None
+) -> AsyncIterator[Any]:
+    """Yield the right HTTP client for a monitor/scraper config.
+
+    When ``skip_ssl`` is enabled for a specific monitor or scraper, create a
+    fresh retrying client with TLS verification disabled for that scope only.
+    Otherwise reuse the outer source client unchanged.
+    """
+    if config and config.get("skip_ssl"):
+        async with build_default_http_client(verify_ssl=False) as insecure_client:
+            yield insecure_client
+        return
+    yield client
+
+
 def _clean_text(value: str) -> str:
     return " ".join(value.split())
 
@@ -279,11 +296,11 @@ class CareerSiteSource:
         return resolve_career_site_parser(url=url, html=html)  # type: ignore[return-value]
 
 
-def build_default_http_client() -> _RetryingHttpClient:
+def build_default_http_client(*, verify_ssl: bool = True) -> _RetryingHttpClient:
     timeout = httpx.Timeout(15.0, connect=30.0)
     limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
     return _RetryingHttpClient(
-        httpx.AsyncClient(timeout=timeout, limits=limits),
+        httpx.AsyncClient(timeout=timeout, limits=limits, verify=verify_ssl),
         max_retries=2,
         retry_delay_seconds=1.0,
     )

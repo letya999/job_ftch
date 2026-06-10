@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
-from job_ftch.infrastructure.sources.site_models import MonitorResult
+from job_ftch.domain.site_models import MonitorResult
 
 if TYPE_CHECKING:
     import httpx
@@ -34,14 +34,10 @@ async def fetch_page_text(
     client: httpx.AsyncClient,
     max_chars: int = 500_000,
 ) -> str | None:
-    """Fetch a page and return its text content (capped), or None on error."""
-    try:
-        resp = await client.get(url, follow_redirects=True)
-        if resp.status_code != 200:
-            return None
-        return resp.text[:max_chars]
-    except Exception:
-        return None
+    """Fetch a page and return its text content (capped). Raises exceptions on network or HTTP errors."""
+    resp = await client.get(url, follow_redirects=True)
+    resp.raise_for_status()
+    return resp.text[:max_chars]
 
 
 def truncated_rich_result(payloads: list[Any]) -> MonitorResult:

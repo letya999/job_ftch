@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
-from job_ftch.application.registry import register_source, register_source_v2
+from job_ftch.application.registry import register_source, register_source_spec
 from job_ftch.domain import QuarantinedRawItem, RawItem, RawItemRejectionReason
 
 if TYPE_CHECKING:
@@ -131,10 +131,11 @@ def _build_local_fixture_source(settings: Settings) -> LocalFixtureSource:
     return LocalFixtureSource(settings.debug_source_path)
 
 
-@register_source_v2("local_fixture")
+@register_source_spec("local_fixture")
 def _build_local_fixture_source_v2(
     spec: LocalFixtureSpec,
     auth: AuthProvider,
+    store: Any = None,
 ) -> LocalFixtureSource:
-    del auth
+    del auth, store
     return LocalFixtureSource(Path(spec.path))

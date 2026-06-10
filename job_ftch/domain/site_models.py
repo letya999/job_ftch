@@ -43,8 +43,8 @@ class MonitorResult:
     """Normalized result from a monitor run."""
 
     urls: set[str] = field(default_factory=set)
-    payloads_by_url: dict[str, DiscoveredPostingPayload] | None = None
-    metadata_updates: dict[str, Any] | None = None
+    payloads_by_url: dict[str, DiscoveredPostingPayload] = field(default_factory=dict)
+    metadata_updates: dict[str, Any] = field(default_factory=dict)
     hybrid: bool = False  # partial-rich: some URLs have data, others don't
     truncated: bool = False  # hit MAX_JOBS cap; pipeline skips tombstone logic
     filtered_count: int = 0

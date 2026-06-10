@@ -42,6 +42,20 @@ build/
 jobs.json
 jobs_*.json
 artifacts/
+
+# Test run artifacts
+*.jsonl
+adaptive_results.jsonl
+getmatch_*.jsonl
+global_test_results.jsonl
+
+# Dev artifacts / notes
+JOBSEEK_*.md
+plans/
+
+# Test configs
+config/test_*.yaml
+
 # Docker
 docker-compose.yml
 docker-compose.override.yml

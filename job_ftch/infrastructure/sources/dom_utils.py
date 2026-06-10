@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import re
 import warnings
-from typing import Any
 from html import escape
 from html.parser import HTMLParser
+from typing import Any
 
 # Tags that never contain visible job content
 SKIP_TAGS = frozenset(

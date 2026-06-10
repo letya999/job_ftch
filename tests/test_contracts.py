@@ -111,6 +111,12 @@ class MinimalStore:
             actual_key = f"{source_kind}:{source_name}:{key}"
         self._state[actual_key] = value
 
+    async def get_source_strategy(self, domain: str) -> dict[str, str] | None:
+        return None
+
+    async def save_source_strategy(self, domain: str, monitor: str, bypass: str) -> None:
+        pass
+
 
 class MinimalLLMProvider:
     async def extract(self, text: str, schema: type[Any]) -> Any:

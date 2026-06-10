@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 import re
 from typing import Any
 
 import httpx
+import structlog
 
 from job_ftch.application.registry import register_monitor
+from job_ftch.domain.site_models import (
+    DiscoveredPostingPayload,
+    MonitorResult,
+)
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     BoardGoneError,
@@ -18,12 +22,8 @@ from job_ftch.infrastructure.sources.monitors.shared import (
     slugs_from_url,
     truncated_rich_result,
 )
-from job_ftch.infrastructure.sources.site_models import (
-    DiscoveredPostingPayload,
-    MonitorResult,
-)
 
-logger = logging.getLogger("job_ftch.monitors.lever")
+logger = structlog.get_logger("job_ftch.monitors.lever")
 
 BATCH_SIZE = 100
 _RETRY_ATTEMPTS = 3
@@ -39,7 +39,7 @@ _IGNORE_TOKENS = frozenset({"v0", "api", "js", "css", "assets"})
 _API_HEADERS = {"Accept": "application/json"}
 
 
-def _build_description(posting: dict) -> str | None:
+def _build_description(posting: dict[str, Any]) -> str | None:
     parts: list[str] = []
     description = posting.get("description")
     if description:
@@ -55,7 +55,7 @@ def _build_description(posting: dict) -> str | None:
     return "\n".join(parts) if parts else None
 
 
-def _parse_salary(salary_range: dict | None) -> dict | None:
+def _parse_salary(salary_range: dict[str, Any] | None) -> dict[str, Any] | None:
     if not salary_range:
         return None
     currency = salary_range.get("currency")
@@ -71,7 +71,7 @@ def _parse_salary(salary_range: dict | None) -> dict | None:
     }
 
 
-def _parse_job(posting: dict) -> DiscoveredPostingPayload | None:
+def _parse_job(posting: dict[str, Any]) -> DiscoveredPostingPayload | None:
     url = posting.get("hostedUrl")
     if not url:
         return None
@@ -82,7 +82,7 @@ def _parse_job(posting: dict) -> DiscoveredPostingPayload | None:
         single = categories.get("location")
         all_locations = [single] if single else []
 
-    metadata: dict = {}
+    metadata: dict[str, Any] = {}
     team = categories.get("team")
     if team:
         metadata["team"] = team
@@ -142,11 +142,11 @@ async def _fetch_job_count(
 async def _get_page_with_retry(
     client: httpx.AsyncClient,
     url: str,
-    params: dict,
+    params: dict[str, Any],
     *,
     retries: int = _RETRY_ATTEMPTS,
     base_delay: float = _RETRY_BASE_DELAY,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     last_exc: Exception | None = None
     for attempt in range(retries):
         try:
@@ -170,7 +170,9 @@ async def _get_page_with_retry(
     return []
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | list[DiscoveredPostingPayload]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | list[DiscoveredPostingPayload]:
     board_url = spec.url
     token = spec.monitor_config.get("token") or _token_from_url(board_url)
 

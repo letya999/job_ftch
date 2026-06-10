@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import re
 from typing import TYPE_CHECKING, Any
+
+import structlog
 
 from job_ftch.application.registry import register_monitor
 from job_ftch.infrastructure.sources.monitors.shared import (
@@ -18,9 +19,9 @@ from job_ftch.infrastructure.sources.monitors.shared import (
 if TYPE_CHECKING:
     import httpx
 
-    from job_ftch.infrastructure.sources.site_models import MonitorResult
+    from job_ftch.domain.site_models import MonitorResult
 
-logger = logging.getLogger("job_ftch.monitors.workable")
+logger = structlog.get_logger("job_ftch.monitors.workable")
 
 _RETRY_ATTEMPTS = 4
 _RETRY_BACKOFF = (5.0, 15.0, 30.0, 60.0)
@@ -49,10 +50,10 @@ def _job_url(slug: str, shortcode: str) -> str:
 async def _api_list(slug: str, client: httpx.AsyncClient) -> tuple[set[str], bool]:
     urls: set[str] = set()
     truncated = False
-    body: dict = {"query": "", "location": [], "department": [], "worktype": []}
+    body: dict[str, Any] = {"query": "", "location": [], "department": [], "worktype": []}
 
     while True:
-        data = None
+        data: dict[str, Any] | None = None
         for attempt in range(_RETRY_ATTEMPTS):
             resp = await client.post(_api_list_url(slug), json=body)
             if resp.status_code == 429:
@@ -84,7 +85,9 @@ async def _api_list(slug: str, client: httpx.AsyncClient) -> tuple[set[str], boo
     return urls, truncated
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | set[str]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | set[str]:
     board_url = spec.url
     metadata = spec.monitor_config
     slug = metadata.get("token") or _token_from_url(board_url)

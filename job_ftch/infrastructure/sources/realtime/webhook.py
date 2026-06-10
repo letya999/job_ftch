@@ -5,7 +5,7 @@ from typing import Any
 import structlog
 
 from job_ftch.application.contracts import AuthProvider
-from job_ftch.application.registry import register_source_v2
+from job_ftch.application.registry import register_source_spec
 from job_ftch.domain import QuarantinedRawItem, RawItem, SourceKind
 from job_ftch.domain.source_spec import WebhookSourceSpec
 
@@ -87,6 +87,6 @@ def _payload_to_text(payload: dict[str, Any]) -> str:
     return ""
 
 
-@register_source_v2("webhook")
-def _create_webhook_source(spec: Any, auth: AuthProvider) -> WebhookSource:
+@register_source_spec("webhook")
+def _create_webhook(spec: Any, auth: AuthProvider, store: Any = None) -> WebhookSource:
     return WebhookSource(spec, auth)

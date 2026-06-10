@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from job_ftch.application.registry import register_monitor
-from job_ftch.infrastructure.sources.site_models import DiscoveredPostingPayload
+from job_ftch.domain.site_models import DiscoveredPostingPayload
 
 if TYPE_CHECKING:
     import httpx
@@ -165,11 +165,11 @@ async def discover(
 
     postings = data if isinstance(data, list) else data.get("jobPostings") or []
     jobs = [j for raw in postings if isinstance(raw, dict) and (j := _parse_job(raw, slug))]
-    
+
     if len(jobs) > MAX_JOBS:
         log.info("deel.truncated", count=len(jobs), cap=MAX_JOBS)
         jobs = jobs[:MAX_JOBS]
-        
+
     log.info("deel.discovered", slug=slug, jobs=len(jobs))
     return jobs
 

@@ -20,7 +20,7 @@ from job_ftch.infrastructure.sources.scrapers.embedded import scrape as embedded
 if TYPE_CHECKING:
     import httpx
 
-    from job_ftch.infrastructure.sources.site_models import ScrapedPostingPayload
+    from job_ftch.domain.site_models import ScrapedPostingPayload
 
 
 def _inject_script_id(config: dict[str, Any]) -> dict[str, Any]:
@@ -124,7 +124,9 @@ def parse_html(html: str, config: dict[str, Any]) -> ScrapedPostingPayload | Non
     return embedded_parse_html(html, _inject_script_id(config))
 
 
-async def scrape(url: str, config: dict[str, Any], http: httpx.AsyncClient) -> ScrapedPostingPayload | None:
+async def scrape(
+    url: str, config: dict[str, Any], http: httpx.AsyncClient
+) -> ScrapedPostingPayload | None:
     return await embedded_scrape(url, _inject_script_id(config), http)
 
 
