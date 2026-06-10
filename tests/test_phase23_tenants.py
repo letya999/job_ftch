@@ -6,9 +6,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from job_ftch.application.auth import resolve_auth_provider
+from job_ftch.application.registry import create_auth_provider
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import TenantRunner
+from job_ftch.config import Settings
 from job_ftch.domain import RawItem, SourceKind, TenantConfig
+from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,6 +27,22 @@ def _write_fixture(path: Path) -> None:
         metadata={"company": "OpenAI", "title": "Senior ML Engineer"},
     )
     path.write_text(json.dumps([item.model_dump(mode="json")]), encoding="utf-8")
+
+
+def test_auth_provider_resolution_via_registry() -> None:
+    settings = Settings()
+
+    provider = resolve_auth_provider("env", settings=settings)
+    default_provider = create_auth_provider(None, settings)
+
+    assert isinstance(provider, EnvAuthProvider)
+    assert isinstance(default_provider, EnvAuthProvider)
+
+    with pytest.raises(ValueError, match="Unsupported auth provider"):
+        create_auth_provider("unknown", settings)
+
+    with pytest.raises(ValueError, match="auth_file_path is required"):
+        create_auth_provider("file", settings)
 
 
 def test_load_tenants_supports_directory_and_aggregate_file(tmp_path: Path) -> None:

@@ -76,6 +76,7 @@ _MONITOR_REGISTRY: list[MonitorEntry] = []
 _SCRAPER_REGISTRY: dict[str, ScraperEntry] = {}
 
 _bypass_factories: dict[str, Callable[..., Any]] = {}
+_AUTH_PROVIDERS: dict[str, Callable[..., object]] = {}
 _job_backend_factories: dict[str, Callable[..., Any]] = {}
 _search_backend_factories: dict[str, Callable[..., Any]] = {}
 _embedding_provider_factories: dict[str, Callable[..., Any]] = {}
@@ -162,6 +163,14 @@ def register_parser(
 def register_bypass(name: str) -> Callable[[FAny], FAny]:
     def decorator(factory: FAny) -> FAny:
         _bypass_factories[name] = factory
+        return factory
+
+    return decorator
+
+
+def register_auth_provider(name: str) -> Callable[[FAny], FAny]:
+    def decorator(factory: FAny) -> FAny:
+        _AUTH_PROVIDERS[name] = factory
         return factory
 
     return decorator
@@ -298,6 +307,9 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.stores.job_group_store",
                 "job_ftch.infrastructure.llm.heuristic",
                 "job_ftch.infrastructure.llm.openai_provider",
+                "job_ftch.infrastructure.auth.env_auth",
+                "job_ftch.infrastructure.auth.file_auth",
+                "job_ftch.infrastructure.auth.vault_auth",
                 "job_ftch.sinks.json_file",
                 "job_ftch.sinks.telegram_posting",
                 "job_ftch.infrastructure.backends.jobs.sqlite",
@@ -468,6 +480,16 @@ def resolve_career_site_parser(*, url: str, html: str) -> CareerSiteParser:
             return cast("CareerSiteParser", factory())
     msg = f"Unsupported career site layout for URL: {url}"
     raise ValueError(msg)
+
+
+def create_auth_provider(name: str | None, settings: Settings) -> object:
+    load_extensions()
+    normalized = (name or "env").strip().lower()
+    factory = _AUTH_PROVIDERS.get(normalized)
+    if factory is None:
+        msg = f"Unsupported auth provider: {name}"
+        raise ValueError(msg)
+    return factory(settings)
 
 
 def create_job_backend(settings: Settings) -> object:
