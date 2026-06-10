@@ -100,7 +100,9 @@ def _parse_job(offer: dict) -> DiscoveredPostingPayload | None:
     )
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | list[DiscoveredPostingPayload]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | list[DiscoveredPostingPayload]:
     board_url = spec.url
     metadata = spec.monitor_config
     api_base = metadata.get("api_base") or _api_base_from_url(board_url)

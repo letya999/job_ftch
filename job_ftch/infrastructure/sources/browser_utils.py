@@ -60,12 +60,13 @@ OVERLAY_SELECTORS = (
     '[class*="consent-manager"]',
     '[role="dialog"][class*="cookie"]',
     '[role="dialog"][id*="cookie"]',
-    '#didomi-host',
-    '.cc-banner',
-    '.cc-window',
-    '.cc-revoke',
-    '.cc-type-info',
+    "#didomi-host",
+    ".cc-banner",
+    ".cc-window",
+    ".cc-revoke",
+    ".cc-type-info",
 )
+
 
 @asynccontextmanager
 async def open_page(
@@ -87,11 +88,11 @@ async def open_page(
     headless = config.get("headless", True)
     channel = config.get("channel")
     stealth = config.get("stealth", True)
-    
+
     launch_args = []
     if stealth:
         launch_args.append("--disable-blink-features=AutomationControlled")
-    
+
     if config.get("disable_http2"):
         launch_args.append("--disable-http2")
 
@@ -100,12 +101,13 @@ async def open_page(
         channel=channel,
         args=launch_args,
     )
-    
+
     proxy_config = None
     if use_proxy:
         proxy_url = os.environ.get("JOB_FTCH_HTTP_PROXY")
         if proxy_url:
             from playwright.async_api import ProxySettings
+
             proxy_config = ProxySettings(server=proxy_url)
 
     context: BrowserContext = await browser.new_context(
@@ -115,20 +117,21 @@ async def open_page(
         ignore_https_errors=config.get("skip_ssl", False),
         proxy=proxy_config,
     )
-    
+
     context.set_default_timeout(config.get("timeout", DEFAULT_TIMEOUT))
-    
+
     if config.get("cookies"):
         await context.add_cookies(config["cookies"])
 
     page: Page = await context.new_page()
-    
+
     try:
         if config.get("warmup_url"):
             await page.goto(config["warmup_url"])
         yield page
     finally:
         await browser.close()
+
 
 @asynccontextmanager
 async def _open_persistent_page(
@@ -141,23 +144,24 @@ async def _open_persistent_page(
     Opens a page using launch_persistent_context for better stealth.
     """
     import tempfile
-    
+
     user_data_dir = tempfile.mkdtemp(prefix="pw_profile_")
     headless = config.get("headless", True)
     channel = config.get("channel", "chrome")  # Default to real chrome for persistent
     stealth = config.get("stealth", True)
-    
+
     args = []
     if stealth:
         args.append("--disable-blink-features=AutomationControlled")
     if config.get("disable_http2"):
         args.append("--disable-http2")
-        
+
     proxy_config = None
     if use_proxy:
         proxy_url = os.environ.get("JOB_FTCH_HTTP_PROXY")
         if proxy_url:
             from playwright.async_api import ProxySettings
+
             proxy_config = ProxySettings(server=proxy_url)
 
     context: BrowserContext = await pw.chromium.launch_persistent_context(
@@ -172,14 +176,14 @@ async def _open_persistent_page(
         proxy=proxy_config,
         timeout=CONTEXT_TIMEOUT,
     )
-    
+
     context.set_default_timeout(config.get("timeout", DEFAULT_TIMEOUT))
-    
+
     if config.get("cookies"):
         await context.add_cookies(config["cookies"])
 
     page = context.pages[0] if context.pages else await context.new_page()
-    
+
     try:
         if config.get("warmup_url"):
             await page.goto(config["warmup_url"])
@@ -192,6 +196,7 @@ async def _open_persistent_page(
         with suppress(Exception):
             shutil.rmtree(user_data_dir, ignore_errors=True)
 
+
 async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     """
     Navigate to a URL with fallback wait strategies.
@@ -199,15 +204,18 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     wait = config.get("wait", DEFAULT_WAIT)
     wait_fallback = config.get("wait_fallback", DEFAULT_WAIT_FALLBACK)
     timeout = config.get("timeout", DEFAULT_TIMEOUT)
-    
+
     try:
         await page.goto(url, wait_until=wait, timeout=timeout)
     except Exception as exc:
         if wait_fallback and wait != wait_fallback:
-            log.warning("browser.navigate_fallback", url=url, error=str(exc), fallback=wait_fallback)
+            log.warning(
+                "browser.navigate_fallback", url=url, error=str(exc), fallback=wait_fallback
+            )
             await page.goto(url, wait_until=wait_fallback, timeout=timeout)
         else:
             raise
+
 
 async def dismiss_overlays(page: Page) -> None:
     """
@@ -226,6 +234,7 @@ async def dismiss_overlays(page: Page) -> None:
     except Exception as exc:
         log.debug("browser.dismiss_overlays_failed", error=str(exc))
 
+
 async def run_actions(page: Page, actions: list[dict[str, Any]]) -> None:
     """
     Execute a sequence of browser actions.
@@ -234,11 +243,12 @@ async def run_actions(page: Page, actions: list[dict[str, Any]]) -> None:
         kind = action.get("action")
         if not kind:
             continue
-        
+
         try:
             await _execute_action(page, action, kind)
         except Exception as exc:
             log.warning("browser.action_failed", action=kind, error=str(exc))
+
 
 async def _execute_action(page: Page, action: dict[str, Any], kind: str) -> None:
     """
@@ -247,27 +257,30 @@ async def _execute_action(page: Page, action: dict[str, Any], kind: str) -> None
     if kind == "remove":
         selector = action.get("selector")
         if selector:
-            await page.evaluate(f"() => document.querySelectorAll('{selector}').forEach(el => el.remove())")
-    
+            await page.evaluate(
+                f"() => document.querySelectorAll('{selector}').forEach(el => el.remove())"
+            )
+
     elif kind == "click":
         selector = action.get("selector")
         if selector:
             await page.click(selector, timeout=action.get("timeout", 5000))
-    
+
     elif kind == "wait":
         seconds = action.get("seconds", 1)
         await asyncio.sleep(seconds)
-        
+
     elif kind == "evaluate":
         expression = action.get("expression")
         if expression:
             await page.evaluate(expression)
-            
+
     elif kind == "dismiss_overlays":
         await dismiss_overlays(page)
-        
+
     elif kind == "repeat":
         await _execute_repeat(page, action)
+
 
 async def _execute_repeat(page: Page, action: dict[str, Any]) -> None:
     """
@@ -277,7 +290,7 @@ async def _execute_repeat(page: Page, action: dict[str, Any]) -> None:
     inner_action = action.get("inner")
     if not inner_action:
         return
-        
+
     inner_kind = inner_action.get("action")
     if not inner_kind:
         return
@@ -287,7 +300,9 @@ async def _execute_repeat(page: Page, action: dict[str, Any]) -> None:
         await _execute_action(page, inner_action, inner_kind)
         await asyncio.sleep(action.get("delay", 1.0))
 
+
 _CONTENT_NAVIGATING_MARKER = "page is navigating and changing the content"
+
 
 async def safe_content(page: Page) -> str:
     """

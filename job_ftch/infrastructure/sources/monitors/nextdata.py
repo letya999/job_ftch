@@ -73,7 +73,9 @@ def _find_jobs_path(data: dict, paths: list[str] | None = None) -> tuple[str, in
     return None
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | set[str] | list[DiscoveredPostingPayload]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | set[str] | list[DiscoveredPostingPayload]:
     board_url = spec.url
     metadata = spec.monitor_config
 
@@ -103,13 +105,13 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> Mo
             url = _build_url(item, url_template, metadata.get("slug_fields"))
             if not url:
                 continue
-            
+
             job_kwargs: dict[str, Any] = {"url": url}
             for target, field_spec in fields_map.items():
                 val = extract_field(item, field_spec, root=data)
                 if val is not None:
                     job_kwargs[target] = val
-            
+
             jobs.append(DiscoveredPostingPayload(**job_kwargs))
         return jobs
 

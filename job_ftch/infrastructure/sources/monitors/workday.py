@@ -76,7 +76,9 @@ async def _post_page_with_retry(
     return {}
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | set[str]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | set[str]:
     board_url = spec.url
     metadata = spec.monitor_config
     company = metadata.get("company")

@@ -165,11 +165,11 @@ async def discover(
 
     postings = data if isinstance(data, list) else data.get("jobPostings") or []
     jobs = [j for raw in postings if isinstance(raw, dict) and (j := _parse_job(raw, slug))]
-    
+
     if len(jobs) > MAX_JOBS:
         log.info("deel.truncated", count=len(jobs), cap=MAX_JOBS)
         jobs = jobs[:MAX_JOBS]
-        
+
     log.info("deel.discovered", slug=slug, jobs=len(jobs))
     return jobs
 

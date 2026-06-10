@@ -124,7 +124,9 @@ def parse_html(html: str, config: dict[str, Any]) -> ScrapedPostingPayload | Non
     return embedded_parse_html(html, _inject_script_id(config))
 
 
-async def scrape(url: str, config: dict[str, Any], http: httpx.AsyncClient) -> ScrapedPostingPayload | None:
+async def scrape(
+    url: str, config: dict[str, Any], http: httpx.AsyncClient
+) -> ScrapedPostingPayload | None:
     return await embedded_scrape(url, _inject_script_id(config), http)
 
 

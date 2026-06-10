@@ -14,13 +14,7 @@ def format_job_message(job: Job) -> str:
     description = escape(job.description[:280].strip())
     url = escape(str(job.canonical_url)) if job.canonical_url else "No URL"
     work_mode = escape(str(job.work_mode))
-    return (
-        f"<b>{title}</b>\n"
-        f"{company}\n"
-        f"{location} • {work_mode}\n\n"
-        f"{description}\n\n"
-        f"{url}"
-    )
+    return f"<b>{title}</b>\n{company}\n{location} • {work_mode}\n\n{description}\n\n{url}"
 
 
 def format_job_digest(jobs: list[Job], *, page: int = 0, page_size: int = 5) -> str:

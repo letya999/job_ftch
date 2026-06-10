@@ -43,7 +43,9 @@ def _posting_url(slug: str, uuid: str) -> str:
     return f"https://ats.rippling.com/{slug}/jobs/{uuid}"
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | set[str]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | set[str]:
     board_url = spec.url
     metadata = spec.monitor_config
     slug = metadata.get("slug") or _slug_from_url(board_url)

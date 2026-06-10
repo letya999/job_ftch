@@ -111,7 +111,7 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> se
     log.info("softgarden.listed", slug=slug, jobs=len(job_ids))
 
     urls = {_job_url(base, jid, pattern) for jid in job_ids}
-    
+
     if len(urls) > MAX_JOBS:
         log.warning("softgarden.truncated", slug=slug, total=len(urls), cap=MAX_JOBS)
         urls = set(sorted(urls)[:MAX_JOBS])

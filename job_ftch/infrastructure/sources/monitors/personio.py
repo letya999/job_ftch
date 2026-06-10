@@ -81,7 +81,9 @@ def _parse_description(position: ET.Element) -> str | None:
     return "\n".join(parts) if parts else None
 
 
-def _parse_job(position: ET.Element, slug: str, domain: str = "de") -> DiscoveredPostingPayload | None:
+def _parse_job(
+    position: ET.Element, slug: str, domain: str = "de"
+) -> DiscoveredPostingPayload | None:
     pos_id = _text(position, "id")
     title = _text(position, "name")
     if not pos_id:
@@ -102,7 +104,9 @@ def _parse_job(position: ET.Element, slug: str, domain: str = "de") -> Discovere
     )
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | list[DiscoveredPostingPayload]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | list[DiscoveredPostingPayload]:
     board_url = spec.url
     metadata = spec.monitor_config
     slug = metadata.get("slug") or _slug_from_url(board_url)

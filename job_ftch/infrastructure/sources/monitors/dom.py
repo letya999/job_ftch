@@ -17,14 +17,13 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
-_JOB_KEYWORDS = frozenset(
-    {"job", "career", "position", "posting", "opening", "role", "vacancy"}
-)
+_JOB_KEYWORDS = frozenset({"job", "career", "position", "posting", "opening", "role", "vacancy"})
 MAX_URLS = 10_000
 
 
 class LinkExtractor(HTMLParser):
     """Simple stdlib-based link extractor."""
+
     def __init__(self, base_url: str):
         super().__init__()
         self.base_url = base_url
@@ -43,13 +42,13 @@ def _build_url_matcher(url_filter: Any) -> re.Pattern[str] | None:
     """Compiles url_filter config into a regex pattern."""
     if not url_filter:
         return None
-    
+
     pattern_str = ""
     if isinstance(url_filter, str):
         pattern_str = url_filter
     elif isinstance(url_filter, dict) and "include" in url_filter:
         pattern_str = url_filter["include"]
-    
+
     if pattern_str:
         try:
             return re.compile(pattern_str, re.IGNORECASE)
@@ -58,14 +57,16 @@ def _build_url_matcher(url_filter: Any) -> re.Pattern[str] | None:
     return None
 
 
-def _extract_links_static(html: str, base_url: str, url_matcher: re.Pattern[str] | None = None) -> set[str]:
+def _extract_links_static(
+    html: str, base_url: str, url_matcher: re.Pattern[str] | None = None
+) -> set[str]:
     """Extract links from static HTML using keyword or regex matching."""
     extractor = LinkExtractor(base_url)
     extractor.feed(html)
-    
+
     urls = extractor.urls
     filtered: set[str] = set()
-    
+
     for url in urls:
         if url_matcher:
             if url_matcher.search(url):
@@ -74,25 +75,22 @@ def _extract_links_static(html: str, base_url: str, url_matcher: re.Pattern[str]
             # fallback to keyword filter
             if any(kw in url.lower() for kw in _JOB_KEYWORDS):
                 filtered.add(url)
-                
+
     return filtered
 
 
 async def _extract_links_rendered(
-    page: Any, 
-    board_url: str, 
-    config: dict[str, Any],
-    url_matcher: re.Pattern[str] | None = None
+    page: Any, board_url: str, config: dict[str, Any], url_matcher: re.Pattern[str] | None = None
 ) -> set[str]:
     """Extract links from a rendered page using Playwright."""
     from job_ftch.infrastructure.sources.browser_utils import navigate, run_actions
-    
+
     await navigate(page, board_url, config)
-    
+
     actions = config.get("actions")
     if actions:
         await run_actions(page, actions)
-        
+
     # Extract via JS to get the most accurate rendered state
     js_extract = """
     () => Array.from(document.querySelectorAll('a'))
@@ -100,7 +98,7 @@ async def _extract_links_rendered(
                .filter(href => href.startsWith('http'))
     """
     urls: list[str] = await page.evaluate(js_extract)
-    
+
     filtered: set[str] = set()
     for url in urls:
         if url_matcher:
@@ -109,7 +107,7 @@ async def _extract_links_rendered(
         else:
             if any(kw in url.lower() for kw in _JOB_KEYWORDS):
                 filtered.add(url)
-                
+
     return filtered
 
 
@@ -118,7 +116,7 @@ async def _paginate_urls(
     pagination: dict[str, Any],
     initial_urls: set[str],
     client: httpx.AsyncClient,
-    url_matcher: re.Pattern[str] | None = None
+    url_matcher: re.Pattern[str] | None = None,
 ) -> set[str]:
     """Fetch additional pages of URLs via httpx (static pagination)."""
     urls = set(initial_urls)
@@ -127,7 +125,7 @@ async def _paginate_urls(
     start = pagination.get("start", 1)
     increment = pagination.get("increment", 1)
     max_pages = pagination.get("max_pages", 5)
-    
+
     if not (param_name or url_template):
         return urls
 
@@ -135,12 +133,13 @@ async def _paginate_urls(
     for _ in range(max_pages):
         if len(urls) >= MAX_URLS:
             break
-            
+
         if url_template:
             page_url = url_template.format(page=current_page)
         else:
             # Append as query param
             from urllib.parse import parse_qsl, urlencode, urlunparse
+
             u = list(urlparse(board_url))
             query = dict(parse_qsl(str(u[4])))
             query[str(param_name)] = str(current_page)
@@ -151,15 +150,15 @@ async def _paginate_urls(
         html = await fetch_page_text(page_url, client)
         if not html:
             break
-            
+
         new_urls = _extract_links_static(html, page_url, url_matcher)
         if not (new_urls - urls):
             # No new URLs found, stop paginating
             break
-            
+
         urls.update(new_urls)
         current_page += increment
-        
+
     return urls
 
 

@@ -135,7 +135,9 @@ async def _fetch_job_count(token: str, client: httpx.AsyncClient) -> int | None:
         return None
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | list[DiscoveredPostingPayload]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | list[DiscoveredPostingPayload]:
     """Fetch job listings from Greenhouse API."""
     board_url = spec.url
     token = spec.monitor_config.get("token") or _token_from_url(board_url)
@@ -146,7 +148,9 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> Mo
     url = _api_url(token)
     response = await client.get(url, params={"content": "true"})
     if response.status_code == 404:
-        raise BoardGoneError(f"Greenhouse board token {token!r} returned 404", url=str(response.url))
+        raise BoardGoneError(
+            f"Greenhouse board token {token!r} returned 404", url=str(response.url)
+        )
     response.raise_for_status()
 
     data = response.json()

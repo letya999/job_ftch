@@ -84,7 +84,9 @@ async def _api_list(slug: str, client: httpx.AsyncClient) -> tuple[set[str], boo
     return urls, truncated
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | set[str]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | set[str]:
     board_url = spec.url
     metadata = spec.monitor_config
     slug = metadata.get("token") or _token_from_url(board_url)

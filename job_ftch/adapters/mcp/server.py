@@ -83,7 +83,9 @@ class TenantMCPServer:
             tenant_id: str | None = None,
             limit: int = 20,
         ) -> list[dict[str, Any]]:
-            groups = await self._require_runner().search_jobs(query, tenant_id=tenant_id, limit=limit)
+            groups = await self._require_runner().search_jobs(
+                query, tenant_id=tenant_id, limit=limit
+            )
             return [group.model_dump(mode="json") for group in groups]
 
         @self.app.tool

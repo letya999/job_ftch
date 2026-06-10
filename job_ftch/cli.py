@@ -183,10 +183,7 @@ async def _handle_tenants(settings: Settings, args: argparse.Namespace) -> None:
     try:
         if args.tenant_command == "list":
             for tenant in await runner.list_tenants():
-                print(
-                    f"{tenant.tenant_id}\t{tenant.display_name}\t"
-                    f"sources={tenant.source_count}"
-                )
+                print(f"{tenant.tenant_id}\t{tenant.display_name}\tsources={tenant.source_count}")
             return
         if args.tenant_command == "status":
             summary = await runner.get_status(args.tenant_id)

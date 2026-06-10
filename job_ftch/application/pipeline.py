@@ -323,7 +323,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
                             setattr(summary, key, getattr(summary, key) + val)
                         else:
                             setattr(summary, key, val)
-                
+
                 # Also update by_source_kind if possible
                 source_kind = getattr(self._source, "kind", "career_site")
                 sk_stats = summary.source_stats(source_kind)

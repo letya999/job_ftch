@@ -169,7 +169,9 @@ def _parse_generic_item(item: ET.Element) -> DiscoveredPostingPayload | None:
     )
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | list[DiscoveredPostingPayload]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | list[DiscoveredPostingPayload]:
     board_url = spec.url
     metadata = spec.monitor_config
     preset_name = metadata.get("preset", "generic")

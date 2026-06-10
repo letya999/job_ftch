@@ -145,7 +145,5 @@ class TenantInfo(BaseModel):
 
 
 TenantConfig.model_rebuild(
-    _types_namespace={
-        "SourceSpec": import_module("job_ftch.domain.source_spec").SourceSpec
-    }
+    _types_namespace={"SourceSpec": import_module("job_ftch.domain.source_spec").SourceSpec}
 )

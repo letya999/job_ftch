@@ -36,9 +36,7 @@ class FakeSender:
         *,
         reply_markup: dict[str, Any] | None = None,
     ) -> None:
-        self.messages.append(
-            {"chat_id": chat_id, "text": text, "reply_markup": reply_markup}
-        )
+        self.messages.append({"chat_id": chat_id, "text": text, "reply_markup": reply_markup})
 
 
 class FakeHTTPException(Exception):

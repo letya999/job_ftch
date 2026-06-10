@@ -178,7 +178,9 @@ async def _resolve_sitemap_index(
     return results
 
 
-async def _discover_sitemap(board_url: str, client: httpx.AsyncClient) -> tuple[str, list[ET.Element]]:
+async def _discover_sitemap(
+    board_url: str, client: httpx.AsyncClient
+) -> tuple[str, list[ET.Element]]:
     all_candidates = (
         _walk_up_candidates(board_url)
         + _common_nonstandard_candidates(board_url)
@@ -198,7 +200,9 @@ async def _discover_sitemap(board_url: str, client: httpx.AsyncClient) -> tuple[
     raise SitemapDiscoveryError(f"No sitemap found for {board_url}")
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> tuple[set[str], str | None]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> tuple[set[str], str | None]:
     board_url = spec.url
     cached_sitemap = spec.monitor_config.get("sitemap_url")
     new_sitemap_url: str | None = None

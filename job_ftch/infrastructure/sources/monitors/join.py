@@ -60,6 +60,7 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> se
 
     # Create a mock spec for nextdata monitor
     from dataclasses import dataclass
+
     @dataclass
     class MockSpec:
         url: str

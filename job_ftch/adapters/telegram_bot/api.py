@@ -36,7 +36,9 @@ def create_app(
         if not resolved_configs_dir:
             msg = "configs_dir is required for the Telegram bot API bridge."
             raise ValueError(msg)
-        runner = TenantRunner.from_tenants(load_tenants(resolved_configs_dir), base_settings=settings)
+        runner = TenantRunner.from_tenants(
+            load_tenants(resolved_configs_dir), base_settings=settings
+        )
     if bot_service is None:
         auth = EnvAuthProvider()
         bot_config = load_bot_config(auth)

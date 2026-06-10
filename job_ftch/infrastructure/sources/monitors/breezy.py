@@ -48,7 +48,9 @@ def _api_url(portal_url: str) -> str:
     return f"{portal_url.rstrip('/')}/json"
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | set[str]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | set[str]:
     board_url = spec.url
     portal_url = spec.monitor_config.get("portal_url") or _breezy_portal_from_url(board_url)
 

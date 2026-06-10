@@ -144,7 +144,9 @@ async def _fetch_job_count(token: str, client: httpx.AsyncClient) -> int | None:
         return None
 
 
-async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> MonitorResult | list[DiscoveredPostingPayload]:
+async def discover(
+    spec: Any, client: httpx.AsyncClient, auth: Any = None
+) -> MonitorResult | list[DiscoveredPostingPayload]:
     board_url = spec.url
     token = spec.monitor_config.get("token") or _token_from_url(board_url)
 

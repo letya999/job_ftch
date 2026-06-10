@@ -254,7 +254,9 @@ class TenantRunner:
         summary.tenant_id = tenant_id
         await runtime.store.set_run_state(
             "pipeline.run_summary",
-            json.dumps(summary.as_dict(), default=_json_default, ensure_ascii=False, sort_keys=True),
+            json.dumps(
+                summary.as_dict(), default=_json_default, ensure_ascii=False, sort_keys=True
+            ),
         )
         return summary
 
@@ -308,7 +310,9 @@ class TenantRunner:
         merged: list[JobGroup] = []
         seen: set[str] = set()
         for current_tenant in self.tenant_ids():
-            groups = await self.get_runtime(current_tenant).search_backend.search(query, limit=limit)
+            groups = await self.get_runtime(current_tenant).search_backend.search(
+                query, limit=limit
+            )
             for group in groups:
                 if group.group_id in seen:
                     continue

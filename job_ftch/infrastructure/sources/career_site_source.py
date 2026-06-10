@@ -114,7 +114,7 @@ class CareerSiteSource(Source["RawItem"]):
             return
 
         scraper_chain = self._resolve_scraper_chain(monitor_name, monitor_config)
-        
+
         limit = self.spec.detail_limit or self.spec.limit
         count = 0
         for url in urls_to_scrape:
@@ -137,13 +137,17 @@ class CareerSiteSource(Source["RawItem"]):
                     extras=scrape_result.extras,
                     metadata=scrape_result.metadata,
                 )
-                yield payload_to_raw_item(full_payload, self.spec, self.spec.source_name or monitor_name)
+                yield payload_to_raw_item(
+                    full_payload, self.spec, self.spec.source_name or monitor_name
+                )
                 self.stats["scraped"] += 1
                 count += 1
 
         logger.info("career_site_fetch_complete", **self.stats)
 
-    def _resolve_scraper_chain(self, monitor_name: str, monitor_config: dict[str, Any]) -> list[str]:
+    def _resolve_scraper_chain(
+        self, monitor_name: str, monitor_config: dict[str, Any]
+    ) -> list[str]:
         """Determine primary and fallback scrapers based on monitor type."""
         if self.spec.scraper:
             chain = [self.spec.scraper]
@@ -161,11 +165,13 @@ class CareerSiteSource(Source["RawItem"]):
             return ["workday", "json-ld"]
         if monitor_name == "smartrecruiters":
             return ["smartrecruiters", "json-ld"]
-        
+
         # Default chain
         return ["json-ld", "embedded", "nextdata", "dom"]
 
-    async def _scrape_with_fallback(self, url: str, scraper_chain: list[str]) -> ScrapedPostingPayload | None:
+    async def _scrape_with_fallback(
+        self, url: str, scraper_chain: list[str]
+    ) -> ScrapedPostingPayload | None:
         """Try scrapers in order until one returns a result with content."""
         for i, scraper_name in enumerate(scraper_chain):
             try:
@@ -180,7 +186,7 @@ class CareerSiteSource(Source["RawItem"]):
             except Exception as exc:
                 logger.debug("scraper_failed", name=scraper_name, url=url, error=str(exc))
                 continue
-        
+
         logger.warning("all_scrapers_failed", url=url, chain=scraper_chain)
         return None
 

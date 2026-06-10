@@ -114,7 +114,13 @@ def can_handle(htmls: list[str]) -> dict | None:
                     if obj:
                         fields = _auto_map_fields(obj)
                         if fields:
-                            return {"source": extractor.__name__.replace("extract_", "").replace("_data", ""), "path": path, "fields": fields}
+                            return {
+                                "source": extractor.__name__.replace("extract_", "").replace(
+                                    "_data", ""
+                                ),
+                                "path": path,
+                                "fields": fields,
+                            }
             except Exception:
                 continue
     return None

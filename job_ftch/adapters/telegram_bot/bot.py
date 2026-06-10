@@ -43,7 +43,9 @@ class TelegramBotConfig:
     digest_size: int = 5
 
 
-def load_bot_config(auth_provider: EnvAuthProvider, source_id: str = "telegram_bot") -> TelegramBotConfig:
+def load_bot_config(
+    auth_provider: EnvAuthProvider, source_id: str = "telegram_bot"
+) -> TelegramBotConfig:
     payload = auth_provider.resolve(source_id)
     token = payload.get("token")
     if not token:
@@ -101,7 +103,9 @@ class HttpTelegramBotClient:
         response = await self._client.post(f"{self._base_url}/setWebhook", json=payload)
         response.raise_for_status()
 
-    async def get_updates(self, *, offset: int | None = None, timeout: int = 30) -> list[dict[str, Any]]:
+    async def get_updates(
+        self, *, offset: int | None = None, timeout: int = 30
+    ) -> list[dict[str, Any]]:
         payload: dict[str, Any] = {"timeout": timeout}
         if offset is not None:
             payload["offset"] = offset
@@ -177,9 +181,13 @@ class TelegramBotService:
         if command == "/status":
             status_tenant_id = args[0] if args else tenant_ids[0]
             summary = await self._runner.get_status(status_tenant_id)
-            reply = "No runs yet." if summary is None else (
-                f"{status_tenant_id}: emitted={summary.emitted}, failed={summary.failed}, "
-                f"quarantined={summary.quarantined}"
+            reply = (
+                "No runs yet."
+                if summary is None
+                else (
+                    f"{status_tenant_id}: emitted={summary.emitted}, failed={summary.failed}, "
+                    f"quarantined={summary.quarantined}"
+                )
             )
             await self._sender.send_message(chat_id, reply)
             return
@@ -250,7 +258,9 @@ class TelegramBotService:
         prefix, tenant_id, page_text, query = parts[:4]
         page = int(page_text)
         if prefix == "digest":
-            jobs = await self._runner.latest_jobs(tenant_id, limit=(page + 1) * self._config.digest_size)
+            jobs = await self._runner.latest_jobs(
+                tenant_id, limit=(page + 1) * self._config.digest_size
+            )
             await self._sender.send_message(
                 chat_id,
                 format_job_digest(jobs, page=page, page_size=self._config.digest_size),
@@ -258,9 +268,13 @@ class TelegramBotService:
             return
         if prefix == "search":
             tenant_value = None if tenant_id == "-" else tenant_id
-            groups = await self._runner.search_jobs(query, tenant_id=tenant_value, limit=(page + 1) * 5)
+            groups = await self._runner.search_jobs(
+                query, tenant_id=tenant_value, limit=(page + 1) * 5
+            )
             if page < len(groups):
-                await self._sender.send_message(chat_id, format_job_message(groups[page].canonical_job))
+                await self._sender.send_message(
+                    chat_id, format_job_message(groups[page].canonical_job)
+                )
 
     def _is_allowed(self, *, user_id: int, chat_id: int) -> bool:
         allowed_users = self._config.allowed_user_ids
