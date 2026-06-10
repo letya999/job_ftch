@@ -24,7 +24,7 @@ class JsonFileSink:
     ) -> None:
         self._output_path = output_path
         instance_id = str(os.getpid())
-        self._tmp_path = self._build_tmp_path(output_path, instance_id)
+        self._tmp_path = self._build_tmp_path(output_path)
         self._staging_path = self._build_staging_path(output_path, instance_id)
         self._jsonl = jsonl
         self._schema_version = schema_version
@@ -75,10 +75,10 @@ class JsonFileSink:
         return {"schema_version": self._schema_version, "payload": payload}
 
     @staticmethod
-    def _build_tmp_path(output_path: Path, instance_id: str) -> Path:
+    def _build_tmp_path(output_path: Path) -> Path:
         suffix = "".join(output_path.suffixes)
         stem = output_path.name[: -len(suffix)] if suffix else output_path.name
-        return output_path.with_name(f"{stem}.{instance_id}.tmp{suffix}")
+        return output_path.with_name(f"{stem}.tmp{suffix}")
 
     @staticmethod
     def _build_staging_path(output_path: Path, instance_id: str) -> Path:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 
 from job_ftch.application.builder import (
     run_pipeline_from_settings,
@@ -11,6 +12,8 @@ from job_ftch.application.builder import (
     show_status_from_settings,
 )
 from job_ftch.application.scheduler import Scheduler
+from job_ftch.application.tenant_loader import load_tenants
+from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.config import Settings, get_settings
 
 
@@ -22,6 +25,26 @@ def parse_args() -> argparse.Namespace:
     pipeline_parser.add_argument("--daemon", action="store_true", help="Run in background loop.")
     pipeline_parser.add_argument("--status", action="store_true", help="Show last run status.")
 
+    tenants_parser = subparsers.add_parser("tenants", help="Manage tenant configurations")
+    tenants_subparsers = tenants_parser.add_subparsers(dest="tenant_command", required=True)
+    tenants_subparsers.add_parser("list", help="List configured tenants")
+    tenants_status = tenants_subparsers.add_parser("status", help="Show last status for one tenant")
+    tenants_status.add_argument("tenant_id", type=str)
+    tenants_run = tenants_subparsers.add_parser("run", help="Run one tenant immediately")
+    tenants_run.add_argument("tenant_id", type=str)
+    tenants_reset = tenants_subparsers.add_parser("reset", help="Reset tenant store namespace")
+    tenants_reset.add_argument("tenant_id", type=str)
+
+    mcp_parser = subparsers.add_parser("mcp-server", help="Start the FastMCP tenant server")
+    mcp_parser.add_argument(
+        "--transport",
+        choices=("stdio", "http", "sse"),
+        default="stdio",
+        help="MCP transport to use.",
+    )
+    mcp_parser.add_argument("--host", default="127.0.0.1")
+    mcp_parser.add_argument("--port", type=int, default=8000)
+
     parser.add_argument(
         "--source-backend",
         default=None,
@@ -31,6 +54,11 @@ def parse_args() -> argparse.Namespace:
         "--sources-file",
         default=None,
         help="Path to YAML or JSON file with a list of source configs.",
+    )
+    parser.add_argument(
+        "--configs-dir",
+        default=None,
+        help="Directory with tenant YAML/JSON configs for multi-tenant mode.",
     )
     parser.add_argument(
         "--source-path", default=None, help="Path to a JSON or JSONL RawItem fixture."
@@ -85,6 +113,10 @@ def build_settings(args: argparse.Namespace) -> Settings:
         from pathlib import Path
 
         updates["sources_file_path"] = Path(args.sources_file)
+    if args.configs_dir is not None:
+        from pathlib import Path
+
+        updates["configs_dir"] = Path(args.configs_dir)
     if args.source_path is not None:
         updates["source_backend"] = "local_fixture"
         updates["debug_source_path"] = args.source_path
@@ -125,6 +157,10 @@ def main() -> int:
 
     if args.command == "search":
         asyncio.run(run_search_from_settings(settings, args))
+    elif args.command == "tenants":
+        asyncio.run(_handle_tenants(settings, args))
+    elif args.command == "mcp-server":
+        _run_mcp_server(settings, args)
     elif args.command == "pipeline" and args.status:
         asyncio.run(show_status_from_settings(settings))
     elif args.command == "pipeline" and args.daemon:
@@ -133,3 +169,54 @@ def main() -> int:
     else:
         asyncio.run(run_pipeline_from_settings(settings))
     return 0
+
+
+def _load_tenant_runner(settings: Settings) -> TenantRunner:
+    if settings.configs_dir is None:
+        msg = "--configs-dir or JOB_FTCH_CONFIGS_DIR is required for tenant commands."
+        raise ValueError(msg)
+    return TenantRunner.from_tenants(load_tenants(settings.configs_dir), base_settings=settings)
+
+
+async def _handle_tenants(settings: Settings, args: argparse.Namespace) -> None:
+    runner = _load_tenant_runner(settings)
+    try:
+        if args.tenant_command == "list":
+            for tenant in await runner.list_tenants():
+                print(
+                    f"{tenant.tenant_id}\t{tenant.display_name}\t"
+                    f"sources={tenant.source_count}"
+                )
+            return
+        if args.tenant_command == "status":
+            summary = await runner.get_status(args.tenant_id)
+            print(
+                "null"
+                if summary is None
+                else json.dumps(summary.as_dict(), ensure_ascii=False, indent=2, default=str)
+            )
+            return
+        if args.tenant_command == "run":
+            summary = await runner.run_tenant(args.tenant_id)
+            print(json.dumps(summary.as_dict(), ensure_ascii=False, indent=2, default=str))
+            return
+        if args.tenant_command == "reset":
+            await runner.reset_tenant(args.tenant_id)
+            print(f"reset {args.tenant_id}")
+            return
+    finally:
+        await runner.close()
+
+
+def _run_mcp_server(settings: Settings, args: argparse.Namespace) -> None:
+    if settings.configs_dir is None:
+        msg = "--configs-dir or JOB_FTCH_CONFIGS_DIR is required for mcp-server."
+        raise ValueError(msg)
+    from job_ftch.adapters.mcp.server import create_server
+
+    server = create_server(configs_dir=settings.configs_dir, base_settings=settings)
+    asyncio.run(server.startup())
+    try:
+        server.run(transport=args.transport, host=args.host, port=args.port)
+    finally:
+        asyncio.run(server.shutdown())

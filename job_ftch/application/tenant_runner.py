@@ -31,8 +31,6 @@ from job_ftch.config import get_settings
 from job_ftch.domain import (
     Job,
     JobGroup,
-    QuarantinedRawItem,
-    RejectedItem,
     TenantConfig,
     TenantInfo,
 )
@@ -46,7 +44,6 @@ if TYPE_CHECKING:
         LLMProvider,
         ProcessingNode,
         SearchBackend,
-        Sink,
         Store,
     )
     from job_ftch.config import Settings
@@ -82,7 +79,7 @@ class TenantStore:
 
     async def has_processed(self, item_id: str) -> bool:
         connector = cast("Any", self._store)
-        return await connector.set_contains(self._key("processed"), item_id)
+        return bool(await connector.set_contains(self._key("processed"), item_id))
 
     async def mark_processed(self, item_id: str) -> None:
         connector = cast("Any", self._store)
@@ -90,7 +87,7 @@ class TenantStore:
 
     async def has_dedup_key(self, key: str) -> bool:
         connector = cast("Any", self._store)
-        return await connector.set_contains(self._key("dedup_keys"), key)
+        return bool(await connector.set_contains(self._key("dedup_keys"), key))
 
     async def remember_dedup_key(self, record: Any) -> None:
         connector = cast("Any", self._store)
@@ -136,9 +133,10 @@ class TenantStore:
         source_name: str | None = None,
     ) -> str | None:
         connector = cast("Any", self._store)
-        return await connector.get(
+        value = await connector.get(
             self._run_state_key(key, source_kind=source_kind, source_name=source_name)
         )
+        return None if value is None else str(value)
 
     async def set_run_state(
         self,
@@ -216,13 +214,8 @@ class TenantRunner:
             for node in nodes:
                 builder.stage(cast("ProcessingNode[Any]", node))
             builder.sink(output_sink)
-            builder.with_quarantine_sink(
-                cast("Sink[QuarantinedRawItem]", build_quarantine_sink(tenant_settings))
-            )
-            builder.with_rejected_sink(
-                cast("Sink[RejectedItem]", rejected_sink),
-                counted=rejected_counted,
-            )
+            builder.with_quarantine_sink(build_quarantine_sink(tenant_settings))
+            builder.with_rejected_sink(rejected_sink, counted=rejected_counted)
             builder.set_default_max_items(tenant_settings.pipeline_max_items_per_run)
             builder.set_summary_context(
                 review_sink=review_sink,

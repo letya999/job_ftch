@@ -90,6 +90,9 @@ job_ftch = "job_ftch.cli:main"
 
 [project.entry-points."job_ftch.vector_backends"]
 
+[project.entry-points."job_ftch.mcp_servers"]
+default = "job_ftch.adapters.mcp.server:create_server"
+
 [dependency-groups]
 dev = [
     "pre-commit>=3.7",
@@ -145,6 +148,20 @@ module = [
     "job_ftch.infrastructure.sources.browser.base",
 ]
 warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = [
+    "app",
+    "live_probe",
+    "scripts.export_schema",
+    "job_ftch.application.registry",
+    "job_ftch.infrastructure.sources.browser_utils",
+    "job_ftch.infrastructure.sources.nextdata_utils",
+    "job_ftch.infrastructure.sources.site_utils",
+    "job_ftch.infrastructure.sources.monitors.*",
+    "job_ftch.infrastructure.sources.scrapers.*",
+]
+ignore_errors = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

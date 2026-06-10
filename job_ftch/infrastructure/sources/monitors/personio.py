@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import re
-import defusedxml.ElementTree as ET
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
+
+import defusedxml.ElementTree as ET
 
 from job_ftch.application.registry import register_monitor
 from job_ftch.infrastructure.sources.monitors.shared import (

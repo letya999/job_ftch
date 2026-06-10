@@ -8,6 +8,7 @@ from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
 from job_ftch.infrastructure.auth.file_auth import FileAuthProvider
 
 if TYPE_CHECKING:
+    from job_ftch.application.contracts import AuthProvider
     from job_ftch.config import Settings
 
 
@@ -15,7 +16,7 @@ def resolve_auth_provider(
     provider_name: str | None,
     *,
     settings: Settings,
-) -> object:
+) -> AuthProvider:
     normalized = (provider_name or "env").strip().lower()
     if normalized == "env":
         return EnvAuthProvider()

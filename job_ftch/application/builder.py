@@ -75,7 +75,7 @@ class PipelineBuilder:
     def __init__(self) -> None:
         self._source_specs: list[SourceSpec] = []
         self._source_instance: Source[RawItem] | None = None
-        self._auth_provider = EnvAuthProvider()
+        self._auth_provider: AuthProvider = EnvAuthProvider()
         self._stages: list[ProcessingNode[Any]] = []
         self._sinks: list[Sink[Job]] = []
         self._store: Store | None = None

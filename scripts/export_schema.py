@@ -8,7 +8,7 @@ from pydantic import TypeAdapter
 from job_ftch.domain.source_spec import SourceSpec
 
 if __name__ == "__main__":
-    adapter = TypeAdapter(SourceSpec)
+    adapter: TypeAdapter[SourceSpec] = TypeAdapter(SourceSpec)
     schema = adapter.json_schema()
     out = Path("config/sources.schema.json")
     out.parent.mkdir(parents=True, exist_ok=True)

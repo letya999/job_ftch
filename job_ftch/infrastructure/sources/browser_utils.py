@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import os
-from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, AsyncIterator, Literal
+from contextlib import asynccontextmanager, suppress
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from playwright.async_api import Browser, BrowserContext, Page, Playwright
 
 log = structlog.get_logger()
@@ -186,10 +188,9 @@ async def _open_persistent_page(
         await context.close()
         # Clean up temp dir if possible (might fail on windows if files locked)
         import shutil
-        try:
+
+        with suppress(Exception):
             shutil.rmtree(user_data_dir, ignore_errors=True)
-        except Exception:
-            pass
 
 async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     """

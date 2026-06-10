@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import structlog
 from typing import TYPE_CHECKING, Any, cast
+
+import structlog
 
 from job_ftch.application.contracts import Source
 from job_ftch.application.registry import (
@@ -23,8 +24,6 @@ from job_ftch.infrastructure.sources.site_utils import (
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-
-    import httpx
 
     from job_ftch.application.contracts import AuthProvider
     from job_ftch.domain import QuarantinedRawItem, RawItem

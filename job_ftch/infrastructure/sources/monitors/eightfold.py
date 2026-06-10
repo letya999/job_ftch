@@ -12,8 +12,8 @@ from urllib.parse import urlparse
 import structlog
 
 from job_ftch.application.registry import register_monitor
-from job_ftch.infrastructure.sources.monitors.sitemap import discover as sitemap_discover
 from job_ftch.infrastructure.sources.monitors.shared import fetch_page_text
+from job_ftch.infrastructure.sources.monitors.sitemap import discover as sitemap_discover
 
 if TYPE_CHECKING:
     import httpx

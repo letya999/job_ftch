@@ -6,9 +6,10 @@ structured fields from the HTML.
 
 from __future__ import annotations
 
-import structlog
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
+
+import structlog
 
 from job_ftch.application.registry import register_scraper
 from job_ftch.infrastructure.sources.dom_utils import flatten, walk_steps

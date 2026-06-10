@@ -140,7 +140,7 @@ async def _paginate_urls(
             page_url = url_template.format(page=current_page)
         else:
             # Append as query param
-            from urllib.parse import urlencode, parse_qsl, urlunparse
+            from urllib.parse import parse_qsl, urlencode, urlunparse
             u = list(urlparse(board_url))
             query = dict(parse_qsl(str(u[4])))
             query[str(param_name)] = str(current_page)
@@ -173,17 +173,20 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> se
     if render:
         try:
             from playwright.async_api import async_playwright
-            from job_ftch.infrastructure.sources.browser_utils import open_page, safe_content, BROWSER_KEYS
-        except ImportError:
+
+            from job_ftch.infrastructure.sources.browser_utils import (
+                BROWSER_KEYS,
+                open_page,
+            )
+        except ImportError as exc:
             raise RuntimeError(
                 "playwright is required for DOM monitor with render=true. "
                 "Install: uv add playwright --optional browser && playwright install chromium"
-            )
+            ) from exc
 
         browser_config = {k: v for k, v in config.items() if k in BROWSER_KEYS}
-        async with async_playwright() as pw:
-            async with open_page(pw, browser_config) as page:
-                urls = await _extract_links_rendered(page, board_url, config, url_matcher)
+        async with async_playwright() as pw, open_page(pw, browser_config) as page:
+            urls = await _extract_links_rendered(page, board_url, config, url_matcher)
     else:
         html = await fetch_page_text(board_url, client)
         if not html:

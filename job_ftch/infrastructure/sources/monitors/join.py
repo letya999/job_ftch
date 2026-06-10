@@ -13,8 +13,8 @@ from urllib.parse import urlparse
 import structlog
 
 from job_ftch.application.registry import register_monitor
-from job_ftch.infrastructure.sources.monitors.shared import fetch_page_text
 from job_ftch.infrastructure.sources.monitors.nextdata import discover as nextdata_discover
+from job_ftch.infrastructure.sources.monitors.shared import fetch_page_text
 from job_ftch.infrastructure.sources.nextdata_utils import extract_next_data, resolve_path
 
 if TYPE_CHECKING:

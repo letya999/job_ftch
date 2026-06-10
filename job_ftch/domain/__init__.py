@@ -30,6 +30,7 @@ from job_ftch.domain.models import (
 )
 from job_ftch.domain.quarantine import QuarantinedRawItem, RawItemRejectionReason
 from job_ftch.domain.rejected import RejectedItem, RejectedOutcome
+from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.domain.tenant import OutputSpec, ScheduleSpec, TenantConfig, TenantInfo
 from job_ftch.domain.triage import TriageRejectionReason
 
@@ -46,6 +47,7 @@ from .job_group import (
 
 __all__ = [
     "CompensationRange",
+    "CareerSiteSpec",
     "DedupKeyKind",
     "DuplicateRecord",
     "DuplicateRejectionReason",
