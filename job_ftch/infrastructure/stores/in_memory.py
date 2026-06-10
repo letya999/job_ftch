@@ -55,6 +55,12 @@ class InMemoryStore:
     async def close(self) -> None:
         pass
 
+    async def reset_namespace(self, prefix: str) -> None:
+        self._kv = {key: value for key, value in self._kv.items() if not key.startswith(prefix)}
+        self._sets = {
+            key: value for key, value in self._sets.items() if not key.startswith(prefix)
+        }
+
     # Store methods — built on top of StoreConnector primitives
 
     async def has_processed(self, item_id: str) -> bool:

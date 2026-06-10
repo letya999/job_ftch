@@ -93,6 +93,12 @@ class PostgreSQLStore(SQLStoreAdapter):
             await self._pool.close()
             self._pool = None
 
+    async def reset_namespace(self, prefix: str) -> None:
+        pool = await self._ensure_initialized()
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM jf_kv WHERE key LIKE $1", f"{prefix}%")
+            await conn.execute("DELETE FROM jf_set WHERE key LIKE $1", f"{prefix}%")
+
     async def ping(self) -> bool:
         """Check connection health."""
         try:

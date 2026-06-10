@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import TYPE_CHECKING
 
 from job_ftch.application.registry import register_sink
@@ -22,8 +23,9 @@ class JsonFileSink:
         schema_version: str | None = None,
     ) -> None:
         self._output_path = output_path
-        self._tmp_path = self._build_tmp_path(output_path)
-        self._staging_path = self._build_staging_path(output_path)
+        instance_id = str(os.getpid())
+        self._tmp_path = self._build_tmp_path(output_path, instance_id)
+        self._staging_path = self._build_staging_path(output_path, instance_id)
         self._jsonl = jsonl
         self._schema_version = schema_version
         self._output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -44,9 +46,15 @@ class JsonFileSink:
         if self._jsonl:
             if not self._tmp_path.exists():
                 self._tmp_path.write_text("", encoding="utf-8")
+            if self._tmp_path.stat().st_size == 0 and self._output_path.exists():
+                self._tmp_path.unlink(missing_ok=True)
+                return
             self._tmp_path.replace(self._output_path)
             return
         items = self._load_staged_items()
+        if not items and self._output_path.exists():
+            self._staging_path.unlink(missing_ok=True)
+            return
         payload: object = items
         if self._schema_version is not None:
             payload = {"schema_version": self._schema_version, "items": items}
@@ -67,16 +75,16 @@ class JsonFileSink:
         return {"schema_version": self._schema_version, "payload": payload}
 
     @staticmethod
-    def _build_tmp_path(output_path: Path) -> Path:
+    def _build_tmp_path(output_path: Path, instance_id: str) -> Path:
         suffix = "".join(output_path.suffixes)
         stem = output_path.name[: -len(suffix)] if suffix else output_path.name
-        return output_path.with_name(f"{stem}.tmp{suffix}")
+        return output_path.with_name(f"{stem}.{instance_id}.tmp{suffix}")
 
     @staticmethod
-    def _build_staging_path(output_path: Path) -> Path:
+    def _build_staging_path(output_path: Path, instance_id: str) -> Path:
         suffix = "".join(output_path.suffixes)
         stem = output_path.name[: -len(suffix)] if suffix else output_path.name
-        return output_path.with_name(f"{stem}.staging.jsonl")
+        return output_path.with_name(f"{stem}.{instance_id}.staging.jsonl")
 
     def _load_staged_items(self) -> list[object]:
         if not self._staging_path.exists():

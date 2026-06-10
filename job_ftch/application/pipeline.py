@@ -95,6 +95,7 @@ class SourceRunStats(StatsBase):
 @dataclass(slots=True)
 class RunSummary(StatsBase):
     by_source_kind: dict[str, SourceRunStats] = field(default_factory=dict)
+    tenant_id: str | None = None
     applied_profile: str | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None

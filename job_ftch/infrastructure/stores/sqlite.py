@@ -84,6 +84,12 @@ class SQLiteStore(SQLStoreAdapter):
             await self._conn.close()
             self._conn = None
 
+    async def reset_namespace(self, prefix: str) -> None:
+        conn = await self._ensure_initialized()
+        await conn.execute("DELETE FROM jf_kv WHERE key LIKE ?", (f"{prefix}%",))
+        await conn.execute("DELETE FROM jf_set WHERE key LIKE ?", (f"{prefix}%",))
+        await conn.commit()
+
     async def ping(self) -> bool:
         """Check connection health."""
         try:

@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import structlog
-from pydantic import BaseModel, Field
 
 from job_ftch.application.contracts import (
+    AuthProvider,
     EmbeddingProvider,
     JobGroupStore,
     LLMProvider,
@@ -41,7 +41,14 @@ from job_ftch.application.registry import (
 from job_ftch.application.source_loader import load_sources
 from job_ftch.application.telemetry import configure_telemetry
 from job_ftch.config import Settings, get_settings
-from job_ftch.domain import FilterProfile, Job, QuarantinedRawItem, RawItem, RejectedItem
+from job_ftch.domain import (
+    FilterProfile,
+    Job,
+    QuarantinedRawItem,
+    RawItem,
+    RejectedItem,
+    TenantConfig,
+)
 from job_ftch.domain.source_spec import SourceSpec
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
 from job_ftch.infrastructure.sources.composite import CompositeSource
@@ -60,100 +67,6 @@ from job_ftch.nodes import (
     TitleCompanyNormalizationNode,
 )
 from job_ftch.sinks import CountedSink, FailureTolerantSink, FanOutSink, RoutingSink
-
-
-class OutputConfig(BaseModel):
-    path: Path
-    jsonl: bool = False
-    schema_version: str | None = "job_ftch.job.v1"
-
-
-class TenantConfig(BaseModel):
-    sources: list[SourceSpec]
-    filter_profile_path: Path | None = None
-    schedule_interval_seconds: int | None = Field(default=None, gt=0)
-    output: OutputConfig = Field(
-        default_factory=lambda: OutputConfig(path=Path("artifacts/debug/raw_items.json"))
-    )
-    quarantine_output: OutputConfig = Field(
-        default_factory=lambda: OutputConfig(
-            path=Path("artifacts/debug/quarantine.jsonl"),
-            jsonl=True,
-            schema_version="job_ftch.quarantine.v1",
-        )
-    )
-    review_output: OutputConfig = Field(
-        default_factory=lambda: OutputConfig(
-            path=Path("artifacts/debug/review.jsonl"),
-            jsonl=True,
-        )
-    )
-    rejected_output: OutputConfig = Field(
-        default_factory=lambda: OutputConfig(
-            path=Path("artifacts/debug/rejected.jsonl"),
-            jsonl=True,
-            schema_version="job_ftch.rejected.v1",
-        )
-    )
-    source_backend: str = "local_fixture"
-    sink_backend: str = "json_file"
-    store_backend: str = "memory"
-    job_group_store_backend: str = "sqlite"
-    llm_backend: str = "heuristic"
-    posting_backend: str = "none"
-    dry_run: bool = False
-    pipeline_max_items_per_run: int = 200
-    pipeline_max_text_length: int = 20_000
-    review_max_quality_score: float = 0.65
-    posting_min_quality_score: float = 0.8
-    output_jsonl: bool = False
-    store_path: Path = Path(".runtime/job_ftch.db")
-    job_backend: str = "sqlite"
-    search_backend: str = "sqlite"
-    vector_backend: str | None = None
-    embedding_enabled: bool = False
-    embedding_provider: str = "openai"
-    search_language: str = "simple"
-
-    def to_settings(self) -> Settings:
-        base = get_settings().model_dump(mode="python")
-        base.update(
-            {
-                "source_backend": self.source_backend,
-                "sink_backend": self.sink_backend,
-                "store_backend": self.store_backend,
-                "job_group_store_backend": self.job_group_store_backend,
-                "llm_backend": self.llm_backend,
-                "posting_backend": self.posting_backend,
-                "dry_run": self.dry_run,
-                "pipeline_max_items_per_run": self.pipeline_max_items_per_run,
-                "pipeline_max_text_length": self.pipeline_max_text_length,
-                "filter_profile_path": self.filter_profile_path,
-                "schedule_interval_seconds": self.schedule_interval_seconds,
-                "output_path": self.output.path,
-                "output_jsonl": self.output.jsonl,
-                "output_schema_version": self.output.schema_version,
-                "quarantine_output_path": self.quarantine_output.path,
-                "quarantine_output_jsonl": self.quarantine_output.jsonl,
-                "quarantine_output_schema_version": self.quarantine_output.schema_version,
-                "review_output_path": self.review_output.path,
-                "review_output_jsonl": self.review_output.jsonl,
-                "review_output_schema_version": self.review_output.schema_version,
-                "rejected_output_path": self.rejected_output.path,
-                "rejected_output_jsonl": self.rejected_output.jsonl,
-                "rejected_output_schema_version": self.rejected_output.schema_version,
-                "review_max_quality_score": self.review_max_quality_score,
-                "posting_min_quality_score": self.posting_min_quality_score,
-                "store_path": self.store_path,
-                "job_backend": self.job_backend,
-                "search_backend": self.search_backend,
-                "vector_backend": self.vector_backend,
-                "embedding_enabled": self.embedding_enabled,
-                "embedding_provider": self.embedding_provider,
-                "search_language": self.search_language,
-            }
-        )
-        return Settings.model_validate(base)
 
 
 class PipelineBuilder:
@@ -207,7 +120,7 @@ class PipelineBuilder:
         self._source_instance = None
         return self
 
-    def auth(self, provider: EnvAuthProvider) -> PipelineBuilder:
+    def auth(self, provider: AuthProvider) -> PipelineBuilder:
         self._auth_provider = provider
         return self
 
@@ -363,10 +276,65 @@ def load_tenant_config(path: Path) -> TenantConfig:
     return TenantConfig.model_validate(data)
 
 
+def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = None) -> Settings:
+    base = (base_settings or get_settings()).model_dump(mode="python")
+    tenant_id = tenant.tenant_id
+    base.update(
+        {
+            "tenant_id": tenant_id,
+            "tenant_display_name": tenant.display_name,
+            "source_backend": tenant.source_backend,
+            "sink_backend": tenant.output.backend or tenant.sink_backend,
+            "store_backend": tenant.store_backend,
+            "job_group_store_backend": tenant.job_group_store_backend,
+            "llm_backend": tenant.llm_backend,
+            "posting_backend": tenant.posting_backend,
+            "dry_run": tenant.dry_run,
+            "pipeline_max_items_per_run": tenant.pipeline_max_items_per_run,
+            "pipeline_max_text_length": tenant.pipeline_max_text_length,
+            "filter_profile_path": tenant.filter_profile_path,
+            "schedule_interval_seconds": (
+                tenant.schedule.interval_seconds if tenant.schedule is not None else None
+            ),
+            "output_path": tenant.output.render_path(tenant_id),
+            "output_jsonl": tenant.output.jsonl,
+            "output_schema_version": tenant.output.schema_version,
+            "quarantine_output_path": tenant.quarantine_output.render_path(tenant_id),
+            "quarantine_output_jsonl": tenant.quarantine_output.jsonl,
+            "quarantine_output_schema_version": tenant.quarantine_output.schema_version,
+            "review_output_path": tenant.review_output.render_path(tenant_id),
+            "review_output_jsonl": tenant.review_output.jsonl,
+            "review_output_schema_version": tenant.review_output.schema_version,
+            "rejected_output_path": tenant.rejected_output.render_path(tenant_id),
+            "rejected_output_jsonl": tenant.rejected_output.jsonl,
+            "rejected_output_schema_version": tenant.rejected_output.schema_version,
+            "review_max_quality_score": tenant.review_max_quality_score,
+            "posting_min_quality_score": tenant.posting_min_quality_score,
+            "store_path": Path(str(tenant.store_path).format(tenant_id=tenant_id)),
+            "job_store_path": (
+                Path(str(tenant.job_store_path).format(tenant_id=tenant_id))
+                if tenant.job_store_path is not None
+                else None
+            ),
+            "store_dsn": tenant.store_dsn,
+            "store_pool_min": tenant.store_pool_min,
+            "store_pool_max": tenant.store_pool_max,
+            "store_fallback_on_error": tenant.store_fallback_on_error,
+            "job_backend": tenant.job_backend,
+            "search_backend": tenant.search_backend,
+            "vector_backend": tenant.vector_backend,
+            "embedding_enabled": tenant.embedding_enabled,
+            "embedding_provider": tenant.embedding_provider,
+            "search_language": tenant.search_language,
+        }
+    )
+    return Settings.model_validate(base)
+
+
 def configure(path: str | Path) -> PipelineBuilder:
     config_path = Path(path)
     tenant = load_tenant_config(config_path)
-    settings = tenant.to_settings()
+    settings = tenant_to_settings(tenant)
     auth = EnvAuthProvider()
     store = cast(Store, create_store(settings))
     job_group_store = cast(JobGroupStore, create_job_group_store(settings))
@@ -394,8 +362,8 @@ def configure(path: str | Path) -> PipelineBuilder:
         profile_name=profile.name if profile is not None else "default",
         output_path=settings.output_path,
     )
-    if tenant.schedule_interval_seconds is not None:
-        builder.schedule(tenant.schedule_interval_seconds)
+    if tenant.schedule and tenant.schedule.interval_seconds is not None:
+        builder.schedule(tenant.schedule.interval_seconds)
     return builder
 
 

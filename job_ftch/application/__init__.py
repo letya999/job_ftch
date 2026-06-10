@@ -1,6 +1,6 @@
 """Application layer — pipeline engine, contracts (Protocols), use cases."""
 
-from job_ftch.application.builder import PipelineBuilder, TenantConfig, configure, run
+from job_ftch.application.builder import PipelineBuilder, configure, run
 from job_ftch.application.contracts import (
     EmbeddingProvider,
     FlushableSink,
@@ -17,7 +17,9 @@ from job_ftch.application.contracts import (
     VectorBackend,
 )
 from job_ftch.application.pipeline import Pipeline, RunSummary
+from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.application.telemetry import configure_telemetry
+from job_ftch.domain import TenantConfig
 
 __all__ = [
     "configure_telemetry",
@@ -37,6 +39,7 @@ __all__ = [
     "Source",
     "Store",
     "TenantConfig",
+    "TenantRunner",
     "VectorBackend",
     "configure",
     "run",
