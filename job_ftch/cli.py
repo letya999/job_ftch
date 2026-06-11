@@ -45,6 +45,21 @@ def parse_args() -> argparse.Namespace:
     mcp_parser.add_argument("--host", default="127.0.0.1")
     mcp_parser.add_argument("--port", type=int, default=8000)
 
+    bot_parser = subparsers.add_parser("telegram-bot", help="Start the Telegram bot")
+    bot_mode = bot_parser.add_mutually_exclusive_group()
+    bot_mode.add_argument(
+        "--polling",
+        action="store_true",
+        help="Run in long-polling mode (default).",
+    )
+    bot_mode.add_argument(
+        "--webhook",
+        action="store_true",
+        help="Run in webhook mode (requires FastAPI).",
+    )
+    bot_parser.add_argument("--host", default="0.0.0.0", help="Webhook server host.")
+    bot_parser.add_argument("--port", type=int, default=8080, help="Webhook server port.")
+
     parser.add_argument(
         "--source-backend",
         default=None,
@@ -161,6 +176,8 @@ def main() -> int:
         asyncio.run(_handle_tenants(settings, args))
     elif args.command == "mcp-server":
         _run_mcp_server(settings, args)
+    elif args.command == "telegram-bot":
+        _run_telegram_bot(settings, args)
     elif args.command == "pipeline" and args.status:
         asyncio.run(show_status_from_settings(settings))
     elif args.command == "pipeline" and args.daemon:
@@ -203,6 +220,43 @@ async def _handle_tenants(settings: Settings, args: argparse.Namespace) -> None:
             return
     finally:
         await runner.close()
+
+
+def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
+    try:
+        from job_ftch.adapters.telegram_bot.bot import (
+            HttpTelegramBotClient,
+            TelegramBotService,
+            load_bot_config,
+            run_polling_loop,
+        )
+        from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
+    except ImportError:
+        print("Install job-ftch[bot] to use the Telegram bot.")
+        raise SystemExit(1) from None
+
+    if settings.configs_dir is None:
+        msg = "--configs-dir or JOB_FTCH_CONFIGS_DIR is required for telegram-bot."
+        raise ValueError(msg)
+
+    runner = _load_tenant_runner(settings)
+    auth = EnvAuthProvider()
+    bot_config = load_bot_config(auth)
+
+    if args.webhook:
+        try:
+            import uvicorn
+
+            from job_ftch.adapters.telegram_bot.api import create_app
+        except ImportError:
+            print("Install job-ftch[api] to use webhook mode.")
+            raise SystemExit(1) from None
+        app = create_app(configs_dir=settings.configs_dir, runner=runner)
+        uvicorn.run(app, host=args.host, port=args.port)
+    else:
+        client = HttpTelegramBotClient(bot_config.token)
+        service = TelegramBotService(runner=runner, sender=client, config=bot_config)
+        asyncio.run(run_polling_loop(service=service, client=client))
 
 
 def _run_mcp_server(settings: Settings, args: argparse.Namespace) -> None:
