@@ -42,6 +42,8 @@ build/
 jobs.json
 jobs_*.json
 artifacts/
+output/
+.runtime/
 
 # Test run artifacts
 *.jsonl
