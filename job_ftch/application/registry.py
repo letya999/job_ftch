@@ -464,11 +464,76 @@ async def create_store_with_fallback(settings: Settings) -> object:
 
 def create_job_group_store(settings: Settings) -> object:
     load_extensions()
-    factory = _job_group_store_factories.get(settings.job_group_store_backend)
+    backend = settings.job_group_store_backend
+    factory = _job_group_store_factories.get(backend)
     if factory is None:
-        msg = f"Unsupported job group store backend: {settings.job_group_store_backend}"
+        msg = f"Unsupported job group store backend: {backend}"
         raise ValueError(msg)
     return factory(settings)
+
+
+async def create_job_group_store_with_fallback(settings: Settings) -> object:
+    """Create job group store with async ping health check and fallback to sqlite/memory."""
+    load_extensions()
+    backend = settings.job_group_store_backend
+    log = structlog.get_logger("job_ftch.registry")
+
+    factory = _job_group_store_factories.get(backend)
+    if factory is None:
+        msg = f"Unsupported job group store backend: {backend}"
+        raise ValueError(msg)
+
+    primary_exc: Exception | None = None
+    store: object | None = None
+    try:
+        store = factory(settings)
+    except Exception as exc:
+        primary_exc = exc
+
+    if store is not None:
+        if hasattr(store, "ping"):
+            try:
+                ok = await store.ping()  # type: ignore[union-attr]
+                if ok:
+                    return store
+                primary_exc = RuntimeError(f"job_group_store ping returned False for backend={backend}")
+            except Exception as exc:
+                primary_exc = exc
+        else:
+            return store
+
+    log.warning(
+        "job_group_store_primary_unavailable_falling_back",
+        backend=backend,
+        error=str(primary_exc),
+    )
+
+    for fallback in ("sqlite", "memory"):
+        if fallback == backend:
+            continue
+        fallback_factory = _job_group_store_factories.get(fallback)
+        if fallback_factory is None:
+            continue
+        try:
+            fallback_store = fallback_factory(settings)
+            if hasattr(fallback_store, "ping"):
+                ok = await fallback_store.ping()  # type: ignore[union-attr]
+                if not ok:
+                    continue
+            log.warning(
+                "job_group_store_falling_back",
+                primary=backend,
+                fallback=fallback,
+                error=str(primary_exc),
+            )
+            return fallback_store
+        except Exception:
+            continue
+
+    if primary_exc is not None:
+        raise primary_exc
+    msg = f"All job_group_store backends failed for primary={backend}"
+    raise RuntimeError(msg)
 
 
 def create_llm(settings: Settings) -> object:

@@ -35,7 +35,7 @@ class LinkExtractor(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag == "a":
             for name, value in attrs:
-                if name == "href" and value:
+                if name == "href" and value and not value.startswith("#"):
                     absolute = urljoin(self.base_url, value)
                     if absolute.startswith("http"):
                         self.urls.add(absolute)

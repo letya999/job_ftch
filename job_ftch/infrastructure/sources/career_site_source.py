@@ -254,6 +254,9 @@ class CareerSiteSource(Source["RawItem"]):
                             self.stats["truncated"] = True
                             break
 
+                        # Always increment so the loop is bounded by attempts,
+                        # not just successes — prevents infinite crawl on 404s.
+                        count += 1
                         scrape_result = await self._scrape_with_fallback(url, scraper_chain)
                         if scrape_result:
                             full_payload = DiscoveredPostingPayload(
@@ -275,7 +278,6 @@ class CareerSiteSource(Source["RawItem"]):
                                 self.spec.source_name or current_monitor_name,
                             )
                             self.stats["scraped"] += 1
-                            count += 1
 
                 if self.store and (
                     not self.spec.bypass

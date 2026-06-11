@@ -29,6 +29,7 @@ from job_ftch.application.pipeline import Pipeline, RunSummary
 from job_ftch.application.registry import (
     create_embedding_provider,
     create_job_group_store,
+    create_job_group_store_with_fallback,
     create_llm,
     create_search_backend,
     create_sink,
@@ -524,7 +525,7 @@ async def run_pipeline_from_settings(settings: Settings) -> RunSummary:
     )
     store = await build_store(settings)
     try:
-        job_group_store = cast(JobGroupStore, create_job_group_store(settings))
+        job_group_store = cast(JobGroupStore, await create_job_group_store_with_fallback(settings))
         llm = build_llm(settings)
         profile = load_filter_profile(settings)
         sanitize_node, nodes = build_nodes(settings, store, llm, job_group_store, profile=profile)
