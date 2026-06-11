@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import hmac
 from pathlib import Path
 from typing import Any
+
+import structlog
 
 from job_ftch.adapters.telegram_bot.bot import (
     HttpTelegramBotClient,
@@ -15,6 +18,8 @@ from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.config import Settings, get_settings
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
+
+logger = structlog.get_logger(__name__)
 
 
 def create_app(
@@ -47,6 +52,11 @@ def create_app(
     else:
         bot_config = bot_service.config
 
+    if not bot_config.secret_token:
+        raise RuntimeError(
+            "TELEGRAM_SECRET_TOKEN must be set; refusing to start without authentication"
+        )
+
     app = FastAPI(title="job_ftch telegram bridge")
 
     @app.get("/health")
@@ -58,10 +68,13 @@ def create_app(
         payload: dict[str, Any],
         x_telegram_bot_api_secret_token: str | None = Header(default=None),
     ) -> dict[str, bool]:
-        expected = bot_config.secret_token
-        if expected and x_telegram_bot_api_secret_token != expected:
+        expected = bot_config.secret_token or ""
+        if not hmac.compare_digest(x_telegram_bot_api_secret_token or "", expected):
             raise HTTPException(status_code=403, detail="Invalid Telegram secret token.")
-        await bot_service.handle_update(payload)
+        try:
+            await bot_service.handle_update(payload)
+        except Exception as exc:
+            logger.error("handle_update_failed", error=str(exc), exc_info=True)
         return {"ok": True}
 
     @app.post("/pipeline/run")
@@ -69,8 +82,8 @@ def create_app(
         payload: dict[str, Any] | None = None,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        expected = bot_config.bridge_api_key
-        if expected and x_api_key != expected:
+        expected_key = bot_config.bridge_api_key
+        if expected_key and not hmac.compare_digest(x_api_key or "", expected_key):
             raise HTTPException(status_code=403, detail="Invalid bridge API key.")
         tenant_id = None if payload is None else payload.get("tenant_id")
         if tenant_id is None:
@@ -89,7 +102,12 @@ def create_app(
         q: str,
         tenant_id: str | None = None,
         limit: int = 20,
+        x_api_key: str | None = Header(default=None),
     ) -> list[dict[str, Any]]:
+        expected_key = bot_config.bridge_api_key
+        if expected_key and not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        limit = min(limit, 100)
         groups = await runner.search_jobs(q, tenant_id=tenant_id, limit=limit)
         return [group.model_dump(mode="json") for group in groups]
 

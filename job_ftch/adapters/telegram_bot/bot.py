@@ -192,7 +192,11 @@ class TelegramBotService:
             await self._sender.send_message(chat_id, reply)
             return
         if command == "/run":
-            self._require_admin(user_id)
+            try:
+                self._require_admin(user_id)
+            except PermissionError as exc:
+                await self._sender.send_message(chat_id, f"Access denied: {exc}")
+                return
             tenant_id: str | None = args[0] if args else None
             if tenant_id is None:
                 summaries = await self._runner.run_all()
@@ -202,7 +206,11 @@ class TelegramBotService:
             await self._sender.send_message(chat_id, f"{tenant_id}: emitted={summary.emitted}")
             return
         if command == "/reset":
-            self._require_admin(user_id)
+            try:
+                self._require_admin(user_id)
+            except PermissionError as exc:
+                await self._sender.send_message(chat_id, f"Access denied: {exc}")
+                return
             tenant_id = args[0]
             await self._runner.reset_tenant(tenant_id)
             await self._sender.send_message(chat_id, f"Reset {tenant_id}")

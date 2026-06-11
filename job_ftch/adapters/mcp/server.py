@@ -83,6 +83,7 @@ class TenantMCPServer:
             tenant_id: str | None = None,
             limit: int = 20,
         ) -> list[dict[str, Any]]:
+            limit = min(limit, 100)
             groups = await self._require_runner().search_jobs(
                 query, tenant_id=tenant_id, limit=limit
             )
