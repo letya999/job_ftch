@@ -30,7 +30,6 @@ from . import (
 )
 
 
-
 def load_scrapers() -> None:
     """Import all scrapers to trigger registration."""
     for module_name in (

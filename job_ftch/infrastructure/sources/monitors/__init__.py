@@ -61,6 +61,5 @@ from . import (
     workday as workday,
 )
 
-
 if TYPE_CHECKING:
     from job_ftch.application.registry import register_monitor as register_monitor

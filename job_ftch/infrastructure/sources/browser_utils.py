@@ -111,7 +111,6 @@ async def open_page(
         "ignore_https_errors": config.get("skip_ssl", False),
     }
 
-
     if use_proxy:
         proxy_url = os.environ.get("JOB_FTCH_HTTP_PROXY")
         if proxy_url:
@@ -179,7 +178,6 @@ async def _open_persistent_page(
         "ignore_https_errors": config.get("skip_ssl", False),
         "timeout": CONTEXT_TIMEOUT,
     }
-
 
     if use_proxy:
         proxy_url = os.environ.get("JOB_FTCH_HTTP_PROXY")

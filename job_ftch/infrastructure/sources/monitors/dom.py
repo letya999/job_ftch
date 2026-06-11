@@ -141,7 +141,6 @@ async def _extract_links_rendered(
     if settle_seconds > 0:
         await asyncio.sleep(settle_seconds)
 
-
     # Extract via JS to get the most accurate rendered state
     js_extract = """
     () => Array.from(document.querySelectorAll('a'))
