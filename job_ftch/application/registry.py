@@ -489,7 +489,7 @@ def resolve_career_site_parser(*, url: str, html: str) -> CareerSiteParser:
     raise ValueError(msg)
 
 
-def create_auth_provider(name: str | None, settings: Settings) -> object:
+def create_auth_provider(name: str | None, settings: Settings) -> AuthProvider:
     load_extensions()
     normalized = (name or "env").strip().lower()
     factory = _AUTH_PROVIDERS.get(normalized)

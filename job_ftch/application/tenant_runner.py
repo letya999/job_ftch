@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
+
+import structlog
 
 from job_ftch.application.auth import resolve_auth_provider
 from job_ftch.application.builder import (
@@ -45,8 +48,11 @@ if TYPE_CHECKING:
         ProcessingNode,
         SearchBackend,
         Store,
+        StoreConnector,
     )
     from job_ftch.config import Settings
+
+logger = structlog.get_logger(__name__)
 
 
 def _json_default(value: object) -> object:
@@ -78,25 +84,25 @@ class TenantStore:
         return prefix
 
     async def has_processed(self, item_id: str) -> bool:
-        connector = cast("Any", self._store)
+        connector = cast("StoreConnector", self._store)
         return bool(await connector.set_contains(self._key("processed"), item_id))
 
     async def mark_processed(self, item_id: str) -> None:
-        connector = cast("Any", self._store)
+        connector = cast("StoreConnector", self._store)
         await connector.set_add(self._key("processed"), item_id)
 
     async def has_dedup_key(self, key: str) -> bool:
-        connector = cast("Any", self._store)
+        connector = cast("StoreConnector", self._store)
         return bool(await connector.set_contains(self._key("dedup_keys"), key))
 
     async def remember_dedup_key(self, record: Any) -> None:
-        connector = cast("Any", self._store)
+        connector = cast("StoreConnector", self._store)
         await connector.set_add(self._key("dedup_keys"), record.key)
         await connector.set_add(self._key(f"dedup_keys:{record.kind.value}"), record.key)
         await connector.set(self._key(f"dedup_record:{record.key}"), record.model_dump_json())
 
     async def list_dedup_keys(self, kind: str | None = None) -> tuple[Any, ...]:
-        connector = cast("Any", self._store)
+        connector = cast("StoreConnector", self._store)
         set_key = self._key("dedup_keys" if kind is None else f"dedup_keys:{kind}")
         members = await connector.set_members(set_key)
         results = []
@@ -109,12 +115,12 @@ class TenantStore:
         return tuple(results)
 
     async def record_duplicate(self, record: Any) -> None:
-        connector = cast("Any", self._store)
+        connector = cast("StoreConnector", self._store)
         await connector.set_add(self._key("dup_records"), record.item_id)
         await connector.set(self._key(f"dup_record:{record.item_id}"), record.model_dump_json())
 
     async def list_duplicate_records(self) -> tuple[Any, ...]:
-        connector = cast("Any", self._store)
+        connector = cast("StoreConnector", self._store)
         members = await connector.set_members(self._key("dup_records"))
         results = []
         from job_ftch.domain import DuplicateRecord
@@ -132,7 +138,7 @@ class TenantStore:
         source_kind: str | None = None,
         source_name: str | None = None,
     ) -> str | None:
-        connector = cast("Any", self._store)
+        connector = cast("StoreConnector", self._store)
         value = await connector.get(
             self._run_state_key(key, source_kind=source_kind, source_name=source_name)
         )
@@ -146,7 +152,7 @@ class TenantStore:
         source_kind: str | None = None,
         source_name: str | None = None,
     ) -> None:
-        connector = cast("Any", self._store)
+        connector = cast("StoreConnector", self._store)
         await connector.set(
             self._run_state_key(key, source_kind=source_kind, source_name=source_name),
             value,
@@ -273,7 +279,13 @@ class TenantRunner:
             async with semaphore:
                 try:
                     return await self.run_tenant(tenant_id)
-                except Exception:
+                except Exception as exc:
+                    logger.error(
+                        "tenant_run_failed",
+                        tenant_id=tenant_id,
+                        error=str(exc),
+                        exc_info=True,
+                    )
                     return None
 
         results = await asyncio.gather(*(run_one(tid) for tid in self.tenant_ids()))
@@ -284,10 +296,14 @@ class TenantRunner:
         raw = await runtime.store.get_run_state("pipeline.run_summary")
         if raw is None:
             return None
-        payload = json.loads(raw)
-        summary = RunSummary(**payload)
-        summary.tenant_id = tenant_id
-        return summary
+        try:
+            payload = json.loads(raw)
+            summary = RunSummary(**payload)
+            summary.tenant_id = tenant_id
+            return summary
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("status_decode_failed", tenant_id=tenant_id, error=str(exc))
+            return None
 
     async def list_tenants(self) -> list[TenantInfo]:
         result: list[TenantInfo] = []
@@ -311,11 +327,16 @@ class TenantRunner:
         tenant_id: str | None = None,
         limit: int = 20,
     ) -> list[JobGroup]:
+        limit = min(limit, 100)
+        tenant_ids = self.tenant_ids()
         if tenant_id is not None:
             return await self.get_runtime(tenant_id).search_backend.search(query, limit=limit)
+        if len(tenant_ids) > 1:
+            msg = "tenant_id is required when multiple tenants are configured"
+            raise ValueError(msg)
         merged: list[JobGroup] = []
         seen: set[str] = set()
-        for current_tenant in self.tenant_ids():
+        for current_tenant in tenant_ids:
             groups = await self.get_runtime(current_tenant).search_backend.search(
                 query, limit=limit
             )
@@ -374,15 +395,34 @@ async def _tenant_run_lock(settings: Settings, tenant_id: str) -> Any:
     lock_dir = settings.store_path.parent / "tenant_locks"
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_path = lock_dir / f"{tenant_id}.lock"
-    while True:
-        try:
-            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            break
-        except FileExistsError:
-            await asyncio.sleep(0.05)
+    deadline = time.monotonic() + 30.0
+
+    def _acquire() -> int:
+        while True:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode("ascii"))
+                return fd
+            except FileExistsError:
+                if time.monotonic() > deadline:
+                    raise TimeoutError(
+                        f"Could not acquire run lock for {tenant_id} after 30s"
+                    ) from None
+                try:
+                    pid_bytes = lock_path.read_bytes()
+                    stale_pid = int(pid_bytes.strip())
+                    os.kill(stale_pid, 0)
+                except (ProcessLookupError, ValueError, OSError):
+                    logger.warning("reclaiming_stale_lock", tenant_id=tenant_id)
+                    lock_path.unlink(missing_ok=True)
+                    continue
+                time.sleep(0.1)
+
+    fd: int | None = None
     try:
-        os.write(fd, str(os.getpid()).encode("ascii"))
+        fd = await asyncio.to_thread(_acquire)
         yield
     finally:
-        os.close(fd)
+        if fd is not None:
+            os.close(fd)
         lock_path.unlink(missing_ok=True)

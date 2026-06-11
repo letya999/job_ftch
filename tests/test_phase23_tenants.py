@@ -86,6 +86,21 @@ def test_load_tenants_supports_directory_and_aggregate_file(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_strategy_roundtrip_memory_backend() -> None:
+    from job_ftch.application.tenant_runner import TenantStore
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+
+    store = TenantStore("tenant1", InMemoryStore())
+
+    await store.save_source_strategy("example.com", "playwright", "noop")
+    result = await store.get_source_strategy("example.com")
+    assert result == {"monitor": "playwright", "bypass": "noop"}
+
+    missing = await store.get_source_strategy("missing.com")
+    assert missing is None
+
+
+@pytest.mark.asyncio
 async def test_tenant_runner_namespaces_status_and_reset(tmp_path: Path) -> None:
     fixture_path = tmp_path / "fixture.json"
     _write_fixture(fixture_path)

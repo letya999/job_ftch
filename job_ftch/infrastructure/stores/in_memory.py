@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from job_ftch.application.registry import register_store
 from job_ftch.domain import DuplicateRecord, RememberedDedupKey
@@ -116,6 +116,19 @@ class InMemoryStore:
         source_name: str | None = None,
     ) -> None:
         await self.set(_ns(source_kind, source_name, key), value)
+
+    async def get_source_strategy(self, domain: str) -> dict[str, str] | None:
+        import json
+
+        raw = await self.get(f"strategy:{domain}")
+        if raw is None:
+            return None
+        return cast("dict[str, str]", json.loads(raw))
+
+    async def save_source_strategy(self, domain: str, monitor: str, bypass: str) -> None:
+        import json
+
+        await self.set(f"strategy:{domain}", json.dumps({"monitor": monitor, "bypass": bypass}))
 
 
 @register_store("memory")

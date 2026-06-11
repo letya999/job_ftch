@@ -16,4 +16,4 @@ def resolve_auth_provider(
     *,
     settings: Settings,
 ) -> AuthProvider:
-    return create_auth_provider(provider_name, settings)  # type: ignore[return-value]
+    return create_auth_provider(provider_name, settings)
