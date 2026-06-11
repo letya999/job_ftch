@@ -34,7 +34,7 @@ SourceFactory = Callable[[Settings], object]
 SinkFactory = Callable[[Settings], object]
 StoreFactory = Callable[[Settings], object]
 LLMFactory = Callable[[Settings], object]
-SourceSpecFactory = Callable[[Any, "AuthProvider"], object]
+SourceSpecFactory = Callable[..., object]
 ParserMatcher = Callable[[str, str], bool]
 ParserFactory = Callable[[], object]
 
@@ -52,15 +52,15 @@ class MonitorEntry:
     name: str
     cost: int  # lower = cheaper = tried first in auto-detect
     rich: bool  # True = returns full payload, no scraper needed
-    factory: Callable  # (spec, http, auth) -> monitor instance OR discover coroutine
-    can_handle: Callable | None = None  # async (url, client) -> dict | None
+    factory: Callable[..., Any]  # (spec, http, auth) -> monitor instance OR discover coroutine
+    can_handle: Callable[..., Any] | None = None  # async (url, client) -> dict | None
 
 
 @dataclass(frozen=True)
 class ScraperEntry:
     name: str
-    factory: Callable  # (config, http) -> scraper instance OR scrape coroutine
-    can_handle: Callable | None = None  # (list[str]) -> dict | None  (static HTML probe)
+    factory: Callable[..., Any]  # (config, http) -> scraper instance OR scrape coroutine
+    can_handle: Callable[..., Any] | None = None  # (list[str]) -> dict | None  (static HTML probe)
     needs_browser: bool = False
 
 
@@ -96,7 +96,7 @@ def register_source(kind: str) -> Callable[[FSource], FSource]:
     return decorator
 
 
-def register_source_v2(kind: str) -> Callable[[FSourceV2], FSourceV2]:
+def register_source_spec(kind: str) -> Callable[[FSourceV2], FSourceV2]:
     normalized = kind.strip()
 
     def decorator(factory: FSourceV2) -> FSourceV2:
@@ -210,10 +210,10 @@ def register_vector_backend(name: str) -> Callable[[FAny], FAny]:
 
 def register_monitor(
     name: str,
-    factory: Callable,
+    factory: Callable[..., Any],
     cost: int,
     rich: bool,
-    can_handle: Callable | None = None,
+    can_handle: Callable[..., Any] | None = None,
 ) -> None:
     """Register a board monitor and keep registry sorted by cost."""
     entry = MonitorEntry(
@@ -229,8 +229,8 @@ def register_monitor(
 
 def register_scraper(
     name: str,
-    factory: Callable,
-    can_handle: Callable | None = None,
+    factory: Callable[..., Any],
+    can_handle: Callable[..., Any] | None = None,
     needs_browser: bool = False,
 ) -> None:
     """Register a job scraper."""
@@ -262,23 +262,24 @@ def resolve_scraper(name: str) -> ScraperEntry:
     return entry
 
 
-async def detect_monitor_type(url: str, client: Any, pw: Any = None) -> tuple[str, dict] | None:
-    """Iterate _MONITOR_REGISTRY sorted by cost, call can_handle() on each."""
+def resolve_bypass(name: str | None, bypass_config: dict[str, str] | None = None) -> Any:
+    """Resolve a BypassStrategy by name."""
     load_extensions()
-    for entry in _MONITOR_REGISTRY:
-        if entry.can_handle is None:
-            continue
-        # Some can_handle may need browser (pw)
-        try:
-            # We assume can_handle is async if it takes client
-            # The plan says: async (url, client) -> dict | None
-            result = await entry.can_handle(url, client)
-            if result is not None:
-                return entry.name, result
-        except Exception:
-            # Skip if detection fails
-            continue
-    return None
+    name = name or "noop"
+    factory = _bypass_factories.get(name)
+    if factory is None:
+        msg = f"Unsupported bypass strategy: {name}"
+        raise ValueError(msg)
+    try:
+        return factory(bypass_config=bypass_config)
+    except TypeError:
+        return factory()
+
+
+def get_all_monitor_entries() -> list[MonitorEntry]:
+    """Return all registered monitors sorted by cost."""
+    load_extensions()
+    return list(_MONITOR_REGISTRY)
 
 
 def all_monitor_names() -> frozenset[str]:
@@ -329,6 +330,7 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.sources.telegram_realtime",
                 "job_ftch.infrastructure.sources.monitors",
                 "job_ftch.infrastructure.sources.scrapers",
+                "job_ftch.infrastructure.bypass",
             ):
                 import_module(module_name)
             _builtins_loaded = True
@@ -382,14 +384,19 @@ class _NullAuthProvider:
         return {}
 
 
-def create_source_from_spec(spec: SourceSpec, auth: AuthProvider | None = None) -> object:
+def create_source_from_spec(
+    spec: SourceSpec, auth: AuthProvider | None = None, store: Any = None
+) -> object:
     load_extensions()
     effective_auth: AuthProvider = auth if auth is not None else _NullAuthProvider()
     factory = _source_spec_factories.get(spec.type)
     if factory is None:
         msg = f"Unsupported source type: {spec.type}"
         raise ValueError(msg)
-    return factory(spec, effective_auth)
+    try:
+        return factory(spec, effective_auth, store)
+    except TypeError:
+        return factory(spec, effective_auth)
 
 
 def create_sink(settings: Settings, *, quarantine: bool = False) -> object:

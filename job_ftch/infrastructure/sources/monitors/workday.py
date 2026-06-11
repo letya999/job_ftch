@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 import re
 from typing import TYPE_CHECKING, Any
+
+import structlog
 
 from job_ftch.application.registry import register_monitor
 from job_ftch.infrastructure.sources.monitors.shared import (
@@ -18,9 +19,9 @@ from job_ftch.infrastructure.sources.monitors.shared import (
 if TYPE_CHECKING:
     import httpx
 
-    from job_ftch.infrastructure.sources.site_models import MonitorResult
+    from job_ftch.domain.site_models import MonitorResult
 
-logger = logging.getLogger("job_ftch.monitors.workday")
+logger = structlog.get_logger("job_ftch.monitors.workday")
 
 PAGE_SIZE = 20
 _RETRY_ATTEMPTS = 3
@@ -53,18 +54,18 @@ def _job_url(company: str, wd_instance: str, site: str, external_path: str) -> s
 async def _post_page_with_retry(
     client: httpx.AsyncClient,
     list_url: str,
-    payload: dict,
+    payload: dict[str, Any],
     *,
     retries: int = _RETRY_ATTEMPTS,
     base_delay: float = _RETRY_BASE_DELAY,
-) -> dict:
+) -> dict[str, Any]:
     for attempt in range(retries):
         try:
             resp = await client.post(list_url, json=payload)
             if resp.status_code == 200:
                 data = resp.json()
                 if not isinstance(data, dict):
-                    raise ValueError("Workday API returned non-dict body")
+                    raise ValueError("Workday API returned non-dict[str, Any] body")
                 return data
             resp.raise_for_status()
         except Exception:

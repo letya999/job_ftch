@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from html import unescape
 from typing import Any
 
 import jmespath
@@ -21,6 +22,8 @@ RSC_PUSH_RE = re.compile(
 )
 
 PHENOM_CANVAS_RE = re.compile(r"phApp\.ddo\s*=\s*")
+NUXT_DATA_RE = re.compile(r"window\.__NUXT__\s*=\s*")
+INERTIA_DATA_RE = re.compile(r'data-page="([^"]+)"')
 
 _HTML_TAG_RE = re.compile(r"<[a-zA-Z/]")
 
@@ -90,43 +93,47 @@ def resolve_path(data: Any, path: str) -> Any:
     return jmespath.search(path, data)
 
 
-def extract_field(item: dict, spec: str | list | dict, root: dict | None = None) -> Any:
+def extract_field(
+    item: dict[str, Any], spec: str | list[Any] | dict[str, Any], root: dict[str, Any] | None = None
+) -> Any:
     """Extract a value from *item* using a field spec."""
     if isinstance(spec, list):
         return _extract_concat(item, spec)
 
     if isinstance(spec, dict) and "concat" in spec:
-        return _extract_concat(item, spec["concat"], separator=spec.get("separator", "\n"))
+        return _extract_concat(item, spec["concat"], separator=str(spec.get("separator", "\n")))
 
     if isinstance(spec, dict) and "lookup_from" in spec and "key_from" in spec:
         if root is None:
             return None
-        key_val = jmespath.search(spec["key_from"], item)
+        key_val = jmespath.search(str(spec["key_from"]), item)
         if key_val is None:
             return None
-        table = jmespath.search(spec["lookup_from"], root)
+        table = jmespath.search(str(spec["lookup_from"]), root)
         if not isinstance(table, dict):
             return None
         return table.get(str(key_val))
 
     if isinstance(spec, dict) and "path" in spec:
         if "map" in spec:
-            result = jmespath.search(spec["path"], item)
+            result = jmespath.search(str(spec["path"]), item)
             if result is None:
                 return None
             value_map = spec["map"]
+            if not isinstance(value_map, dict):
+                return None
             if isinstance(result, list):
                 mapped = [str(value_map[str(v)]) for v in result if str(v) in value_map]
                 return mapped or None
             key = str(result)
-            mapped = value_map.get(key)
-            return str(mapped) if mapped is not None else None
+            val = value_map.get(key)
+            return str(val) if val is not None else None
         return extract_field(item, spec["path"], root=root)
 
     if isinstance(spec, str) and spec.startswith("="):
         return spec[1:]
 
-    result = jmespath.search(spec, item)
+    result = jmespath.search(str(spec), item)
     if result is None:
         return None
     if isinstance(result, list):
@@ -175,7 +182,7 @@ def _plain_to_html(text: str) -> str:
     return "\n".join(out)
 
 
-def _extract_concat(item: dict, specs: list, separator: str = "\n") -> str | None:
+def _extract_concat(item: dict[str, Any], specs: list[Any], separator: str = "\n") -> str | None:
     parts: list[str] = []
     pending_constants: list[str] = []
     had_data_expr = False
@@ -187,8 +194,8 @@ def _extract_concat(item: dict, specs: list, separator: str = "\n") -> str | Non
 
         if isinstance(s, dict):
             had_data_expr = True
-            each_path = s.get("each", "")
-            wrap_tpl = s.get("wrap", "")
+            each_path = str(s.get("each", ""))
+            wrap_tpl = str(s.get("wrap", ""))
             arr = jmespath.search(each_path, item)
             if not arr or not isinstance(arr, list):
                 pending_constants.clear()
@@ -206,7 +213,7 @@ def _extract_concat(item: dict, specs: list, separator: str = "\n") -> str | Non
             continue
 
         had_data_expr = True
-        result = jmespath.search(s, item)
+        result = jmespath.search(str(s), item)
         if result is None:
             pending_constants.clear()
             continue
@@ -225,33 +232,35 @@ def _extract_concat(item: dict, specs: list, separator: str = "\n") -> str | Non
     return separator.join(parts) if parts else None
 
 
-def extract_next_data(html: str) -> dict | None:
+def extract_next_data(html: str) -> dict[str, Any] | None:
     match = NEXT_DATA_RE.search(html)
     if not match:
         return None
     try:
-        return json.loads(match.group(1))
+        data = json.loads(match.group(1))
+        return data if isinstance(data, dict) else None
     except (json.JSONDecodeError, ValueError):
         return None
 
 
-def extract_react_router_data(html: str) -> dict | None:
+def extract_react_router_data(html: str) -> dict[str, Any] | None:
     match = REACT_ROUTER_RE.search(html)
     if not match:
         return None
     try:
         unescaped = json.loads('"' + match.group(1) + '"')
-        return json.loads(unescaped)
+        data = json.loads(unescaped)
+        return data if isinstance(data, dict) else None
     except (json.JSONDecodeError, ValueError):
         return None
 
 
-def extract_rsc_data(html: str) -> dict | None:
+def extract_rsc_data(html: str) -> dict[str, Any] | None:
     chunks = RSC_PUSH_RE.findall(html)
     if not chunks:
         return None
 
-    merged: dict = {}
+    merged: dict[str, Any] = {}
     for raw in chunks:
         try:
             unescaped = json.loads('"' + raw + '"')
@@ -280,7 +289,7 @@ def extract_rsc_data(html: str) -> dict | None:
     return merged or None
 
 
-def extract_phenom_canvas_data(html: str) -> dict | None:
+def extract_phenom_canvas_data(html: str) -> dict[str, Any] | None:
     match = PHENOM_CANVAS_RE.search(html)
     if not match:
         return None
@@ -293,12 +302,51 @@ def extract_phenom_canvas_data(html: str) -> dict | None:
     if end is None:
         return None
     try:
-        return json.loads(html[start:end])
+        data = json.loads(html[start:end])
+        return data if isinstance(data, dict) else None
     except (json.JSONDecodeError, ValueError):
         return None
 
 
-def extract_embedded_json(html: str, source: str = "nextdata") -> dict | None:
+def _extract_assigned_json(html: str, marker_re: re.Pattern[str]) -> dict[str, Any] | None:
+    match = marker_re.search(html)
+    if not match:
+        return None
+    start = match.end()
+    while start < len(html) and html[start] in " \t\r\n":
+        start += 1
+    if start >= len(html) or html[start] not in "{[":
+        return None
+    end = find_json_extent(html, start)
+    if end is None:
+        return None
+    try:
+        parsed = json.loads(html[start:end])
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else {"data": parsed}
+
+
+def extract_nuxt_data(html: str) -> dict[str, Any] | None:
+    return _extract_assigned_json(html, NUXT_DATA_RE)
+
+
+def extract_inertia_data(html: str) -> dict[str, Any] | None:
+    match = INERTIA_DATA_RE.search(html)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(unescape(match.group(1)))
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else {"data": parsed}
+
+
+def extract_embedded_json(html: str, source: str = "nextdata") -> dict[str, Any] | None:
+    if source == "nuxt":
+        return extract_nuxt_data(html)
+    if source == "inertia":
+        return extract_inertia_data(html)
     if source == "reactrouter":
         return extract_react_router_data(html)
     if source == "rsc":

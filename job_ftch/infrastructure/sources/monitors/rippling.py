@@ -17,7 +17,7 @@ from job_ftch.infrastructure.sources.monitors.shared import (
 if TYPE_CHECKING:
     import httpx
 
-    from job_ftch.infrastructure.sources.site_models import MonitorResult
+    from job_ftch.domain.site_models import MonitorResult
 
 logger = logging.getLogger("job_ftch.monitors.rippling")
 
@@ -56,7 +56,7 @@ async def discover(
     resp = await client.get(_api_list_url(slug))
     resp.raise_for_status()
 
-    job_list: list[dict] = resp.json()
+    job_list: list[dict[str, Any]] = resp.json()
     if not isinstance(job_list, list):
         return set()
 

@@ -11,23 +11,27 @@ except ImportError:
 
 
 class StealthBrowserBypass:
-    """Applies playwright-stealth patches to Playwright page context.
+    """Applies playwright-stealth patches to Playwright page context."""
 
-    Install: pip install playwright-stealth
-    Community-maintained: see infrastructure/bypass/stealth_browser.py
-    """
-
-    def configure(self, client: Any) -> Any:
-        if not _STEALTH_AVAILABLE:
-            raise ImportError(
-                "playwright-stealth is not installed. Run: pip install playwright-stealth"
-            )
-        # When a Playwright page is passed, apply stealth patches
-        if hasattr(client, "add_init_script"):
-            playwright_stealth.stealth_sync(client)
+    async def apply_http(self, client: Any) -> Any:
         return client
+
+    def apply_browser_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        # Append arguments to disable automation features
+        args = kwargs.get("args", [])
+        if "--disable-blink-features=AutomationControlled" not in args:
+            args.append("--disable-blink-features=AutomationControlled")
+        kwargs["args"] = args
+        return kwargs
+
+    async def apply_page(self, page: Any) -> None:
+        if not _STEALTH_AVAILABLE:
+            raise ImportError("playwright-stealth is not installed.")
+        # Async stealth injection
+        await playwright_stealth.stealth_async(page)
 
 
 @register_bypass("stealth_browser")
-def _create_stealth() -> StealthBrowserBypass:
+def _create_stealth(bypass_config: dict[str, str] | None = None) -> StealthBrowserBypass:
+    del bypass_config
     return StealthBrowserBypass()

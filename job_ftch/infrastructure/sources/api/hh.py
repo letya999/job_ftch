@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from job_ftch.application.registry import register_source_v2
+from job_ftch.application.registry import register_source_spec
 from job_ftch.domain import RawItem, SourceKind
 
 from .base import OfficialAPISource
@@ -41,6 +41,6 @@ class HHAPISource(OfficialAPISource):
         return super()._map_to_raw_item(item)
 
 
-@register_source_v2("hh")
-def _create_hh_source(spec: Any, auth: AuthProvider) -> HHAPISource:
+@register_source_spec("hh_api")
+def _create_hh(spec: Any, auth: AuthProvider, store: Any = None) -> HHAPISource:
     return HHAPISource(spec, auth)

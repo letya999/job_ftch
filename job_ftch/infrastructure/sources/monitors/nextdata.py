@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from job_ftch.application.registry import register_monitor
+from job_ftch.domain.site_models import (
+    DiscoveredPostingPayload,
+    MonitorResult,
+)
 from job_ftch.infrastructure.sources.monitors.shared import (
     fetch_page_text,
 )
@@ -19,15 +24,11 @@ from job_ftch.infrastructure.sources.nextdata_utils import (
     resolve_path,
     slugify,
 )
-from job_ftch.infrastructure.sources.site_models import (
-    DiscoveredPostingPayload,
-    MonitorResult,
-)
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.monitors.nextdata")
+logger = structlog.get_logger("job_ftch.monitors.nextdata")
 
 _COMMON_PATHS = [
     "props.pageProps.positions",
@@ -40,7 +41,9 @@ _COMMON_PATHS = [
 ]
 
 
-def _build_url(item: dict, url_template: str, slug_fields: list[str] | None) -> str | None:
+def _build_url(
+    item: dict[str, Any], url_template: str, slug_fields: list[str] | None
+) -> str | None:
     variables: dict[str, Any] = {}
     for key, value in item.items():
         if isinstance(value, (str, int, float)):
@@ -61,7 +64,7 @@ def _build_url(item: dict, url_template: str, slug_fields: list[str] | None) -> 
         return None
 
 
-def _find_jobs_path(data: dict, paths: list[str] | None = None) -> tuple[str, int] | None:
+def _find_jobs_path(data: dict[str, Any], paths: list[str] | None = None) -> tuple[str, int] | None:
     for path in paths or _COMMON_PATHS:
         arr = resolve_path(data, path)
         if (

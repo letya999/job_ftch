@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from importlib import import_module
+from typing import TYPE_CHECKING
 
 # Trigger loading
 from . import (
@@ -29,6 +30,7 @@ from . import (
 )
 
 
+
 def load_scrapers() -> None:
     """Import all scrapers to trigger registration."""
     for module_name in (
@@ -45,3 +47,7 @@ def load_scrapers() -> None:
             import_module(module_name)
         except ImportError:
             continue
+
+
+if TYPE_CHECKING:
+    from job_ftch.application.registry import register_scraper as register_scraper

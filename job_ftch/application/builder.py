@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
@@ -50,8 +50,6 @@ from job_ftch.domain import (
     TenantConfig,
 )
 from job_ftch.domain.source_spec import SourceSpec
-from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
-from job_ftch.infrastructure.sources.composite import CompositeSource
 from job_ftch.nodes import (
     AIRoleRelevanceNode,
     CompensationParsingNode,
@@ -68,6 +66,9 @@ from job_ftch.nodes import (
 )
 from job_ftch.sinks import CountedSink, FailureTolerantSink, FanOutSink, RoutingSink
 
+if TYPE_CHECKING:
+    from job_ftch.application.contracts import AuthProvider
+
 
 class PipelineBuilder:
     """Builds pipelines programmatically for library and adapter use."""
@@ -75,7 +76,7 @@ class PipelineBuilder:
     def __init__(self) -> None:
         self._source_specs: list[SourceSpec] = []
         self._source_instance: Source[RawItem] | None = None
-        self._auth_provider: AuthProvider = EnvAuthProvider()
+        self._auth_provider: AuthProvider | None = None
         self._stages: list[ProcessingNode[Any]] = []
         self._sinks: list[Sink[Job]] = []
         self._store: Store | None = None
@@ -253,6 +254,8 @@ class PipelineBuilder:
             )
 
     def _build_source_from_specs(self) -> Source[RawItem]:
+        from job_ftch.infrastructure.sources.composite import CompositeSource
+
         child_sources = [
             cast(Source[RawItem], create_source_from_spec(spec, self._auth_provider))
             for spec in self._source_specs
@@ -332,6 +335,8 @@ def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = No
 
 
 def configure(path: str | Path) -> PipelineBuilder:
+    from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
+
     config_path = Path(path)
     tenant = load_tenant_config(config_path)
     settings = tenant_to_settings(tenant)
@@ -371,16 +376,19 @@ def run(path: str | Path) -> RunSummary:
     return asyncio.run(configure(path).run_async())
 
 
-def build_composite_source_from_file(path: Path) -> Source[RawItem]:
+def build_composite_source_from_file(path: Path, store: Any = None) -> Source[RawItem]:
+    from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
+    from job_ftch.infrastructure.sources.composite import CompositeSource
+
     auth = EnvAuthProvider()
     specs = load_sources(path)
-    child_sources = [create_source_from_spec(spec, auth) for spec in specs]
+    child_sources = [create_source_from_spec(spec, auth, store=store) for spec in specs]
     return CompositeSource(cast("Sequence[Source[RawItem]]", child_sources))
 
 
-def build_source(settings: Settings) -> Source[RawItem]:
+def build_source(settings: Settings, store: Any = None) -> Source[RawItem]:
     if settings.sources_file_path:
-        return build_composite_source_from_file(settings.sources_file_path)
+        return build_composite_source_from_file(settings.sources_file_path, store=store)
     return cast(Source[RawItem], create_source(settings))
 
 
@@ -524,7 +532,7 @@ async def run_pipeline_from_settings(settings: Settings) -> RunSummary:
         rejected_counted, rejected_sink = build_rejected_sink(settings)
         builder = (
             PipelineBuilder()
-            .with_runtime_source(build_source(settings))
+            .with_runtime_source(build_source(settings, store=store))
             .store(store)
             .stage(cast(ProcessingNode[Any], sanitize_node))
             .sink(output_sink)

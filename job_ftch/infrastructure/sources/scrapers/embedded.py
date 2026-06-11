@@ -2,24 +2,27 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from job_ftch.application.registry import register_scraper
+from job_ftch.domain.site_models import ScrapedPostingPayload
 from job_ftch.infrastructure.sources.nextdata_utils import (
     extract_field,
+    extract_inertia_data,
     extract_next_data,
+    extract_nuxt_data,
     extract_phenom_canvas_data,
     extract_react_router_data,
     extract_rsc_data,
     resolve_path,
 )
-from job_ftch.infrastructure.sources.site_models import ScrapedPostingPayload
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.scrapers.embedded")
+logger = structlog.get_logger("job_ftch.scrapers.embedded")
 
 _TITLE_KEYS = {"title", "name", "jobTitle", "job_title", "position"}
 _DESC_KEYS = {"description", "content", "descriptionHtml", "body", "jobDescription"}
@@ -60,8 +63,16 @@ def _map_to_payload(raw: dict[str, Any]) -> ScrapedPostingPayload:
     return ScrapedPostingPayload(**kwargs)
 
 
-def _find_job_object(data: Any, path: str) -> tuple[str | None, dict | None]:
+def _find_job_object(data: Any, path: str) -> tuple[str | None, dict[str, Any] | None]:
     """Recursively search for an object that looks like a job posting."""
+    if isinstance(data, list):
+        for index, value in enumerate(data):
+            new_path = f"{path}[{index}]" if path else f"[{index}]"
+            found_path, found_obj = _find_job_object(value, new_path)
+            if found_obj:
+                return found_path, found_obj
+        return None, None
+
     if not isinstance(data, dict):
         return None, None
 
@@ -102,11 +113,18 @@ def _auto_map_fields(obj: dict[str, Any]) -> dict[str, str]:
     return mapping
 
 
-def can_handle(htmls: list[str]) -> dict | None:
+def can_handle(htmls: list[str]) -> dict[str, Any] | None:
     """Detect embedded JSON with job objects across multiple pages."""
     for html in htmls:
         # Try different sources
-        for extractor in [extract_next_data, extract_react_router_data, extract_phenom_canvas_data]:
+        for source_name, extractor in [
+            ("nextdata", extract_next_data),
+            ("nuxt", extract_nuxt_data),
+            ("inertia", extract_inertia_data),
+            ("reactrouter", extract_react_router_data),
+            ("phenom_canvas", extract_phenom_canvas_data),
+            ("rsc", extract_rsc_data),
+        ]:
             try:
                 data = extractor(html)
                 if data:
@@ -114,55 +132,86 @@ def can_handle(htmls: list[str]) -> dict | None:
                     if obj:
                         fields = _auto_map_fields(obj)
                         if fields:
-                            return {
-                                "source": extractor.__name__.replace("extract_", "").replace(
-                                    "_data", ""
-                                ),
-                                "path": path,
-                                "fields": fields,
-                            }
+                            return {"source": source_name, "path": path, "fields": fields}
             except Exception:
                 continue
     return None
 
 
-def parse_html(html: str, config: dict) -> ScrapedPostingPayload | None:
-    """Extract job data from pre-fetched HTML."""
-    source = config.get("source", "nextdata")
+def _extract_source_data(html: str, source: str) -> dict[str, Any] | None:
     if source == "nextdata":
-        data = extract_next_data(html)
-    elif source == "reactrouter":
-        data = extract_react_router_data(html)
-    elif source == "rsc":
-        data = extract_rsc_data(html)
-    elif source == "phenom_canvas":
-        data = extract_phenom_canvas_data(html)
-    else:
-        data = None
-
-    if data is None:
-        return None
-
-    path = config.get("path")
-    item = resolve_path(data, path) if path else data
-    if item is None:
-        return None
-
-    fields_map = config.get("fields", {})
-    raw: dict[str, Any] = {}
-    for target, spec in fields_map.items():
-        val = extract_field(item, spec, root=data if isinstance(data, dict) else None)
-        if val is not None:
-            raw[target] = val
-
-    return _map_to_payload(raw)
+        return extract_next_data(html)
+    if source == "nuxt":
+        return extract_nuxt_data(html)
+    if source == "inertia":
+        return extract_inertia_data(html)
+    if source == "reactrouter":
+        return extract_react_router_data(html)
+    if source == "rsc":
+        return extract_rsc_data(html)
+    if source == "phenom_canvas":
+        return extract_phenom_canvas_data(html)
+    return None
 
 
-async def scrape(url: str, config: dict, http: httpx.AsyncClient) -> ScrapedPostingPayload | None:
+def parse_html(html: str, config: dict[str, Any]) -> ScrapedPostingPayload | None:
+    """Extract job data from pre-fetched HTML."""
+    source = config.get("source")
+    sources = (
+        [source]
+        if source
+        else [
+            "nextdata",
+            "nuxt",
+            "inertia",
+            "reactrouter",
+            "rsc",
+            "phenom_canvas",
+        ]
+    )
+
+    for source_name in sources:
+        data = _extract_source_data(html, source_name)
+        if data is None:
+            continue
+
+        path = config.get("path")
+        item = resolve_path(data, path) if path else data
+        if item is None:
+            continue
+
+        fields_map = config.get("fields")
+        if not fields_map:
+            auto_path, auto_obj = _find_job_object(item, path or "")
+            if auto_obj:
+                fields_map = _auto_map_fields(auto_obj)
+                item = auto_obj
+                if auto_path and not path:
+                    path = auto_path
+        if not fields_map:
+            continue
+
+        raw: dict[str, Any] = {}
+        for target, spec in fields_map.items():
+            val = extract_field(item, spec, root=data if isinstance(data, dict) else None)
+            if val is not None:
+                raw[target] = val
+        if raw:
+            return _map_to_payload(raw)
+
+    return None
+
+
+async def scrape(
+    url: str, config: dict[str, Any], http: httpx.AsyncClient
+) -> ScrapedPostingPayload | None:
     try:
-        resp = await http.get(url, follow_redirects=True)
-        resp.raise_for_status()
-        return parse_html(resp.text, config)
+        html = config.get("prefetched_html")
+        if not isinstance(html, str):
+            resp = await http.get(url, follow_redirects=True)
+            resp.raise_for_status()
+            html = resp.text
+        return parse_html(html, config)
     except Exception:
         return None
 

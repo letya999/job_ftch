@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from job_ftch.application.registry import register_monitor
+from job_ftch.domain.site_models import (
+    DiscoveredPostingPayload,
+    MonitorResult,
+)
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     BoardGoneError,
@@ -16,15 +21,11 @@ from job_ftch.infrastructure.sources.monitors.shared import (
     slugs_from_url,
     truncated_rich_result,
 )
-from job_ftch.infrastructure.sources.site_models import (
-    DiscoveredPostingPayload,
-    MonitorResult,
-)
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.monitors.ashby")
+logger = structlog.get_logger("job_ftch.monitors.ashby")
 
 _PAGE_PATTERNS = [
     re.compile(r"api\.ashbyhq\.com/posting-api/job-board/([\w-]+)"),
@@ -34,7 +35,7 @@ _PAGE_PATTERNS = [
 _IGNORE_TOKENS = frozenset({"api", "js", "css", "assets", "posting-api"})
 
 
-def _parse_locations(job: dict) -> list[str] | None:
+def _parse_locations(job: dict[str, Any]) -> list[str] | None:
     locations: list[str] = []
     seen: set[str] = set()
 
@@ -63,7 +64,9 @@ def _parse_locations(job: dict) -> list[str] | None:
     return locations or None
 
 
-def _parse_compensation(job: dict, compensation: dict | None) -> dict | None:
+def _parse_compensation(
+    job: dict[str, Any], compensation: dict[str, Any] | None
+) -> dict[str, Any] | None:
     if not compensation:
         return None
     comp_tiers = compensation.get("compensationTierSummary", [])
@@ -87,12 +90,14 @@ def _parse_compensation(job: dict, compensation: dict | None) -> dict | None:
     return None
 
 
-def _parse_job(job: dict, compensation: dict | None = None) -> DiscoveredPostingPayload | None:
+def _parse_job(
+    job: dict[str, Any], compensation: dict[str, Any] | None = None
+) -> DiscoveredPostingPayload | None:
     url = job.get("jobUrl")
     if not url:
         return None
 
-    metadata: dict = {}
+    metadata: dict[str, Any] = {}
     department = job.get("department")
     if department:
         metadata["department"] = department

@@ -3,39 +3,40 @@
 from __future__ import annotations
 
 import html
-import logging
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 import defusedxml.ElementTree as ET
+import structlog
 
 from job_ftch.application.registry import register_monitor
+from job_ftch.domain.site_models import (
+    DiscoveredPostingPayload,
+    MonitorResult,
+)
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     fetch_page_text,
     truncated_rich_result,
 )
-from job_ftch.infrastructure.sources.site_models import (
-    DiscoveredPostingPayload,
-    MonitorResult,
-)
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.monitors.rss_board")
+logger = structlog.get_logger("job_ftch.monitors.rss_board")
 
 _TT_NS = "https://teamtailor.com/locations"
 _G_NS = "http://base.google.com/ns/1.0"
 _TITLE_LOCATION_RE = re.compile(r"\s*\([^)]+,\s*[^)]+\)\s*$")
+_GENERIC_RSS_LINK_RE = re.compile(r'href="([^"]*rss[^"]*)"', re.IGNORECASE)
 
 
 @dataclass(frozen=True)
 class _Preset:
     feed_paths: list[str]
-    page_patterns: list[re.Pattern]
+    page_patterns: list[re.Pattern[str]]
     feed_ns: dict[str, str]
     paginated: bool = False
     page_size: int = 100
@@ -66,21 +67,21 @@ _PRESETS: dict[str, _Preset] = {
 def _text(item: ET.Element, tag: str) -> str | None:
     child = item.find(tag)
     if child is not None and child.text:
-        return child.text.strip()
+        return str(child.text).strip()
     return None
 
 
 def _g(item: ET.Element, tag: str) -> str | None:
     child = item.find(f"{{{_G_NS}}}{tag}")
     if child is not None and child.text:
-        return child.text.strip()
+        return str(child.text).strip()
     return None
 
 
 def _tt(item: ET.Element, tag: str) -> str | None:
     child = item.find(f"{{{_TT_NS}}}{tag}")
     if child is not None and child.text:
-        return child.text.strip()
+        return str(child.text).strip()
     return None
 
 
@@ -101,7 +102,7 @@ def _parse_sf_item(item: ET.Element) -> DiscoveredPostingPayload | None:
         if cleaned:
             title = cleaned
 
-    metadata: dict = {}
+    metadata: dict[str, Any] = {}
     if job_id := _text(item, "guid"):
         metadata["id"] = job_id
     if employer := _g(item, "employer"):
@@ -222,6 +223,16 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
             parsed = urlparse(url)
             feed = f"{parsed.scheme}://{parsed.netloc}{preset.feed_paths[0]}"
             return {"preset": preset_name, "feed_url": feed}
+
+    match = _GENERIC_RSS_LINK_RE.search(html_text)
+    if match:
+        parsed = urlparse(url)
+        feed = html.unescape(match.group(1))
+        if feed.startswith("/"):
+            feed = f"{parsed.scheme}://{parsed.netloc}{feed}"
+        elif not feed.startswith("http"):
+            feed = f"{parsed.scheme}://{parsed.netloc}/{feed.lstrip('/')}"
+        return {"preset": "generic", "feed_url": feed}
 
     return None
 

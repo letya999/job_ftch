@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import random
 from html.parser import HTMLParser
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from job_ftch.application.registry import register_scraper
+from job_ftch.domain.site_models import ScrapedPostingPayload
 from job_ftch.infrastructure.sources.monitors.shared import normalize_salary_unit
-from job_ftch.infrastructure.sources.site_models import ScrapedPostingPayload
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.scrapers.json_ld")
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 _CTRL_REPLACEMENTS = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
 
@@ -48,7 +49,7 @@ class _JsonLdExtractor(HTMLParser):
         super().__init__()
         self._in_jsonld = False
         self._data: list[str] = []
-        self.results: list[dict] = []
+        self.results: list[dict[str, Any]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag == "script":
@@ -90,7 +91,7 @@ def _normalize_keys(data: Any) -> Any:
     return data
 
 
-def _find_job_posting(data: dict | list) -> dict | None:
+def _find_job_posting(data: dict[str, Any] | list[Any]) -> dict[str, Any] | None:
     if isinstance(data, list):
         for item in data:
             result = _find_job_posting(item)
@@ -101,9 +102,9 @@ def _find_job_posting(data: dict | list) -> dict | None:
     if isinstance(data, dict):
         type_val = data.get("@type", "")
         if isinstance(type_val, str) and "JobPosting" in type_val:
-            return _normalize_keys(data)
+            return cast("dict[str, Any]", _normalize_keys(data))
         if isinstance(type_val, list) and any("JobPosting" in t for t in type_val):
-            return _normalize_keys(data)
+            return cast("dict[str, Any]", _normalize_keys(data))
 
         graph = data.get("@graph")
         if isinstance(graph, list):
@@ -112,7 +113,7 @@ def _find_job_posting(data: dict | list) -> dict | None:
     return None
 
 
-def _extract_locations(posting: dict) -> list[str] | None:
+def _extract_locations(posting: dict[str, Any]) -> list[str] | None:
     locations: list[str] = []
     job_location = posting.get("jobLocation")
     if job_location is None:
@@ -140,7 +141,7 @@ def _extract_locations(posting: dict) -> list[str] | None:
     return locations or None
 
 
-def _extract_salary(posting: dict) -> dict | None:
+def _extract_salary(posting: dict[str, Any]) -> dict[str, Any] | None:
     base_salary = posting.get("baseSalary")
     if not isinstance(base_salary, dict):
         return None
@@ -176,8 +177,8 @@ def _text_or_list(val: Any) -> list[str] | None:
     return None
 
 
-def _parse_posting(posting: dict) -> ScrapedPostingPayload:
-    extras: dict = {}
+def _parse_posting(posting: dict[str, Any]) -> ScrapedPostingPayload:
+    extras: dict[str, Any] = {}
     skills = _text_or_list(posting.get("skills"))
     if skills:
         extras["skills"] = skills
@@ -202,17 +203,7 @@ def _parse_posting(posting: dict) -> ScrapedPostingPayload:
     )
 
 
-async def scrape(url: str, config: dict, http: httpx.AsyncClient) -> ScrapedPostingPayload | None:
-    try:
-        resp = await http.get(url, follow_redirects=True)
-        if resp.status_code == 403:
-            await asyncio.sleep(0.5 + random.random())
-            resp = await http.get(url, follow_redirects=True)
-        resp.raise_for_status()
-        html = resp.text
-    except Exception:
-        return None
-
+def parse_html(html: str) -> ScrapedPostingPayload | None:
     extractor = _JsonLdExtractor()
     extractor.feed(html)
 
@@ -223,7 +214,25 @@ async def scrape(url: str, config: dict, http: httpx.AsyncClient) -> ScrapedPost
     return None
 
 
-def can_handle(htmls: list[str]) -> dict | None:
+async def scrape(
+    url: str, config: dict[str, Any], http: httpx.AsyncClient
+) -> ScrapedPostingPayload | None:
+    try:
+        html = config.get("prefetched_html")
+        if not isinstance(html, str):
+            resp = await http.get(url, follow_redirects=True)
+            if resp.status_code == 403:
+                await asyncio.sleep(0.5 + random.random())
+                resp = await http.get(url, follow_redirects=True)
+            resp.raise_for_status()
+            html = resp.text
+    except Exception:
+        return None
+
+    return parse_html(html)
+
+
+def can_handle(htmls: list[str]) -> dict[str, Any] | None:
     found = 0
     for html in htmls:
         extractor = _JsonLdExtractor()

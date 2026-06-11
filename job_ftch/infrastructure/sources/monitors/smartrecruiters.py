@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
+
+import structlog
 
 from job_ftch.application.registry import register_monitor
 from job_ftch.infrastructure.sources.monitors.shared import (
@@ -19,9 +20,9 @@ from job_ftch.infrastructure.sources.monitors.shared import (
 if TYPE_CHECKING:
     import httpx
 
-    from job_ftch.infrastructure.sources.site_models import MonitorResult
+    from job_ftch.domain.site_models import MonitorResult
 
-logger = logging.getLogger("job_ftch.monitors.smartrecruiters")
+logger = structlog.get_logger("job_ftch.monitors.smartrecruiters")
 
 PAGE_SIZE = 100
 _RETRY_ATTEMPTS = 3
@@ -67,18 +68,18 @@ def _posting_url(token: str, posting_id: str) -> str:
 async def _get_page_with_retry(
     client: httpx.AsyncClient,
     url: str,
-    params: dict,
+    params: dict[str, Any],
     *,
     retries: int = _RETRY_ATTEMPTS,
     base_delay: float = _RETRY_BASE_DELAY,
-) -> dict:
+) -> dict[str, Any]:
     for attempt in range(retries):
         try:
             resp = await client.get(url, params=params)
             if resp.status_code == 200:
                 data = resp.json()
                 if not isinstance(data, dict):
-                    raise ValueError("SmartRecruiters API returned non-dict body")
+                    raise ValueError("SmartRecruiters API returned non-dict[str, Any] body")
                 return data
             resp.raise_for_status()
         except Exception:

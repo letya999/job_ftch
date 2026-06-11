@@ -30,10 +30,15 @@ dependencies = [
     "feedparser>=6.0.12",
     "jmespath>=1.0",
     "defusedxml>=0.7.1",
+    "curl-cffi>=0.15.0",
+    "playwright-stealth>=2.0.3",
+    "asyncpg>=0.31.0",
+    "qdrant-client>=1.18.0",
 ]
 
 [project.optional-dependencies]
 browser = ["playwright>=1.45"]
+stealth = ["playwright-stealth>=1.0", "curl_cffi>=0.7", "cloakbrowser>=0.3.31"]
 bot = ["aiogram>=3.0"]
 dagster = ["dagster>=1.8"]
 faststream = ["faststream>=0.5"]
@@ -60,6 +65,9 @@ all = [
     "fastmcp>=2.4",
     "faststream>=0.5",
     "playwright>=1.45",
+    "playwright-stealth>=1.0",
+    "curl_cffi>=0.7",
+    "cloakbrowser>=0.3.31",
     "sentence-transformers>=3.0",
     "torch>=2.3",
     "qdrant-client>=1.9",

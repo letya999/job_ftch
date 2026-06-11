@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlsplit
 from pydantic import BaseModel, Field
 from selectolax.lexbor import LexborHTMLParser
 
-from job_ftch.application.registry import register_parser, register_source_v2
+from job_ftch.application.registry import register_parser, register_source_spec
 from job_ftch.domain import RawItem, SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 
@@ -256,12 +256,13 @@ def _build_greenhouse_parser() -> DeclarativeCareerSiteParser:
     return DeclarativeCareerSiteParser(CareerSiteConfig.greenhouse())
 
 
-@register_source_v2("declarative_html")
+@register_source_spec("declarative_html")
 def _build_declarative_html_source_v2(
     spec: DeclarativeHtmlSpec,
     auth: AuthProvider,
+    store: Any = None,
 ) -> DeclarativeCareerSiteSource:
-    del auth
+    del auth, store
     from job_ftch.infrastructure.sources.career_site import build_default_http_client
 
     client = build_default_http_client()

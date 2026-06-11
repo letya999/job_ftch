@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+import structlog
+
 from job_ftch.application.registry import register_monitor
+from job_ftch.domain.site_models import (
+    DiscoveredPostingPayload,
+    MonitorResult,
+)
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     BoardGoneError,
@@ -15,15 +20,11 @@ from job_ftch.infrastructure.sources.monitors.shared import (
     normalize_salary_unit,
     truncated_rich_result,
 )
-from job_ftch.infrastructure.sources.site_models import (
-    DiscoveredPostingPayload,
-    MonitorResult,
-)
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.monitors.recruitee")
+logger = structlog.get_logger("job_ftch.monitors.recruitee")
 
 _DOMAIN_RE = re.compile(r"^([\w-]+)\.recruitee\.com$")
 _IGNORE_SLUGS = frozenset({"api", "www", "app", "docs", "help", "support", "status"})
@@ -52,7 +53,7 @@ def _api_url(api_base: str) -> str:
     return f"{api_base.rstrip('/')}/api/offers"
 
 
-def _parse_job(offer: dict) -> DiscoveredPostingPayload | None:
+def _parse_job(offer: dict[str, Any]) -> DiscoveredPostingPayload | None:
     url = offer.get("careers_url")
     if not url:
         return None

@@ -2,23 +2,25 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from job_ftch.application.registry import register_scraper
+from job_ftch.domain.site_models import ScrapedPostingPayload
 from job_ftch.infrastructure.sources.monitors.shared import (
     normalize_job_location_type,
     normalize_salary_unit,
 )
-from job_ftch.infrastructure.sources.site_models import ScrapedPostingPayload
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.scrapers.rippling")
+logger = structlog.get_logger("job_ftch.scrapers.rippling")
 
 _API_BASE = "https://api.rippling.com/platform/api/ats/v1/board"
+
 _JOB_URL_RE = re.compile(
     r"ats\.(?:\w+\.)?rippling\.com/(?:[a-z]{2}-[A-Z]{2}/)?([\w-]+)/jobs/([\w-]+)"
 )
@@ -37,7 +39,7 @@ def _detail_url(slug: str, uuid: str) -> str:
     return f"{_API_BASE}/{slug}/jobs/{uuid}"
 
 
-def _parse_salary(pay_ranges: list[dict] | None) -> dict | None:
+def _parse_salary(pay_ranges: list[dict[str, Any]] | None) -> dict[str, Any] | None:
     """Extract salary from payRangeDetails."""
     if not pay_ranges:
         return None
@@ -65,14 +67,14 @@ def _parse_job_location_type(locations: list[str] | None) -> str | None:
     return None
 
 
-def _parse_employment_type(emp: dict | None) -> str | None:
+def _parse_employment_type(emp: dict[str, Any] | None) -> str | None:
     """Pass through the upstream Rippling employment-type label."""
     if not emp:
         return None
     return emp.get("label") or emp.get("id") or None
 
 
-def _parse_detail(detail: dict) -> ScrapedPostingPayload:
+def _parse_detail(detail: dict[str, Any]) -> ScrapedPostingPayload:
     """Parse a Rippling detail API response into ScrapedPostingPayload."""
     desc_obj = detail.get("description") or {}
     parts: list[str] = []
@@ -112,7 +114,9 @@ def _parse_detail(detail: dict) -> ScrapedPostingPayload:
     )
 
 
-async def scrape(url: str, config: dict, http: httpx.AsyncClient) -> ScrapedPostingPayload | None:
+async def scrape(
+    url: str, config: dict[str, Any], http: httpx.AsyncClient
+) -> ScrapedPostingPayload | None:
     """Fetch job details from the Rippling detail API."""
     parsed = _extract_job_params(url)
     if not parsed:

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+from html import unescape
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import structlog
 
@@ -19,6 +21,7 @@ log = structlog.get_logger()
 
 _JOB_KEYWORDS = frozenset({"job", "career", "position", "posting", "opening", "role", "vacancy"})
 MAX_URLS = 10_000
+_HOSTLIKE_PATH_RE = re.compile(r"^[a-z0-9.-]+\.[a-z]{2,}/", re.IGNORECASE)
 
 
 class LinkExtractor(HTMLParser):
@@ -36,6 +39,12 @@ class LinkExtractor(HTMLParser):
                     absolute = urljoin(self.base_url, value)
                     if absolute.startswith("http"):
                         self.urls.add(absolute)
+
+
+def _extract_all_links(html: str, base_url: str) -> set[str]:
+    extractor = LinkExtractor(base_url)
+    extractor.feed(html)
+    return set(extractor.urls)
 
 
 def _build_url_matcher(url_filter: Any) -> re.Pattern[str] | None:
@@ -61,10 +70,9 @@ def _extract_links_static(
     html: str, base_url: str, url_matcher: re.Pattern[str] | None = None
 ) -> set[str]:
     """Extract links from static HTML using keyword or regex matching."""
-    extractor = LinkExtractor(base_url)
-    extractor.feed(html)
-
-    urls = extractor.urls
+    urls = _extract_all_links(html, base_url)
+    if url_matcher:
+        urls.update(_extract_regex_urls(html, base_url, url_matcher))
     filtered: set[str] = set()
 
     for url in urls:
@@ -79,6 +87,44 @@ def _extract_links_static(
     return filtered
 
 
+def _extract_regex_urls(html: str, base_url: str, url_matcher: re.Pattern[str]) -> set[str]:
+    """Extract regex-matching URLs from raw HTML, including relative URLs in embedded JSON."""
+    candidates: set[str] = set()
+    text = unescape(html)
+
+    for match in url_matcher.finditer(text):
+        raw = match.group(0)
+        if not raw:
+            continue
+        if raw.startswith("http"):
+            candidates.add(raw)
+            continue
+        if raw.startswith("/"):
+            candidates.add(urljoin(base_url, raw))
+            continue
+        # Regex may match host+path without scheme.
+        if "://" not in raw and "/" in raw:
+            if _HOSTLIKE_PATH_RE.match(raw):
+                scheme = urlparse(base_url).scheme or "https"
+                candidates.add(f"{scheme}://{raw.lstrip('/')}")
+            else:
+                candidates.add(urljoin(base_url, "/" + raw.lstrip("/")))
+
+    return {u for u in candidates if u.startswith("http")}
+
+
+def _looks_like_detail_page(url: str) -> bool:
+    path = urlparse(url).path.lower()
+    segments = [segment for segment in path.split("/") if segment]
+    if not segments:
+        return False
+    return any(
+        token in segment
+        for segment in segments
+        for token in ("job", "jobs", "vacancy", "vacancies", "position", "opening", "career")
+    )
+
+
 async def _extract_links_rendered(
     page: Any, board_url: str, config: dict[str, Any], url_matcher: re.Pattern[str] | None = None
 ) -> set[str]:
@@ -90,6 +136,11 @@ async def _extract_links_rendered(
     actions = config.get("actions")
     if actions:
         await run_actions(page, actions)
+
+    settle_seconds = float(config.get("settle_seconds", 0))
+    if settle_seconds > 0:
+        await asyncio.sleep(settle_seconds)
+
 
     # Extract via JS to get the most accurate rendered state
     js_extract = """
@@ -138,8 +189,6 @@ async def _paginate_urls(
             page_url = url_template.format(page=current_page)
         else:
             # Append as query param
-            from urllib.parse import parse_qsl, urlencode, urlunparse
-
             u = list(urlparse(board_url))
             query = dict(parse_qsl(str(u[4])))
             query[str(param_name)] = str(current_page)
@@ -162,21 +211,37 @@ async def _paginate_urls(
     return urls
 
 
+async def _expand_listing_urls(
+    listing_urls: set[str],
+    client: httpx.AsyncClient,
+    url_matcher: re.Pattern[str] | None = None,
+) -> set[str]:
+    """Follow one level of listing pages and extract job/detail URLs from them."""
+    expanded: set[str] = set()
+    for listing_url in listing_urls:
+        if len(expanded) >= MAX_URLS:
+            break
+        html = await fetch_page_text(listing_url, client)
+        if not html:
+            continue
+        expanded.update(_extract_links_static(html, listing_url, url_matcher))
+    return expanded
+
+
 async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> set[str]:
     board_url = spec.url
     config = spec.monitor_config
     render = config.get("render", False)
     url_matcher = _build_url_matcher(config.get("url_filter"))
     pagination = config.get("pagination")
+    expand_links = config.get("expand_links")
+    all_urls: set[str] = set()
 
     if render:
         try:
             from playwright.async_api import async_playwright
 
-            from job_ftch.infrastructure.sources.browser_utils import (
-                BROWSER_KEYS,
-                open_page,
-            )
+            from job_ftch.infrastructure.sources.browser_utils import BROWSER_KEYS, open_page
         except ImportError as exc:
             raise RuntimeError(
                 "playwright is required for DOM monitor with render=true. "
@@ -191,14 +256,33 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> se
         if not html:
             log.warning("dom.fetch_failed", board_url=board_url)
             return set()
+        if expand_links:
+            all_urls = _extract_all_links(html, board_url)
         urls = _extract_links_static(html, board_url, url_matcher)
 
     if pagination:
         urls = await _paginate_urls(board_url, pagination, urls, client, url_matcher)
 
+    if expand_links:
+        patterns = expand_links if isinstance(expand_links, list) else [expand_links]
+        listing_urls = {
+            url
+            for url in (all_urls or urls)
+            if any(re.search(pattern, url, re.IGNORECASE) for pattern in patterns)
+        }
+        if listing_urls:
+            urls.update(await _expand_listing_urls(listing_urls, client, url_matcher))
+
     # Exclude the board URL itself
     normalized_board = board_url.rstrip("/")
     urls = {u for u in urls if u.rstrip("/") != normalized_board}
+
+    if config.get("include_self_url") or (
+        config.get("include_if_detail_page", True)
+        and not urls
+        and _looks_like_detail_page(board_url)
+    ):
+        urls.add(board_url)
 
     if len(urls) > MAX_URLS:
         log.warning("dom.truncated", total=len(urls), cap=MAX_URLS)
@@ -222,4 +306,4 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     return None
 
 
-register_monitor("dom", discover, cost=100, rich=False, can_handle=can_handle)
+register_monitor("dom", discover, cost=50, rich=False, can_handle=can_handle)

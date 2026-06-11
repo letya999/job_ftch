@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse
+
+import structlog
 
 from job_ftch.application.registry import register_monitor
 from job_ftch.infrastructure.sources.monitors.shared import (
@@ -17,9 +18,9 @@ from job_ftch.infrastructure.sources.monitors.shared import (
 if TYPE_CHECKING:
     import httpx
 
-    from job_ftch.infrastructure.sources.site_models import MonitorResult
+    from job_ftch.domain.site_models import MonitorResult
 
-logger = logging.getLogger("job_ftch.monitors.breezy")
+logger = structlog.get_logger("job_ftch.monitors.breezy")
 
 _BREEZY_DOMAIN_RE = re.compile(r"^([\w-]+)\.breezy\.hr$")
 _IGNORE_SLUGS = frozenset({"www", "api", "app", "developer", "marketing"})

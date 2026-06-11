@@ -77,6 +77,7 @@ async def test_habr_ds_rss_returns_items(
 async def test_habr_rss_incremental_dedup(
     habr_ml_spec: RSSFeedSourceSpec, in_memory_store, null_auth
 ) -> None:
+    pytest.importorskip("feedparser")
     source = RSSFeedSource(spec=habr_ml_spec, auth=null_auth, store=in_memory_store)
 
     # First fetch

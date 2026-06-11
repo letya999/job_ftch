@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import structlog
 
 from job_ftch.application.registry import register_scraper
+from job_ftch.domain.site_models import ScrapedPostingPayload
 from job_ftch.infrastructure.sources.monitors.shared import normalize_job_location_type
-from job_ftch.infrastructure.sources.site_models import ScrapedPostingPayload
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.scrapers.workday")
+logger = structlog.get_logger("job_ftch.scrapers.workday")
 
 _JOB_URL_RE = re.compile(
     r"([\w-]+)\.wd(\d+)\.myworkdayjobs\.com/"
@@ -49,7 +50,7 @@ def _normalize_workday_location(raw: str) -> str:
     return cleaned
 
 
-def _parse_detail(data: dict) -> ScrapedPostingPayload:
+def _parse_detail(data: dict[str, Any]) -> ScrapedPostingPayload:
     info = data.get("jobPostingInfo", {})
 
     locations: list[str] = []
@@ -59,7 +60,7 @@ def _parse_detail(data: dict) -> ScrapedPostingPayload:
         if loc:
             locations.append(_normalize_workday_location(loc))
 
-    metadata: dict = {}
+    metadata: dict[str, Any] = {}
     if req_id := info.get("jobReqId"):
         metadata["jobReqId"] = req_id
 
@@ -74,7 +75,9 @@ def _parse_detail(data: dict) -> ScrapedPostingPayload:
     )
 
 
-async def scrape(url: str, config: dict, http: httpx.AsyncClient) -> ScrapedPostingPayload | None:
+async def scrape(
+    url: str, config: dict[str, Any], http: httpx.AsyncClient
+) -> ScrapedPostingPayload | None:
     parsed = _parse_job_url(url)
     if not parsed:
         return None

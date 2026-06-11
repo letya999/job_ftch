@@ -20,7 +20,7 @@ from job_ftch.infrastructure.sources.scrapers.embedded import scrape as embedded
 if TYPE_CHECKING:
     import httpx
 
-    from job_ftch.infrastructure.sources.site_models import ScrapedPostingPayload
+    from job_ftch.domain.site_models import ScrapedPostingPayload
 
 
 def _inject_script_id(config: dict[str, Any]) -> dict[str, Any]:

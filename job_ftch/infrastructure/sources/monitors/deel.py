@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from job_ftch.application.registry import register_monitor
-from job_ftch.infrastructure.sources.site_models import DiscoveredPostingPayload
+from job_ftch.domain.site_models import DiscoveredPostingPayload
 
 if TYPE_CHECKING:
     import httpx

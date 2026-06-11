@@ -8,8 +8,9 @@ sources:
       url_filter: "career\\.habr\\.com/vacancies/\\d{5,}"
     limit: 50
 
+  # skills[]=296 is client-side AJAX; ?q= is server-rendered with static links
   - type: career_site
-    url: "https://career.habr.com/vacancies?skills[]=296"
+    url: "https://career.habr.com/vacancies?q=machine+learning"
     source_name: habr_ml_skill
     monitor: dom
     monitor_config:
@@ -17,21 +18,25 @@ sources:
     limit: 50
 
   # --- GetMatch ---
+  # SPA — api_sniffer captures the JSON feed during browser render
   - type: career_site
     url: https://getmatch.ru/vacancies/data-scientist-machine-learning
     source_name: getmatch_ds
-    monitor: dom
-    monitor_config:
-      url_filter: "getmatch\\.ru/vacancies/\\d+"
+    monitor: auto
     limit: 50
 
   # --- GeekJob ---
+  # Expired local CA cert on geekjob.ru TLS — skip_ssl bypasses it (both phases)
+  # Vacancy IDs are MongoDB ObjectIDs (24-char hex), not plain digits
   - type: career_site
     url: https://geekjob.ru/vacancies
     source_name: geekjob
     monitor: dom
     monitor_config:
-      url_filter: "geekjob\\.ru/vacancy/\\d+"
+      url_filter: "geekjob\\.ru/vacancy/[a-f0-9]+"
+      skip_ssl: true
+    scraper_config:
+      skip_ssl: true
     limit: 50
 
   # --- Hirify ---
@@ -86,12 +91,13 @@ sources:
     limit: 50
 
   # --- KZ job boards ---
+  # qyzmet.kz individual job URLs: /jobdesc?id=NNNNNNN (not path segments)
   - type: career_site
-    url: "https://qyzmet.kz/%D0%B2%D0%B0%D0%BA%D0%B0%D0%BD%D1%81%D0%B8%D0%B8/Data-scientist"
+    url: "https://qyzmet.kz/vacansii"
     source_name: qyzmet_ds
     monitor: dom
     monitor_config:
-      url_filter: "qyzmet\\.kz/.*/(\\d+|[a-z0-9-]+-\\d+)"
+      url_filter: "qyzmet\\.kz/jobdesc\\?id=\\d+"
     limit: 50
 
   - type: career_site
@@ -111,10 +117,13 @@ sources:
     limit: 50
 
   # --- Company career pages ---
+  # /career/it/ overview has static vacancy links; /career/it/vacancies/ is React-only
   - type: career_site
-    url: https://www.tbank.ru/career/it/vacancies/
+    url: https://www.tbank.ru/career/it/
     source_name: tbank_it
-    monitor: auto
+    monitor: dom
+    monitor_config:
+      url_filter: "tbank\\.ru/career/it/vacancy/"
     limit: 50
 
   - type: career_site
@@ -135,12 +144,13 @@ sources:
     monitor: auto
     limit: 50
 
+  # VK career portal moved to team.vk.company; individual job URLs: /vacancy/NNNNN/
   - type: career_site
-    url: https://h.careers/company/vk
+    url: https://team.vk.company/vacancy/
     source_name: vk_careers
     monitor: dom
     monitor_config:
-      url_filter: "h\\.careers/(job|vacancy)/\\d+"
+      url_filter: "team\\.vk\\.company/vacancy/\\d+"
     limit: 50
 
   - type: career_site
@@ -149,10 +159,9 @@ sources:
     monitor: auto
     limit: 50
 
+  # OutSystems SPA — api_sniffer captures the screenservices vacancy feed
   - type: career_site
     url: https://people.beeline.kz/
     source_name: beeline_kz
-    monitor: dom
-    monitor_config:
-      url_filter: "beeline\\.kz/(vacancy|job)/\\d+"
+    monitor: auto
     limit: 50

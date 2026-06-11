@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 from job_ftch.application.registry import register_scraper
+from job_ftch.domain.site_models import ScrapedPostingPayload
 from job_ftch.infrastructure.sources.monitors.shared import normalize_salary_unit
-from job_ftch.infrastructure.sources.site_models import ScrapedPostingPayload
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.scrapers.smartrecruiters")
+logger = structlog.get_logger("job_ftch.scrapers.smartrecruiters")
 
 _JOB_URL_RE = re.compile(r"(?:jobs|careers)\.smartrecruiters\.com/([\w-]+)/([\w-]+)")
 
@@ -31,7 +32,7 @@ def _detail_url(token: str, posting_id: str) -> str:
     return f"https://api.smartrecruiters.com/v1/companies/{token}/postings/{posting_id}"
 
 
-def _build_description(job_ad: dict) -> str | None:
+def _build_description(job_ad: dict[str, Any]) -> str | None:
     """Combine jobAd sections into a single HTML description."""
     if not job_ad:
         return None
@@ -50,19 +51,19 @@ def _build_description(job_ad: dict) -> str | None:
     return "\n".join(parts) if parts else None
 
 
-def _build_location(loc: dict) -> str | None:
+def _build_location(loc: dict[str, Any]) -> str | None:
     """Build a human-readable location string."""
     if not loc:
         return None
     full = loc.get("fullLocation")
     if full:
-        return full
+        return str(full)
     parts = [loc.get("city"), loc.get("region"), loc.get("country")]
     filtered = [p for p in parts if p]
-    return ", ".join(filtered) if filtered else None
+    return str(", ".join(str(p) for p in filtered)) if filtered else None
 
 
-def _parse_salary(posting: dict) -> dict | None:
+def _parse_salary(posting: dict[str, Any]) -> dict[str, Any] | None:
     """Extract salary from the compensation field if available."""
     comp = posting.get("compensation")
     if not comp:
@@ -79,7 +80,7 @@ def _parse_salary(posting: dict) -> dict | None:
     return {"currency": currency, "min": sal_min, "max": sal_max, "unit": unit}
 
 
-def _parse_detail(posting: dict) -> ScrapedPostingPayload:
+def _parse_detail(posting: dict[str, Any]) -> ScrapedPostingPayload:
     """Parse a SmartRecruiters detail API response into ScrapedPostingPayload."""
     title = posting.get("name")
     description = _build_description(posting.get("jobAd", {}))
@@ -120,7 +121,9 @@ def _parse_detail(posting: dict) -> ScrapedPostingPayload:
     )
 
 
-async def scrape(url: str, config: dict, http: httpx.AsyncClient) -> ScrapedPostingPayload | None:
+async def scrape(
+    url: str, config: dict[str, Any], http: httpx.AsyncClient
+) -> ScrapedPostingPayload | None:
     """Fetch job details from the SmartRecruiters detail API."""
     token, posting_id = _parse_job_url(url)
     if not token or not posting_id:

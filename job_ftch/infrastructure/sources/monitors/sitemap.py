@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import logging
+
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import defusedxml.ElementTree as ET
+import structlog
 
 from job_ftch.application.registry import register_monitor
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.monitors.sitemap")
+logger = structlog.get_logger("job_ftch.monitors.sitemap")
 
 MAX_URLS = 50_000
 NS = "{http://www.sitemaps.org/schemas/sitemap/0.9}"
@@ -43,7 +45,7 @@ def _strip_utm(url: str) -> str:
 def _detect_ns(root: ET.Element) -> str:
     tag = root.tag
     if tag.startswith("{"):
-        return tag[: tag.index("}") + 1]
+        return str(tag[: tag.index("}") + 1])
     return NS
 
 

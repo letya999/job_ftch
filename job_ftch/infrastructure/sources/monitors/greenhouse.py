@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
 
+import structlog
+
 from job_ftch.application.registry import register_monitor
+from job_ftch.domain.site_models import (
+    DiscoveredPostingPayload,
+    MonitorResult,
+)
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     BoardGoneError,
@@ -15,15 +20,11 @@ from job_ftch.infrastructure.sources.monitors.shared import (
     slugs_from_url,
     truncated_rich_result,
 )
-from job_ftch.infrastructure.sources.site_models import (
-    DiscoveredPostingPayload,
-    MonitorResult,
-)
 
 if TYPE_CHECKING:
     import httpx
 
-logger = logging.getLogger("job_ftch.monitors.greenhouse")
+logger = structlog.get_logger("job_ftch.monitors.greenhouse")
 
 _PAGE_PATTERNS = [
     re.compile(r"boards-api\.greenhouse\.io/v1/boards/([\w-]+)"),
@@ -47,7 +48,7 @@ def _clean_description(html: str | None) -> str | None:
     return _STRAY_TOGGLE_RE.sub("", html)
 
 
-def _parse_job(job: dict) -> DiscoveredPostingPayload | None:
+def _parse_job(job: dict[str, Any]) -> DiscoveredPostingPayload | None:
     url = job.get("absolute_url")
     if not url:
         return None
@@ -65,7 +66,7 @@ def _parse_job(job: dict) -> DiscoveredPostingPayload | None:
             locations.append(name)
             seen.add(name)
 
-    metadata: dict = {}
+    metadata: dict[str, Any] = {}
     departments = [d.get("name") for d in job.get("departments", []) if d.get("name")]
     if departments:
         metadata["departments"] = departments

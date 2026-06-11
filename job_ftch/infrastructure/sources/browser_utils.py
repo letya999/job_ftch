@@ -74,13 +74,16 @@ async def open_page(
     config: dict[str, Any],
     *,
     use_proxy: bool = False,
+    bypass_strategy: Any = None,
 ) -> AsyncIterator[Page]:
     """
     High-level entry point to open a Playwright page with optional stealth and proxy.
     """
     persistent = config.get("persistent_context", False)
     if persistent:
-        async with _open_persistent_page(pw, config, use_proxy=use_proxy) as p:
+        async with _open_persistent_page(
+            pw, config, use_proxy=use_proxy, bypass_strategy=bypass_strategy
+        ) as p:
             yield p
         return
 
@@ -96,27 +99,33 @@ async def open_page(
     if config.get("disable_http2"):
         launch_args.append("--disable-http2")
 
-    browser: Browser = await pw.chromium.launch(
-        headless=headless,
-        channel=channel,
-        args=launch_args,
-    )
+    launch_kwargs: dict[str, Any] = {
+        "headless": headless,
+        "channel": channel,
+        "args": launch_args,
+    }
+    context_kwargs: dict[str, Any] = {
+        "user_agent": config.get("user_agent", DEFAULT_USER_AGENT),
+        "viewport": config.get("viewport", {"width": 1440, "height": 900}),
+        "locale": config.get("locale", "en-US"),
+        "ignore_https_errors": config.get("skip_ssl", False),
+    }
 
-    proxy_config = None
+
     if use_proxy:
         proxy_url = os.environ.get("JOB_FTCH_HTTP_PROXY")
         if proxy_url:
             from playwright.async_api import ProxySettings
 
-            proxy_config = ProxySettings(server=proxy_url)
+            context_kwargs["proxy"] = ProxySettings(server=proxy_url)
 
-    context: BrowserContext = await browser.new_context(
-        user_agent=config.get("user_agent", DEFAULT_USER_AGENT),
-        viewport=config.get("viewport", {"width": 1440, "height": 900}),
-        locale=config.get("locale", "en-US"),
-        ignore_https_errors=config.get("skip_ssl", False),
-        proxy=proxy_config,
-    )
+    if bypass_strategy:
+        launch_kwargs = bypass_strategy.apply_browser_args(launch_kwargs)
+        context_kwargs = bypass_strategy.apply_browser_args(context_kwargs)
+
+    browser: Browser = await pw.chromium.launch(**launch_kwargs)
+
+    context: BrowserContext = await browser.new_context(**context_kwargs)
 
     context.set_default_timeout(config.get("timeout", DEFAULT_TIMEOUT))
 
@@ -124,6 +133,8 @@ async def open_page(
         await context.add_cookies(config["cookies"])
 
     page: Page = await context.new_page()
+    if bypass_strategy:
+        await bypass_strategy.apply_page(page)
 
     try:
         if config.get("warmup_url"):
@@ -139,6 +150,7 @@ async def _open_persistent_page(
     config: dict[str, Any],
     *,
     use_proxy: bool = False,
+    bypass_strategy: Any = None,
 ) -> AsyncIterator[Page]:
     """
     Opens a page using launch_persistent_context for better stealth.
@@ -156,26 +168,30 @@ async def _open_persistent_page(
     if config.get("disable_http2"):
         args.append("--disable-http2")
 
-    proxy_config = None
+    launch_kwargs: dict[str, Any] = {
+        "user_data_dir": user_data_dir,
+        "headless": headless,
+        "channel": channel,
+        "args": args,
+        "user_agent": config.get("user_agent", DEFAULT_USER_AGENT),
+        "viewport": config.get("viewport", {"width": 1440, "height": 900}),
+        "locale": config.get("locale", "en-US"),
+        "ignore_https_errors": config.get("skip_ssl", False),
+        "timeout": CONTEXT_TIMEOUT,
+    }
+
+
     if use_proxy:
         proxy_url = os.environ.get("JOB_FTCH_HTTP_PROXY")
         if proxy_url:
             from playwright.async_api import ProxySettings
 
-            proxy_config = ProxySettings(server=proxy_url)
+            launch_kwargs["proxy"] = ProxySettings(server=proxy_url)
 
-    context: BrowserContext = await pw.chromium.launch_persistent_context(
-        user_data_dir=user_data_dir,
-        headless=headless,
-        channel=channel,
-        args=args,
-        user_agent=config.get("user_agent", DEFAULT_USER_AGENT),
-        viewport=config.get("viewport", {"width": 1440, "height": 900}),
-        locale=config.get("locale", "en-US"),
-        ignore_https_errors=config.get("skip_ssl", False),
-        proxy=proxy_config,
-        timeout=CONTEXT_TIMEOUT,
-    )
+    if bypass_strategy:
+        launch_kwargs = bypass_strategy.apply_browser_args(launch_kwargs)
+
+    context: BrowserContext = await pw.chromium.launch_persistent_context(**launch_kwargs)
 
     context.set_default_timeout(config.get("timeout", DEFAULT_TIMEOUT))
 
@@ -183,6 +199,8 @@ async def _open_persistent_page(
         await context.add_cookies(config["cookies"])
 
     page = context.pages[0] if context.pages else await context.new_page()
+    if bypass_strategy:
+        await bypass_strategy.apply_page(page)
 
     try:
         if config.get("warmup_url"):
@@ -200,19 +218,26 @@ async def _open_persistent_page(
 async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     """
     Navigate to a URL with fallback wait strategies.
+    Raises RuntimeError if the page responds with an anti-bot status code (403, 401, 429, 503).
     """
     wait = config.get("wait", DEFAULT_WAIT)
     wait_fallback = config.get("wait_fallback", DEFAULT_WAIT_FALLBACK)
     timeout = config.get("timeout", DEFAULT_TIMEOUT)
 
     try:
-        await page.goto(url, wait_until=wait, timeout=timeout)
+        resp = await page.goto(url, wait_until=wait, timeout=timeout)
+        if resp and resp.status in (403, 401, 429, 503):
+            raise RuntimeError(f"Browser navigation blocked with status {resp.status}")
     except Exception as exc:
+        if "Browser navigation blocked" in str(exc):
+            raise
         if wait_fallback and wait != wait_fallback:
             log.warning(
                 "browser.navigate_fallback", url=url, error=str(exc), fallback=wait_fallback
             )
-            await page.goto(url, wait_until=wait_fallback, timeout=timeout)
+            resp = await page.goto(url, wait_until=wait_fallback, timeout=timeout)
+            if resp and resp.status in (403, 401, 429, 503):
+                raise RuntimeError(f"Browser navigation blocked with status {resp.status}") from exc
         else:
             raise
 
