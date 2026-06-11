@@ -248,15 +248,11 @@ class CareerSiteSource(Source["RawItem"]):
                     )
 
                     limit = self.spec.detail_limit or self.spec.limit
-                    count = 0
-                    for url in urls_to_scrape:
+                    for count, url in enumerate(urls_to_scrape):
                         if count >= limit:
                             self.stats["truncated"] = True
                             break
 
-                        # Always increment so the loop is bounded by attempts,
-                        # not just successes — prevents infinite crawl on 404s.
-                        count += 1
                         scrape_result = await self._scrape_with_fallback(url, scraper_chain)
                         if scrape_result:
                             full_payload = DiscoveredPostingPayload(
