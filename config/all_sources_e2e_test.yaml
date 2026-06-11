@@ -382,15 +382,21 @@ sources:
   - type: career_site
     url: https://www.ptsecurity.com/ru-ru/about/vacancy/
     source_name: pt_security
-    monitor: auto
+    monitor: dom
     bypass: auto
+    monitor_config:
+      render: true
+      settle_seconds: 2
     limit: 5
 
   - type: career_site
     url: "https://www.x5.ru/ru/about/career"
     source_name: x5_tech_career
-    monitor: auto
+    monitor: dom
     bypass: auto
+    monitor_config:
+      render: true
+      settle_seconds: 2
     limit: 5
 
   # =================================================================
@@ -407,8 +413,11 @@ sources:
   - type: career_site
     url: https://www.freedomholdingcorp.com/
     source_name: freedom_careers
-    monitor: auto
+    monitor: dom
     bypass: auto
+    monitor_config:
+      render: true
+      settle_seconds: 2
     limit: 5
 
   - type: career_site
@@ -435,15 +444,21 @@ sources:
   - type: career_site
     url: "https://airastana.com/global-en/kaz/en/company/career"
     source_name: airastana_career
-    monitor: auto
+    monitor: dom
     bypass: auto
+    monitor_config:
+      render: true
+      settle_seconds: 2
     limit: 5
 
   - type: career_site
     url: https://choco.kz/careers
     source_name: choco_career
-    monitor: auto
+    monitor: dom
     bypass: auto
+    monitor_config:
+      render: true
+      settle_seconds: 2
     limit: 5
 
   - type: career_site
@@ -488,21 +503,27 @@ sources:
   - type: career_site
     url: "https://www.monster.com/jobs/search?q=machine+learning+engineer&where=remote"
     source_name: monster_ml
-    monitor: auto
+    monitor: dom
     bypass: auto
+    monitor_config:
+      render: true
+      settle_seconds: 3
     limit: 5
 
   - type: career_site
     url: "https://www.ziprecruiter.com/jobs-search?search=machine+learning+engineer&location=remote"
     source_name: ziprecruiter_ml
-    monitor: auto
+    monitor: dom
     bypass: auto
+    monitor_config:
+      render: true
+      settle_seconds: 3
     limit: 5
 
   - type: career_site
     url: "https://wellfound.com/jobs?role=ml-engineer"
     source_name: wellfound_ml
-    monitor: auto
+    monitor: nextdata
     bypass: auto
     limit: 5
 
@@ -523,8 +544,11 @@ sources:
   - type: career_site
     url: "https://www.levels.fyi/jobs?jobFamily=Machine+Learning+Engineer"
     source_name: levelsfyi_ml
-    monitor: auto
+    monitor: dom
     bypass: auto
+    monitor_config:
+      render: true
+      settle_seconds: 3
     limit: 5
 
   - type: career_site
@@ -538,14 +562,14 @@ sources:
     url: "https://www.careerbuilder.com/jobs?keywords=machine+learning+engineer"
     source_name: careerbuilder_ml
     monitor: auto
-    bypass: auto
+    bypass: cloak
     limit: 5
 
   - type: career_site
     url: "https://www.adzuna.com/search?q=machine+learning+engineer"
     source_name: adzuna_ml
     monitor: auto
-    bypass: auto
+    bypass: curl_stealth
     limit: 5
 
   - type: career_site
