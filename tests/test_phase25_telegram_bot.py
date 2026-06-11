@@ -210,3 +210,57 @@ async def test_bot_access_control_and_status_endpoint(
     assert status_payload["tenant_id"] == "ai_jobs"
 
     await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_webhook_real_fastapi_token_auth(tmp_path: Path) -> None:
+    pytest.importorskip("fastapi")
+    import httpx
+
+    from job_ftch.adapters.telegram_bot.api import create_app
+
+    runner = _build_runner(tmp_path)
+    sender = FakeSender()
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            secret_token="correct-secret",
+            bridge_api_key="bridge-key",
+            allowed_user_ids=(1,),
+            allowed_chat_ids=(100,),
+            admin_user_ids=(1,),
+            rate_limit_seconds=0.0,
+        ),
+    )
+    app = create_app(runner=runner, bot_service=service)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/webhook/telegram",
+            json={"message": {"chat": {"id": 100}, "from": {"id": 1}, "text": "/start"}},
+            headers={"X-Telegram-Bot-Api-Secret-Token": "correct-secret"},
+        )
+        assert response.status_code == 200
+
+        response = await client.post(
+            "/webhook/telegram",
+            json={"message": {"chat": {"id": 100}, "from": {"id": 1}, "text": "/start"}},
+            headers={"X-Telegram-Bot-Api-Secret-Token": "wrong-secret"},
+        )
+        assert response.status_code == 403
+
+        response = await client.get("/jobs/search", params={"q": "python"})
+        assert response.status_code == 403
+
+        response = await client.get(
+            "/jobs/search",
+            params={"q": "python"},
+            headers={"X-API-Key": "bridge-key"},
+        )
+        assert response.status_code == 200
+
+    await runner.close()

@@ -106,3 +106,47 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
     assert len(search_results) == 1
 
     await server.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_real_fastmcp_tool_handlers(tmp_path: Path) -> None:
+    pytest.importorskip("fastmcp")
+
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    (configs_dir / "tenant.json").write_text(
+        json.dumps(
+            {
+                "tenant_id": "ai_jobs",
+                "display_name": "AI Jobs",
+                "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+                "store_backend": "sqlite",
+                "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+                "job_group_store_backend": "sqlite",
+                "job_backend": "sqlite",
+                "search_backend": "sqlite",
+                "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    from job_ftch.adapters.mcp.server import create_server
+
+    server = create_server(configs_dir=configs_dir)
+    await server.startup()
+    assert server.runner is not None
+
+    groups = await server.runner.search_jobs("machine learning", tenant_id="ai_jobs", limit=5)
+    assert isinstance(groups, list)
+
+    job = await server.runner.get_job("nonexistent-id")
+    assert job is None
+
+    tenants = await server.runner.list_tenants()
+    assert isinstance(tenants, list)
+    assert len(tenants) > 0
+
+    await server.shutdown()
