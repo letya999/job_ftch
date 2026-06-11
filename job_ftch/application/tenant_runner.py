@@ -152,6 +152,12 @@ class TenantStore:
             value,
         )
 
+    async def get_source_strategy(self, domain: str) -> dict[str, str] | None:
+        return await self._store.get_source_strategy(domain)
+
+    async def save_source_strategy(self, domain: str, monitor: str, bypass: str) -> None:
+        await self._store.save_source_strategy(domain, monitor, bypass)
+
     async def reset_namespace(self) -> None:
         reset = getattr(self._store, "reset_namespace", None)
         if not callable(reset):
