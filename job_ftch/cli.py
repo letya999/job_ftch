@@ -57,7 +57,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run in webhook mode (requires FastAPI).",
     )
-    bot_parser.add_argument("--host", default="0.0.0.0", help="Webhook server host.")
+    bot_parser.add_argument("--host", default="0.0.0.0", help="Webhook server host.")  # nosec B104
     bot_parser.add_argument("--port", type=int, default=8080, help="Webhook server port.")
 
     parser.add_argument(
