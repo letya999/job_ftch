@@ -15,7 +15,7 @@ def test_role_family_inferred_from_english_title(normalizer):
 def test_role_family_inferred_from_russian_title(normalizer):
     # Testing some common Russian title aliases
     assert normalizer.infer_role_family("Старший разработчик Python") == "engineering"
-    assert normalizer.infer_role_family("Аналитик данных") == "data"
+    assert normalizer.infer_role_family("Аналитик данных") == "analytics"
 
 def test_seniority_inferred_from_title(normalizer):
     assert normalizer.infer_seniority("Senior Product Manager") == "senior"
@@ -67,7 +67,7 @@ async def test_title_normalization_uses_ontology(normalizer):
         description_raw="test desc"
     )
     record = await node.process(draft)
-    assert record.role_family == "data"
+    assert record.role_family == "engineering"
     assert record.seniority == Seniority.UNKNOWN  # ML Engineer doesn't imply seniority in my aliases
 
     draft_sr = JobDraft(

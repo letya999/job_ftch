@@ -85,8 +85,8 @@ async def test_jsonl_sink_wraps_payloads_with_schema_version(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_counted_sink_tracks_source_kind_counts() -> None:
-    inner = JsonFileSink(Path("artifacts/debug/test-counted.json"))
+async def test_counted_sink_tracks_source_kind_counts(tmp_path: Path) -> None:
+    inner = JsonFileSink(tmp_path / "test-counted.json")
     sink = CountedSink(inner)
 
     await sink.emit(_job())

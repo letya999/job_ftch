@@ -134,6 +134,7 @@ async def test_openai_provider_forwards_timeout_retry_and_prompt(
 @pytest.mark.asyncio
 async def test_build_output_sinks_routes_borderline_jobs_to_review(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     class RecordingSink:
         def __init__(self) -> None:
@@ -156,8 +157,8 @@ async def test_build_output_sinks_routes_borderline_jobs_to_review(
     monkeypatch.setattr(app_module, "create_sink", fake_create_sink)
     settings = Settings.model_validate(
         {
-            "review_output_path": str(Path("artifacts/debug/review-contract.jsonl")),
-            "rejected_output_path": str(Path("artifacts/debug/rejected-contract.jsonl")),
+            "review_output_path": str(tmp_path / "review-contract.jsonl"),
+            "rejected_output_path": str(tmp_path / "rejected-contract.jsonl"),
         }
     )
 
@@ -180,6 +181,7 @@ async def test_build_output_sinks_routes_borderline_jobs_to_review(
 @pytest.mark.asyncio
 async def test_build_output_sinks_respects_dry_run_for_posting(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     create_calls: list[tuple[str, str]] = []
 
@@ -203,8 +205,8 @@ async def test_build_output_sinks_respects_dry_run_for_posting(
             "telegram_publish_entity": "target",
             "telegram_api_id": 1,
             "telegram_api_hash": "hash",
-            "review_output_path": str(Path("artifacts/debug/review-contract.jsonl")),
-            "rejected_output_path": str(Path("artifacts/debug/rejected-contract.jsonl")),
+            "review_output_path": str(tmp_path / "review-contract.jsonl"),
+            "rejected_output_path": str(tmp_path / "rejected-contract.jsonl"),
         }
     )
 
@@ -217,6 +219,7 @@ async def test_build_output_sinks_respects_dry_run_for_posting(
 @pytest.mark.asyncio
 async def test_build_output_sinks_routes_strong_jobs_to_posting(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     class RecordingSink:
         def __init__(self) -> None:
@@ -243,8 +246,8 @@ async def test_build_output_sinks_routes_strong_jobs_to_posting(
             "telegram_publish_entity": "target",
             "telegram_api_id": 1,
             "telegram_api_hash": "hash",
-            "review_output_path": str(Path("artifacts/debug/review-contract.jsonl")),
-            "rejected_output_path": str(Path("artifacts/debug/rejected-contract.jsonl")),
+            "review_output_path": str(tmp_path / "review-contract.jsonl"),
+            "rejected_output_path": str(tmp_path / "rejected-contract.jsonl"),
         }
     )
 

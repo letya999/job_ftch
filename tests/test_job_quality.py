@@ -148,8 +148,9 @@ async def test_quality_scoring_and_validation_keep_good_job() -> None:
     validated = await validator.process(scored)
 
     assert validated is not None
-    assert validated.quality_score is not None
-    assert validated.quality_score >= 0.25
+    assert 0.6 <= validated.quality_score <= 1.0, (
+        f"Expected quality 0.6-1.0 for strong job, got {validated.quality_score}"
+    )
 
 
 @pytest.mark.asyncio
