@@ -17,3 +17,12 @@ Updated after Phase 3 follow-up cleanup on 2026-06-06.
 - `Store` now persists remembered dedup keys and duplicate explanation records, so future store backends must preserve this behavior.
 - `RawItemRejected.to_quarantined()` assumes a real `RawItem` contract and should not reintroduce defensive `hasattr()` checks.
 - When editing pipeline/reporting logic later, keep `SanitizeNode` first and preserve stage counters `fetched -> sanitized -> triaged -> emitted`, plus per-source drop/quarantine reasons.
+- Current planning direction extends the funnel beyond early triage:
+  source context, post-type classification, hard filter, dedup candidate lookup, semantic prefilter,
+  extraction, normalization, aggregation, match scoring, risk/quality, routing.
+- Old mental model "RawItem -> Job is the only future shape" is now too coarse for planning.
+  Target contract family should converge toward `RawItem -> JobDraft -> JobRecord -> JobGroup`,
+  while still keeping the extraction boundary as the main raw-to-structured transition.
+- Preserve explicit counters and reason maps even if the funnel becomes deeper.
+  Additional stages must not collapse observability for:
+  relevance drops, risk reviews, quality reviews, duplicate handling, and aggregation routing.

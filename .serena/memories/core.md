@@ -3,6 +3,8 @@
 - Read this first. Follow-up memories:
   `mem:tech_stack` for runtime and dependency choices.
   `mem:conventions` for architectural and coding invariants.
+  `mem:architecture/master_plan` for the current target shape of the library-first ETL core.
+  `mem:pipeline/funnel_strategy` for the intended high-signal multi-node matching and routing flow.
   `mem:suggested_commands` for day-to-day repo commands on Windows.
   `mem:task_completion` for required verification gates before closing coding work.
 - Repo state: phases 1-21 complete on branch `phase-17-21` (merged to `dev`).
@@ -25,6 +27,11 @@
   `tests/` 180+ passing tests covering all major subsystems.
 - Architectural target is hexagonal with expanded ports:
   Source, Node, Sink, Store, JobPersistence, SearchBackend, EmbeddingProvider, VectorBackend.
+- Current target evolution goes beyond single-record extraction:
+  compact payload family should converge toward `RawItem -> JobDraft -> JobRecord -> JobGroup`,
+  with rich typed blocks inside stable payloads rather than many fragile top-level transition types.
+- Matching and routing target is a multi-node funnel that separates:
+  post type, relevance, risk, quality, and aggregation confidence.
 - Stable invariants from project docs:
   `domain/` may import only stdlib and `pydantic`.
   `application/` must NOT import `infrastructure/` - resolved via named-backend registry (ADR-020).
@@ -32,7 +39,10 @@
   no secrets in code; use `.env`.
   adding dependencies requires updating `docs/tech_stack.md`.
   nontrivial architecture changes require an ADR in `docs/adr/`.
-- ADRs present: 001-020 (latest: ADR-020 registry fallback named backend).
+- Important planning docs:
+  repo root `JOB_FTCH_MASTER_PLAN.md` captures the current target architecture and matching funnel.
+  `docs/adr/024-canonical-job-contract-and-matching-funnel.md` captures the same direction as an ADR.
+- ADRs present through 024; latest planning ADR is 024 on canonical job contract and matching funnel.
 - Source spec types (discriminated union in `domain/source_spec.py`):
   `telegram`, `declarative`, `career_site`, `local_fixture`, `rest_api`, `browser`,
   `rss_feed`, `telegram_realtime`, `webhook`, `websocket`.

@@ -9,9 +9,16 @@
   prefer stdlib before new dependency.
   file size target ~150 lines, function size target ~20 lines.
   use logging, not `print()`, in real implementation code.
+- Contract discipline:
+  prefer compact stable payload families over many ad hoc transition models.
+  keep raw value, normalized value, confidence, and evidence separate where normalization matters.
+  separate relevance, risk, quality, and aggregation confidence instead of collapsing them into one score.
 - Layering rules:
   no I/O in `domain/`.
   no business logic in infrastructure adapters.
   add new source/node/sink/store/llm backend in the dedicated directory only.
 - Commit/PR vocabulary is restricted to `feat`, `fix`, `chore`, `docs`, `refactor`.
 - Project docs are bilingual in places; code and stable identifiers stay English/ASCII.
+- Extensibility rules:
+  prefer declarative-first source additions where possible.
+  new extension points should remain registry and entry-point based, not core-dispatch based.

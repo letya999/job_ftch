@@ -49,3 +49,8 @@ What are the trade-offs?
 17. [017-notification-sink-event-broadcasting.md](017-notification-sink-event-broadcasting.md) — NotificationSink: configurable event broadcasting
 18. [018-job-catalog-and-search-architecture.md](018-job-catalog-and-search-architecture.md) — Job Catalog and Persistent Search architecture
 19. [019-embeddings-and-vector-storage-boundary.md](019-embeddings-and-vector-storage-boundary.md) — Embeddings and Vector Storage boundary
+20. [020-registry-fallback-named-backend.md](020-registry-fallback-named-backend.md) — Registry fallback named backend
+21. [021-career-site-monitor-scraper-split.md](021-career-site-monitor-scraper-split.md) — Career-site monitor and scraper split
+22. [022-cloakbrowser-advanced-bypass.md](022-cloakbrowser-advanced-bypass.md) — CloakBrowser advanced bypass
+23. [023-adaptive-scraping-escalation.md](023-adaptive-scraping-escalation.md) — Adaptive scraping escalation
+24. [024-canonical-job-contract-and-matching-funnel.md](024-canonical-job-contract-and-matching-funnel.md) — Canonical job contract and top-tier matching funnel
