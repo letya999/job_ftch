@@ -12,8 +12,8 @@ from job_ftch.application.registry import (
     register_search_backend,
 )
 from job_ftch.domain import (
-    Job,
     JobGroup,
+    JobRecord,
     compute_identity_fingerprint,
     create_job_group,
     merge_job_into_group,
@@ -91,7 +91,7 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         except Exception:
             return False
 
-    async def save(self, job: Job) -> None:
+    async def save(self, job: JobRecord) -> None:
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
             group_id: str | None = None
@@ -136,7 +136,7 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             await self._persist_group(conn, updated_group)
             await self._persist_job(conn, job, updated_group.group_id)
 
-    async def create(self, job: Job) -> JobGroup:
+    async def create(self, job: JobRecord) -> JobGroup:
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
             group = create_job_group(job)
@@ -150,7 +150,7 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
 
             return group
 
-    async def merge(self, group_id: str, job: Job) -> JobGroup:
+    async def merge(self, group_id: str, job: JobRecord) -> JobGroup:
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
             row = await conn.fetchrow(
@@ -195,7 +195,9 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 group.group_id,
             )
 
-    async def _persist_job(self, conn: asyncpg.Connection, job: Job, group_id: str) -> None:
+    async def _persist_job(
+        self, conn: asyncpg.Connection, job: JobRecord, group_id: str
+    ) -> None:
         # Deep copy metadata to avoid mutation of original job
         job_copy = job.model_copy(
             update={
@@ -245,7 +247,7 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             raw_json,
         )
 
-    async def get_job(self, job_id: str) -> Job | None:
+    async def get_job(self, job_id: str) -> JobRecord | None:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT raw_json FROM jf_jobs WHERE job_id = $1", job_id)
@@ -253,7 +255,7 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 return load_job(row["raw_json"])
         return None
 
-    async def list_jobs(self, limit: int, offset: int) -> list[Job]:
+    async def list_jobs(self, limit: int, offset: int) -> list[JobRecord]:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(

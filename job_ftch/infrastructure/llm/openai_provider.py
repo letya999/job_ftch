@@ -12,9 +12,26 @@ if TYPE_CHECKING:
     from job_ftch.config import Settings
 
 _SYSTEM_PROMPT = """Extract one job posting into the provided schema.
-Use null for unknown fields.
+Use null or empty collections for unknown fields.
 Prefer factual values copied or normalized from the text.
-Do not invent company, location, or compensation."""
+Do not invent company, location, compensation, seniority, or skills.
+
+Classify post_type:
+- job_posting: employer or company is hiring
+- candidate_seeking: person is looking for work
+- announcement: meetup, webinar, event, course, digest, news
+- spam: scam, gambling, unrelated promotion
+
+Rate ai_relevance:
+- 0.0: clearly not an AI/ML/data role
+- 0.3: tangentially related
+- 0.5: platform/data/infra work adjacent to AI
+- 0.7: strong AI relevance
+- 1.0: core AI/ML/NLP/CV/LLM role
+
+Extract normalized technical skills in English lowercase when possible.
+Separate responsibilities, must-have requirements, and nice-to-have requirements.
+Infer language as ru or en when reasonably clear from the text."""
 
 
 class OpenAIInstructorLLMProvider:

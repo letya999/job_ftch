@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -12,6 +13,7 @@ from job_ftch.domain.source_spec import RSSFeedSourceSpec
 from job_ftch.infrastructure.llm.heuristic import HeuristicLLMProvider
 from job_ftch.infrastructure.sources.realtime.rss import RSSFeedSource
 from job_ftch.nodes.extraction import ExtractionNode
+from job_ftch.nodes.job_normalization import TitleCompanyNormalizationNode
 from job_ftch.nodes.sanitize import SanitizeNode
 from job_ftch.sinks.json_file import JsonFileSink
 
@@ -23,17 +25,18 @@ def temp_json_path(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def pipeline_setup(
-    habr_ml_spec: RSSFeedSourceSpec, in_memory_store, temp_json_path: Path, null_auth
-):
+    habr_ml_spec: RSSFeedSourceSpec, in_memory_store: Any, temp_json_path: Path, null_auth: Any
+) -> tuple[Pipeline[Any, Any], Any, Path]:
     source = RSSFeedSource(spec=habr_ml_spec, auth=null_auth, store=in_memory_store)
     sanitize = SanitizeNode(allowed_career_site_hosts=("career.habr.com",))
     extraction = ExtractionNode(llm=HeuristicLLMProvider())
+    normalization = TitleCompanyNormalizationNode()
     sink = JsonFileSink(output_path=temp_json_path)
 
     pipeline = Pipeline(
         source=source,
         sanitize_node=sanitize,
-        nodes=[extraction],
+        nodes=[extraction, normalization],
         sink=sink,
         store=in_memory_store,
     )
@@ -41,7 +44,11 @@ def pipeline_setup(
 
 
 @pytest.mark.asyncio
-async def test_pipeline_rss_to_json_sink(pipeline_setup, habr_ml_rss_xml: str, monkeypatch) -> None:
+async def test_pipeline_rss_to_json_sink(
+    pipeline_setup: tuple[Pipeline[Any, Any], Any, Path],
+    habr_ml_rss_xml: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pytest.importorskip("feedparser")
     pipeline, _, temp_json_path = pipeline_setup
 
@@ -51,10 +58,11 @@ async def test_pipeline_rss_to_json_sink(pipeline_setup, habr_ml_rss_xml: str, m
             self.text = text
             self.status_code = 200
 
-        def raise_for_status(self):
+        def raise_for_status(self) -> None:
             pass
 
-    async def mock_get(*args, **kwargs):
+    async def mock_get(*args: object, **kwargs: object) -> MockResponse:
+        del args, kwargs
         return MockResponse(habr_ml_rss_xml)
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
@@ -74,7 +82,11 @@ async def test_pipeline_rss_to_json_sink(pipeline_setup, habr_ml_rss_xml: str, m
 
 
 @pytest.mark.asyncio
-async def test_pipeline_dedup_second_run(pipeline_setup, habr_ml_rss_xml: str, monkeypatch) -> None:
+async def test_pipeline_dedup_second_run(
+    pipeline_setup: tuple[Pipeline[Any, Any], Any, Path],
+    habr_ml_rss_xml: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pipeline, store, _ = pipeline_setup
 
     class MockResponse:
@@ -82,10 +94,11 @@ async def test_pipeline_dedup_second_run(pipeline_setup, habr_ml_rss_xml: str, m
             self.text = text
             self.status_code = 200
 
-        def raise_for_status(self):
+        def raise_for_status(self) -> None:
             pass
 
-    async def mock_get(*args, **kwargs):
+    async def mock_get(*args: object, **kwargs: object) -> MockResponse:
+        del args, kwargs
         return MockResponse(habr_ml_rss_xml)
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)

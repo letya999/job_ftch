@@ -1,22 +1,27 @@
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from job_ftch.application.registry import create_job_backend
 from job_ftch.config import Settings
-from job_ftch.domain import Job, SourceKind
+from job_ftch.domain import JobRecord, SourceKind
+
+if TYPE_CHECKING:
+    from job_ftch.infrastructure.backends.jobs.sqlite import SQLiteJobBackend
 
 
 @pytest.fixture
-def settings(tmp_path):
+def settings(tmp_path: Path) -> Settings:
     return Settings(
         job_backend="sqlite", search_backend="sqlite", job_store_path=tmp_path / "test.db"
     )
 
 
 @pytest.fixture
-def sample_job():
-    return Job(
+def sample_job() -> JobRecord:
+    return JobRecord(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="chan",
@@ -28,8 +33,8 @@ def sample_job():
 
 
 @pytest.mark.asyncio
-async def test_sqlite_backend_save_get(settings, sample_job):
-    backend = create_job_backend(settings)
+async def test_sqlite_backend_save_get(settings: Settings, sample_job: JobRecord) -> None:
+    backend = cast("SQLiteJobBackend", create_job_backend(settings))
 
     await backend.save(sample_job)
 
@@ -46,8 +51,8 @@ async def test_sqlite_backend_save_get(settings, sample_job):
 
 
 @pytest.mark.asyncio
-async def test_sqlite_backend_search(settings, sample_job):
-    backend = create_job_backend(settings)
+async def test_sqlite_backend_search(settings: Settings, sample_job: JobRecord) -> None:
+    backend = cast("SQLiteJobBackend", create_job_backend(settings))
 
     await backend.save(sample_job)
 
@@ -64,8 +69,8 @@ async def test_sqlite_backend_search(settings, sample_job):
 
 
 @pytest.mark.asyncio
-async def test_sqlite_backend_delete(settings, sample_job):
-    backend = create_job_backend(settings)
+async def test_sqlite_backend_delete(settings: Settings, sample_job: JobRecord) -> None:
+    backend = cast("SQLiteJobBackend", create_job_backend(settings))
 
     # Save two jobs that land in one group (same title and company, different source)
     job1 = sample_job

@@ -16,8 +16,8 @@ from job_ftch.application.registry import (
     register_search_backend,
 )
 from job_ftch.domain import (
-    Job,
     JobGroup,
+    JobRecord,
     compute_identity_fingerprint,
     create_job_group,
     merge_job_into_group,
@@ -83,7 +83,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         except Exception:
             return False
 
-    async def save(self, job: Job) -> None:
+    async def save(self, job: JobRecord) -> None:
         """Required behavior:
         1. compute canonical URL key if present
         2. compute identity fingerprint
@@ -156,7 +156,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 await conn.rollback()
                 raise
 
-    async def create(self, job: Job) -> JobGroup:
+    async def create(self, job: JobRecord) -> JobGroup:
         async with self._lock:
             conn = await self._get_conn()
             await conn.execute("BEGIN IMMEDIATE")
@@ -176,7 +176,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 await conn.rollback()
                 raise
 
-    async def merge(self, group_id: str, job: Job) -> JobGroup:
+    async def merge(self, group_id: str, job: JobRecord) -> JobGroup:
         async with self._lock:
             conn = await self._get_conn()
             await conn.execute("BEGIN IMMEDIATE")
@@ -225,7 +225,9 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 (fp, group.group_id),
             )
 
-    async def _persist_job(self, conn: aiosqlite.Connection, job: Job, group_id: str) -> None:
+    async def _persist_job(
+        self, conn: aiosqlite.Connection, job: JobRecord, group_id: str
+    ) -> None:
         # Deep copy metadata to avoid mutation of original job
         job_copy = job.model_copy(
             update={
@@ -287,7 +289,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             ),
         )
 
-    async def get_job(self, job_id: str) -> Job | None:
+    async def get_job(self, job_id: str) -> JobRecord | None:
         conn = await self._get_conn()
         async with conn.execute("SELECT raw_json FROM jf_jobs WHERE job_id = ?", (job_id,)) as cur:
             row = await cur.fetchone()
@@ -295,7 +297,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             return load_job(row[0])
         return None
 
-    async def list_jobs(self, limit: int, offset: int) -> list[Job]:
+    async def list_jobs(self, limit: int, offset: int) -> list[JobRecord]:
         conn = await self._get_conn()
         async with conn.execute(
             "SELECT raw_json FROM jf_jobs ORDER BY created_at DESC LIMIT ? OFFSET ?",

@@ -14,7 +14,7 @@ from job_ftch.domain import (
 
 if TYPE_CHECKING:
     from job_ftch.config import Settings
-    from job_ftch.domain import Job
+    from job_ftch.domain import JobRecord
 
 
 @register_job_group_store("memory")
@@ -38,7 +38,7 @@ class InMemoryJobGroupStore:
     async def get_group(self, group_id: str) -> JobGroup | None:
         return self._groups.get(group_id)
 
-    async def create(self, job: Job) -> JobGroup:
+    async def create(self, job: JobRecord) -> JobGroup:
         group = create_job_group(job)
         group_id = group.group_id
         fingerprint = compute_identity_fingerprint(job)
@@ -54,7 +54,7 @@ class InMemoryJobGroupStore:
 
         return group
 
-    async def merge(self, group_id: str, job: Job) -> JobGroup:
+    async def merge(self, group_id: str, job: JobRecord) -> JobGroup:
         group = self._groups.get(group_id)
         if not group:
             raise ValueError(f"Group {group_id} not found.")

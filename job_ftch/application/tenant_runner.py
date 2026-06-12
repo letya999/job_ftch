@@ -19,7 +19,7 @@ from job_ftch.application.builder import (
     build_output_sinks,
     build_quarantine_sink,
     build_rejected_sink,
-    load_filter_profile,
+    load_profile_catalog,
     tenant_to_settings,
 )
 from job_ftch.application.pipeline import RunSummary
@@ -208,13 +208,13 @@ class TenantRunner:
             tenant_store = TenantStore(tenant.tenant_id, base_store)
             job_group_store = cast("JobGroupStore", create_job_group_store(tenant_settings))
             llm = cast("LLMProvider", create_llm(tenant_settings))
-            profile = load_filter_profile(tenant_settings)
+            catalog = load_profile_catalog(tenant_settings)
             sanitize_node, nodes = build_nodes(
                 tenant_settings,
                 tenant_store,
                 llm,
                 job_group_store,
-                profile=profile,
+                catalog=catalog,
             )
             output_sink, review_sink, posting_sink = build_output_sinks(tenant_settings)
             rejected_counted, rejected_sink = build_rejected_sink(tenant_settings)
@@ -233,7 +233,7 @@ class TenantRunner:
                 review_sink=review_sink,
                 posting_sink=posting_sink,
                 job_group_store=job_group_store,
-                profile_name=profile.name if profile is not None else "default",
+                profile_name=catalog.catalog_name,
                 output_path=tenant_settings.output_path,
             )
             if tenant.schedule and tenant.schedule.interval_seconds is not None:

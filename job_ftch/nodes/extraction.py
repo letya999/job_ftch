@@ -9,12 +9,16 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, TypeAdapter
 from job_ftch.application.drops import RawItemDropped
 from job_ftch.domain import (
     CompensationRange,
+    EmploymentType,
     ExtractionRejectionReason,
-    Job,
+    JobDraft,
     JobExtractionStatus,
     JobReviewReason,
+    LanguageCode,
     PostType,
     RawItem,
+    Seniority,
+    SkillTag,
     SourceKind,
     WorkMode,
 )
@@ -46,6 +50,22 @@ class ExtractedJobFields(BaseModel):
         le=1.0,
         description="0.0 = not an AI/ML role. 1.0 = clearly AI/ML role.",
     )
+    language: LanguageCode = LanguageCode.UNKNOWN
+    role_family: str | None = None
+    role_track: str | None = None
+    seniority: Seniority = Seniority.UNKNOWN
+    employment_type: EmploymentType = EmploymentType.UNKNOWN
+    domain: str | None = None
+    industry: str | None = None
+    project_types: tuple[str, ...] = ()
+    responsibilities: tuple[str, ...] = ()
+    requirements_must: tuple[str, ...] = ()
+    requirements_nice: tuple[str, ...] = ()
+    skills_explicit: tuple[SkillTag, ...] = ()
+    skills_inferred: tuple[SkillTag, ...] = ()
+    tools_stack: tuple[str, ...] = ()
+    benefits: tuple[str, ...] = ()
+    culture_signals: tuple[str, ...] = ()
 
 
 def _metadata_text(item: RawItem, keys: tuple[str, ...]) -> str | None:
@@ -105,7 +125,7 @@ class ExtractionNode:
     def __init__(self, llm: LLMProvider) -> None:
         self._llm = llm
 
-    async def process(self, item: RawItem) -> Job | None:
+    async def process(self, item: RawItem) -> JobDraft | None:
         extracted, degraded = await self._extract_fields(item)
         title = extracted.title or _fallback_title(item)
         company = extracted.company or _fallback_company(item)
@@ -141,15 +161,15 @@ class ExtractionNode:
             review_reasons.insert(0, JobReviewReason.PARTIAL_EXTRACTION.value)
         metadata = dict(item.metadata)
         metadata["extraction_backend"] = self._llm.__class__.__name__
-        return Job(
+        return JobDraft(
             raw_item_id=item.stable_id,
             source_kind=item.source_kind,
             source_name=item.source_name,
-            title=title,
-            company=company,
-            description=description,
+            title_raw=title,
+            company_name_raw=company,
+            description_raw=description,
             canonical_url=canonical_url,
-            location=location,
+            location_raw=location,
             work_mode=work_mode,
             compensation=extracted.compensation,
             extraction_status=extraction_status,
@@ -157,6 +177,22 @@ class ExtractionNode:
             metadata=metadata,
             post_type=extracted.post_type,
             ai_relevance=extracted.ai_relevance,
+            language=extracted.language,
+            role_family=extracted.role_family,
+            role_track=extracted.role_track,
+            seniority=extracted.seniority,
+            employment_type=extracted.employment_type,
+            domain=extracted.domain,
+            industry=extracted.industry,
+            project_types=extracted.project_types,
+            responsibilities=extracted.responsibilities,
+            requirements_must=extracted.requirements_must,
+            requirements_nice=extracted.requirements_nice,
+            skills_explicit=extracted.skills_explicit,
+            skills_inferred=extracted.skills_inferred,
+            tools_stack=extracted.tools_stack,
+            benefits=extracted.benefits,
+            culture_signals=extracted.culture_signals,
         )
 
     async def _extract_fields(self, item: RawItem) -> tuple[ExtractedJobFields, bool]:

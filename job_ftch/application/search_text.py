@@ -8,23 +8,36 @@ from job_ftch.domain import Job, WorkMode
 def build_job_embedding_text(job: Job) -> str:
     """
     Build embedding text from normalized job.
-    Uses title, company_canonical or company, location, work_mode, description.
+    Uses structured role, company, location, skills, and description fields.
     Skips empty parts.
     """
     parts = []
 
-    if job.title:
-        parts.append(job.title)
+    if job.title_normalized or job.title:
+        parts.append(job.title_normalized or job.title or "")
+
+    if job.role_family:
+        parts.append(job.role_family)
+
+    if job.domain:
+        parts.append(job.domain)
 
     company = job.company_canonical or job.company
     if company:
         parts.append(company)
 
-    if job.location:
-        parts.append(job.location)
+    location = job.location or job.city or job.region or job.country
+    if location:
+        parts.append(location)
 
     if job.work_mode != WorkMode.UNKNOWN:
         parts.append(str(job.work_mode))
+
+    if job.skills_explicit:
+        parts.append(", ".join(skill.canonical_name for skill in job.skills_explicit))
+
+    if job.tools_stack:
+        parts.append(", ".join(job.tools_stack))
 
     if job.description:
         parts.append(job.description)

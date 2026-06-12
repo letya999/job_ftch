@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -16,13 +17,16 @@ from job_ftch.nodes import SanitizeNode
 from job_ftch.sinks.fanout import FanOutSink
 from job_ftch.sinks.json_file import JsonFileSink
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
 
 class StubSource:
     def __init__(self, items: list[RawItem]) -> None:
         self._items = items
 
-    def fetch(self):  # type: ignore[no-untyped-def]
-        async def _items():  # type: ignore[no-untyped-def]
+    def fetch(self) -> AsyncIterator[RawItem]:
+        async def _items() -> AsyncIterator[RawItem]:
             for item in self._items:
                 yield item
 

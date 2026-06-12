@@ -8,7 +8,7 @@ import app as app_module
 from app import build_output_sinks
 from job_ftch.application.drops import RawItemDropped
 from job_ftch.config import Settings
-from job_ftch.domain import DuplicateRejectionReason, Job, SourceKind, WorkMode
+from job_ftch.domain import DuplicateRejectionReason, Job, JobDraft, SourceKind, WorkMode
 from job_ftch.infrastructure.llm.openai_provider import OpenAIInstructorLLMProvider
 from job_ftch.nodes.extraction_validation import ExtractionValidationNode
 
@@ -29,11 +29,25 @@ def _job(**overrides: object) -> Job:
     return Job.model_validate(payload)
 
 
+def _draft(**overrides: object) -> JobDraft:
+    payload: dict[str, object] = {
+        "raw_item_id": "raw-1",
+        "source_kind": SourceKind.TELEGRAM_CHANNEL,
+        "source_name": "AI Jobs Board",
+        "title_raw": "LLM Platform Engineer",
+        "company_name_raw": "Example Corp",
+        "description_raw": "Build LLM infra, prompt pipelines, and agent evaluation systems.",
+        "work_mode": WorkMode.REMOTE,
+    }
+    payload.update(overrides)
+    return JobDraft.model_validate(payload)
+
+
 @pytest.mark.asyncio
 async def test_extraction_validation_marks_missing_location_for_review() -> None:
     node = ExtractionValidationNode()
 
-    job = await node.process(_job(location=None, review_reasons=()))
+    job = await node.process(_draft(location_raw=None, review_reasons=()))
 
     assert job is not None
     assert "missing_location" in job.review_reasons
@@ -44,7 +58,7 @@ async def test_extraction_validation_drops_too_short_descriptions() -> None:
     node = ExtractionValidationNode(min_description_chars=30)
 
     with pytest.raises(RawItemDropped, match="too short to be useful"):
-        await node.process(_job(description="too short"))
+        await node.process(_draft(description_raw="too short"))
 
 
 @pytest.mark.asyncio
@@ -238,7 +252,7 @@ async def test_duplicate_drop_is_reported_as_dedicated_summary_metric(tmp_path: 
             self._items = items
 
         def fetch(self):  # type: ignore[no-untyped-def]
-            async def _items():  # type: ignore[no-untyped-def]
+            async def _items() -> object:
                 for item in self._items:
                     yield item
 

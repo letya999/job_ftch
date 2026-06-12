@@ -10,13 +10,13 @@ from job_ftch.application.identity import JobIdentityMatcher
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import JobGroupStore
-    from job_ftch.domain import Job
+    from job_ftch.domain import Job, JobRecord
 
 
 class JobAggregationNode:
     """
-    Stage[Job, Job] — cross-source aggregation.
-    Job PASSES THROUGH unchanged.
+    Stage[JobRecord, JobRecord] — cross-source aggregation.
+    JobRecord passes through with canonical group attachment.
     Side-effect: creates or updates a JobGroup in JobGroupStore.
     Placed AFTER ExtractionNode (and optionally CompanyCanonicalizer from Phase 13).
     """
@@ -34,7 +34,7 @@ class JobAggregationNode:
         self._enable_fuzzy = enable_fuzzy
         self._attach_group_id = attach_group_id
 
-    async def process(self, job: Job) -> Job:
+    async def process(self, job: JobRecord) -> JobRecord:
         group_id = await self._find_or_create_group(job)
 
         if not self._attach_group_id:
@@ -42,6 +42,7 @@ class JobAggregationNode:
 
         return job.model_copy(
             update={
+                "group_id": group_id,
                 "metadata": {
                     **job.metadata,
                     "group_id": group_id,
@@ -49,7 +50,7 @@ class JobAggregationNode:
             }
         )
 
-    async def _find_or_create_group(self, job: Job) -> str:
+    async def _find_or_create_group(self, job: JobRecord) -> str:
         # Step 1 & 2: exact match via matcher (URL or Fingerprint)
         group_id = await self._matcher.find_matching_group(job)
         if group_id:
@@ -70,7 +71,7 @@ class JobAggregationNode:
         new_group = await self._store.create(job)
         return new_group.group_id
 
-    def _is_fuzzy_match(self, job: Job, other: Job) -> bool:
+    def _is_fuzzy_match(self, job: JobRecord, other: Job) -> bool:
         # Same company (canonical) + fuzzy title
         job_company = job.company_canonical or job.company
         other_company = other.company_canonical or other.company

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from job_ftch.domain import Job, SourceKind
+from job_ftch.domain import JobRecord, SourceKind
 from job_ftch.domain.job_group import (
     create_job_group,
     merge_job_into_group,
@@ -11,8 +11,8 @@ from job_ftch.domain.job_group import (
 
 
 @pytest.fixture
-def sample_job():
-    return Job(
+def sample_job() -> JobRecord:
+    return JobRecord(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="chan",
@@ -23,14 +23,14 @@ def sample_job():
     )
 
 
-def test_create_job_group(sample_job):
+def test_create_job_group(sample_job: JobRecord) -> None:
     group = create_job_group(sample_job)
     assert group.source_count == 1
     assert group.canonical_job.title == "Python Dev"
     assert len(group.source_attributions) == 1
 
 
-def test_merge_job_into_group(sample_job):
+def test_merge_job_into_group(sample_job: JobRecord) -> None:
     group = create_job_group(sample_job)
 
     # Merge new job from different source
@@ -49,7 +49,7 @@ def test_merge_job_into_group(sample_job):
     assert len(merged.source_attributions) == 2
 
 
-def test_remove_job_from_group(sample_job):
+def test_remove_job_from_group(sample_job: JobRecord) -> None:
     group = create_job_group(sample_job)
 
     # Remove the only job

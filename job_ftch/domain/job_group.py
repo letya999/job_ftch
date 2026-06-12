@@ -9,7 +9,7 @@ from typing import Any
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict
 
-from .models import Job, JobExtractionStatus, SourceKind, WorkMode
+from .models import JobExtractionStatus, JobRecord, SourceKind, WorkMode
 
 
 class SourceAttribution(BaseModel):
@@ -26,15 +26,15 @@ class JobGroup(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     group_id: str  # sha256 of canonical fingerprint
-    canonical_job: Job  # merged best-field record
-    jobs: list[Job]  # one per unique source (ordered by source priority)
+    canonical_job: JobRecord  # merged best-field record
+    jobs: list[JobRecord]  # one per unique source (ordered by source priority)
     source_attributions: list[SourceAttribution]
     source_count: int  # = len(jobs)
     first_seen_at: datetime
     last_seen_at: datetime
 
 
-def compute_group_id(job: Job) -> str:
+def compute_group_id(job: JobRecord) -> str:
     """
     Computes a unique group_id for a job.
     If canonical_url is present, it's used as the primary identifier.
@@ -45,7 +45,7 @@ def compute_group_id(job: Job) -> str:
     return compute_identity_fingerprint(job)
 
 
-def compute_identity_fingerprint(job: Job) -> str:
+def compute_identity_fingerprint(job: JobRecord) -> str:
     """
     Computes a semantic identity fingerprint (company + title + location).
     Used for cross-source matching when URLs differ.
@@ -69,7 +69,7 @@ def compute_identity_fingerprint(job: Job) -> str:
     return sha256(fingerprint_raw.encode("utf-8")).hexdigest()
 
 
-def merge_jobs(jobs: list[Job]) -> Job:
+def merge_jobs(jobs: list[JobRecord]) -> JobRecord:
     """
     Merges multiple Job objects into one canonical record.
     Priority order: CAREER_SITE > TELEGRAM_CHANNEL > TELEGRAM_GROUP > TELEGRAM_COMMENT > DEBUG
@@ -86,7 +86,7 @@ def merge_jobs(jobs: list[Job]) -> Job:
         SourceKind.DEBUG: 4,
     }
 
-    def get_priority(j: Job) -> int:
+    def get_priority(j: JobRecord) -> int:
         return priority.get(j.source_kind, 99)
 
     sorted_jobs = sorted(jobs, key=get_priority)
@@ -147,27 +147,31 @@ def merge_jobs(jobs: list[Job]) -> Job:
     for j in reversed(sorted_jobs):  # lower priority first so higher priority overwrites
         metadata.update(j.metadata)
 
-    return Job(
-        raw_item_id=canonical.raw_item_id,
-        source_kind=canonical.source_kind,
-        source_name=canonical.source_name,
-        title=title,
-        company=company,
-        company_canonical=company_canonical,
-        description=description,
-        canonical_url=canonical_url,
-        location=location,
-        work_mode=work_mode,
-        compensation=compensation,
-        extraction_status=extraction_status,
-        quality_score=quality_score,
-        relevance_score=relevance_score,
-        review_reasons=review_reasons,
-        metadata=metadata,
+    return canonical.model_copy(
+        update={
+            "title": title,
+            "title_normalized": title,
+            "description": description,
+            "description_raw": canonical.description_raw or description,
+            "description_clean": description,
+            "company": company,
+            "company_canonical": company_canonical,
+            "company_name_raw": canonical.company_name_raw or company,
+            "company_name_normalized": company_canonical or company,
+            "canonical_url": canonical_url,
+            "location": location,
+            "work_mode": work_mode,
+            "compensation": compensation,
+            "extraction_status": extraction_status,
+            "quality_score": quality_score,
+            "relevance_score": relevance_score,
+            "review_reasons": review_reasons,
+            "metadata": metadata,
+        }
     )
 
 
-def job_seen_at(job: Job) -> datetime:
+def job_seen_at(job: JobRecord) -> datetime:
     now = job.metadata.get("fetched_at")
     if isinstance(now, str):
         return datetime.fromisoformat(now)
@@ -178,7 +182,7 @@ def job_seen_at(job: Job) -> datetime:
     return datetime.now(UTC)
 
 
-def create_job_group(job: Job) -> JobGroup:
+def create_job_group(job: JobRecord) -> JobGroup:
     group_id = compute_group_id(job)
     now = job_seen_at(job)
 
@@ -201,7 +205,7 @@ def create_job_group(job: Job) -> JobGroup:
     )
 
 
-def merge_job_into_group(group: JobGroup, job: Job) -> JobGroup:
+def merge_job_into_group(group: JobGroup, job: JobRecord) -> JobGroup:
     # Check if this source is already in the group
     existing_job_idx = -1
     for i, existing_job in enumerate(group.jobs):

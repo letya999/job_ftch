@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import JobGroupStore
-    from job_ftch.domain import Job
+    from job_ftch.domain import JobRecord
 
 
 class JobIdentityMatcher:
@@ -19,7 +19,7 @@ class JobIdentityMatcher:
     def __init__(self, store: JobGroupStore) -> None:
         self._store = store
 
-    async def find_matching_group(self, job: Job) -> str | None:
+    async def find_matching_group(self, job: JobRecord) -> str | None:
         """Return group_id of matching JobGroup, or None if no match."""
         # Step 1: exact URL match
         if job.canonical_url:

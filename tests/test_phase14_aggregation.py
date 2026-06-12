@@ -5,7 +5,7 @@ from pydantic import AnyHttpUrl
 
 from job_ftch.application.identity import JobIdentityMatcher
 from job_ftch.domain import (
-    Job,
+    JobRecord,
     SourceKind,
     WorkMode,
 )
@@ -13,12 +13,25 @@ from job_ftch.domain.job_group import compute_identity_fingerprint, merge_jobs
 from job_ftch.infrastructure.stores.job_group_store import InMemoryJobGroupStore
 from job_ftch.nodes.aggregation import JobAggregationNode
 
+
+def _record(**overrides: object) -> JobRecord:
+    payload: dict[str, object] = {
+        "raw_item_id": "1",
+        "source_kind": SourceKind.DEBUG,
+        "source_name": "debug",
+        "title": "A",
+        "company": "B",
+        "description": "desc",
+    }
+    payload.update(overrides)
+    return JobRecord.model_validate(payload)
+
 # --- Unit Tests: compute_identity_fingerprint ---
 
 
-def test_fingerprint_normalization():
+def test_fingerprint_normalization() -> None:
     """Test that title is normalized (lowercase, punctuation stripped, sorted words)."""
-    job1 = Job(
+    job1 = _record(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",
@@ -26,7 +39,7 @@ def test_fingerprint_normalization():
         company="TechCorp",
         description="desc",
     )
-    job2 = Job(
+    job2 = _record(
         raw_item_id="2",
         source_kind=SourceKind.TELEGRAM_GROUP,
         source_name="gr1",
@@ -37,9 +50,9 @@ def test_fingerprint_normalization():
     assert compute_identity_fingerprint(job1) == compute_identity_fingerprint(job2)
 
 
-def test_fingerprint_company_fallback():
+def test_fingerprint_company_fallback() -> None:
     """Test that company is used if company_canonical is missing."""
-    job1 = Job(
+    job1 = _record(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",
@@ -48,7 +61,7 @@ def test_fingerprint_company_fallback():
         company_canonical="techcorp",
         description="desc",
     )
-    job2 = Job(
+    job2 = _record(
         raw_item_id="2",
         source_kind=SourceKind.TELEGRAM_GROUP,
         source_name="gr1",
@@ -59,9 +72,9 @@ def test_fingerprint_company_fallback():
     assert compute_identity_fingerprint(job1) == compute_identity_fingerprint(job2)
 
 
-def test_fingerprint_location():
+def test_fingerprint_location() -> None:
     """Test that location is case-insensitive and stripped."""
-    job1 = Job(
+    job1 = _record(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",
@@ -70,7 +83,7 @@ def test_fingerprint_location():
         location=" New York ",
         description="desc",
     )
-    job2 = Job(
+    job2 = _record(
         raw_item_id="2",
         source_kind=SourceKind.TELEGRAM_GROUP,
         source_name="gr1",
@@ -85,9 +98,9 @@ def test_fingerprint_location():
 # --- Unit Tests: merge_jobs ---
 
 
-def test_merge_jobs_priority():
+def test_merge_jobs_priority() -> None:
     """Test that highest priority source (CAREER_SITE) wins most fields."""
-    job_cs = Job(
+    job_cs = _record(
         raw_item_id="1",
         source_kind=SourceKind.CAREER_SITE,
         source_name="cs",
@@ -98,7 +111,7 @@ def test_merge_jobs_priority():
         description="Short description",
         metadata={"key": "cs_val"},
     )
-    job_tg = Job(
+    job_tg = _record(
         raw_item_id="2",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="tg",
@@ -124,9 +137,9 @@ def test_merge_jobs_priority():
     assert merged.metadata["other"] == "val"
 
 
-def test_merge_jobs_max_scores():
+def test_merge_jobs_max_scores() -> None:
     """Test that quality_score and relevance_score take the maximum."""
-    job1 = Job(
+    job1 = _record(
         raw_item_id="1",
         source_kind=SourceKind.DEBUG,
         source_name="d1",
@@ -136,7 +149,7 @@ def test_merge_jobs_max_scores():
         quality_score=0.5,
         relevance_score=0.2,
     )
-    job2 = Job(
+    job2 = _record(
         raw_item_id="2",
         source_kind=SourceKind.DEBUG,
         source_name="d2",
@@ -152,7 +165,7 @@ def test_merge_jobs_max_scores():
     assert merged.relevance_score == 0.2
 
 
-def test_merge_jobs_empty():
+def test_merge_jobs_empty() -> None:
     with pytest.raises(ValueError, match="Cannot merge empty list"):
         merge_jobs([])
 
@@ -161,11 +174,11 @@ def test_merge_jobs_empty():
 
 
 @pytest.mark.asyncio
-async def test_matcher_url_exact():
+async def test_matcher_url_exact() -> None:
     store = InMemoryJobGroupStore()
     matcher = JobIdentityMatcher(store)
 
-    job = Job(
+    job = _record(
         raw_item_id="1",
         source_kind=SourceKind.DEBUG,
         source_name="d",
@@ -179,7 +192,7 @@ async def test_matcher_url_exact():
     group_id = await matcher.find_matching_group(job)
     assert group_id is not None
 
-    job_diff_url = Job(
+    job_diff_url = _record(
         raw_item_id="2",
         source_kind=SourceKind.DEBUG,
         source_name="d",
@@ -195,10 +208,10 @@ async def test_matcher_url_exact():
 
 
 @pytest.mark.asyncio
-async def test_store_merge_existing_source():
+async def test_store_merge_existing_source() -> None:
     """Merge job from the same source updates the job in the group instead of appending."""
     store = InMemoryJobGroupStore()
-    job1 = Job(
+    job1 = _record(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",
@@ -208,7 +221,7 @@ async def test_store_merge_existing_source():
     )
     group = await store.create(job1)
 
-    job1_updated = Job(
+    job1_updated = _record(
         raw_item_id="2",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",
@@ -223,10 +236,10 @@ async def test_store_merge_existing_source():
 
 
 @pytest.mark.asyncio
-async def test_store_merge_new_source():
+async def test_store_merge_new_source() -> None:
     """Merge job from a different source appends to the group."""
     store = InMemoryJobGroupStore()
-    job1 = Job(
+    job1 = _record(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",
@@ -236,7 +249,7 @@ async def test_store_merge_new_source():
     )
     group = await store.create(job1)
 
-    job2 = Job(
+    job2 = _record(
         raw_item_id="2",
         source_kind=SourceKind.TELEGRAM_GROUP,
         source_name="gr1",
@@ -254,12 +267,12 @@ async def test_store_merge_new_source():
 
 
 @pytest.mark.asyncio
-async def test_node_fuzzy_match():
+async def test_node_fuzzy_match() -> None:
     """Verify fuzzy title matching works when enabled."""
     store = InMemoryJobGroupStore()
     node = JobAggregationNode(store, fuzzy_title_threshold=80.0, enable_fuzzy=True)
 
-    job1 = Job(
+    job1 = _record(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",
@@ -267,7 +280,7 @@ async def test_node_fuzzy_match():
         company="OpenAI",
         description="desc",
     )
-    job2 = Job(
+    job2 = _record(
         raw_item_id="2",
         source_kind=SourceKind.TELEGRAM_GROUP,
         source_name="gr1",
@@ -283,12 +296,12 @@ async def test_node_fuzzy_match():
 
 
 @pytest.mark.asyncio
-async def test_node_fuzzy_match_disabled():
+async def test_node_fuzzy_match_disabled() -> None:
     """Verify fuzzy title matching is skipped when disabled."""
     store = InMemoryJobGroupStore()
     node = JobAggregationNode(store, enable_fuzzy=False)
 
-    job1 = Job(
+    job1 = _record(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",
@@ -296,7 +309,7 @@ async def test_node_fuzzy_match_disabled():
         company="OpenAI",
         description="desc",
     )
-    job2 = Job(
+    job2 = _record(
         raw_item_id="2",
         source_kind=SourceKind.TELEGRAM_GROUP,
         source_name="gr1",
@@ -312,12 +325,12 @@ async def test_node_fuzzy_match_disabled():
 
 
 @pytest.mark.asyncio
-async def test_node_fuzzy_threshold():
+async def test_node_fuzzy_threshold() -> None:
     """Verify jobs below the fuzzy threshold are not merged."""
     store = InMemoryJobGroupStore()
     node = JobAggregationNode(store, fuzzy_title_threshold=95.0, enable_fuzzy=True)
 
-    job1 = Job(
+    job1 = _record(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",
@@ -325,7 +338,7 @@ async def test_node_fuzzy_threshold():
         company="OpenAI",
         description="desc",
     )
-    job2 = Job(
+    job2 = _record(
         raw_item_id="2",
         source_kind=SourceKind.TELEGRAM_GROUP,
         source_name="gr1",
@@ -342,12 +355,12 @@ async def test_node_fuzzy_threshold():
 
 
 @pytest.mark.asyncio
-async def test_node_passes_job_through():
+async def test_node_passes_job_through() -> None:
     """Verify that JobAggregationNode returns the job unmodified."""
     store = InMemoryJobGroupStore()
     node = JobAggregationNode(store)
 
-    job = Job(
+    job = _record(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",
@@ -361,12 +374,12 @@ async def test_node_passes_job_through():
 
 
 @pytest.mark.asyncio
-async def test_stats_tracking_comprehensive():
+async def test_stats_tracking_comprehensive() -> None:
     """Verify complete stats tracking across multiple merges and creates."""
     store = InMemoryJobGroupStore()
     node = JobAggregationNode(store)
 
-    job1 = Job(
+    job1 = _record(
         raw_item_id="1",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",
@@ -374,7 +387,7 @@ async def test_stats_tracking_comprehensive():
         company="Corp",
         description="desc",
     )
-    job2 = Job(
+    job2 = _record(
         raw_item_id="2",
         source_kind=SourceKind.TELEGRAM_GROUP,
         source_name="gr1",
@@ -382,7 +395,7 @@ async def test_stats_tracking_comprehensive():
         company="Corp",
         description="desc",
     )
-    job3 = Job(
+    job3 = _record(
         raw_item_id="3",
         source_kind=SourceKind.CAREER_SITE,
         source_name="cs",
@@ -390,7 +403,7 @@ async def test_stats_tracking_comprehensive():
         company="Corp",
         description="desc",
     )
-    job4 = Job(
+    job4 = _record(
         raw_item_id="4",
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="ch1",

@@ -12,6 +12,7 @@ import structlog
 
 from job_ftch.application.contracts import (
     AuthProvider,
+    ClassifierProvider,
     EmbeddingProvider,
     JobGroupStore,
     LLMProvider,
@@ -23,7 +24,9 @@ from job_ftch.application.contracts import (
     Store,
     VectorBackend,
 )
-from job_ftch.application.filter_profile_loader import load_filter_profile as load_profile_from_path
+from job_ftch.application.filter_profile_loader import (
+    load_profile_catalog as load_catalog_from_path,
+)
 from job_ftch.application.logging import configure_logging
 from job_ftch.application.pipeline import Pipeline, RunSummary
 from job_ftch.application.registry import (
@@ -43,8 +46,8 @@ from job_ftch.application.source_loader import load_sources
 from job_ftch.application.telemetry import configure_telemetry
 from job_ftch.config import Settings, get_settings
 from job_ftch.domain import (
-    FilterProfile,
     Job,
+    ProfileCatalog,
     QuarantinedRawItem,
     RawItem,
     RejectedItem,
@@ -52,12 +55,10 @@ from job_ftch.domain import (
 )
 from job_ftch.domain.source_spec import SourceSpec
 from job_ftch.nodes import (
-    AIRoleRelevanceNode,
     CompensationParsingNode,
     DedupNode,
     ExtractionNode,
     ExtractionValidationNode,
-    HeuristicTriageNode,
     JobAggregationNode,
     JobValidationNode,
     LocationWorkModeNormalizationNode,
@@ -65,6 +66,12 @@ from job_ftch.nodes import (
     SanitizeNode,
     TitleCompanyNormalizationNode,
 )
+from job_ftch.nodes.hard_filter import HardFilterNode
+from job_ftch.nodes.language_context import LanguageContextNode
+from job_ftch.nodes.match_scoring import MultiProfileMatchNode
+from job_ftch.nodes.post_type import PostTypeClassificationNode
+from job_ftch.nodes.risk import RiskScoringNode
+from job_ftch.nodes.semantic_prefilter import SemanticPrefilterNode
 from job_ftch.sinks import CountedSink, FailureTolerantSink, FanOutSink, RoutingSink
 
 if TYPE_CHECKING:
@@ -345,8 +352,8 @@ def configure(path: str | Path) -> PipelineBuilder:
     store = cast(Store, create_store(settings))
     job_group_store = cast(JobGroupStore, create_job_group_store(settings))
     llm = cast("LLMProvider", create_llm(settings))
-    profile = load_filter_profile(settings)
-    sanitize_node, nodes = build_nodes(settings, store, llm, job_group_store, profile=profile)
+    catalog = load_profile_catalog(settings)
+    sanitize_node, nodes = build_nodes(settings, store, llm, job_group_store, catalog=catalog)
     output_sink, review_sink, posting_sink = build_output_sinks(settings)
     rejected_counted, rejected_sink = build_rejected_sink(settings)
 
@@ -365,7 +372,7 @@ def configure(path: str | Path) -> PipelineBuilder:
         review_sink=review_sink,
         posting_sink=posting_sink,
         job_group_store=job_group_store,
-        profile_name=profile.name if profile is not None else "default",
+        profile_name=catalog.catalog_name,
         output_path=settings.output_path,
     )
     if tenant.schedule and tenant.schedule.interval_seconds is not None:
@@ -393,10 +400,18 @@ def build_source(settings: Settings, store: Any = None) -> Source[RawItem]:
     return cast(Source[RawItem], create_source(settings))
 
 
-def load_filter_profile(settings: Settings) -> FilterProfile | None:
-    if settings.filter_profile_path is None:
+def build_classifier(_settings: Settings, _catalog: ProfileCatalog) -> ClassifierProvider | None:
+    try:
+        from job_ftch.infrastructure.classifiers.keyword_classifier import KeywordClassifierProvider
+    except Exception:
         return None
-    return load_profile_from_path(settings.filter_profile_path)
+    return KeywordClassifierProvider()
+
+
+def load_profile_catalog(settings: Settings) -> ProfileCatalog:
+    if settings.filter_profile_path is None:
+        return ProfileCatalog.default()
+    return load_catalog_from_path(settings.filter_profile_path)
 
 
 def build_nodes(
@@ -404,17 +419,22 @@ def build_nodes(
     store: Store,
     llm: LLMProvider,
     job_group_store: JobGroupStore,
-    profile: FilterProfile | None = None,
+    catalog: ProfileCatalog,
 ) -> tuple[SanitizingNode[RawItem], Sequence[ProcessingNode[object]]]:
+    classifier = build_classifier(settings, catalog)
     nodes: list[ProcessingNode[Any]] = [
-        HeuristicTriageNode(profile=profile),
+        LanguageContextNode(),
+        PostTypeClassificationNode(classifier=classifier),
+        HardFilterNode(catalog),
         DedupNode(store),
+        SemanticPrefilterNode(catalog),
         ExtractionNode(llm),
         ExtractionValidationNode(),
         TitleCompanyNormalizationNode(),
         LocationWorkModeNormalizationNode(),
         CompensationParsingNode(),
-        AIRoleRelevanceNode(profile=profile),
+        MultiProfileMatchNode(catalog),
+        RiskScoringNode(),
         QualityScoringNode(),
         JobValidationNode(),
         JobAggregationNode(job_group_store, attach_group_id=True),
@@ -527,8 +547,8 @@ async def run_pipeline_from_settings(settings: Settings) -> RunSummary:
     try:
         job_group_store = cast(JobGroupStore, await create_job_group_store_with_fallback(settings))
         llm = build_llm(settings)
-        profile = load_filter_profile(settings)
-        sanitize_node, nodes = build_nodes(settings, store, llm, job_group_store, profile=profile)
+        catalog = load_profile_catalog(settings)
+        sanitize_node, nodes = build_nodes(settings, store, llm, job_group_store, catalog=catalog)
         output_sink, review_sink, posting_sink = build_output_sinks(settings)
         rejected_counted, rejected_sink = build_rejected_sink(settings)
         builder = (
@@ -544,7 +564,7 @@ async def run_pipeline_from_settings(settings: Settings) -> RunSummary:
                 review_sink=review_sink,
                 posting_sink=posting_sink,
                 job_group_store=job_group_store,
-                profile_name=profile.name if profile is not None else "default",
+                profile_name=catalog.catalog_name,
                 output_path=settings.output_path,
             )
         )

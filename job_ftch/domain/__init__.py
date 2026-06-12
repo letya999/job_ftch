@@ -1,5 +1,7 @@
 """Domain layer - pure models, zero I/O. Entities, value objects, domain rules."""
 
+from job_ftch.domain.candidate import CandidateIdentity, CandidateProfile, CandidateResumeSnapshot
+from job_ftch.domain.contracts import draft_to_record, job_to_draft, job_to_record
 from job_ftch.domain.dedup import (
     DedupKeyKind,
     DuplicateRecord,
@@ -21,12 +23,26 @@ from job_ftch.domain.job_quality import (
 )
 from job_ftch.domain.models import (
     CompensationRange,
+    EmploymentType,
     Job,
+    JobDraft,
     JobExtractionStatus,
+    JobRecord,
+    LanguageCode,
+    MatchDecision,
     PostType,
+    ProfileMatchScore,
     RawItem,
+    Seniority,
+    SkillTag,
     SourceKind,
     WorkMode,
+)
+from job_ftch.domain.profile import (
+    CompensationExpectation,
+    ProfileCatalog,
+    ProfileWeights,
+    SearchProfile,
 )
 from job_ftch.domain.quarantine import QuarantinedRawItem, RawItemRejectionReason
 from job_ftch.domain.rejected import RejectedItem, RejectedOutcome
@@ -48,18 +64,30 @@ from .job_group import (
 __all__ = [
     "CompensationRange",
     "CareerSiteSpec",
+    "CandidateIdentity",
+    "CandidateProfile",
+    "CandidateResumeSnapshot",
     "DedupKeyKind",
     "DuplicateRecord",
     "DuplicateRejectionReason",
+    "CompensationExpectation",
     "ExtractionRejectionReason",
+    "EmploymentType",
     "FilterProfile",
     "Job",
+    "JobDraft",
     "JobExtractionStatus",
     "JobGroup",
+    "JobRecord",
     "JobReviewReason",
     "JobValidationRejectionReason",
+    "LanguageCode",
+    "MatchDecision",
     "PostType",
     "OutputSpec",
+    "ProfileCatalog",
+    "ProfileMatchScore",
+    "ProfileWeights",
     "QuarantinedRawItem",
     "RawItem",
     "RawItemRejectionReason",
@@ -67,6 +95,9 @@ __all__ = [
     "RejectedOutcome",
     "RememberedDedupKey",
     "ScheduleSpec",
+    "SearchProfile",
+    "Seniority",
+    "SkillTag",
     "SourceAttribution",
     "SourceKind",
     "TenantConfig",
@@ -75,6 +106,7 @@ __all__ = [
     "WorkMode",
     "compute_group_id",
     "compute_identity_fingerprint",
+    "draft_to_record",
     "create_job_group",
     "merge_job_into_group",
     "remove_job_from_group",
@@ -86,4 +118,6 @@ __all__ = [
     "dedup_url_for_raw_item",
     "merge_jobs",
     "processed_key_for_raw_item",
+    "job_to_draft",
+    "job_to_record",
 ]

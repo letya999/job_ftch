@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from job_ftch.application.drops import RawItemDropped
-from job_ftch.domain import Job, SourceKind, WorkMode
+from job_ftch.domain import Job, JobDraft, JobRecord, SourceKind, WorkMode
 from job_ftch.nodes import (
     AIRoleRelevanceNode,
     CompensationParsingNode,
@@ -28,13 +28,42 @@ def _job(**overrides: object) -> Job:
     return Job.model_validate(payload)
 
 
+def _draft(**overrides: object) -> JobDraft:
+    payload: dict[str, object] = {
+        "raw_item_id": "raw-1",
+        "source_kind": SourceKind.TELEGRAM_CHANNEL,
+        "source_name": "AI Jobs Board",
+        "title_raw": "LLM Platform Engineer",
+        "company_name_raw": "Example Corp",
+        "description_raw": "Build LLM infra, prompt pipelines, and agent evaluation systems.",
+        "work_mode": WorkMode.UNKNOWN,
+    }
+    payload.update(overrides)
+    return JobDraft.model_validate(payload)
+
+
+def _record(**overrides: object) -> JobRecord:
+    payload: dict[str, object] = {
+        "raw_item_id": "raw-1",
+        "source_kind": SourceKind.TELEGRAM_CHANNEL,
+        "source_name": "AI Jobs Board",
+        "title": "LLM Platform Engineer",
+        "company": "Example Corp",
+        "description": "Build LLM infra, prompt pipelines, and agent evaluation systems.",
+        "work_mode": WorkMode.UNKNOWN,
+    }
+    payload.update(overrides)
+    return JobRecord.model_validate(payload)
+
+
 @pytest.mark.asyncio
 async def test_title_company_normalization_splits_company_from_title() -> None:
     node = TitleCompanyNormalizationNode()
 
-    job = await node.process(_job(title="Hiring: AI Infra Engineer at Example AI", company=None))
+    job = await node.process(_draft(title_raw="Hiring: AI Infra Engineer at Example AI", company_name_raw=None))
 
     assert job is not None
+    assert isinstance(job, JobRecord)
     assert job.title == "AI Infra Engineer"
     assert job.company == "Example AI"
 
@@ -43,7 +72,7 @@ async def test_title_company_normalization_splits_company_from_title() -> None:
 async def test_location_work_mode_normalization_detects_remote() -> None:
     node = LocationWorkModeNormalizationNode()
 
-    job = await node.process(_job(location="Remote", description="Remote AI PM role"))
+    job = await node.process(_record(location="Remote", description="Remote AI PM role"))
 
     assert job is not None
     assert job.location is None
@@ -55,7 +84,7 @@ async def test_compensation_parsing_node_reads_salary_from_description() -> None
     node = CompensationParsingNode()
 
     job = await node.process(
-        _job(description="LLM engineer role. Compensation USD 120000 - 160000 plus bonus.")
+        _record(description="LLM engineer role. Compensation USD 120000 - 160000 plus bonus.")
     )
 
     assert job is not None
@@ -80,19 +109,15 @@ async def test_ai_role_relevance_drops_out_of_scope_jobs() -> None:
 async def test_quality_scoring_and_validation_keep_good_job() -> None:
     scorer = QualityScoringNode()
     validator = JobValidationNode()
-    relevance = AIRoleRelevanceNode()
-
-    relevant = await relevance.process(
-        _job(
-            description=(
-                "Build AI infra, LLM evaluation, prompt tooling, and agent platform "
-                "services for enterprise customers."
-            ),
-            canonical_url="https://example.com/jobs/1",
-            location="Berlin",
-        )
+    relevant = _record(
+        description=(
+            "Build AI infra, LLM evaluation, prompt tooling, and agent platform "
+            "services for enterprise customers."
+        ),
+        canonical_url="https://example.com/jobs/1",
+        location="Berlin",
+        relevance_score=0.9,
     )
-    assert relevant is not None
     scored = await scorer.process(relevant)
     assert scored is not None
 

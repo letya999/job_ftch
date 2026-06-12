@@ -1,0 +1,109 @@
+"""Canonical public domain contracts and compatibility helpers."""
+
+from __future__ import annotations
+
+from job_ftch.domain.models import Job, JobDraft, JobRecord
+
+
+def job_to_draft(job: Job) -> JobDraft:
+    return JobDraft(
+        raw_item_id=job.raw_item_id,
+        source_kind=job.source_kind,
+        source_name=job.source_name,
+        canonical_url=job.canonical_url,
+        language=job.language,
+        languages_detected=job.languages_detected,
+        title_raw=job.title_raw or job.title,
+        company_name_raw=job.company,
+        description_raw=job.description,
+        location_raw=job.location,
+        work_mode=job.work_mode,
+        compensation=job.compensation,
+        post_type=job.post_type,
+        ai_relevance=job.ai_relevance,
+        role_family=job.role_family,
+        role_track=job.role_track,
+        seniority=job.seniority,
+        employment_type=job.employment_type,
+        extraction_status=job.extraction_status,
+        authority_scope=job.authority_scope,
+        region=job.region,
+        country=job.country,
+        city=job.city,
+        timezone=job.timezone,
+        domain=job.domain,
+        industry=job.industry,
+        project_types=job.project_types,
+        responsibilities=job.responsibilities,
+        requirements_must=job.requirements_must,
+        requirements_nice=job.requirements_nice,
+        skills_explicit=job.skills_explicit,
+        skills_inferred=job.skills_inferred,
+        tools_stack=job.tools_stack,
+        benefits=job.benefits,
+        culture_signals=job.culture_signals,
+        risk_signals=job.risk_signals,
+        review_reasons=job.review_reasons,
+        metadata=job.metadata,
+    )
+
+
+def draft_to_record(draft: JobDraft) -> JobRecord:
+    title = draft.title_raw
+    company = draft.company_name_raw
+    return JobRecord(
+        raw_item_id=draft.raw_item_id,
+        source_kind=draft.source_kind,
+        source_name=draft.source_name,
+        title=title,
+        company=company,
+        description=draft.description_raw,
+        canonical_url=draft.canonical_url,
+        location=draft.location_raw,
+        work_mode=draft.work_mode,
+        compensation=draft.compensation,
+        extraction_status=draft.extraction_status,
+        review_reasons=draft.review_reasons,
+        metadata=draft.metadata,
+        post_type=draft.post_type,
+        ai_relevance=draft.ai_relevance,
+        language=draft.language,
+        languages_detected=draft.languages_detected,
+        title_raw=draft.title_raw,
+        title_normalized=draft.title_raw,
+        role_family=draft.role_family,
+        role_track=draft.role_track,
+        seniority=draft.seniority,
+        employment_type=draft.employment_type,
+        authority_scope=draft.authority_scope,
+        region=draft.region,
+        country=draft.country,
+        city=draft.city,
+        timezone=draft.timezone,
+        domain=draft.domain,
+        industry=draft.industry,
+        project_types=draft.project_types,
+        responsibilities=draft.responsibilities,
+        requirements_must=draft.requirements_must,
+        requirements_nice=draft.requirements_nice,
+        skills_explicit=draft.skills_explicit,
+        skills_inferred=draft.skills_inferred,
+        tools_stack=draft.tools_stack,
+        benefits=draft.benefits,
+        culture_signals=draft.culture_signals,
+        risk_signals=draft.risk_signals,
+        description_raw=draft.description_raw,
+        description_clean=draft.description_raw,
+        company_name_raw=company,
+        company_name_normalized=company,
+    )
+
+
+def job_to_record(job: Job) -> JobRecord:
+    return JobRecord(
+        **job.model_dump(),
+        description_raw=job.description,
+        description_clean=job.description,
+        company_name_raw=job.company,
+        company_name_normalized=job.company_canonical or job.company,
+    )

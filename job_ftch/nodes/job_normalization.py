@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from job_ftch.domain import CompensationRange, Job, WorkMode
+from job_ftch.domain import CompensationRange, JobDraft, JobRecord, WorkMode, draft_to_record
 
 _PREFIX_RE = re.compile(r"^(hiring|vacancy|opening|role|ищем|вакансия)\s*[:\-]\s*", re.IGNORECASE)
 _COMP_SPLIT_RE = re.compile(r"\s+(?:at|@|-)\s+", re.IGNORECASE)
@@ -52,18 +52,38 @@ def _normalize_currency(value: str) -> str:
 
 
 class TitleCompanyNormalizationNode:
-    async def process(self, item: Job) -> Job | None:
-        title = _clean_title(item.title)
-        company = _clean_company(item.company)
+    async def process(self, item: JobDraft) -> JobRecord | None:
+        title = _clean_title(item.title_raw)
+        company = _clean_company(item.company_name_raw)
         if title is not None and company is None:
             parts = _COMP_SPLIT_RE.split(title, maxsplit=1)
             if len(parts) == 2:
                 title, company = parts[0].strip(), parts[1].strip()
-        return item.model_copy(update={"title": title, "company": company})
+        role_family = item.role_family
+        lowered_title = (title or "").casefold()
+        if role_family is None:
+            if any(token in lowered_title for token in ("engineer", "developer", "разработ")):
+                role_family = "engineering"
+            elif any(token in lowered_title for token in ("scientist", "research", "исслед")):
+                role_family = "research"
+            elif any(token in lowered_title for token in ("manager", "product", "менедж")):
+                role_family = "product"
+        record = draft_to_record(item)
+        return record.model_copy(
+            update={
+                "title": title,
+                "title_normalized": title,
+                "company": company,
+                "company_canonical": company,
+                "company_name_raw": company,
+                "company_name_normalized": company,
+                "role_family": role_family,
+            }
+        )
 
 
 class LocationWorkModeNormalizationNode:
-    async def process(self, item: Job) -> Job | None:
+    async def process(self, item: JobRecord) -> JobRecord | None:
         location = item.location
         work_mode = item.work_mode
         if work_mode is WorkMode.UNKNOWN:
@@ -73,11 +93,20 @@ class LocationWorkModeNormalizationNode:
             lowered = normalized.casefold()
             if lowered in {"remote", "hybrid", "on-site", "onsite"}:
                 location = None
-        return item.model_copy(update={"location": location, "work_mode": work_mode})
+        city = item.city or location
+        region = item.region or location
+        return item.model_copy(
+            update={
+                "location": location,
+                "city": city,
+                "region": region,
+                "work_mode": work_mode,
+            }
+        )
 
 
 class CompensationParsingNode:
-    async def process(self, item: Job) -> Job | None:
+    async def process(self, item: JobRecord) -> JobRecord | None:
         if item.compensation is not None:
             return item
         match = _SALARY_RE.search(item.description)

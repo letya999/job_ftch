@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 from job_ftch.application.drops import RawItemDropped
-from job_ftch.domain import Job, JobReviewReason, JobValidationRejectionReason
+from job_ftch.domain import JobDraft, JobReviewReason, JobValidationRejectionReason
 
 
 class ExtractionValidationNode:
     def __init__(self, *, min_description_chars: int = 30) -> None:
         self._min_description_chars = min_description_chars
 
-    async def process(self, item: Job) -> Job | None:
-        if len(item.description.strip()) < self._min_description_chars:
+    async def process(self, item: JobDraft) -> JobDraft | None:
+        if len(item.description_raw.strip()) < self._min_description_chars:
             raise RawItemDropped(
                 reason=JobValidationRejectionReason.JOB_DESCRIPTION_TOO_SHORT,
                 details="Extracted job description is too short to be useful.",
@@ -19,13 +19,13 @@ class ExtractionValidationNode:
                 stage=self.__class__.__name__,
             )
         review_reasons = list(item.review_reasons)
-        if item.title is None and item.company is None and item.canonical_url is None:
+        if item.title_raw is None and item.company_name_raw is None and item.canonical_url is None:
             raise RawItemDropped(
                 reason=JobValidationRejectionReason.JOB_MISSING_CORE_FIELDS,
                 details="Extracted job is missing title, company, and canonical URL.",
                 item=item,
                 stage=self.__class__.__name__,
             )
-        if item.location is None and JobReviewReason.MISSING_LOCATION.value not in review_reasons:
+        if item.location_raw is None and JobReviewReason.MISSING_LOCATION.value not in review_reasons:
             review_reasons.append(JobReviewReason.MISSING_LOCATION.value)
         return item.model_copy(update={"review_reasons": tuple(review_reasons)})

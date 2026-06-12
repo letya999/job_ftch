@@ -1,14 +1,14 @@
 """Serialization helpers for persistent backends."""
 
-from job_ftch.domain import Job, JobGroup
+from job_ftch.domain import JobGroup, JobRecord
 
 
-def dump_job(job: Job) -> str:
+def dump_job(job: JobRecord) -> str:
     return job.model_dump_json(by_alias=True)
 
 
-def load_job(raw: str) -> Job:
-    return Job.model_validate_json(raw)
+def load_job(raw: str) -> JobRecord:
+    return JobRecord.model_validate_json(raw)
 
 
 def dump_group(group: JobGroup) -> str:
