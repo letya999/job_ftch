@@ -85,10 +85,15 @@ class TenantConfig(BaseModel):
     llm_backend: str = "heuristic"
     posting_backend: str = "none"
     dry_run: bool = False
+    metrics_enabled: bool = False
+    metrics_port: int = 9090
     pipeline_max_items_per_run: int = 200
     pipeline_max_text_length: int = 20_000
     review_max_quality_score: float = 0.65
     posting_min_quality_score: float = 0.8
+    routing_accept_threshold: float = 0.85
+    routing_review_threshold: float = 0.5
+    routing_quality_override_threshold: float = 0.6
     store_path: Path = Path(".runtime/{tenant_id}/job_ftch.db")
     job_store_path: Path | None = None
     store_dsn: str | None = None

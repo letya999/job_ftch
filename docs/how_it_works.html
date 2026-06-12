@@ -223,13 +223,13 @@ dlt-часть — вытащить и загрузить данные. dbt-ча
             P-&gt;&gt;P: пропустить
         else новый
             DB--&gt;&gt;P: нет
-            P-&gt;&gt;N: Sanitize → Triage → Dedup → Extract → Quality
-            alt сломан/нерелевантен
-                N--&gt;&gt;P: выбросить (в карантин)
+            P-&gt;&gt;N: Sanitize → Classify → Filter → Dedup → Extract → Normalize → Score → Aggregate
+            alt сломан / не вакансия / дубликат
+                N--&gt;&gt;P: quarantine / drop / review
             else годный
-                N--&gt;&gt;P: чистая Job
+                N--&gt;&gt;P: JobRecord (+ group_id при match)
                 P-&gt;&gt;O: сохранить / отправить
-                P-&gt;&gt;DB: пометить обработанным
+                P-&gt;&gt;DB: пометить обработанным и обновить JobGroup
             end
         end
     end
@@ -242,20 +242,27 @@ dlt-часть — вытащить и загрузить данные. dbt-ча
 <h2 id="два-потока-годное-и-сломанное">Два потока: годное и сломанное </h2>
 <p>Важная философская деталь: <strong>ничего не теряется молча.</strong></p>
 <div class="mermaid">flowchart LR
-    IN["Пост"] --&gt; SAN{"Чистка&lt;br/&gt;валиден?"}
-    SAN --&gt;|"да"| TRI{"Это&lt;br/&gt;вакансия?"}
+    IN["Пост / RawItem"] --&gt; SAN{"SanitizeNode&lt;br/&gt;валиден?"}
+    SAN --&gt;|"да"| CLS{"PostTypeClassificationNode&lt;br/&gt;job posting?"}
     SAN --&gt;|"нет, сломан"| Q["🚫 Карантин&lt;br/&gt;с причиной"]
-    TRI --&gt;|"да"| OUT["✅ В обработку → Job"]
-    TRI --&gt;|"нет, мусор"| DROP["🗑️ Дроп&lt;br/&gt;со счётчиком"]
+    CLS --&gt;|"да"| EXT["Extraction + normalization&lt;br/&gt;RawItem -&gt; JobDraft -&gt; JobRecord"]
+    CLS --&gt;|"нет, candidate / spam / noise"| DROP["🗑️ Дроп&lt;br/&gt;со счётчиком"]
+    EXT --&gt; GATE{"Match / risk / quality / validation&lt;br/&gt;достаточно полезно?"}
+    GATE --&gt;|"да"| OUT["✅ Emit JobRecord&lt;br/&gt;+ attach JobGroup"]
+    GATE --&gt;|"нет"| REV["🟡 Review / reject&lt;br/&gt;с причиной"]
 
     style OUT fill:#1a7a3a,color:#fff
     style Q fill:#a83a1a,color:#fff
     style DROP fill:#777,color:#fff
+    style REV fill:#8a6d1a,color:#fff
 </div><ul>
-<li><strong>Годное</strong> идёт дальше и становится <code>Job</code>.</li>
+<li><strong>Годное</strong> проходит извлечение и нормализацию и становится <code>JobRecord</code>.</li>
 <li><strong>Сломанное</strong> (битый URL, пустой текст) уходит в <strong>карантин</strong> с пометкой<br>
 "почему" — чтобы потом посмотреть и починить источник.</li>
-<li><strong>Мусор</strong> (не вакансия) дропается, но <strong>считается</strong> — видно, сколько и почему.</li>
+<li><strong>Не вакансия / низкое качество</strong> не исчезает молча: запись либо дропается со счётчиком,
+либо уходит в review/reject с явной причиной.</li>
+<li><strong>Совпавшие вакансии из разных источников</strong> не схлопываются в одну запись вслепую:
+<code>JobAggregationNode</code> прикрепляет <code>group_id</code> и обновляет <code>JobGroup</code>.</li>
 </ul>
 <p>Поэтому оператор всегда видит честную воронку:<br>
 <code>собрано → почищено → отсеяно → выдано</code>. Никаких чёрных дыр.</p>

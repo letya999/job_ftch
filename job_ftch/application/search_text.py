@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from job_ftch.domain import Job, WorkMode
+from job_ftch.domain import JobRecord, WorkMode
 
 
-def build_job_embedding_text(job: Job) -> str:
+def build_job_embedding_text(job: JobRecord) -> str:
     """
     Build embedding text from normalized job.
     Uses structured role, company, location, skills, and description fields.

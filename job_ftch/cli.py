@@ -25,11 +25,25 @@ def parse_args() -> argparse.Namespace:
     pipeline_parser.add_argument("--daemon", action="store_true", help="Run in background loop.")
     pipeline_parser.add_argument("--status", action="store_true", help="Show last run status.")
 
+    runs_parser = subparsers.add_parser("runs", help="Inspect persisted run history")
+    runs_subparsers = runs_parser.add_subparsers(dest="runs_command", required=True)
+    runs_list = runs_subparsers.add_parser("list", help="List recent pipeline runs")
+    runs_list.add_argument("--tenant", dest="tenant_id", default=None)
+    runs_list.add_argument("--limit", type=int, default=20)
+    runs_show = runs_subparsers.add_parser("show", help="Show one pipeline run")
+    runs_show.add_argument("run_id", type=str)
+    runs_show.add_argument("--tenant", dest="tenant_id", default=None)
+
     tenants_parser = subparsers.add_parser("tenants", help="Manage tenant configurations")
     tenants_subparsers = tenants_parser.add_subparsers(dest="tenant_command", required=True)
     tenants_subparsers.add_parser("list", help="List configured tenants")
     tenants_status = tenants_subparsers.add_parser("status", help="Show last status for one tenant")
     tenants_status.add_argument("tenant_id", type=str)
+    tenants_lineage = tenants_subparsers.add_parser(
+        "lineage", help="Show lineage for one job inside a tenant"
+    )
+    tenants_lineage.add_argument("tenant_id", type=str)
+    tenants_lineage.add_argument("job_id", type=str)
     tenants_run = tenants_subparsers.add_parser("run", help="Run one tenant immediately")
     tenants_run.add_argument("tenant_id", type=str)
     tenants_reset = tenants_subparsers.add_parser("reset", help="Reset tenant store namespace")
@@ -172,6 +186,8 @@ def main() -> int:
 
     if args.command == "search":
         asyncio.run(run_search_from_settings(settings, args))
+    elif args.command == "runs":
+        asyncio.run(_handle_runs(settings, args))
     elif args.command == "tenants":
         asyncio.run(_handle_tenants(settings, args))
     elif args.command == "mcp-server":
@@ -214,9 +230,43 @@ async def _handle_tenants(settings: Settings, args: argparse.Namespace) -> None:
             summary = await runner.run_tenant(args.tenant_id)
             print(json.dumps(summary.as_dict(), ensure_ascii=False, indent=2, default=str))
             return
+        if args.tenant_command == "lineage":
+            lineage = await runner.get_job_lineage(args.job_id, tenant_id=args.tenant_id)
+            print(
+                "null"
+                if lineage is None
+                else json.dumps(lineage.model_dump(mode="json"), ensure_ascii=False, indent=2, default=str)
+            )
+            return
         if args.tenant_command == "reset":
             await runner.reset_tenant(args.tenant_id)
             print(f"reset {args.tenant_id}")
+            return
+    finally:
+        await runner.close()
+
+
+async def _handle_runs(settings: Settings, args: argparse.Namespace) -> None:
+    runner = _load_tenant_runner(settings)
+    try:
+        if args.runs_command == "list":
+            summaries = await runner.list_runs(tenant_id=args.tenant_id, limit=args.limit)
+            print(
+                json.dumps(
+                    [summary.as_dict() for summary in summaries],
+                    ensure_ascii=False,
+                    indent=2,
+                    default=str,
+                )
+            )
+            return
+        if args.runs_command == "show":
+            summary = await runner.get_run(args.run_id, tenant_id=args.tenant_id)
+            print(
+                "null"
+                if summary is None
+                else json.dumps(summary.as_dict(), ensure_ascii=False, indent=2, default=str)
+            )
             return
     finally:
         await runner.close()

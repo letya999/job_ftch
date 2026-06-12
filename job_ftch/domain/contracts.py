@@ -8,9 +8,13 @@ from job_ftch.domain.models import Job, JobDraft, JobRecord
 def job_to_draft(job: Job) -> JobDraft:
     return JobDraft(
         raw_item_id=job.raw_item_id,
+        source_record_id=job.source_record_id,
         source_kind=job.source_kind,
         source_name=job.source_name,
+        source_url=job.source_url,
         canonical_url=job.canonical_url,
+        fetched_at=job.fetched_at,
+        posted_at=job.posted_at,
         language=job.language,
         languages_detected=job.languages_detected,
         title_raw=job.title_raw or job.title,
@@ -44,6 +48,7 @@ def job_to_draft(job: Job) -> JobDraft:
         culture_signals=job.culture_signals,
         risk_signals=job.risk_signals,
         review_reasons=job.review_reasons,
+        provenance=job.provenance,
         metadata=job.metadata,
     )
 
@@ -53,24 +58,29 @@ def draft_to_record(draft: JobDraft) -> JobRecord:
     company = draft.company_name_raw
     return JobRecord(
         raw_item_id=draft.raw_item_id,
+        source_record_id=draft.source_record_id,
         source_kind=draft.source_kind,
         source_name=draft.source_name,
+        source_url=draft.source_url,
         title=title,
         company=company,
         description=draft.description_raw,
         canonical_url=draft.canonical_url,
+        fetched_at=draft.fetched_at,
+        posted_at=draft.posted_at,
         location=draft.location_raw,
         work_mode=draft.work_mode,
         compensation=draft.compensation,
         extraction_status=draft.extraction_status,
         review_reasons=draft.review_reasons,
+        provenance=draft.provenance,
         metadata=draft.metadata,
         post_type=draft.post_type,
         ai_relevance=draft.ai_relevance,
         language=draft.language,
         languages_detected=draft.languages_detected,
         title_raw=draft.title_raw,
-        title_normalized=draft.title_raw,
+        title_normalized=draft.title_raw,  # pre-normalization placeholder; overwritten by TitleCompanyNormalizationNode
         role_family=draft.role_family,
         role_track=draft.role_track,
         seniority=draft.seniority,
@@ -93,9 +103,22 @@ def draft_to_record(draft: JobDraft) -> JobRecord:
         culture_signals=draft.culture_signals,
         risk_signals=draft.risk_signals,
         description_raw=draft.description_raw,
-        description_clean=draft.description_raw,
+        description_clean=draft.description_raw,  # pre-normalization placeholder; overwritten by normalization pass
         company_name_raw=company,
         company_name_normalized=company,
+        # Plan B extensions
+        years_experience=draft.years_experience,
+        education=draft.education,
+        relocation=draft.relocation,
+        visa_support=draft.visa_support,
+        domain_knowledge=draft.domain_knowledge,
+        soft_skills=draft.soft_skills,
+        certifications=draft.certifications,
+        leadership_level=draft.leadership_level,
+        ic_or_manager=draft.ic_or_manager,
+        company_type=draft.company_type,
+        team_size_hint=draft.team_size_hint,
+        remote_restrictions=draft.remote_restrictions,
     )
 
 

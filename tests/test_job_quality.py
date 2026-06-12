@@ -3,15 +3,17 @@ from __future__ import annotations
 import pytest
 
 from job_ftch.application.drops import RawItemDropped
-from job_ftch.domain import Job, JobDraft, JobRecord, SourceKind, WorkMode
+from job_ftch.domain import Job, JobDraft, JobRecord, JobStatus, RiskLevel, SourceKind, WorkMode
 from job_ftch.nodes import (
-    AIRoleRelevanceNode,
     CompensationParsingNode,
+    JobLifecycleNode,
     JobValidationNode,
     LocationWorkModeNormalizationNode,
     QualityScoringNode,
+    RiskScoringNode,
     TitleCompanyNormalizationNode,
 )
+from job_ftch.nodes.relevance import AIRoleRelevanceNode
 
 
 def _job(**overrides: object) -> Job:
@@ -60,7 +62,9 @@ def _record(**overrides: object) -> JobRecord:
 async def test_title_company_normalization_splits_company_from_title() -> None:
     node = TitleCompanyNormalizationNode()
 
-    job = await node.process(_draft(title_raw="Hiring: AI Infra Engineer at Example AI", company_name_raw=None))
+    job = await node.process(
+        _draft(title_raw="Hiring: AI Infra Engineer at Example AI", company_name_raw=None)
+    )
 
     assert job is not None
     assert isinstance(job, JobRecord)
@@ -90,6 +94,26 @@ async def test_compensation_parsing_node_reads_salary_from_description() -> None
     assert job is not None
     assert job.compensation is not None
     assert job.compensation.min_amount == 120000
+    assert "compensation:parsed_from_description" in job.provenance.normalization
+
+
+@pytest.mark.asyncio
+async def test_risk_scoring_promotes_explicit_contract_fields() -> None:
+    node = RiskScoringNode(review_threshold=0.4)
+
+    job = await node.process(
+        _record(
+            canonical_url=None,
+            description="Crypto role. Apply in Telegram DM for fast payout.",
+            risk_signals=("manual_flag",),
+        )
+    )
+
+    assert job is not None
+    assert job.risk_score == 0.8
+    assert job.risk_level is RiskLevel.HIGH
+    assert "high_risk_signals" in job.review_reasons
+    assert job.metadata["risk_score"] == 0.8
 
 
 @pytest.mark.asyncio
@@ -126,3 +150,18 @@ async def test_quality_scoring_and_validation_keep_good_job() -> None:
     assert validated is not None
     assert validated.quality_score is not None
     assert validated.quality_score >= 0.25
+
+
+@pytest.mark.asyncio
+async def test_job_lifecycle_marks_explicitly_closed_role_as_filled() -> None:
+    node = JobLifecycleNode()
+
+    job = await node.process(
+        _record(
+            description="This position has been filled and the vacancy is now closed.",
+            metadata={"status": "closed"},
+        )
+    )
+
+    assert job.status is JobStatus.FILLED
+    assert "lifecycle:explicit_status_signal" in job.provenance.normalization

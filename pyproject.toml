@@ -44,6 +44,7 @@ dagster = ["dagster>=1.8"]
 faststream = ["faststream>=0.5"]
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
 mcp = ["fastmcp>=2.4"]
+metrics = ["prometheus-client>=0.20"]
 sqlite = ["aiosqlite>=0.20"]
 postgres = ["asyncpg>=0.29"]
 embeddings = ["sentence-transformers>=3.0", "torch>=2.3"]
@@ -96,6 +97,21 @@ job_ftch = "job_ftch.cli:main"
 [project.entry-points."job_ftch.embedding_providers"]
 
 [project.entry-points."job_ftch.vector_backends"]
+
+[project.entry-points."job_ftch.extractors"]
+# Extractor plugins go here
+
+[project.entry-points."job_ftch.classifiers"]
+# Classifier plugins go here
+
+[project.entry-points."job_ftch.normalizers"]
+# Normalizer plugins go here
+
+[project.entry-points."job_ftch.scorers"]
+# Scorer plugins go here
+
+[project.entry-points."job_ftch.notification_targets"]
+# Notification target plugins go here
 
 [project.entry-points."job_ftch.mcp_servers"]
 default = "job_ftch.adapters.mcp.server:create_server"

@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, TypeVar, cast
+from uuid import uuid4
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import (
@@ -25,6 +26,7 @@ from job_ftch.application.rejections import RawItemRejected
 from job_ftch.domain import (
     Job,
     JobExtractionStatus,
+    JobRecord,
     QuarantinedRawItem,
     RawItem,
     RawItemRejectionReason,
@@ -139,7 +141,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self,
         source: Source[PipelineInput],
         sanitize_node: SanitizingNode[PipelineInput],
-        nodes: Sequence[ProcessingNode[Any]],
+        nodes: Sequence[Stage[Any, Any]],
         sink: Sink[PipelineOutput] | Sequence[Sink[PipelineOutput]],
         store: Store,
         quarantine_sink: Sink[QuarantinedRawItem] | None = None,
@@ -157,8 +159,10 @@ class Pipeline[PipelineInput, PipelineOutput]:
 
     async def run(self, max_items: int | None = None) -> RunSummary:
         summary = RunSummary()
+        summary.source_run_id = uuid4().hex
         await self._set_run_state("pipeline.started_at", summary.started_at.isoformat())
         await self._set_run_state("pipeline.status", "running")
+        await self._set_run_state("pipeline.source_run_id", summary.source_run_id)
         run_interrupted = False
         with self._tracer.start_as_current_span("pipeline.run") as span:
             source_iter = self._source.fetch().__aiter__()
@@ -233,6 +237,15 @@ class Pipeline[PipelineInput, PipelineOutput]:
                                 )
                                 finalized = True
                                 break
+                            if isinstance(next_item, JobRecord):
+                                next_item = next_item.model_copy(
+                                    update={
+                                        "metadata": {
+                                            **next_item.metadata,
+                                            "source_run_id": summary.source_run_id,
+                                        }
+                                    }
+                                )
                             current = next_item
                             failure_item = current
                         if current is None:
@@ -240,6 +253,15 @@ class Pipeline[PipelineInput, PipelineOutput]:
                         summary.triaged += 1
                         summary.source_stats(source_kind).triaged += 1
                         self._record_output_stats(current, summary, source_kind)
+                        if isinstance(current, JobRecord):
+                            current = current.model_copy(
+                                update={
+                                    "metadata": {
+                                        **current.metadata,
+                                        "source_run_id": summary.source_run_id,
+                                    }
+                                }
+                            )
                         failure_reason = "sink_emit_failed"
                         failure_stage = self._sink.__class__.__name__
                         failure_item = current

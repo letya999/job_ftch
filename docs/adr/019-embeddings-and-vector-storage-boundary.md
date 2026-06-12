@@ -1,4 +1,4 @@
-# ADR 017: Embeddings and Vector Storage Boundary
+# ADR 019: Embeddings and Vector Storage Boundary
 
 ## Status
 Accepted

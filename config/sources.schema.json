@@ -162,6 +162,88 @@
           ],
           "default": null,
           "title": "Source Name"
+        },
+        "monitor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "auto",
+          "title": "Monitor"
+        },
+        "monitor_config": {
+          "additionalProperties": true,
+          "title": "Monitor Config",
+          "type": "object"
+        },
+        "scraper": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scraper"
+        },
+        "scraper_config": {
+          "additionalProperties": true,
+          "title": "Scraper Config",
+          "type": "object"
+        },
+        "scraper_fallback": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scraper Fallback",
+          "type": "array"
+        },
+        "detail_limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail Limit"
+        },
+        "url_filter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url Filter"
+        },
+        "url_transform": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url Transform"
         }
       },
       "required": [
@@ -1344,5 +1426,7 @@
     {
       "$ref": "#/$defs/WebSocketSourceSpec"
     }
-  ]
+  ],
+  "$id": "https://job-ftch.dev/schemas/SourceSpec.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

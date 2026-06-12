@@ -26,6 +26,7 @@ def _record(**overrides: object) -> JobRecord:
     payload.update(overrides)
     return JobRecord.model_validate(payload)
 
+
 # --- Unit Tests: compute_identity_fingerprint ---
 
 

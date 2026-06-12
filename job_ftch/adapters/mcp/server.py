@@ -73,6 +73,16 @@ class TenantMCPServer:
             return None if summary is None else summary.as_dict()
 
         @self.app.tool
+        async def list_runs(tenant_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+            summaries = await self._require_runner().list_runs(tenant_id=tenant_id, limit=limit)
+            return [summary.as_dict() for summary in summaries]
+
+        @self.app.tool
+        async def get_run(run_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
+            summary = await self._require_runner().get_run(run_id, tenant_id=tenant_id)
+            return None if summary is None else summary.as_dict()
+
+        @self.app.tool
         async def list_tenants() -> list[dict[str, Any]]:
             tenants = await self._require_runner().list_tenants()
             return [tenant.model_dump(mode="json") for tenant in tenants]
@@ -93,6 +103,14 @@ class TenantMCPServer:
         async def get_job(job_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
             job = await self._require_runner().get_job(job_id, tenant_id=tenant_id)
             return None if job is None else job.model_dump(mode="json")
+
+        @self.app.tool
+        async def get_job_lineage(
+            job_id: str,
+            tenant_id: str | None = None,
+        ) -> dict[str, Any] | None:
+            lineage = await self._require_runner().get_job_lineage(job_id, tenant_id=tenant_id)
+            return None if lineage is None else lineage.model_dump(mode="json")
 
         @self.app.tool
         async def reset_tenant(tenant_id: str) -> None:

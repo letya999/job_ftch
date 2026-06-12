@@ -1,4 +1,4 @@
-# ADR-021: Module Boundary Enforcement
+# ADR-021b: Module Boundary Enforcement
 
 - Status: ACCEPTED
 - Date: 2026-06-08

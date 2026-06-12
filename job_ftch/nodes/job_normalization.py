@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import re
 
-from job_ftch.domain import CompensationRange, JobDraft, JobRecord, WorkMode, draft_to_record
+from job_ftch.application.contracts import TypeChangingNode
+from job_ftch.domain import (
+    CompensationRange,
+    JobDraft,
+    JobRecord,
+    Seniority,
+    WorkMode,
+    draft_to_record,
+)
+from job_ftch.infrastructure.ontology.normalizer import OntologyNormalizer, get_default_normalizer
 
 _PREFIX_RE = re.compile(r"^(hiring|vacancy|opening|role|ищем|вакансия)\s*[:\-]\s*", re.IGNORECASE)
 _COMP_SPLIT_RE = re.compile(r"\s+(?:at|@|-)\s+", re.IGNORECASE)
@@ -51,7 +60,10 @@ def _normalize_currency(value: str) -> str:
     return {"$": "USD", "€": "EUR", "£": "GBP"}.get(value.upper(), value.upper())
 
 
-class TitleCompanyNormalizationNode:
+class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
+    def __init__(self, normalizer: OntologyNormalizer | None = None):
+        self.normalizer = normalizer or get_default_normalizer()
+
     async def process(self, item: JobDraft) -> JobRecord | None:
         title = _clean_title(item.title_raw)
         company = _clean_company(item.company_name_raw)
@@ -59,16 +71,38 @@ class TitleCompanyNormalizationNode:
             parts = _COMP_SPLIT_RE.split(title, maxsplit=1)
             if len(parts) == 2:
                 title, company = parts[0].strip(), parts[1].strip()
+        
+        normalization_steps: list[str] = []
+        
         role_family = item.role_family
-        lowered_title = (title or "").casefold()
-        if role_family is None:
-            if any(token in lowered_title for token in ("engineer", "developer", "разработ")):
-                role_family = "engineering"
-            elif any(token in lowered_title for token in ("scientist", "research", "исслед")):
-                role_family = "research"
-            elif any(token in lowered_title for token in ("manager", "product", "менедж")):
-                role_family = "product"
+        if role_family is None and title:
+            role_family = self.normalizer.infer_role_family(title)
+            if role_family:
+                normalization_steps.append(f"role_family:{role_family}")
+        
+        seniority = item.seniority
+        if seniority is Seniority.UNKNOWN and title:
+            inferred = self.normalizer.infer_seniority(title)
+            if inferred:
+                try:
+                    seniority = Seniority(inferred)
+                    normalization_steps.append(f"seniority:{inferred}")
+                except ValueError:
+                    pass
+
+        if title != item.title_raw:
+            normalization_steps.append("title:cleaned")
+        if company != item.company_name_raw:
+            normalization_steps.append("company:cleaned")
+        
         record = draft_to_record(item)
+        provenance = record.provenance.model_copy(
+            update={
+                "normalization": tuple(
+                    list(record.provenance.normalization) + normalization_steps + ["title_company_normalization"]
+                )
+            }
+        )
         return record.model_copy(
             update={
                 "title": title,
@@ -78,6 +112,8 @@ class TitleCompanyNormalizationNode:
                 "company_name_raw": company,
                 "company_name_normalized": company,
                 "role_family": role_family,
+                "seniority": seniority,
+                "provenance": provenance,
             }
         )
 
@@ -95,12 +131,24 @@ class LocationWorkModeNormalizationNode:
                 location = None
         city = item.city or location
         region = item.region or location
+        normalization_steps: list[str] = []
+        if location != item.location:
+            normalization_steps.append("location:normalized")
+        if work_mode != item.work_mode:
+            normalization_steps.append("work_mode:inferred")
         return item.model_copy(
             update={
                 "location": location,
                 "city": city,
                 "region": region,
                 "work_mode": work_mode,
+                "provenance": item.provenance.model_copy(
+                    update={
+                        "normalization": tuple(
+                            list(item.provenance.normalization) + normalization_steps
+                        )
+                    }
+                ),
             }
         )
 
@@ -117,4 +165,40 @@ class CompensationParsingNode:
             min_amount=_normalize_amount(match.group("min")),
             max_amount=_normalize_amount(match.group("max")),
         )
-        return item.model_copy(update={"compensation": compensation})
+        return item.model_copy(
+            update={
+                "compensation": compensation,
+                "provenance": item.provenance.model_copy(
+                    update={
+                        "normalization": tuple(
+                            list(item.provenance.normalization) + ["compensation:parsed_from_description"]
+                        )
+                    }
+                ),
+            }
+        )
+
+
+class SkillNormalizationNode:
+    def __init__(self, normalizer: OntologyNormalizer | None = None):
+        self.normalizer = normalizer or get_default_normalizer()
+
+    async def process(self, item: JobRecord) -> JobRecord | None:
+        skills_explicit = self.normalizer.normalize_skills(item.skills_explicit)
+        skills_inferred = self.normalizer.normalize_skills(item.skills_inferred)
+
+        if skills_explicit != item.skills_explicit or skills_inferred != item.skills_inferred:
+            return item.model_copy(
+                update={
+                    "skills_explicit": skills_explicit,
+                    "skills_inferred": skills_inferred,
+                    "provenance": item.provenance.model_copy(
+                        update={
+                            "normalization": tuple(
+                                list(item.provenance.normalization) + ["skills:normalized"]
+                            )
+                        }
+                    ),
+                }
+            )
+        return item

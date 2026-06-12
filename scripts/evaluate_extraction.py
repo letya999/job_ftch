@@ -50,6 +50,10 @@ async def evaluate_fixture(settings: Settings, fixture_path: Path) -> dict[str, 
         expected = dict(record["expected"])
         job = await extractor.process(raw_item)
         actual = job.model_dump(mode="json") if job is not None else {}
+        if actual.get("title") is None and actual.get("title_raw") is not None:
+            actual["title"] = actual["title_raw"]
+        if actual.get("company") is None and actual.get("company_name_raw") is not None:
+            actual["company"] = actual["company_name_raw"]
         field_matches = {field: actual.get(field) == value for field, value in expected.items()}
         matched_fields += sum(1 for matched in field_matches.values() if matched)
         expected_fields += len(field_matches)

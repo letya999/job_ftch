@@ -195,13 +195,13 @@ sequenceDiagram
             P->>P: пропустить
         else новый
             DB-->>P: нет
-            P->>N: Sanitize → Triage → Dedup → Extract → Quality
-            alt сломан/нерелевантен
-                N-->>P: выбросить (в карантин)
+            P->>N: Sanitize → Classify → Filter → Dedup → Extract → Normalize → Score → Aggregate
+            alt сломан / не вакансия / дубликат
+                N-->>P: quarantine / drop / review
             else годный
-                N-->>P: чистая Job
+                N-->>P: JobRecord (+ group_id при match)
                 P->>O: сохранить / отправить
-                P->>DB: пометить обработанным
+                P->>DB: пометить обработанным и обновить JobGroup
             end
         end
     end
@@ -221,21 +221,28 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    IN["Пост"] --> SAN{"Чистка<br/>валиден?"}
-    SAN -->|"да"| TRI{"Это<br/>вакансия?"}
+    IN["Пост / RawItem"] --> SAN{"SanitizeNode<br/>валиден?"}
+    SAN -->|"да"| CLS{"PostTypeClassificationNode<br/>job posting?"}
     SAN -->|"нет, сломан"| Q["🚫 Карантин<br/>с причиной"]
-    TRI -->|"да"| OUT["✅ В обработку → Job"]
-    TRI -->|"нет, мусор"| DROP["🗑️ Дроп<br/>со счётчиком"]
+    CLS -->|"да"| EXT["Extraction + normalization<br/>RawItem -> JobDraft -> JobRecord"]
+    CLS -->|"нет, candidate / spam / noise"| DROP["🗑️ Дроп<br/>со счётчиком"]
+    EXT --> GATE{"Match / risk / quality / validation<br/>достаточно полезно?"}
+    GATE -->|"да"| OUT["✅ Emit JobRecord<br/>+ attach JobGroup"]
+    GATE -->|"нет"| REV["🟡 Review / reject<br/>с причиной"]
 
     style OUT fill:#1a7a3a,color:#fff
     style Q fill:#a83a1a,color:#fff
     style DROP fill:#777,color:#fff
+    style REV fill:#8a6d1a,color:#fff
 ```
 
-- **Годное** идёт дальше и становится `Job`.
+- **Годное** проходит извлечение и нормализацию и становится `JobRecord`.
 - **Сломанное** (битый URL, пустой текст) уходит в **карантин** с пометкой
   "почему" — чтобы потом посмотреть и починить источник.
-- **Мусор** (не вакансия) дропается, но **считается** — видно, сколько и почему.
+- **Не вакансия / низкое качество** не исчезает молча: запись либо дропается со счётчиком,
+  либо уходит в review/reject с явной причиной.
+- **Совпавшие вакансии из разных источников** не схлопываются в одну запись вслепую:
+  `JobAggregationNode` прикрепляет `group_id` и обновляет `JobGroup`.
 
 Поэтому оператор всегда видит честную воронку:
 `собрано → почищено → отсеяно → выдано`. Никаких чёрных дыр.

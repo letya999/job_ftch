@@ -6,6 +6,7 @@ from job_ftch.domain import (
     CompensationRange,
     Job,
     JobExtractionStatus,
+    JobStatus,
     RawItem,
     SourceKind,
     WorkMode,
@@ -94,6 +95,21 @@ def test_job_allows_partial_extraction_payload() -> None:
     assert job.company is None
     assert dumped["extraction_status"] == "partial"
     assert dumped["review_reasons"] == ["partial_extraction", "missing_company"]
+
+
+def test_job_defaults_to_open_status() -> None:
+    job = Job(
+        raw_item_id="raw-3",
+        source_kind=SourceKind.DEBUG,
+        source_name="debug",
+        title="ML Engineer",
+        description="Build ranking systems.",
+    )
+
+    dumped = job.model_dump(mode="json")
+
+    assert job.status is JobStatus.OPEN
+    assert dumped["status"] == "open"
 
 
 def test_compensation_rejects_invalid_bounds() -> None:

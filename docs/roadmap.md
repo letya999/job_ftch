@@ -1,12 +1,26 @@
 # Roadmap
 
+> Historical note (2026-06-12): this file is the master implementation plan and still keeps
+> original phase/task names where they describe the rollout as planned at that time.
+> The live architecture and canonical payload contract are tracked in
+> `docs/architecture.md` and the accepted ADRs.
+
+> Status snapshot (2026-06-12): the current worktree and test suite confirm milestone
+> coverage through M25 (`280 passed, 8 skipped`). M26 is partially landed
+> (`JobLineage`, tenant/MCP lineage surface, source run ids, persisted run history,
+> `IncrementalCursor` used by RSS and REST API sources, `PrometheusExporter` behind
+> `metrics_enabled/metrics_port`), while broader cursor migration and deeper
+> observability hardening remain roadmap work. M27 stays the target
+> platform shape, not a claim that every listed subsystem is already shipped.
+
 ## Goal
 
 Build `job_ftch` as a **library-first**, domain-specific data ingestion engine for job postings.
 The library ingests from heterogeneous sources (Telegram, career sites, APIs, feeds, webhooks),
-normalises into structured `Job` records, and emits to pluggable sinks — without coupling to any
-runtime orchestrator. Any wrapper (CLI, FastStream, FastAPI, Dagster, Airflow, MCP server) is
-an adapter on top, not part of the core.
+moves data through the canonical payload family `RawItem -> JobDraft -> JobRecord -> JobGroup`,
+and emits normalized records to pluggable sinks — without coupling to any runtime orchestrator.
+Any wrapper (CLI, FastStream, FastAPI, Dagster, Airflow, MCP server) is an adapter on top,
+not part of the core.
 
 ## Delivery rules
 
@@ -48,11 +62,13 @@ an adapter on top, not part of the core.
   `Settings`-based factories remain only as CLI shims (Phase 11, RM-067b).
 
 ### Data contracts
-- `Job` carries a `schema_version: int` field. Breaking field changes bump the version.
-  Evolution policy per field: `evolve` (additive, safe) / `freeze` (no changes) /
-  `discard` (drop old field with deprecation cycle). See Phase 13.
-- `RawItem → Job` is the only cross-type stage boundary. All other nodes are same-type.
-  The boundary is documented in ADR-006; tested via typed contract tests (RM-056 extension).
+- The target public payload family is `RawItem`, `JobDraft`, `JobRecord`, `JobGroup`.
+- `JobRecord` carries `schema_version`. Breaking field changes bump the versioned public
+  contract. Evolution policy per field: `evolve` (additive, safe) / `freeze` (no changes) /
+  `discard` (drop old field with deprecation cycle). See Phase 13 and ADR-024.
+- The required raw-to-structured boundary is `RawItem → JobDraft`.
+  Downstream rollout may continue through `JobRecord` and `JobGroup` rather than one flat
+  `Job` payload. Typed contract tests remain the enforcement mechanism.
 
 ### Scope discipline
 - Phases 0-14: core pipeline, domain, quality, search, scheduler.
@@ -384,13 +400,13 @@ with config-driven profiles. No keyword changes require code edits.
 
 ## Phase 13. Domain model hardening
 
-Purpose: make `Job` a durable, evolvable public contract — not an internal struct that
+Purpose: make `JobRecord` the durable, evolvable public contract — not an internal struct that
 silently breaks consumers when fields change. Add job lifecycle tracking so dead listings
 are automatically detected and marked. Add company entity canonicalization so the same
 employer is never split across thousands of name variants.
 
 ### RM-134 Job schema versioning and evolution policy
-- Add `schema_version: int = 1` to `Job` domain model (non-breaking, default=1).
+- Add `schema_version` to the public normalized job contract (`JobRecord`) with a stable default.
 - Per-field evolution annotation in docstring/ADR: each field tagged as one of:
   `evolve` (additive changes safe), `freeze` (never change name/type), `discard` (marked
   deprecated, removed after two schema_version bumps).
@@ -404,8 +420,12 @@ employer is never split across thousands of name variants.
 - ADR-012: schema versioning and evolution policy.
 
 ### RM-135 Job lifecycle — status field and open/filled/expired tracking
-- Add `status: JobStatus = JobStatus.OPEN` to `Job`.
+- Add `status: JobStatus = JobStatus.OPEN` to the normalized job contract.
   `JobStatus` enum: `open`, `filled`, `expired`, `delisted`, `unknown`.
+- Current rollout state: landed partially. `JobStatus` is now part of the public
+  canonical contract and `JobLifecycleNode` handles explicit `filled/closed`
+  source signals. Cross-run open-job tracking and automatic `delisted` marking
+  remain follow-up work.
 - `JobLifecycleNode` in `job_ftch/nodes/lifecycle.py`:
   - On each pipeline run per source: compares newly fetched job IDs against
     the set of previously-known-open job IDs stored in `Store` under
@@ -429,7 +449,7 @@ employer is never split across thousands of name variants.
   - Fuzzy match (Levenshtein distance ≤ 2) for near-duplicate names; configurable via
     `company_fuzzy_match: bool` in `FilterProfile`.
   - "Сбер" / "Sberbank" / "ПАО Сбербанк" → `canonical_name: "Sberbank"`.
-- `Job.company_canonical: str | None` — set by `CompanyCanonicalizer`; `Job.company`
+- `JobRecord.company_canonical: str | None` — set by `CompanyCanonicalizer`; `JobRecord.company`
   retains the original extracted name.
 - `PostgreSQLJobBackend` indexes `company_canonical` for GROUP BY aggregation queries.
 - `search_jobs` (Phase 16) supports `company_canonical` filter parameter.
@@ -439,21 +459,21 @@ employer is never split across thousands of name variants.
 Purpose: the domain differentiator of a job aggregator is NOT "collect from many sources"
 but "one canonical job record enriched from all sources that posted it." Currently dedup
 drops duplicates. Phase 14 changes the semantic: same job posted on 5 sources becomes
-ONE `Job` with 5 source attributions — not 1 surviving and 4 discarded.
+one aggregate `JobGroup` with preserved source-level `JobRecord` members — not 1 surviving and 4 discarded.
 
 ### RM-137 JobGroup domain model
 - `JobGroup` in `domain/job_group.py`:
-  `canonical_job_id: str`, `jobs: list[Job]` (one per source),
-  `canonical_job: Job` (merged best-field view), `source_count: int`,
+  `canonical_job_id: str`, `jobs: list[JobRecord]` (one per source),
+  `canonical_job: JobRecord` (merged best-field view), `source_count: int`,
   `first_seen_at: datetime`, `last_seen_at: datetime`.
 - `JobGroup` is NOT a pipeline output type — it lives in the store and is built
-  incrementally. The pipeline still emits `Job`; aggregation happens asynchronously.
-- `CanonicalJob` = the `Job` with fields merged from all `jobs` in the group:
+  incrementally. The pipeline still emits source-level `JobRecord`; aggregation happens asynchronously.
+- `CanonicalJob` = the `JobRecord` with fields merged from all `jobs` in the group:
   longest `description` wins, most fields filled wins, canonical URL = first official API
   URL (if available), `sources: list[SourceAttribution]` preserves all origins.
 
 ### RM-138 Cross-source identity matching — post-extraction stage
-- `JobIdentityMatcher` in `job_ftch/application/identity.py` operates on `Job` objects
+- `JobIdentityMatcher` in `job_ftch/application/identity.py` operates on `JobRecord` objects
   AFTER extraction and company canonicalization, never on pre-extraction `RawItem`.
 - New pipeline stage `JobAggregationNode` in `job_ftch/nodes/aggregation.py`, placed
   AFTER `CompanyCanonicalizer` (Phase 13) in the chain. This is the only place merge happens.
@@ -904,7 +924,7 @@ Adapters live in `adapters/` or a separate repository.
 - `adapters/faststream_adapter.py` (in a separate repo or `adapters/` directory).
 - `@broker.subscriber` receives a trigger message; calls `Pipeline.run()` with a
   `SourceSpec` deserialized from the message payload.
-- `@broker.publisher` emits extracted `Job` records downstream.
+- `@broker.publisher` emits extracted `JobRecord` records downstream.
 - Supports NATS JetStream, Redis Streams, Kafka, RabbitMQ via FastStream's unified API.
 - One `Pipeline` per message; `CompositeSource` handles multi-source triggers.
 - Add example in `docs/adapters/faststream.md`.
@@ -1001,7 +1021,7 @@ AI coding assistant and agentic runtime. Users install once, connect from any to
 - `list_tenants() -> list[TenantInfo]` — all loaded tenants with last-run metadata.
 - `search_jobs(query: str, tenant_id: str | None, limit: int) -> list[JobGroup]` — fulltext
   search (Phase 16); `tenant_id=None` searches across all tenants.
-- `get_job(job_id: str) -> Job` — fetch single job by stable ID.
+- `get_job(job_id: str) -> JobRecord` — fetch single job by stable ID.
 - `reset_tenant(tenant_id: str) -> None` — clear dedup store for a tenant (admin tool).
 
 ### RM-123 MCP resources surface
@@ -1068,7 +1088,7 @@ that bridges Telegram ↔ job_ftch core.
 
 ### RM-130 Job digest formatter
 - `adapters/telegram_bot/formatter.py`.
-- Formats `Job` records as Telegram HTML messages: title, company, location, salary
+- Formats `JobRecord` records as Telegram HTML messages: title, company, location, salary
   range, work mode, source, URL button.
 - Truncates long descriptions; collapses multiple locations.
 - Digest mode: N jobs per message, pagination via inline keyboard callback queries.
@@ -1107,6 +1127,9 @@ and an efficient unified incremental fetch primitive that replaces scattered per
   `set(source_id: str, cursor: str) -> None`,
   `reset(source_id: str) -> None`.
 - Backed by `StoreConnector` key `{tenant_id}:{source_id}:cursor`.
+- Current rollout state: landed and already used by `RSSFeedSource` and
+  `OfficialAPISource` derivatives. Remaining work is migration of any residual
+  source-specific cursor state to the same primitive.
 - All sources that currently scatter `last_cursor`, `last_seen_id`, `etag` fields
   in their own state migrate to `IncrementalCursor`. One store key pattern, everywhere.
 - `SourceSpec` gains `incremental: bool = True`; when `False`, full re-fetch every run.
@@ -1119,10 +1142,14 @@ and an efficient unified incremental fetch primitive that replaces scattered per
   `raw_item_id: str`, `job_id: str`, `group_id: str | None`,
   `pipeline_run_id: str`, `tenant_id: str`, `source_kind: str`, `source_name: str`,
   `extracted_at: datetime`, `stage_trace: list[str]`.
-- `LineageStore` protocol + `PostgreSQLLineageBackend`: persists one `JobLineage` per
-  `RawItem → Job` transition, written inside `Pipeline.run()` on successful emit.
-- `raw_item_id` already on `Job`; wires it to `job_id` in the lineage record.
-- CLI: `job_ftch lineage <job_id>` — shows origin raw_item, source, run_id, stages.
+- Pragmatic rollout path landed first: build `JobLineage` on demand from persisted
+  `JobRecord` + `JobGroup`, with `source_run_id` already injected into `JobRecord.metadata`
+  during `Pipeline.run()`. This exposes lineage without a dedicated lineage store migration.
+- Follow-up step: optional `LineageStore` protocol + backend if persisted per-stage lineage
+  becomes necessary later.
+- `raw_item_id` already on `JobRecord`; this is now wired to `job_id` in the lineage payload.
+- CLI: `job_ftch tenants lineage <tenant_id> <job_id>` — shows origin raw item, source,
+  run id, and stages.
 - MCP tool: `get_job_lineage(job_id: str) -> JobLineage`.
 - This is the "dbt lineage" equivalent: every output job is traceable to its raw source.
 
@@ -1136,6 +1163,10 @@ and an efficient unified incremental fetch primitive that replaces scattered per
   - `job_ftch_run_duration_seconds{tenant_id}` (histogram)
   - `job_ftch_jobs_delisted_total{tenant_id, source_kind}` (counter)
   - `job_ftch_job_groups_total{tenant_id}` (gauge, from `JobGroupStore.count()`)
+- Current rollout state: landed behind `metrics_enabled` / `metrics_port`, with
+  counters for fetched/extracted/dropped/failed, a run-duration histogram, and
+  a job-group-total gauge. Delisted counters and richer per-daemon serving remain
+  follow-up work.
 - `prometheus_client` added to `[metrics]` extras group.
 - Configurable: `metrics_enabled: bool = False`, `metrics_port: int = 9090`.
 - In daemon mode (`--daemon`), metrics endpoint starts as a background aiohttp server.

@@ -58,6 +58,9 @@ plans/
 # Test configs
 config/test_*.yaml
 
+# Agent test-run output (quiet pytest redirect)
+.pytest.out
+
 # Docker
 docker-compose.yml
 docker-compose.override.yml

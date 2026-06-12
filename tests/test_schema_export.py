@@ -39,7 +39,10 @@ def test_schema_export_script_writes_canonical_contracts(
 ) -> None:
     monkeypatch.chdir(tmp_path)
 
-    run_path(str(Path(__file__).resolve().parents[1] / "scripts" / "export_schema.py"), run_name="__main__")
+    run_path(
+        str(Path(__file__).resolve().parents[1] / "scripts" / "export_schema.py"),
+        run_name="__main__",
+    )
 
     expected = {
         "config/sources.schema.json",
@@ -54,10 +57,27 @@ def test_schema_export_script_writes_canonical_contracts(
         payload = json.loads(path.read_text(encoding="utf-8"))
         assert "$defs" in payload or payload.get("type") == "object"
 
-    raw_schema = json.loads((tmp_path / "artifacts/schemas/RawItem.schema.json").read_text(encoding="utf-8"))
+    raw_schema = json.loads(
+        (tmp_path / "artifacts/schemas/RawItem.schema.json").read_text(encoding="utf-8")
+    )
     record_schema = json.loads(
         (tmp_path / "artifacts/schemas/JobRecord.schema.json").read_text(encoding="utf-8")
     )
     assert raw_schema["title"] == "RawItem"
     assert record_schema["title"] == "JobRecord"
     assert "job_id" in record_schema["properties"]
+    assert "source_record_id" in record_schema["properties"]
+    assert "posted_at" in record_schema["properties"]
+    assert "status" in record_schema["properties"]
+    assert "risk_score" in record_schema["properties"]
+    assert "risk_level" in record_schema["properties"]
+    assert "provenance" in record_schema["properties"]
+
+    # New Plan B assertions
+    assert "$id" in raw_schema
+    assert "$id" in record_schema
+    assert "leadership_level" in record_schema["properties"]
+    assert "aggregate_source_count" in record_schema["properties"]
+    assert "years_experience" in record_schema["properties"]
+    assert "role_specialization" in record_schema["properties"]
+    assert "culture_summary" in record_schema["properties"]

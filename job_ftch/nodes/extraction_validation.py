@@ -26,6 +26,9 @@ class ExtractionValidationNode:
                 item=item,
                 stage=self.__class__.__name__,
             )
-        if item.location_raw is None and JobReviewReason.MISSING_LOCATION.value not in review_reasons:
+        if (
+            item.location_raw is None
+            and JobReviewReason.MISSING_LOCATION.value not in review_reasons
+        ):
             review_reasons.append(JobReviewReason.MISSING_LOCATION.value)
         return item.model_copy(update={"review_reasons": tuple(review_reasons)})

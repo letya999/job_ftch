@@ -47,7 +47,9 @@ class SemanticPrefilterNode:
             score = self._score_profile(profile, tokens, item.text.casefold())
             scores.append((profile.profile_id, score))
 
-        best_profile_id, best_score = max(scores, key=lambda pair: pair[1], default=("default", 0.0))
+        best_profile_id, best_score = max(
+            scores, key=lambda pair: pair[1], default=("default", 0.0)
+        )
         threshold = max(profile.relevance_threshold for profile in self._catalog.profiles)
         if best_score < threshold * self._uncertain_ratio:
             raise RawItemDropped(
@@ -76,7 +78,9 @@ class SemanticPrefilterNode:
         soft_score = _overlap_score(tokens, profile.soft_preferences)
         anti_score = _overlap_score(tokens, profile.anti_preferences)
         profile_desc_bonus = 0.0
-        if profile.profile_description and any(token in lowered_text for token in profile.profile_description.casefold().split()):
+        if profile.profile_description and any(
+            token in lowered_text for token in profile.profile_description.casefold().split()
+        ):
             profile_desc_bonus = 0.15
         score = (
             profile.weights.title * title_score

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import structlog
 
+from job_ftch.application.watermark import IncrementalCursor
 from job_ftch.application.registry import register_source_spec
 from job_ftch.domain import RawItem, SourceKind
 
@@ -42,7 +43,7 @@ class RSSFeedSource:
         self.auth = auth
         self.store = store
         self.source_name = spec.source_name or str(spec.feed_url)
-        self._seen_key = f"rss:{self.source_name}:seen_ids"
+        self._cursor_source_id = f"rss:{self.source_name}"
 
     async def fetch(self) -> AsyncIterator[RawItem | QuarantinedRawItem]:
         if not _FEEDPARSER_AVAILABLE:
@@ -55,7 +56,7 @@ class RSSFeedSource:
         # Load seen IDs from store for incremental dedup
         seen_ids: set[str] = set()
         if self.spec.incremental and self.store:
-            raw = await self.store.get_run_state(self._seen_key)
+            raw = await IncrementalCursor(self.store).get(self._cursor_source_id)
             if raw:
                 seen_ids = set(raw.split(","))
 
@@ -103,7 +104,7 @@ class RSSFeedSource:
             all_seen = seen_ids | set(new_ids)
             # Keep only last 10000 to avoid unbounded growth
             trimmed = set(list(all_seen)[-10000:])
-            await self.store.set_run_state(self._seen_key, ",".join(trimmed))
+            await IncrementalCursor(self.store).set(self._cursor_source_id, ",".join(trimmed))
 
 
 @register_source_spec("rss")

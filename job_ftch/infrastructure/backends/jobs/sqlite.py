@@ -16,6 +16,7 @@ from job_ftch.application.registry import (
     register_search_backend,
 )
 from job_ftch.domain import (
+    Job,
     JobGroup,
     JobRecord,
     compute_identity_fingerprint,
@@ -39,6 +40,12 @@ def normalize_fts5_query(query: str) -> str:
     q = re.sub(r"[^\w\s]", " ", q, flags=re.UNICODE)
     q = " ".join(q.split())
     return q
+
+
+def _coerce_job_record(job: Job | JobRecord) -> JobRecord:
+    if isinstance(job, JobRecord):
+        return job
+    return JobRecord.model_validate(job.model_dump(mode="python"))
 
 
 @register_job_backend("sqlite")
@@ -66,6 +73,16 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             with open(migration_path, encoding="utf-8") as f:
                 schema = f.read()
             await self._conn.executescript(schema)
+            
+            # Migration 002: blocking_key
+            m2_path = Path(__file__).parent / "migrations" / "002_sqlite_blocking_key.sql"
+            with open(m2_path, encoding="utf-8") as f:
+                m2_sql = f.read()
+            try:
+                await self._conn.executescript(m2_sql)
+            except Exception: # Already exists
+                pass
+                
             await self._conn.commit()
         return self._conn
 
@@ -97,6 +114,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         10. refresh fingerprint index
         11. refresh FTS row for saved job
         """
+        job = _coerce_job_record(job)
         async with self._lock:
             conn = await self._get_conn()
             await conn.execute("BEGIN IMMEDIATE")
@@ -157,6 +175,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 raise
 
     async def create(self, job: JobRecord) -> JobGroup:
+        job = _coerce_job_record(job)
         async with self._lock:
             conn = await self._get_conn()
             await conn.execute("BEGIN IMMEDIATE")
@@ -176,7 +195,10 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 await conn.rollback()
                 raise
 
-    async def merge(self, group_id: str, job: JobRecord) -> JobGroup:
+    async def merge(
+        self, group_id: str, job: JobRecord, merge_confidence: float = 1.0
+    ) -> JobGroup:
+        job = _coerce_job_record(job)
         async with self._lock:
             conn = await self._get_conn()
             await conn.execute("BEGIN IMMEDIATE")
@@ -188,7 +210,9 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 if not row:
                     raise ValueError(f"Group {group_id} not found.")
                 group = load_group(row[0])
-                updated_group = merge_job_into_group(group, job)
+                updated_group = merge_job_into_group(
+                    group, job, merge_confidence=merge_confidence
+                )
                 await self._persist_group(conn, updated_group)
                 await self._persist_job(conn, job, updated_group.group_id)
 
@@ -206,10 +230,10 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
     async def _persist_group(self, conn: aiosqlite.Connection, group: JobGroup) -> None:
         raw_json = dump_group(group)
         await conn.execute(
-            """INSERT INTO jf_job_groups (group_id, raw_json, updated_at)
-               VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-               ON CONFLICT(group_id) DO UPDATE SET raw_json=excluded.raw_json, updated_at=excluded.updated_at""",
-            (group.group_id, raw_json),
+            """INSERT INTO jf_job_groups (group_id, raw_json, blocking_key, updated_at)
+               VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+               ON CONFLICT(group_id) DO UPDATE SET raw_json=excluded.raw_json, blocking_key=excluded.blocking_key, updated_at=excluded.updated_at""",
+            (group.group_id, raw_json, group.blocking_key),
         )
 
         # update URL/fingerprint indexes
@@ -225,9 +249,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 (fp, group.group_id),
             )
 
-    async def _persist_job(
-        self, conn: aiosqlite.Connection, job: JobRecord, group_id: str
-    ) -> None:
+    async def _persist_job(self, conn: aiosqlite.Connection, job: JobRecord, group_id: str) -> None:
         # Deep copy metadata to avoid mutation of original job
         job_copy = job.model_copy(
             update={
@@ -400,6 +422,15 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         ) as cur:
             grow = await cur.fetchone()
         return load_group(grow[0]) if grow else None
+
+    async def find_by_blocking_key(self, key: str, limit: int = 50) -> list[JobGroup]:
+        conn = await self._get_conn()
+        async with conn.execute(
+            "SELECT raw_json FROM jf_job_groups WHERE blocking_key = ? LIMIT ?",
+            (key, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+            return [load_group(row[0]) for row in rows]
 
     async def list_groups(self, limit: int = 100) -> list[JobGroup]:
         conn = await self._get_conn()

@@ -10,7 +10,8 @@ from job_ftch.application.pipeline import Pipeline
 from job_ftch.config import Settings
 from job_ftch.domain import Job, RawItem, SourceKind, WorkMode
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
-from job_ftch.nodes import HeuristicTriageNode, SanitizeNode
+from job_ftch.nodes import SanitizeNode
+from job_ftch.nodes.triage import HeuristicTriageNode
 from job_ftch.sinks.counted import CountedSink
 from job_ftch.sinks.json_file import JsonFileSink
 from job_ftch.sinks.telegram_posting import TelegramPostingSink

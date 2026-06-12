@@ -1,0 +1,158 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0
+rootdir: C:\Users\User\a_projects\job_ftch
+configfile: pyproject.toml
+plugins: anyio-4.13.0, asyncio-1.3.0, cov-7.1.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 283 items
+
+tests\e2e\test_level0_specs.py ...........                               [  3%]
+tests\e2e\test_level1_rss.py sss.                                        [  5%]
+tests\e2e\test_level1_superjob.py .s                                     [  6%]
+tests\e2e\test_level1_telegram.py .ss                                    [  7%]
+tests\e2e\test_level2_pipeline.py ...                                    [  8%]
+tests\e2e\test_level3_scheduler.py ..                                    [  8%]
+tests\test_bypass.py .......                                             [ 11%]
+tests\test_career_site_generic.py ............                           [ 15%]
+tests\test_company_canonicalizer.py .......                              [ 18%]
+tests\test_composite_source.py .......                                   [ 20%]
+tests\test_config.py ........                                            [ 23%]
+tests\test_contracts.py ...                                              [ 24%]
+tests\test_dedup.py ...                                                  [ 25%]
+tests\test_domain_models.py ......                                       [ 27%]
+tests\test_extraction.py ...                                             [ 28%]
+tests\test_extraction_evaluation.py F                                    [ 28%]
+tests\test_input_hygiene.py ........                                     [ 31%]
+tests\test_job_quality.py ......                                         [ 33%]
+tests\test_monitors.py ....                                              [ 35%]
+tests\test_outputs.py .....F                                             [ 37%]
+tests\test_phase11_multisource.py ................                       [ 43%]
+tests\test_phase12_filter_profiles.py ............                       [ 47%]
+tests\test_phase14_aggregation.py ..............                         [ 52%]
+tests\test_phase15_persistent_store.py ...............                   [ 57%]
+tests\test_phase16_e2e.py F.                                             [ 58%]
+tests\test_phase16_hybrid_search.py .                                    [ 58%]
+tests\test_phase16_job_group_helpers.py ...                              [ 59%]
+tests\test_phase16_rrf.py ..                                             [ 60%]
+tests\test_phase16_sqlite_job_backend.py ...                             [ 61%]
+tests\test_phase17_scheduler.py ...                                      [ 62%]
+tests\test_phase18_auth_ingest.py ...                                    [ 63%]
+tests\test_phase18_bypass.py .....                                       [ 65%]
+tests\test_phase19_api_sources.py ..                                     [ 66%]
+tests\test_phase19_lever.py ...                                          [ 67%]
+tests\test_phase20_browser_stub.py ..                                    [ 67%]
+tests\test_phase21_rss.py ........                                       [ 70%]
+tests\test_phase21_webhook.py ....                                       [ 72%]
+tests\test_phase21_websocket.py ...                                      [ 73%]
+tests\test_phase22_library_packaging.py ......                           [ 75%]
+tests\test_phase23_tenants.py .....F                                     [ 77%]
+tests\test_phase24_mcp_server.py ..                                      [ 78%]
+tests\test_phase25_telegram_bot.py F..                                   [ 79%]
+tests\test_phase567_contracts.py .......                                 [ 81%]
+tests\test_phase8_reliability.py ...                                     [ 82%]
+tests\test_phase8_sources.py ..                                          [ 83%]
+tests\test_pipeline.py .....                                             [ 85%]
+tests\test_postgres_store.py ss                                          [ 85%]
+tests\test_registry_fallback.py .....                                    [ 87%]
+tests\test_schema_export.py ..                                           [ 88%]
+tests\test_scrapers.py ..                                                [ 89%]
+tests\test_semantic_prefilter.py ..                                      [ 89%]
+tests\test_smoke.py ......                                               [ 91%]
+tests\test_source_classifier.py .......                                  [ 94%]
+tests\test_sources.py ..........                                         [ 97%]
+tests\test_store.py ....                                                 [ 99%]
+tests\test_triage.py ..                                                  [100%]
+
+================================== FAILURES ===================================
+_______ test_extraction_evaluation_harness_reports_gold_fixture_matches _______
+tests\test_extraction_evaluation.py:20: in test_extraction_evaluation_harness_reports_gold_fixture_matches
+    assert report["matched_fields"] >= 3
+E   assert 2 >= 3
+_______ test_run_pipeline_summary_reports_extracted_review_and_rejected _______
+tests\test_outputs.py:166: in test_run_pipeline_summary_reports_extracted_review_and_rejected
+    assert summary.extracted == 5
+E   AssertionError: assert 2 == 5
+E    +  where 2 = RunSummary(fetched=8, sanitized=8, triaged=2, extracted=2, partial=2, review=2, duplicates=0, dropped=6, emitted=2, po...34, 51, 792885, tzinfo=datetime.timezone.utc), scheduled_run_index=0, source_run_id='f35dcc8375e147289cbaf6bbe2392bd2').extracted
+_______________ test_phase16_sqlite_persistence_restart_search ________________
+tests\test_phase16_e2e.py:39: in test_phase16_sqlite_persistence_restart_search
+    await backend.save(job)
+job_ftch\infrastructure\backends\jobs\sqlite.py:157: in save
+    updated_group = create_job_group(job)
+                    ^^^^^^^^^^^^^^^^^^^^^
+job_ftch\domain\job_group.py:244: in create_job_group
+    return JobGroup(
+E   pydantic_core._pydantic_core.ValidationError: 2 validation errors for JobGroup
+E   canonical_job
+E     Input should be a valid dictionary or instance of JobRecord [type=model_type, input_value=Job(stable_id='35894b4ec2...None, visa_support=None), input_type=Job]
+E       For further information visit https://errors.pydantic.dev/2.13/v/model_type
+E   jobs.0
+E     Input should be a valid dictionary or instance of JobRecord [type=model_type, input_value=Job(stable_id='35894b4ec2...None, visa_support=None), input_type=Job]
+E       For further information visit https://errors.pydantic.dev/2.13/v/model_type
+_______________ test_two_tenant_runners_do_not_duplicate_output _______________
+job_ftch\application\tenant_runner.py:429: in _acquire
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   FileExistsError: [Errno 17] File exists: 'C:\\Users\\User\\AppData\\Local\\Temp\\pytest-of-Пользователь\\pytest-754\\test_two_tenant_runners_do_not0\\ai_jobs\\tenant_locks\\ai_jobs.lock'
+
+During handling of the above exception, another exception occurred:
+job_ftch\application\tenant_runner.py:440: in _acquire
+    os.kill(stale_pid, 0)
+E   OSError: [WinError 87] The parameter is incorrect
+
+During handling of the above exception, another exception occurred:
+tests\test_phase23_tenants.py:191: in test_two_tenant_runners_do_not_duplicate_output
+    first, second = await asyncio.gather(
+job_ftch\application\tenant_runner.py:266: in run_tenant
+    async with _tenant_run_lock(runtime.settings, tenant_id):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:214: in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+job_ftch\application\tenant_runner.py:449: in _tenant_run_lock
+    fd = await asyncio.to_thread(_acquire)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python313\Lib\asyncio\threads.py:25: in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python313\Lib\concurrent\futures\thread.py:59: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+job_ftch\application\tenant_runner.py:443: in _acquire
+    lock_path.unlink(missing_ok=True)
+..\..\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:746: in unlink
+    os.unlink(self)
+E   PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\Users\\User\\AppData\\Local\\Temp\\pytest-of-Пользователь\\pytest-754\\test_two_tenant_runners_do_not0\\ai_jobs\\tenant_locks\\ai_jobs.lock'
+------------------------------ Captured log call ------------------------------
+WARNING  job_ftch.application.tenant_runner:tenant_runner.py:442 {"event": "reclaiming_stale_lock", "level": "warning", "tenant_id": "ai_jobs", "timestamp": "2026-06-12T16:34:57.989247Z"}
+_____________ test_webhook_bridge_handles_run_and_search_updates ______________
+tests\test_phase25_telegram_bot.py:148: in test_webhook_bridge_handles_run_and_search_updates
+    assert "Machine Learning Engineer" in sender.messages[1]["text"]
+E   AssertionError: assert 'Machine Learning Engineer' in 'No matches.'
+============================ slowest 20 durations =============================
+20.19s call     tests/test_pipeline.py::test_app_runs_local_pipeline_command
+12.31s call     tests/test_bypass.py::test_resolve_noop_bypass
+2.52s call     tests/test_phase17_scheduler.py::test_scheduler_runs_periodically
+2.04s call     tests/e2e/test_level3_scheduler.py::test_scheduler_ticks_and_stops
+1.12s call     tests/test_phase24_mcp_server.py::test_mcp_server_real_fastmcp_tool_handlers
+1.06s call     tests/test_phase18_bypass.py::test_proxy_rotator_cycles_proxies
+0.65s call     tests/test_phase25_telegram_bot.py::test_webhook_real_fastapi_token_auth
+0.53s call     tests/e2e/test_level3_scheduler.py::test_scheduler_signal_stop
+0.45s call     tests/e2e/test_level2_pipeline.py::test_pipeline_dedup_second_run
+0.41s call     tests/test_phase18_bypass.py::test_managed_scraper_bypass_scrapfly_sets_headers
+0.27s call     tests/e2e/test_level1_rss.py::test_habr_rss_fixture_roundtrip
+0.25s call     tests/test_phase24_mcp_server.py::test_mcp_server_registers_surface_and_serves_tenant_data
+0.23s call     tests/test_phase18_bypass.py::test_noop_bypass_returns_client_unchanged
+0.23s call     tests/e2e/test_level2_pipeline.py::test_pipeline_rss_to_json_sink
+0.22s call     tests/e2e/test_level1_superjob.py::test_superjob_fixture_field_mapping
+0.22s call     tests/test_phase23_tenants.py::test_tenant_runner_namespaces_status_and_reset
+0.21s call     tests/test_phase23_tenants.py::test_tenant_runner_builds_job_lineage
+0.21s call     tests/test_phase25_telegram_bot.py::test_webhook_bridge_handles_run_and_search_updates
+0.20s call     tests/test_phase11_multisource.py::test_create_source_from_spec_career_site_uses_runtime_auto_detection
+0.20s call     tests/test_phase18_bypass.py::test_proxy_rotator_empty_list_is_noop
+=========================== short test summary info ===========================
+FAILED tests/test_extraction_evaluation.py::test_extraction_evaluation_harness_reports_gold_fixture_matches
+FAILED tests/test_outputs.py::test_run_pipeline_summary_reports_extracted_review_and_rejected
+FAILED tests/test_phase16_e2e.py::test_phase16_sqlite_persistence_restart_search
+FAILED tests/test_phase23_tenants.py::test_two_tenant_runners_do_not_duplicate_output
+FAILED tests/test_phase25_telegram_bot.py::test_webhook_bridge_handles_run_and_search_updates
+================== 5 failed, 270 passed, 8 skipped in 48.47s ==================

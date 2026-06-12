@@ -1,91 +1,224 @@
 # Configuration
 
-## Core variables
-- `JOB_FTCH_SOURCE_BACKEND`: `local_fixture`, `telegram_channel`, `telegram_group`, `telegram_comment`, `career_site`
-- `JOB_FTCH_SINK_BACKEND`: main output sink, currently `json_file`
-- `JOB_FTCH_STORE_BACKEND`: current default `memory`
-- `JOB_FTCH_LLM_BACKEND`: `heuristic` for offline/dev, `openai` for structured extraction
-- `JOB_FTCH_POSTING_BACKEND`: `none` or `telegram_posting`
+`job_ftch` currently has two configuration layers:
 
-## Pipeline guards
-- `JOB_FTCH_PIPELINE_MAX_ITEMS_PER_RUN`: hard cap for one run
-- `JOB_FTCH_PIPELINE_MAX_TEXT_LENGTH`: sanitize-time guard against pathological inputs
+1. Preferred runtime configuration: `TenantConfig` in YAML or JSON.
+2. Legacy quick-run compatibility: environment variables and one-off CLI flags.
 
-## Telegram source controls
+If you are setting up a real installation, prefer tenant files plus declarative `SourceSpec`.
+Use env-first runs only for debugging, local experiments, or backward-compatible wrappers.
+
+---
+
+## Preferred model
+
+The main entry point is a tenant config file loaded through the Python API `job_ftch.configure(...)`.
+For CLI multi-tenant operation, the current entry point is `--configs-dir` with one or more tenant files.
+
+Typical structure:
+
+```yaml
+tenant_id: ai_jobs
+display_name: AI Jobs
+
+sources:
+  - type: telegram_channel
+    entity: ai_jobs
+    limit: 100
+  - type: career_site
+    url: https://job-boards.greenhouse.io/clickhouse
+
+output:
+  backend: json_file
+  path: artifacts/{tenant_id}/jobs.json
+  jsonl: false
+  schema_version: job_ftch.job_record.v1
+
+quarantine_output:
+  path: artifacts/{tenant_id}/quarantine.jsonl
+  jsonl: true
+
+review_output:
+  path: artifacts/{tenant_id}/review.jsonl
+  jsonl: true
+
+rejected_output:
+  path: artifacts/{tenant_id}/rejected.jsonl
+  jsonl: true
+
+schedule:
+  interval_seconds: 900
+
+metrics_enabled: true
+metrics_port: 9090
+```
+
+Key ideas:
+
+- `tenant_id` is the namespace root for paths, store keys, and runtime isolation.
+- `sources` is a list of `SourceSpec` entries. This is the preferred way to describe what to fetch.
+- Secrets do not live in the tenant file. Runtime credentials are resolved through `AuthProvider`.
+- Output blocks define where canonical `JobRecord` items and side channels are written.
+- `metrics_enabled` and `metrics_port` enable the Prometheus exporter for tenant runs.
+
+Python API example:
+
+```python
+import asyncio
+from pathlib import Path
+
+from job_ftch.application.builder import configure
+
+builder = configure(Path("config/tenant.yaml"))
+summary = asyncio.run(builder.run_async())
+```
+
+---
+
+## SourceSpec
+
+`SourceSpec` is the declarative source contract used by the registry and builder layer.
+
+Examples:
+
+Telegram channel:
+
+```yaml
+- type: telegram_channel
+  entity: ai_jobs
+  limit: 100
+```
+
+Telegram group:
+
+```yaml
+- type: telegram_group
+  entity: data_jobs_chat
+  limit: 200
+```
+
+Career site:
+
+```yaml
+- type: career_site
+  url: https://job-boards.greenhouse.io/clickhouse
+```
+
+The exact schema is exported to `config/sources.schema.json`.
+
+---
+
+## Auth and secrets
+
+Secrets are runtime-only:
+
+- Telegram: `JOB_FTCH_TELEGRAM_API_ID`, `JOB_FTCH_TELEGRAM_API_HASH`, `JOB_FTCH_TELEGRAM_SESSION_PATH`
+- OpenAI: `JOB_FTCH_OPENAI_API_KEY`
+- Qdrant: `JOB_FTCH_QDRANT_API_KEY`
+- Other backends: env or provider-specific secret resolution
+
+Rules:
+
+- Never commit credentials inside `TenantConfig` or `SourceSpec`.
+- Prefer `EnvAuthProvider` for local/dev.
+- Use file- or vault-based auth providers only when you actually need them operationally.
+
+---
+
+## Important environment variables
+
+Even in the preferred tenant/YAML flow, some environment variables remain important because they
+control infrastructure and secrets rather than source shape.
+
+Core:
+
+- `JOB_FTCH_STORE_BACKEND`
+- `JOB_FTCH_LLM_BACKEND`
+- `JOB_FTCH_JOB_BACKEND`
+- `JOB_FTCH_SEARCH_BACKEND`
+- `JOB_FTCH_VECTOR_BACKEND`
+
+Pipeline guards:
+
+- `JOB_FTCH_PIPELINE_MAX_ITEMS_PER_RUN`
+- `JOB_FTCH_PIPELINE_MAX_TEXT_LENGTH`
+
+Telegram:
+
 - `JOB_FTCH_TELEGRAM_API_ID`
 - `JOB_FTCH_TELEGRAM_API_HASH`
 - `JOB_FTCH_TELEGRAM_SESSION_PATH`
-- `JOB_FTCH_TELEGRAM_ENTITY`
-- `JOB_FTCH_TELEGRAM_MESSAGE_LIMIT`
-- `JOB_FTCH_TELEGRAM_COMMENT_POST_LIMIT`
-- `JOB_FTCH_TELEGRAM_COMMENT_LIMIT_PER_POST`
-- `JOB_FTCH_TELEGRAM_HISTORY_WAIT_TIME_SECONDS`
-- `JOB_FTCH_TELEGRAM_TIMEOUT_SECONDS`
-- `JOB_FTCH_TELEGRAM_REQUEST_RETRIES`
-- `JOB_FTCH_TELEGRAM_CONNECTION_RETRIES`
-- `JOB_FTCH_TELEGRAM_RETRY_DELAY_SECONDS`
-- `JOB_FTCH_TELEGRAM_FLOOD_SLEEP_THRESHOLD_SECONDS`
 
-## Career-site controls
-- `JOB_FTCH_CAREER_SITE_URL`
-- `JOB_FTCH_CAREER_SITE_ALLOWED_HOSTS`
-- `JOB_FTCH_CAREER_SITE_TIMEOUT_SECONDS`
-- `JOB_FTCH_CAREER_SITE_MAX_RETRIES`
-- `JOB_FTCH_CAREER_SITE_RETRY_DELAY_SECONDS`
-- `JOB_FTCH_CAREER_SITE_MAX_CONNECTIONS`
-- `JOB_FTCH_CAREER_SITE_MAX_KEEPALIVE_CONNECTIONS`
-- `JOB_FTCH_CAREER_SITE_DETAIL_CONCURRENCY`
+OpenAI extraction:
 
-## OpenAI extraction controls
 - `JOB_FTCH_OPENAI_API_KEY`
 - `JOB_FTCH_OPENAI_MODEL`
 - `JOB_FTCH_OPENAI_BASE_URL`
 - `JOB_FTCH_OPENAI_TIMEOUT_SECONDS`
 - `JOB_FTCH_OPENAI_MAX_RETRIES`
 
-## Job Catalog and Search
-- `JOB_FTCH_JOB_BACKEND`: `sqlite`, `postgres`
-- `JOB_FTCH_SEARCH_BACKEND`: `sqlite`, `postgres`, `hybrid`
-- `JOB_FTCH_JOB_STORE_PATH`: path to SQLite file (if different from store_path)
-- `JOB_FTCH_SEARCH_LANGUAGE`: language for PostgreSQL FTS (e.g. `simple`, `english`, `russian`)
+Search and vector:
 
-## Embeddings and Vector Search
-- `JOB_FTCH_EMBEDDING_ENABLED`: `true` or `false`
-- `JOB_FTCH_EMBEDDING_PROVIDER`: `openai`, `sentence_transformers`, `ollama`
-- `JOB_FTCH_EMBEDDING_MODEL`: name of the model
-- `JOB_FTCH_EMBEDDING_DIMENSIONS`: number of dimensions (optional, inferred if not set)
-- `JOB_FTCH_VECTOR_BACKEND`: `pgvector` or `qdrant`
-- `JOB_FTCH_QDRANT_URL`: URL to Qdrant instance
-- `JOB_FTCH_QDRANT_API_KEY`: API key for Qdrant
-- `JOB_FTCH_QDRANT_COLLECTION`: name of the Qdrant collection
-- `JOB_FTCH_OLLAMA_BASE_URL`: base URL for Ollama
+- `JOB_FTCH_EMBEDDING_ENABLED`
+- `JOB_FTCH_EMBEDDING_PROVIDER`
+- `JOB_FTCH_EMBEDDING_MODEL`
+- `JOB_FTCH_QDRANT_URL`
+- `JOB_FTCH_QDRANT_COLLECTION`
+- `JOB_FTCH_OLLAMA_BASE_URL`
 
-## Output targets
+Outputs:
+
 - `JOB_FTCH_OUTPUT_PATH`
-- `JOB_FTCH_OUTPUT_JSONL`
-- `JOB_FTCH_OUTPUT_SCHEMA_VERSION`
-- `JOB_FTCH_QUARANTINE_OUTPUT_PATH`
 - `JOB_FTCH_REVIEW_OUTPUT_PATH`
 - `JOB_FTCH_REJECTED_OUTPUT_PATH`
+- `JOB_FTCH_QUARANTINE_OUTPUT_PATH`
 - `JOB_FTCH_REVIEW_MAX_QUALITY_SCORE`
 - `JOB_FTCH_POSTING_MIN_QUALITY_SCORE`
-- `JOB_FTCH_TELEGRAM_PUBLISH_ENTITY`
 
-## Run modes
-- Local fixture run:
+Metrics:
+
+- `JOB_FTCH_METRICS_ENABLED`
+- `JOB_FTCH_METRICS_PORT`
+
+These env vars still matter, but they are no longer the best place to describe a real multi-source installation.
+
+---
+
+## Legacy quick-run mode
+
+For one-off runs, the old env/CLI flow still works.
+
+Fixture run:
 
 ```bash
-uv run python app.py --source-path fixtures/debug/raw_items.json --max-items 10
+uv run python app.py \
+  --source-path fixtures/e2e/multisource_positive.jsonl \
+  --output-path artifacts/debug/jobs.json \
+  --max-items 20
 ```
 
-- One-off Telegram run:
+One-off Telegram run:
 
 ```bash
-uv run python app.py --source-backend telegram_channel --telegram-entity ai_jobs --once
+uv run python app.py \
+  --source-backend telegram_channel \
+  --telegram-entity ai_jobs \
+  --max-items 100
 ```
 
-- One-off career-site run:
+One-off career-site run:
 
 ```bash
-uv run python app.py --source-backend career_site --career-site-url https://job-boards.greenhouse.io/clickhouse
+uv run python app.py \
+  --source-backend career_site \
+  --career-site-url https://job-boards.greenhouse.io/clickhouse \
+  --max-items 20
 ```
+
+Multi-tenant CLI example:
+
+```bash
+uv run python app.py tenants list --configs-dir config/tenants
+```
+
+Treat env/flag-only runs as a compatibility shim around the newer builder/config system, not as the long-term primary contract.

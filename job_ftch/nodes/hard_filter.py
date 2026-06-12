@@ -35,7 +35,9 @@ class HardFilterNode:
 
         lowered = item.text.casefold()
         for profile in self._catalog.profiles:
-            if profile.blocked_companies and any(company.casefold() in lowered for company in profile.blocked_companies):
+            if profile.blocked_companies and any(
+                company.casefold() in lowered for company in profile.blocked_companies
+            ):
                 raise RawItemDropped(
                     reason=TriageRejectionReason.IRRELEVANT_CONTENT,
                     details="Item mentions a blocked company.",
@@ -45,8 +47,6 @@ class HardFilterNode:
 
     def _language_allowed(self, language: str) -> bool:
         allowed = {
-            lang.value
-            for profile in self._catalog.profiles
-            for lang in profile.allowed_languages
+            lang.value for profile in self._catalog.profiles for lang in profile.allowed_languages
         }
         return not allowed or language in allowed or language == "unknown"

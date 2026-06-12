@@ -17,8 +17,8 @@ def _write_fixture(path: Path) -> None:
         source_kind=SourceKind.DEBUG,
         source_name="fixture",
         external_id="1",
-        text="Machine Learning Engineer\nRemote\nCompany: OpenAI\nSalary: USD 120000",
-        metadata={"company": "OpenAI", "title": "Machine Learning Engineer"},
+        text="Senior ML Engineer\nRemote\nCompany: OpenAI\nSalary: USD 120000 - 150000",
+        metadata={"company": "OpenAI", "title": "Senior ML Engineer"},
     )
     path.write_text(json.dumps([item.model_dump(mode="json")]), encoding="utf-8")
 
@@ -78,8 +78,11 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
 
     assert server.app.name == "job_ftch"
     assert set(server.app.tools) == {
+        "get_run",
         "get_job",
+        "get_job_lineage",
         "get_status",
+        "list_runs",
         "list_tenants",
         "reset_tenant",
         "run_all_pipelines",
@@ -96,14 +99,24 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
     tenant_list = await server.app.tools["list_tenants"]()
     latest_jobs = json.loads(await server.app.resources["jobs://{tenant_id}/latest"]("ai_jobs"))
     status_payload = await server.app.tools["get_status"]("ai_jobs")
-    search_results = await server.app.tools["search_jobs"]("machine learning", "ai_jobs", 10)
+    run_history = await server.app.tools["list_runs"]("ai_jobs", 10)
+    search_results = await server.app.tools["search_jobs"]("senior", "ai_jobs", 10)
+    lineage_payload = await server.app.tools["get_job_lineage"](latest_jobs[0]["job_id"], "ai_jobs")
+    fetched_run = await server.app.tools["get_run"](run_summary["source_run_id"], "ai_jobs")
 
     assert run_summary["tenant_id"] == "ai_jobs"
     assert tenant_list[0]["tenant_id"] == "ai_jobs"
     assert latest_jobs[0]["source_name"] == "fixture"
     assert status_payload is not None
     assert status_payload["tenant_id"] == "ai_jobs"
+    assert len(run_history) == 1
+    assert run_history[0]["source_run_id"] == run_summary["source_run_id"]
     assert len(search_results) == 1
+    assert lineage_payload is not None
+    assert lineage_payload["job_id"] == latest_jobs[0]["job_id"]
+    assert lineage_payload["source_run_id"] is not None
+    assert fetched_run is not None
+    assert fetched_run["source_run_id"] == run_summary["source_run_id"]
 
     await server.shutdown()
 

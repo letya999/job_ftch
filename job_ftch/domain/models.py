@@ -81,6 +81,20 @@ class MatchDecision(StrEnum):
     REJECT = "reject"
 
 
+class RiskLevel(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class JobStatus(StrEnum):
+    OPEN = "open"
+    FILLED = "filled"
+    EXPIRED = "expired"
+    DELISTED = "delisted"
+    UNKNOWN = "unknown"
+
+
 class CompensationPeriod(StrEnum):
     HOUR = "hour"
     DAY = "day"
@@ -194,9 +208,25 @@ class ProfileMatchScore(BaseModel):
         return self
 
 
+class ProvenanceTrail(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    extraction: tuple[str, ...] = ()
+    normalization: tuple[str, ...] = ()
+    merge: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def normalize(self) -> ProvenanceTrail:
+        object.__setattr__(self, "extraction", _normalized_tuple(self.extraction))
+        object.__setattr__(self, "normalization", _normalized_tuple(self.normalization))
+        object.__setattr__(self, "merge", _normalized_tuple(self.merge))
+        return self
+
+
 class RawItem(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    schema_version: str = "1"
     stable_id: str = ""
     source_kind: SourceKind
     source_name: str = Field(min_length=1)
@@ -237,11 +267,16 @@ class RawItem(BaseModel):
 class JobDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    schema_version: str = "1"
     draft_id: str = ""
     raw_item_id: str = Field(min_length=1)
+    source_record_id: str | None = None
     source_kind: SourceKind
     source_name: str = Field(min_length=1)
+    source_url: AnyHttpUrl | None = None
     canonical_url: AnyHttpUrl | None = None
+    fetched_at: datetime | None = None
+    posted_at: datetime | None = None
     language: LanguageCode = LanguageCode.UNKNOWN
     languages_detected: tuple[LanguageCode, ...] = ()
     title_raw: str | None = None
@@ -254,6 +289,7 @@ class JobDraft(BaseModel):
     ai_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
     role_family: str | None = None
     role_track: str | None = None
+    role_specialization: str | None = None
     seniority: Seniority = Seniority.UNKNOWN
     employment_type: EmploymentType = EmploymentType.UNKNOWN
     extraction_status: JobExtractionStatus = JobExtractionStatus.COMPLETE
@@ -268,13 +304,32 @@ class JobDraft(BaseModel):
     responsibilities: tuple[str, ...] = ()
     requirements_must: tuple[str, ...] = ()
     requirements_nice: tuple[str, ...] = ()
+    must_have_skills: tuple[str, ...] = ()
+    nice_to_have_skills: tuple[str, ...] = ()
     skills_explicit: tuple[SkillTag, ...] = ()
     skills_inferred: tuple[SkillTag, ...] = ()
     tools_stack: tuple[str, ...] = ()
     benefits: tuple[str, ...] = ()
     culture_signals: tuple[str, ...] = ()
+    culture_summary: str | None = None
     risk_signals: tuple[str, ...] = ()
+
+    # Plan B extensions
+    years_experience: int | None = Field(default=None, ge=0)
+    education: str | None = None
+    relocation: bool | None = None
+    visa_support: bool | None = None
+    domain_knowledge: tuple[str, ...] = ()
+    soft_skills: tuple[str, ...] = ()
+    certifications: tuple[str, ...] = ()
+    leadership_level: str | None = None
+    ic_or_manager: str | None = None
+    company_type: str | None = None
+    team_size_hint: str | None = None
+    remote_restrictions: str | None = None
+
     review_reasons: tuple[str, ...] = ()
+    provenance: ProvenanceTrail = Field(default_factory=ProvenanceTrail)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -288,17 +343,26 @@ class JobDraft(BaseModel):
                 object.__setattr__(self, field_name, stripped)
 
         optional_text_fields = (
+            "source_record_id",
             "title_raw",
             "company_name_raw",
             "location_raw",
             "role_family",
             "role_track",
+            "role_specialization",
             "region",
             "country",
             "city",
             "timezone",
             "domain",
             "industry",
+            "leadership_level",
+            "ic_or_manager",
+            "company_type",
+            "team_size_hint",
+            "education",
+            "remote_restrictions",
+            "culture_summary",
         )
         for field_name in optional_text_fields:
             value = getattr(self, field_name)
@@ -311,10 +375,16 @@ class JobDraft(BaseModel):
         object.__setattr__(self, "responsibilities", _normalized_tuple(self.responsibilities))
         object.__setattr__(self, "requirements_must", _normalized_tuple(self.requirements_must))
         object.__setattr__(self, "requirements_nice", _normalized_tuple(self.requirements_nice))
+        object.__setattr__(self, "must_have_skills", _normalized_tuple(self.must_have_skills))
+        object.__setattr__(self, "nice_to_have_skills", _normalized_tuple(self.nice_to_have_skills))
         object.__setattr__(self, "tools_stack", _normalized_tuple(self.tools_stack))
         object.__setattr__(self, "benefits", _normalized_tuple(self.benefits))
         object.__setattr__(self, "culture_signals", _normalized_tuple(self.culture_signals))
         object.__setattr__(self, "risk_signals", _normalized_tuple(self.risk_signals))
+        object.__setattr__(self, "domain_knowledge", _normalized_tuple(self.domain_knowledge))
+        object.__setattr__(self, "soft_skills", _normalized_tuple(self.soft_skills))
+        object.__setattr__(self, "certifications", _normalized_tuple(self.certifications))
+
         normalized_reasons = tuple(
             reason.strip()
             for reason in self.review_reasons
@@ -339,8 +409,12 @@ class Job(BaseModel):
 
     stable_id: str = ""
     raw_item_id: str = Field(min_length=1)
+    source_record_id: str | None = None
     source_kind: SourceKind
     source_name: str = Field(min_length=1)
+    source_url: AnyHttpUrl | None = None
+    fetched_at: datetime | None = None
+    posted_at: datetime | None = None
 
     # Legacy core fields preserved for compatibility.
     title: str | None = None
@@ -352,11 +426,13 @@ class Job(BaseModel):
     work_mode: WorkMode = WorkMode.UNKNOWN
     compensation: CompensationRange | None = None
     extraction_status: JobExtractionStatus = JobExtractionStatus.COMPLETE
+    status: JobStatus = JobStatus.OPEN
     quality_score: float | None = Field(default=None, ge=0.0, le=1.0)
     relevance_score: float | None = Field(default=None, ge=0.0, le=1.0)
     post_type: PostType = PostType.UNKNOWN
     ai_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
     review_reasons: tuple[str, ...] = ()
+    provenance: ProvenanceTrail = Field(default_factory=ProvenanceTrail)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     # Rich canonical vacancy model.
@@ -366,6 +442,7 @@ class Job(BaseModel):
     title_normalized: str | None = None
     role_family: str | None = None
     role_track: str | None = None
+    role_specialization: str | None = None
     seniority: Seniority = Seniority.UNKNOWN
     employment_type: EmploymentType = EmploymentType.UNKNOWN
     authority_scope: AuthorityScope | None = None
@@ -379,13 +456,30 @@ class Job(BaseModel):
     responsibilities: tuple[str, ...] = ()
     requirements_must: tuple[str, ...] = ()
     requirements_nice: tuple[str, ...] = ()
+    must_have_skills: tuple[str, ...] = ()
+    nice_to_have_skills: tuple[str, ...] = ()
     skills_explicit: tuple[SkillTag, ...] = ()
     skills_inferred: tuple[SkillTag, ...] = ()
     tools_stack: tuple[str, ...] = ()
     benefits: tuple[str, ...] = ()
     culture_signals: tuple[str, ...] = ()
+    culture_summary: str | None = None
     risk_signals: tuple[str, ...] = ()
     profile_scores: tuple[ProfileMatchScore, ...] = ()
+
+    # Plan B extensions
+    leadership_level: str | None = None
+    ic_or_manager: str | None = None
+    company_type: str | None = None
+    team_size_hint: str | None = None
+    domain_knowledge: tuple[str, ...] = ()
+    soft_skills: tuple[str, ...] = ()
+    years_experience: int | None = Field(default=None, ge=0)
+    education: str | None = None
+    certifications: tuple[str, ...] = ()
+    remote_restrictions: str | None = None
+    relocation: bool | None = None
+    visa_support: bool | None = None
 
     @model_validator(mode="after")
     def validate_job(self) -> Job:
@@ -398,6 +492,7 @@ class Job(BaseModel):
                 object.__setattr__(self, field_name, stripped)
 
         optional_text_fields = (
+            "source_record_id",
             "title",
             "company",
             "company_canonical",
@@ -406,12 +501,20 @@ class Job(BaseModel):
             "title_normalized",
             "role_family",
             "role_track",
+            "role_specialization",
             "region",
             "country",
             "city",
             "timezone",
             "domain",
             "industry",
+            "leadership_level",
+            "ic_or_manager",
+            "company_type",
+            "team_size_hint",
+            "education",
+            "remote_restrictions",
+            "culture_summary",
         )
         for field_name in optional_text_fields:
             value = getattr(self, field_name)
@@ -430,10 +533,15 @@ class Job(BaseModel):
         object.__setattr__(self, "responsibilities", _normalized_tuple(self.responsibilities))
         object.__setattr__(self, "requirements_must", _normalized_tuple(self.requirements_must))
         object.__setattr__(self, "requirements_nice", _normalized_tuple(self.requirements_nice))
+        object.__setattr__(self, "must_have_skills", _normalized_tuple(self.must_have_skills))
+        object.__setattr__(self, "nice_to_have_skills", _normalized_tuple(self.nice_to_have_skills))
         object.__setattr__(self, "tools_stack", _normalized_tuple(self.tools_stack))
         object.__setattr__(self, "benefits", _normalized_tuple(self.benefits))
         object.__setattr__(self, "culture_signals", _normalized_tuple(self.culture_signals))
         object.__setattr__(self, "risk_signals", _normalized_tuple(self.risk_signals))
+        object.__setattr__(self, "domain_knowledge", _normalized_tuple(self.domain_knowledge))
+        object.__setattr__(self, "soft_skills", _normalized_tuple(self.soft_skills))
+        object.__setattr__(self, "certifications", _normalized_tuple(self.certifications))
 
         if self.title is None and self.title_normalized is not None:
             object.__setattr__(self, "title", self.title_normalized)
@@ -466,6 +574,13 @@ class JobRecord(Job):
     best_profile_id: str | None = None
     best_score: float | None = Field(default=None, ge=0.0, le=1.0)
     routing_decision: MatchDecision | None = None
+    extraction_completeness: float | None = Field(default=None, ge=0.0, le=1.0)
+    risk_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    risk_level: RiskLevel | None = None
+
+    # Aggregation block on record level
+    aggregate_source_count: int = Field(default=1, ge=1)
+    aggregation_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def validate_record(self) -> JobRecord:
@@ -487,6 +602,21 @@ class JobRecord(Job):
             object.__setattr__(self, "best_score", best.final_score)
             if self.routing_decision is None:
                 object.__setattr__(self, "routing_decision", best.decision)
+        if self.extraction_completeness is None:
+            completeness = 1.0
+            for value in (self.title, self.company, self.location):
+                if not value:
+                    completeness -= 0.15
+            if self.extraction_status is JobExtractionStatus.PARTIAL:
+                completeness -= 0.2
+            object.__setattr__(self, "extraction_completeness", max(0.0, round(completeness, 2)))
+        if self.risk_level is None and self.risk_score is not None:
+            level = RiskLevel.LOW
+            if self.risk_score >= 0.75:
+                level = RiskLevel.HIGH
+            elif self.risk_score >= 0.4:
+                level = RiskLevel.MEDIUM
+            object.__setattr__(self, "risk_level", level)
         if self.job_id == "":
             object.__setattr__(self, "job_id", self.stable_id)
         return self

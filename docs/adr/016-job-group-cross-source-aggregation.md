@@ -3,6 +3,12 @@
 **Status**: ACCEPTED
 **Date**: 2026-06-07
 
+> Outdated note (2026-06-12): this ADR is preserved as the original aggregation decision.
+> Current rollout changed the concrete contract and placement:
+> 1. Source-level records are now read as `JobRecord`, not the older flat `Job`.
+> 2. The shipped node is `JobAggregationNode`; exact funnel position continues to evolve with [ADR-024](024-canonical-job-contract-and-matching-funnel.md).
+> 3. Current high-level architecture is tracked in [Architecture](../architecture.md).
+
 ## Context
 
 Phase 25 addresses a fundamental problem: the same job posting appears across multiple sources. A senior ML Engineer role at Sber might be in the official HH.ru API response, reposted in three Telegram channels, and listed on the company career site. Without aggregation, the operator sees five items for one job. Naive deduplication (ADR-005) drops duplicates — but loses the information that the job was seen in five places, which is a signal of its reach and actuality.

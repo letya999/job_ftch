@@ -4,7 +4,27 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Status](https://img.shields.io/badge/status-ранняя%20разработка-orange.svg)
 
-**job_ftch** — library-first асинхронный движок для сбора вакансий. Собирает данные из разнородных источников (Telegram-каналы/группы, карьерные сайты, официальные API, ATS-вебхуки), нормализует в типизированные записи `Job` и отправляет в подключаемые sinks — без привязки к конкретному оркестратору. Любая обёртка (CLI, FastStream, FastAPI, Dagster, Airflow, MCP-сервер, Telegram-бот) — это адаптер поверх ядра, а не часть ядра.
+**job_ftch** — library-first асинхронный движок для сбора вакансий. Собирает данные из разнородных источников (Telegram-каналы/группы, карьерные сайты, официальные API, ATS-вебхуки), проводит их через каноническую семью payload'ов `RawItem -> JobDraft -> JobRecord -> JobGroup` и отправляет нормализованные записи в подключаемые sinks — без привязки к конкретному оркестратору. Любая обёртка (CLI, FastStream, FastAPI, Dagster, Airflow, MCP-сервер, Telegram-бот) — это адаптер поверх ядра, а не часть ядра.
+
+---
+
+## Tenant CLI surface
+
+Если `--configs-dir` указывает на каталог tenant-конфигов, операторский CLI уже открывает
+основной runtime surface:
+
+```bash
+python app.py --configs-dir config/tenants tenants list
+python app.py --configs-dir config/tenants tenants status ai_jobs
+python app.py --configs-dir config/tenants tenants run ai_jobs
+python app.py --configs-dir config/tenants tenants lineage ai_jobs <job_id>
+python app.py --configs-dir config/tenants runs list --tenant ai_jobs --limit 20
+python app.py --configs-dir config/tenants runs show <run_id> --tenant ai_jobs
+```
+
+`tenants lineage` возвращает текущий payload `JobLineage` для одной сохранённой вакансии:
+там есть исходный `raw_item_id`, `group_id`, `pipeline_stages` и `source_run_id`.
+`runs list/show` открывает сохранённую историю `RunSummary`, привязанную к `source_run_id`.
 
 ---
 
@@ -12,7 +32,9 @@
 
 Система растёт через 5 качественных переходов. Каждый слайд показывает горизонтальный состав компонентов и их ключевые обязанности на данном этапе.
 
-### Переход 1 — Фаза 10: Линейный MVP-пайплайн (сдан)
+Переходы 1-4 — это исторические снимки более ранних фаз. Они намеренно используют названия этапов и payload'ов своего времени. Актуальная целевая форма описана в переходе 5 и в живых документах `docs/architecture.md` и `JOB_FTCH_MASTER_PLAN.md`.
+
+### Переход 1 — Фаза 10: Линейный MVP-пайплайн (исторический снимок, сдан)
 
 Два источника, один этап LLM-извлечения, дедупликация в памяти, вывод в JSON.
 
@@ -47,7 +69,7 @@ graph LR
 
 ---
 
-### Переход 2 — Фаза 13: Мультиисточники + открытый реестр + персистентное хранилище
+### Переход 2 — Фаза 13: Мультиисточники + открытый реестр + персистентное хранилище (исторический снимок)
 
 Декларативный `sources.yaml`, открытый реестр `@register_source`, `SQLiteStore` переживает перезапуск, `FilterProfile` заменяет захардкоженные ключевые слова.
 
@@ -88,7 +110,7 @@ graph LR
 
 ---
 
-### Переход 3 — Фаза 17: Поиск + планировщик + API-адаптеры + обход защиты
+### Переход 3 — Фаза 17: Поиск + планировщик + API-адаптеры + обход защиты (исторический снимок)
 
 Полнотекстовый и векторный поиск, периодическое планирование, официальные API вакансий, подключаемые стратегии обхода защищённых сайтов.
 
@@ -130,7 +152,7 @@ graph LR
 
 ---
 
-### Переход 4 — Фаза 22: Пакетированная библиотека + мультитенантность + MCP-сервер
+### Переход 4 — Фаза 22: Пакетированная библиотека + мультитенантность + MCP-сервер (исторический снимок)
 
 Весь код под пакетом `job_ftch/`, fluent API `PipelineBuilder`, изоляция `TenantConfig`, FastMCP-сервер предоставляет инструменты и ресурсы Claude Code, Cursor и другим MCP-клиентам.
 
@@ -142,7 +164,7 @@ graph LR
         AUTH["AuthProvider\nEnv · File · Vault"]
         subgraph CORE["Ядро пайплайна"]
             COMP["CompositeSource"]
-            PIPE["Sanitize → Triage → Dedup\n→ Extract → Validate"]
+        PIPE["Sanitize → LanguageContext → PostType\n→ HardFilter → Dedup → SemanticPrefilter\n→ Extract → Normalize → Score → Aggregate"]
         end
         subgraph BACKENDS["Бэкенды"]
             PG["PostgreSQLJobBackend\nFTS + pgvector"]
@@ -169,9 +191,12 @@ graph LR
 
 ---
 
-### Переход 5 — Фаза 27: Полная платформа (финальное состояние роадмапа)
+### Переход 5 — Фаза 27: Полная платформа (целевое состояние роадмапа, реализовано частично)
 
 Богатая доменная модель (жизненный цикл, каноникализация, версионирование схемы), кросс-источниковая агрегация, наблюдаемость и настраиваемая рассылка событий.
+Этот слайд описывает целевую архитектуру. Часть её уже есть в коде, а такие куски как
+Prometheus-экспорт и более широкий observability hardening
+по-прежнему остаются задачами roadmap из `docs/roadmap.md`.
 
 ```mermaid
 graph LR
@@ -183,7 +208,7 @@ graph LR
         RT["WebSocketSource\nреальное время"]
     end
     subgraph CORE["Ядро job_ftch"]
-        PIPE["Пайплайн\nSanitize → Triage → Dedup\n→ Extract → Validate → Group"]
+        PIPE["Пайплайн\nSanitize → LanguageContext → PostType\n→ HardFilter → Dedup → SemanticPrefilter\n→ Extraction → Normalization → Match/Risk/Quality\n→ Aggregation"]
         SCHED["Планировщик"]
         TC["TenantConfig"]
         AUTH["AuthProvider"]
@@ -201,7 +226,7 @@ graph LR
     end
     subgraph OBS["Наблюдаемость"]
         IC["IncrementalCursor\nунифицированный водяной знак"]
-        LIN["Линейность\nraw_item → job → group"]
+        LIN["Линейность\nraw_item → job_record → group"]
         PROM["Prometheus-экспортёр"]
         HIST["RunHistory"]
     end
@@ -287,7 +312,7 @@ C4Container
 
         Container(pipeline, "Ядро пайплайна", "Python / asyncio", "Поэлементная оркестрация: получение из Source → цепочка nodes → отправка в Sink. RunSummary, обработка исключений.")
         Container(sources, "Source-адаптеры", "Python", "Telegram (MTProto), CareerSite (HTML), официальные API, WebhookSource, WebSocketSource, DebugSource.")
-        Container(nodes, "Узлы обработки", "Python", "SanitizeNode, TriageNode, DedupNode, ExtractionNode (LLM), ValidationNode, JobGroupNode.")
+        Container(nodes, "Узлы обработки", "Python", "SanitizeNode, LanguageContextNode, PostTypeClassificationNode, HardFilterNode, DedupNode, SemanticPrefilterNode, ExtractionNode, ExtractionValidationNode, normalization nodes, MultiProfileMatchNode, RiskScoringNode, QualityScoringNode, JobValidationNode, JobAggregationNode.")
         Container(sinks, "Sink-адаптеры", "Python", "JsonFileSink, SQLiteJobSink, TelegramPublishSink, NotificationSink, FanOutSink.")
 
         Container(store, "Store-бэкенды", "asyncpg / aiosqlite", "SQLiteStore, PostgreSQLStore. Ключи дедупликации, состояние запуска, IncrementalCursor.")
@@ -350,34 +375,47 @@ C4Component
 
     Container_Boundary(nodes_b, "nodes/") {
         Component(san, "SanitizeNode", "sanitize.py", "Первые ворота. Макс. длина, исправление кодировки, карантин при нарушении политики.")
-        Component(tri, "TriageNode", "triage.py", "Предфильтр на основе FilterProfile. Пропускает вызов LLM для нерелевантных элементов.")
-        Component(ded, "DedupNode", "dedup.py", "Проверка почти-дублей через rapidFuzz по обработанным ключам в Store.")
-        Component(ext, "ExtractionNode", "extraction.py", "RawItem → Job через LLM (instructor). Эвристический fallback при частичном извлечении.")
-        Component(val, "ValidationNode", "validation.py", "Нормализация title/company/location, парсинг зарплаты, оценка, маршрутизация пограничных случаев в review sink.")
-        Component(grp, "JobGroupNode", "job_group.py", "Кросс-источниковая агрегация. Fingerprint + сходство эмбеддингов → слияние в JobGroup, выбор канонической вакансии.")
+        Component(ctx, "LanguageContextNode", "language_context.py", "Дешёвый source context и определение языка до классификации.")
+        Component(pt, "PostTypeClassificationNode", "post_type.py", "Быстрая классификация job_posting / candidate / announcement / spam / unknown.")
+        Component(hf, "HardFilterNode", "hard_filter.py", "Дешёвые жёсткие фильтры до дорогого извлечения.")
+        Component(ded, "DedupNode", "dedup.py", "Raw-уровневый exact/near-dup check по обработанным ключам в Store.")
+        Component(pref, "SemanticPrefilterNode", "semantic_prefilter.py", "Дешёвый multi-profile screening, чтобы не тратить LLM на явные промахи.")
+        Component(ext, "ExtractionNode", "extraction.py", "RawItem -> JobDraft через LLM (instructor) с эвристической поддержкой.")
+        Component(val, "ExtractionValidationNode", "extraction_validation.py", "Проверки минимальной структурной полезности и ранние review reasons.")
+        Component(norm, "Normalization nodes", "job_normalization.py", "Нормализация draft-to-record для title/company/location/work mode/compensation.")
+        Component(match, "MultiProfileMatchNode", "match_scoring.py", "Per-profile scoring с component scores, decision и explanation.")
+        Component(rq, "Risk/Quality nodes", "risk.py / quality.py", "Раздельный risk scoring, quality scoring и финальные validation gates.")
+        Component(grp, "JobAggregationNode", "aggregation.py", "Кросс-источниковая агрегация. Fingerprint + matching -> обновление JobGroup, attach group_id.")
     }
 
     Container_Boundary(dom, "domain/") {
-        Component(job, "Job / RawItem", "job.py / raw_item.py", "Pydantic-модели. Job содержит schema_version, статус жизненного цикла, group_id, линейность raw_item_id.")
+        Component(job, "RawItem / JobDraft / JobRecord", "models.py", "Каноническая семья payload'ов. JobRecord содержит schema_version, source identity/timestamps, нормализованные поля, явные risk/quality/matching сигналы, routing и provenance.")
         Component(jgm, "JobGroup", "job_group.py", "Агрегированное представление одной вакансии, наблюдаемой из N источников.")
-        Component(cur, "IncrementalCursor", "cursor.py", "Унифицированный водяной знак: last_seen_id, last_seen_at, page_token. Используется всеми source-адаптерами.")
-        Component(fp, "FilterProfile", "filter_profile.py", "Настраиваемая релевантность: positive_keywords, negative_keywords, required_patterns, min_score.")
+        Component(cur, "IncrementalCursor", "watermark.py", "Унифицированный водяной знак поверх StoreConnector. Используется incremental source-адаптерами.")
+        Component(fp, "ProfileCatalog / FilterProfile", "profile.py / filter_profile.py", "Настраиваемая релевантность, профильные предпочтения и пороги.")
         Component(nc, "NotificationConfig", "notification.py", "Что/когда/куда рассылать: trigger, targets, payload_format, фильтр min_score.")
     }
 
     Rel(orch, san, "process()")
-    Rel(orch, tri, "process()")
+    Rel(orch, ctx, "process()")
+    Rel(orch, pt, "process()")
+    Rel(orch, hf, "process()")
     Rel(orch, ded, "process()")
+    Rel(orch, pref, "process()")
     Rel(orch, ext, "process()")
     Rel(orch, val, "process()")
+    Rel(orch, norm, "process()")
+    Rel(orch, match, "process()")
+    Rel(orch, rq, "process()")
     Rel(orch, grp, "process()")
     Rel(orch, contracts, "Типы протоколов")
     Rel(builder, orch, "Создаёт")
     Rel(reg, builder, "Предоставляет фабрики")
-    Rel(ext, job, "Производит Job")
-    Rel(grp, jgm, "Производит JobGroup")
+    Rel(ext, job, "Производит JobDraft")
+    Rel(norm, job, "Производит JobRecord")
+    Rel(grp, jgm, "Обновляет JobGroup")
     Rel(ded, cur, "Обновляет водяной знак")
-    Rel(tri, fp, "Читает FilterProfile")
+    Rel(pref, fp, "Читает профильную конфигурацию")
 ```
 
 ---

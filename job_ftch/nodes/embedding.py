@@ -8,13 +8,13 @@ import structlog
 
 from job_ftch.application.contracts import ProcessingNode
 from job_ftch.application.search_text import build_job_embedding_text
-from job_ftch.domain import Job
+from job_ftch.domain import JobRecord
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import EmbeddingProvider, VectorBackend
 
 
-class EmbeddingNode(ProcessingNode[Job]):
+class EmbeddingNode(ProcessingNode[JobRecord]):
     def __init__(
         self,
         provider: EmbeddingProvider,
@@ -24,8 +24,8 @@ class EmbeddingNode(ProcessingNode[Job]):
         self.vector_backend = vector_backend
         self._logger = structlog.get_logger("job_ftch.embedding_node")
 
-    async def process(self, job: Job) -> Job:
-        group_id = job.metadata.get("group_id")
+    async def process(self, job: JobRecord) -> JobRecord:
+        group_id = job.group_id or job.metadata.get("group_id")
         if not group_id:
             raise ValueError("group_id is required in job.metadata for EmbeddingNode")
 

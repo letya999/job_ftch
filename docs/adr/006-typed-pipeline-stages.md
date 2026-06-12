@@ -3,6 +3,11 @@
 **Status**: ACCEPTED
 **Date**: 2026-06-06
 
+> Outdated note (2026-06-12): this ADR is preserved as the original typed-stage decision.
+> The core idea still holds, but the concrete payload family evolved:
+> `RawItem -> JobDraft -> JobRecord -> JobGroup`.
+> See [ADR-024](024-canonical-job-contract-and-matching-funnel.md) and [Architecture](../architecture.md).
+
 ## Context
 The pipeline previously assumed one item type from source through sink. That blocks the next phase where `RawItem` must become `Job`, and later `Job`-typed match/search stages must stay type-safe.
 

@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     telemetry_service_name: str = "job_ftch"
     telemetry_console_exporter: bool = False
+    metrics_enabled: bool = False
+    metrics_port: int = Field(default=9090, gt=0, le=65535)
     pipeline_max_items_per_run: int = Field(default=200, gt=0)
     pipeline_max_text_length: int = Field(default=20_000, ge=256, le=500_000)
     schedule_interval_seconds: int | None = None
@@ -50,6 +52,9 @@ class Settings(BaseSettings):
     rejected_output_schema_version: str | None = "job_ftch.rejected.v1"
     review_max_quality_score: float = Field(default=0.65, ge=0.0, le=1.0)
     posting_min_quality_score: float = Field(default=0.8, ge=0.0, le=1.0)
+    routing_accept_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    routing_review_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    routing_quality_override_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     telegram_api_id: int | None = None
     telegram_api_hash: str | None = None
     telegram_session_path: Path = Path(".runtime/telegram.session")

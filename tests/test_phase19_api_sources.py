@@ -4,6 +4,7 @@ import pytest
 
 from job_ftch.domain import SourceKind
 from job_ftch.domain.source_spec import RestAPISourceSpec
+from job_ftch.infrastructure.sources.api.base import OfficialAPISource
 from job_ftch.infrastructure.sources.api.greenhouse import GreenhouseAPISource
 from job_ftch.infrastructure.sources.api.hh import HHAPISource
 
@@ -65,3 +66,42 @@ async def test_hh_mapping():
     assert str(raw.url) == "https://hh.ru/vacancy/456"
     assert raw.text == "Strong Python knowledge"
     assert raw.metadata["employer"]["name"] == "Acme Corp"
+
+
+@pytest.mark.asyncio
+async def test_official_api_source_uses_incremental_cursor_storage():
+    spec = RestAPISourceSpec(
+        base_url="https://api.example.com/",
+        jobs_endpoint="vacancies",
+        incremental_cursor_field="since_id",
+    )
+    auth = MagicMock()
+    store = MagicMock()
+    store.get = AsyncMock(return_value="42")
+    store.set = AsyncMock()
+
+    class ExampleAPISource(OfficialAPISource):
+        pass
+
+    source = ExampleAPISource(spec, auth, store)
+
+    response = MagicMock()
+    response.raise_for_status = MagicMock()
+    response.json.return_value = [{"id": 99, "title": "Role", "description": "Desc"}]
+
+    client = AsyncMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=False)
+    client.get = AsyncMock(return_value=response)
+
+    from unittest.mock import patch
+
+    with patch("httpx.AsyncClient", return_value=client):
+        items = [item async for item in source.fetch()]
+
+    assert len(items) == 1
+    expected_key = f"{source.source_kind}:{source.source_name}:cursor"
+    store.get.assert_awaited_once_with(expected_key)
+    client.get.assert_awaited_once()
+    assert client.get.await_args.kwargs["params"]["since_id"] == "42"
+    store.set.assert_awaited_once_with(expected_key, "99")

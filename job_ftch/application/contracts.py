@@ -54,6 +54,11 @@ class ProcessingNode(Stage[PipelineItem, PipelineItem], Protocol[PipelineItem]):
 
 
 @runtime_checkable
+class TypeChangingNode(Stage[StageInput, StageOutput], Protocol[StageInput, StageOutput]):
+    """A pipeline node that transitions between two distinct payload types."""
+
+
+@runtime_checkable
 class Sink(Protocol[SinkItem]):
     async def emit(self, item: SinkItem) -> None:
         """Persist or forward an emitted pipeline item."""
@@ -159,6 +164,19 @@ class ClassificationResult:
     model_id: str
 
 
+@dataclass(frozen=True)
+class PluginMetadata:
+    """Metadata manifest for any job_ftch plugin."""
+
+    name: str  # unique plugin identifier
+    version: str  # semver string
+    plugin_type: str  # "source" | "sink" | "extractor" | "classifier" | "normalizer" | "scorer" | "notification_target"
+    description: str
+    author: str = ""
+    requires_extras: tuple[str, ...] = ()  # extras groups needed: ("openai",)
+    entry_point_group: str = ""  # e.g. "job_ftch.sources"
+
+
 @runtime_checkable
 class ClassifierProvider(Protocol):
     async def classify(self, text: str) -> ClassificationResult:
@@ -176,9 +194,12 @@ class ClassifierProvider(Protocol):
 class JobGroupStore(Protocol):
     async def get_group(self, group_id: str) -> JobGroup | None: ...
     async def create(self, job: JobRecord) -> JobGroup: ...
-    async def merge(self, group_id: str, job: JobRecord) -> JobGroup: ...
+    async def merge(
+        self, group_id: str, job: JobRecord, merge_confidence: float = 1.0
+    ) -> JobGroup: ...
     async def find_by_url(self, canonical_url: str) -> JobGroup | None: ...
     async def find_by_fingerprint(self, fingerprint: str) -> JobGroup | None: ...
+    async def find_by_blocking_key(self, key: str, limit: int = 50) -> list[JobGroup]: ...
     async def list_groups(self, limit: int = 100) -> list[JobGroup]: ...
     async def count(self) -> int: ...
 

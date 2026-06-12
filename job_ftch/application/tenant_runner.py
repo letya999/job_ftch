@@ -8,6 +8,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
@@ -23,6 +24,7 @@ from job_ftch.application.builder import (
     tenant_to_settings,
 )
 from job_ftch.application.pipeline import RunSummary
+from job_ftch.application.watermark import IncrementalCursor
 from job_ftch.application.registry import (
     create_job_backend,
     create_job_group_store,
@@ -32,11 +34,14 @@ from job_ftch.application.registry import (
 )
 from job_ftch.config import get_settings
 from job_ftch.domain import (
-    Job,
     JobGroup,
+    JobLineage,
+    JobRecord,
     TenantConfig,
     TenantInfo,
+    build_job_lineage,
 )
+from job_ftch.infrastructure.metrics.prometheus import PrometheusExporter
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -59,6 +64,28 @@ def _json_default(value: object) -> object:
     if hasattr(value, "isoformat"):
         return cast("Any", value).isoformat()
     return str(value)
+
+
+def _summary_sort_key(summary: RunSummary) -> tuple[str, str]:
+    finished = summary.finished_at
+    started = summary.started_at
+    finished_key = finished.isoformat() if isinstance(finished, datetime) else str(finished or "")
+    started_key = started.isoformat() if isinstance(started, datetime) else str(started or "")
+    return (finished_key, started_key)
+
+
+def _summary_from_payload(payload: dict[str, Any], *, tenant_id: str | None = None) -> RunSummary:
+    for key in ("started_at", "finished_at"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            try:
+                payload[key] = datetime.fromisoformat(value)
+            except ValueError:
+                pass
+    summary = RunSummary(**payload)
+    if tenant_id is not None:
+        summary.tenant_id = tenant_id
+    return summary
 
 
 class TenantStore:
@@ -164,6 +191,42 @@ class TenantStore:
     async def save_source_strategy(self, domain: str, monitor: str, bypass: str) -> None:
         await self._store.save_source_strategy(domain, monitor, bypass)
 
+    def incremental_cursor(self) -> IncrementalCursor:
+        connector = cast("StoreConnector", self._store)
+        return IncrementalCursor(connector)
+
+    async def save_run_summary(self, summary: RunSummary) -> None:
+        connector = cast("StoreConnector", self._store)
+        run_id = summary.source_run_id
+        if not run_id:
+            msg = "RunSummary.source_run_id is required to persist run history."
+            raise ValueError(msg)
+        raw = json.dumps(summary.as_dict(), default=_json_default, ensure_ascii=False, sort_keys=True)
+        await connector.set(self._key(f"run_history:{run_id}"), raw)
+        await connector.set_add(self._key("run_history_ids"), run_id)
+
+    async def get_run_summary(self, run_id: str) -> RunSummary | None:
+        connector = cast("StoreConnector", self._store)
+        raw = await connector.get(self._key(f"run_history:{run_id}"))
+        if raw is None:
+            return None
+        try:
+            return _summary_from_payload(json.loads(raw), tenant_id=self._tenant_id)
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("run_history_decode_failed", tenant_id=self._tenant_id, run_id=run_id, error=str(exc))
+            return None
+
+    async def list_run_summaries(self, *, limit: int = 20) -> list[RunSummary]:
+        connector = cast("StoreConnector", self._store)
+        run_ids = await connector.set_members(self._key("run_history_ids"))
+        summaries: list[RunSummary] = []
+        for run_id in run_ids:
+            summary = await self.get_run_summary(run_id)
+            if summary is not None:
+                summaries.append(summary)
+        summaries.sort(key=_summary_sort_key, reverse=True)
+        return summaries[: max(limit, 0)]
+
     async def reset_namespace(self) -> None:
         reset = getattr(self._store, "reset_namespace", None)
         if not callable(reset):
@@ -186,6 +249,7 @@ class TenantRuntime:
     job_group_store: JobGroupStore
     search_backend: SearchBackend
     job_backend: JobPersistenceBackend
+    metrics_exporter: PrometheusExporter | None = None
 
 
 class TenantRunner:
@@ -201,8 +265,18 @@ class TenantRunner:
     ) -> TenantRunner:
         settings_template = base_settings or get_settings()
         runtimes: dict[str, TenantRuntime] = {}
+        metrics_exporters_by_port: dict[int, PrometheusExporter] = {}
         for tenant in tenants:
             tenant_settings = tenant_to_settings(tenant, settings_template)
+            metrics_exporter: PrometheusExporter | None = None
+            if tenant_settings.metrics_enabled:
+                metrics_exporter = metrics_exporters_by_port.get(tenant_settings.metrics_port)
+                if metrics_exporter is None:
+                    metrics_exporter = PrometheusExporter(
+                        start_server=True,
+                        port=tenant_settings.metrics_port,
+                    )
+                    metrics_exporters_by_port[tenant_settings.metrics_port] = metrics_exporter
             auth = resolve_auth_provider(tenant.auth_provider, settings=tenant_settings)
             base_store = cast("Store", create_store(tenant_settings))
             tenant_store = TenantStore(tenant.tenant_id, base_store)
@@ -246,6 +320,7 @@ class TenantRunner:
                 job_group_store=job_group_store,
                 search_backend=cast("SearchBackend", create_search_backend(tenant_settings)),
                 job_backend=cast("JobPersistenceBackend", create_job_backend(tenant_settings)),
+                metrics_exporter=metrics_exporter,
             )
         return cls(runtimes)
 
@@ -270,6 +345,13 @@ class TenantRunner:
                 summary.as_dict(), default=_json_default, ensure_ascii=False, sort_keys=True
             ),
         )
+        await runtime.store.save_run_summary(summary)
+        if runtime.metrics_exporter is not None:
+            await runtime.metrics_exporter.observe_run(
+                summary,
+                tenant_id=tenant_id,
+                job_group_total=await runtime.job_group_store.count(),
+            )
         return summary
 
     async def run_all(self, *, concurrency: int = 4) -> list[RunSummary]:
@@ -297,10 +379,7 @@ class TenantRunner:
         if raw is None:
             return None
         try:
-            payload = json.loads(raw)
-            summary = RunSummary(**payload)
-            summary.tenant_id = tenant_id
-            return summary
+            return _summary_from_payload(json.loads(raw), tenant_id=tenant_id)
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             logger.warning("status_decode_failed", tenant_id=tenant_id, error=str(exc))
             return None
@@ -349,7 +428,7 @@ class TenantRunner:
                     return merged
         return merged
 
-    async def get_job(self, job_id: str, *, tenant_id: str | None = None) -> Job | None:
+    async def get_job(self, job_id: str, *, tenant_id: str | None = None) -> JobRecord | None:
         if tenant_id is not None:
             return await self.get_runtime(tenant_id).job_backend.get_job(job_id)
         for current_tenant in self.tenant_ids():
@@ -358,9 +437,62 @@ class TenantRunner:
                 return job
         return None
 
-    async def latest_jobs(self, tenant_id: str, *, limit: int = 10) -> list[Job]:
+    async def get_job_lineage(
+        self,
+        job_id: str,
+        *,
+        tenant_id: str | None = None,
+    ) -> JobLineage | None:
+        async def _lineage_for_runtime(current_tenant: str) -> JobLineage | None:
+            runtime = self.get_runtime(current_tenant)
+            job = await runtime.job_backend.get_job(job_id)
+            if job is None:
+                return None
+            group = None
+            if job.group_id is not None:
+                group = await runtime.job_group_store.get_group(job.group_id)
+            return build_job_lineage(job, tenant_id=current_tenant, group=group)
+
+        if tenant_id is not None:
+            return await _lineage_for_runtime(tenant_id)
+        for current_tenant in self.tenant_ids():
+            lineage = await _lineage_for_runtime(current_tenant)
+            if lineage is not None:
+                return lineage
+        return None
+
+    async def latest_jobs(self, tenant_id: str, *, limit: int = 10) -> list[JobRecord]:
         groups = await self.get_runtime(tenant_id).job_group_store.list_groups(limit=limit)
         return [group.canonical_job for group in groups]
+
+    async def list_runs(
+        self,
+        *,
+        tenant_id: str | None = None,
+        limit: int = 20,
+    ) -> list[RunSummary]:
+        limit = min(max(limit, 0), 100)
+        if tenant_id is not None:
+            return await self.get_runtime(tenant_id).store.list_run_summaries(limit=limit)
+        summaries: list[RunSummary] = []
+        for current_tenant in self.tenant_ids():
+            summaries.extend(await self.get_runtime(current_tenant).store.list_run_summaries(limit=limit))
+        summaries.sort(key=_summary_sort_key, reverse=True)
+        return summaries[:limit]
+
+    async def get_run(
+        self,
+        run_id: str,
+        *,
+        tenant_id: str | None = None,
+    ) -> RunSummary | None:
+        if tenant_id is not None:
+            return await self.get_runtime(tenant_id).store.get_run_summary(run_id)
+        for current_tenant in self.tenant_ids():
+            summary = await self.get_runtime(current_tenant).store.get_run_summary(run_id)
+            if summary is not None:
+                return summary
+        return None
 
     async def get_config(self, tenant_id: str) -> dict[str, Any]:
         tenant = self.get_runtime(tenant_id).tenant
@@ -411,10 +543,26 @@ async def _tenant_run_lock(settings: Settings, tenant_id: str) -> Any:
                 try:
                     pid_bytes = lock_path.read_bytes()
                     stale_pid = int(pid_bytes.strip())
-                    os.kill(stale_pid, 0)
-                except (ProcessLookupError, ValueError, OSError):
+                except ValueError:
                     logger.warning("reclaiming_stale_lock", tenant_id=tenant_id)
-                    lock_path.unlink(missing_ok=True)
+                    try:
+                        lock_path.unlink(missing_ok=True)
+                    except PermissionError:
+                        time.sleep(0.1)
+                        continue
+                    continue
+                try:
+                    os.kill(stale_pid, 0)
+                except ProcessLookupError:
+                    logger.warning("reclaiming_stale_lock", tenant_id=tenant_id)
+                    try:
+                        lock_path.unlink(missing_ok=True)
+                    except PermissionError:
+                        time.sleep(0.1)
+                        continue
+                    continue
+                except OSError:
+                    time.sleep(0.1)
                     continue
                 time.sleep(0.1)
 
@@ -425,4 +573,4 @@ async def _tenant_run_lock(settings: Settings, tenant_id: str) -> Any:
     finally:
         if fd is not None:
             os.close(fd)
-        lock_path.unlink(missing_ok=True)
+            lock_path.unlink(missing_ok=True)

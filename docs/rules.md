@@ -29,6 +29,17 @@
 4. `uv run pytest tests/` — запуск тестов.
 5. `uv run bandit -r job_ftch scripts/check_module_boundaries.py -ll` — проверка безопасности проекта без шума из `.venv`.
 
+## Запуск тестов под AI-агентом (Claude/Codex/Gemini)
+
+Тесты быстрые (~47с весь suite), но `addopts="-v"` из `pyproject.toml` даёт многословный вывод. В агентном цикле правок это сжигает контекстное окно (verbose-цикл доходил до 1.1M токенов против ~13K при тихом прогоне). Правила:
+
+1. Цикл fix-test: гонять ТОЛЬКО затронутые тесты, тихо:
+   `uv run pytest tests/test_<module>.py -q -o addopts="" --tb=line`
+2. Полный прогон (редко, перед коммитом): писать в файл, читать хвост, не в foreground:
+   `uv run pytest -q -o addopts="" --tb=short > .pytest.out 2>&1; tail -n 20 .pytest.out`
+3. НИКОГДА не гонять весь suite в verbose (`-v`) в foreground повторно.
+4. `-o addopts=""` переопределяет `-v` только для агента; verbose для людей/CI остаётся.
+
 ## Архитектурные решения
 Все нетривиальные решения фиксируются в `docs/adr/` в формате `NNN-slug.md`. Статусы: PROPOSED → ACCEPTED → DEPRECATED.
 

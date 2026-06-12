@@ -8,6 +8,7 @@ import structlog
 
 from job_ftch.application.contracts import Source
 from job_ftch.application.registry import (
+    register_source,
     register_source_spec,
     resolve_bypass,
     resolve_monitor,
@@ -428,4 +429,22 @@ def _build_career_site_source(
         http_client=build_default_http_client(),
         auth=auth,
         store=store,
+    )
+
+
+@register_source("career_site")
+def _career_site_factory(settings: Settings) -> object:
+    from job_ftch.application.registry import create_source_from_spec
+    from job_ftch.domain.source_spec import CareerSiteSpec
+
+    if settings.career_site_url is None:
+        msg = "Career site source requires JOB_FTCH_CAREER_SITE_URL."
+        raise ValueError(msg)
+
+    return create_source_from_spec(
+        CareerSiteSpec(
+            type="career_site",
+            url=settings.career_site_url,
+            limit=settings.pipeline_max_items_per_run,
+        )
     )

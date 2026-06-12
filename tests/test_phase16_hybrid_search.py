@@ -1,35 +1,52 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 import pytest
 
 from job_ftch.application.registry import register_embedding_provider, register_vector_backend
 from job_ftch.config import Settings
-from job_ftch.domain import Job, SourceKind
+from job_ftch.domain import JobRecord, SourceKind
 from job_ftch.infrastructure.backends.search.hybrid import HybridSearchBackend
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class FakeVectorBackend:
-    def __init__(self, job_v_id):
+    def __init__(self, job_v_id: str) -> None:
         self.job_v_id = job_v_id
 
-    async def search(self, vector, limit, filter=None):
+    async def search(
+        self,
+        vector: list[float],
+        limit: int,
+        filter: dict[str, Any] | None = None,
+    ) -> list[str]:
         return [self.job_v_id]
 
-    async def upsert(self, job_id, vector, payload):
+    async def upsert(
+        self,
+        job_id: str,
+        vector: list[float],
+        payload: dict[str, Any],
+    ) -> None:
         pass
 
 
 class FakeEmbeddingProvider:
     @property
-    def dimensions(self):
+    def dimensions(self) -> int:
         return 3
 
-    async def embed(self, texts):
+    async def embed(self, texts: list[str]) -> list[list[float]]:
         return [[0.1, 0.2, 0.3]]
 
 
 @pytest.fixture
-def hybrid_settings(tmp_path):
+def hybrid_settings(tmp_path: Path) -> Settings:
     # Setup job ids
-    job_vec = Job(
+    job_vec = JobRecord(
         raw_item_id="v1",
         source_kind=SourceKind.DEBUG,
         source_name="debug",
@@ -40,11 +57,11 @@ def hybrid_settings(tmp_path):
 
     # Register fakes
     @register_vector_backend("fake")
-    def _fake_v(s):
+    def _fake_v(s: Settings) -> FakeVectorBackend:
         return FakeVectorBackend(job_vec.stable_id)
 
     @register_embedding_provider("fake")
-    def _fake_e(s):
+    def _fake_e(s: Settings) -> FakeEmbeddingProvider:
         return FakeEmbeddingProvider()
 
     return Settings(
@@ -58,11 +75,11 @@ def hybrid_settings(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_hybrid_search_flow(hybrid_settings):
+async def test_hybrid_search_flow(hybrid_settings: Settings) -> None:
     backend = HybridSearchBackend(hybrid_settings)
 
     # 1. Setup jobs in SQLite (FTS)
-    job_fts = Job(
+    job_fts = JobRecord(
         raw_item_id="f1",
         source_kind=SourceKind.DEBUG,
         source_name="debug",
@@ -73,7 +90,7 @@ async def test_hybrid_search_flow(hybrid_settings):
     await backend.fts_backend.save(job_fts)
 
     # 2. Setup job for vector match (we'll manually inject it into SQLite so hybrid can load it)
-    job_vec = Job(
+    job_vec = JobRecord(
         raw_item_id="v1",
         source_kind=SourceKind.DEBUG,
         source_name="debug",

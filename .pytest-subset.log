@@ -1,0 +1,86 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0
+rootdir: C:\Users\User\a_projects\job_ftch
+configfile: pyproject.toml
+plugins: anyio-4.13.0, asyncio-1.3.0, cov-7.1.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 5 items
+
+tests\test_extraction_evaluation.py F                                    [ 20%]
+tests\test_outputs.py F                                                  [ 40%]
+tests\test_phase16_e2e.py F                                              [ 60%]
+tests\test_phase23_tenants.py F                                          [ 80%]
+tests\test_phase25_telegram_bot.py F                                     [100%]
+
+================================== FAILURES ===================================
+_______ test_extraction_evaluation_harness_reports_gold_fixture_matches _______
+tests\test_extraction_evaluation.py:20: in test_extraction_evaluation_harness_reports_gold_fixture_matches
+    assert report["matched_fields"] >= 3
+E   assert 2 >= 3
+_______ test_run_pipeline_summary_reports_extracted_review_and_rejected _______
+tests\test_outputs.py:166: in test_run_pipeline_summary_reports_extracted_review_and_rejected
+    assert summary.extracted == 5
+E   AssertionError: assert 2 == 5
+E    +  where 2 = RunSummary(fetched=8, sanitized=8, triaged=2, extracted=2, partial=2, review=2, duplicates=0, dropped=6, emitted=2, po... 39, 3, 830545, tzinfo=datetime.timezone.utc), scheduled_run_index=0, source_run_id='a46baab4699d4b72bc44fae94993ad67').extracted
+_______________ test_phase16_sqlite_persistence_restart_search ________________
+tests\test_phase16_e2e.py:39: in test_phase16_sqlite_persistence_restart_search
+    await backend.save(job)
+job_ftch\infrastructure\backends\jobs\sqlite.py:157: in save
+    updated_group = create_job_group(job)
+                    ^^^^^^^^^^^^^^^^^^^^^
+job_ftch\domain\job_group.py:244: in create_job_group
+    return JobGroup(
+E   pydantic_core._pydantic_core.ValidationError: 2 validation errors for JobGroup
+E   canonical_job
+E     Input should be a valid dictionary or instance of JobRecord [type=model_type, input_value=Job(stable_id='35894b4ec2...None, visa_support=None), input_type=Job]
+E       For further information visit https://errors.pydantic.dev/2.13/v/model_type
+E   jobs.0
+E     Input should be a valid dictionary or instance of JobRecord [type=model_type, input_value=Job(stable_id='35894b4ec2...None, visa_support=None), input_type=Job]
+E       For further information visit https://errors.pydantic.dev/2.13/v/model_type
+_______________ test_two_tenant_runners_do_not_duplicate_output _______________
+job_ftch\application\tenant_runner.py:429: in _acquire
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   FileExistsError: [Errno 17] File exists: 'C:\\Users\\User\\AppData\\Local\\Temp\\pytest-of-Пользователь\\pytest-756\\test_two_tenant_runners_do_not0\\ai_jobs\\tenant_locks\\ai_jobs.lock'
+
+During handling of the above exception, another exception occurred:
+job_ftch\application\tenant_runner.py:440: in _acquire
+    os.kill(stale_pid, 0)
+E   OSError: [WinError 87] The parameter is incorrect
+
+During handling of the above exception, another exception occurred:
+tests\test_phase23_tenants.py:191: in test_two_tenant_runners_do_not_duplicate_output
+    first, second = await asyncio.gather(
+job_ftch\application\tenant_runner.py:266: in run_tenant
+    async with _tenant_run_lock(runtime.settings, tenant_id):
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python313\Lib\contextlib.py:214: in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+job_ftch\application\tenant_runner.py:449: in _tenant_run_lock
+    fd = await asyncio.to_thread(_acquire)
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python313\Lib\asyncio\threads.py:25: in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+..\..\AppData\Local\Programs\Python\Python313\Lib\concurrent\futures\thread.py:59: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+job_ftch\application\tenant_runner.py:443: in _acquire
+    lock_path.unlink(missing_ok=True)
+..\..\AppData\Local\Programs\Python\Python313\Lib\pathlib\_local.py:746: in unlink
+    os.unlink(self)
+E   PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'C:\\Users\\User\\AppData\\Local\\Temp\\pytest-of-Пользователь\\pytest-756\\test_two_tenant_runners_do_not0\\ai_jobs\\tenant_locks\\ai_jobs.lock'
+------------------------------ Captured log call ------------------------------
+WARNING  job_ftch.application.tenant_runner:tenant_runner.py:442 {"event": "reclaiming_stale_lock", "level": "warning", "tenant_id": "ai_jobs", "timestamp": "2026-06-12T16:39:04.227173Z"}
+_____________ test_webhook_bridge_handles_run_and_search_updates ______________
+tests\test_phase25_telegram_bot.py:148: in test_webhook_bridge_handles_run_and_search_updates
+    assert "Machine Learning Engineer" in sender.messages[1]["text"]
+E   AssertionError: assert 'Machine Learning Engineer' in 'No matches.'
+=========================== short test summary info ===========================
+FAILED tests/test_extraction_evaluation.py::test_extraction_evaluation_harness_reports_gold_fixture_matches
+FAILED tests/test_outputs.py::test_run_pipeline_summary_reports_extracted_review_and_rejected
+FAILED tests/test_phase16_e2e.py::test_phase16_sqlite_persistence_restart_search
+FAILED tests/test_phase23_tenants.py::test_two_tenant_runners_do_not_duplicate_output
+FAILED tests/test_phase25_telegram_bot.py::test_webhook_bridge_handles_run_and_search_updates
+============================= 5 failed in 20.32s ==============================

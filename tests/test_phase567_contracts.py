@@ -8,7 +8,14 @@ import app as app_module
 from app import build_output_sinks
 from job_ftch.application.drops import RawItemDropped
 from job_ftch.config import Settings
-from job_ftch.domain import DuplicateRejectionReason, Job, JobDraft, SourceKind, WorkMode
+from job_ftch.domain import (
+    DuplicateRejectionReason,
+    Job,
+    JobDraft,
+    JobRecord,
+    SourceKind,
+    WorkMode,
+)
 from job_ftch.infrastructure.llm.openai_provider import OpenAIInstructorLLMProvider
 from job_ftch.nodes.extraction_validation import ExtractionValidationNode
 
@@ -27,6 +34,22 @@ def _job(**overrides: object) -> Job:
     }
     payload.update(overrides)
     return Job.model_validate(payload)
+
+
+def _record(**overrides: object) -> JobRecord:
+    payload: dict[str, object] = {
+        "raw_item_id": "raw-1",
+        "source_kind": SourceKind.TELEGRAM_CHANNEL,
+        "source_name": "AI Jobs Board",
+        "title": "LLM Platform Engineer",
+        "company": "Example Corp",
+        "description": "Build LLM infra, prompt pipelines, and agent evaluation systems.",
+        "work_mode": WorkMode.REMOTE,
+        "relevance_score": 0.7,
+        "quality_score": 0.85,
+    }
+    payload.update(overrides)
+    return JobRecord.model_validate(payload)
 
 
 def _draft(**overrides: object) -> JobDraft:
@@ -114,9 +137,9 @@ async def test_build_output_sinks_routes_borderline_jobs_to_review(
 ) -> None:
     class RecordingSink:
         def __init__(self) -> None:
-            self.items: list[Job] = []
+            self.items: list[JobRecord] = []
 
-        async def emit(self, item: Job) -> None:
+        async def emit(self, item: JobRecord) -> None:
             self.items.append(item)
 
         async def flush(self) -> None:
@@ -139,8 +162,8 @@ async def test_build_output_sinks_routes_borderline_jobs_to_review(
     )
 
     sink, review_sink, posting_sink = build_output_sinks(settings)
-    borderline = _job(quality_score=0.4, review_reasons=("partial_extraction",))
-    strong = _job(quality_score=0.9, review_reasons=())
+    borderline = _record(quality_score=0.4, review_reasons=("partial_extraction",))
+    strong = _record(quality_score=0.9, review_reasons=())
 
     await sink.emit(borderline)
     await sink.emit(strong)
@@ -161,7 +184,7 @@ async def test_build_output_sinks_respects_dry_run_for_posting(
     create_calls: list[tuple[str, str]] = []
 
     class RecordingSink:
-        async def emit(self, item: Job) -> None:
+        async def emit(self, item: JobRecord) -> None:
             del item
 
         async def flush(self) -> None:
@@ -197,9 +220,9 @@ async def test_build_output_sinks_routes_strong_jobs_to_posting(
 ) -> None:
     class RecordingSink:
         def __init__(self) -> None:
-            self.items: list[Job] = []
+            self.items: list[JobRecord] = []
 
-        async def emit(self, item: Job) -> None:
+        async def emit(self, item: JobRecord) -> None:
             self.items.append(item)
 
         async def flush(self) -> None:
@@ -226,7 +249,7 @@ async def test_build_output_sinks_routes_strong_jobs_to_posting(
     )
 
     sink, review_sink, posting_sink = build_output_sinks(settings)
-    candidate = _job(quality_score=0.91, review_reasons=())
+    candidate = _record(quality_score=0.91, review_reasons=())
 
     await sink.emit(candidate)
     await sink.flush()

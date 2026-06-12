@@ -64,7 +64,9 @@ class JobValidationNode:
                 item=item,
                 stage=self.__class__.__name__,
             )
-        if item.profile_scores and all(score.decision is MatchDecision.REJECT for score in item.profile_scores):
+        if item.profile_scores and all(
+            score.decision is MatchDecision.REJECT for score in item.profile_scores
+        ):
             raise RawItemDropped(
                 reason=JobValidationRejectionReason.JOB_OUT_OF_SCOPE,
                 details="All active search profiles rejected this vacancy.",

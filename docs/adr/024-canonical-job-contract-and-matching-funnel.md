@@ -1,7 +1,10 @@
 # 024 — Canonical Job Contract And Top-Tier Matching Funnel
 
-**Status**: PROPOSED
+**Status**: ACCEPTED
 **Date**: 2026-06-12
+
+> Updated: 2026-06-12. Status changed to ACCEPTED; implementation
+> underway on branch feat/semantic-job-pipeline.
 
 ## Context
 

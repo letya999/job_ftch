@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from job_ftch.application.watermark import IncrementalCursor
 from job_ftch.domain import (
     DedupKeyKind,
     DuplicateRecord,
@@ -75,3 +76,20 @@ async def test_in_memory_store_run_state_backward_compat_without_namespace():
     assert val == "xyz"
     # With namespace, should NOT see the value set without namespace
     assert await store.get_run_state("cursor", source_kind="tg", source_name="ch") is None
+
+
+@pytest.mark.asyncio
+async def test_incremental_cursor_uses_unified_key_pattern() -> None:
+    store = InMemoryStore()
+    cursor = IncrementalCursor(store, namespace="tenant-a")
+
+    assert await cursor.get("rss:feed") is None
+
+    await cursor.set("rss:feed", "job-1,job-2")
+
+    assert await cursor.get("rss:feed") == "job-1,job-2"
+    assert await store.get("tenant-a:rss:feed:cursor") == "job-1,job-2"
+
+    await cursor.reset("rss:feed")
+
+    assert await cursor.get("rss:feed") is None

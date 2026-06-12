@@ -34,7 +34,7 @@
 | Библиотека | Extras group | Фаза | Назначение |
 |---|---|---|---|
 | `openai` | `[openai]` | 0 | OpenAI API клиент |
-| `instructor` | `[openai]` | 0 | Структурированное извлечение (RawItem → Job) через LLM |
+| `instructor` | `[openai]` | 0 | Структурированное извлечение (RawItem → JobDraft) через LLM |
 | `sentence-transformers` | `[embeddings]` | 14 | Локальные эмбеддинги для семантического поиска |
 
 ---

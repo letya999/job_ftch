@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from job_ftch.domain import (
     JobRecord,
     MatchDecision,
@@ -25,14 +27,27 @@ _SENIORITY_ORDER = {
     Seniority.UNKNOWN: -1,
 }
 
+_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-я0-9+#-]+")
+
 
 def _string_overlap_score(value: str | None, options: tuple[str, ...]) -> float:
     if value is None or not options:
         return 0.0
     lowered = value.casefold()
-    if any(option.casefold() in lowered for option in options):
-        return 1.0
-    return 0.0
+    value_tokens = {token.casefold() for token in _TOKEN_RE.findall(value)}
+    best = 0.0
+    for option in options:
+        normalized = option.casefold().strip()
+        if not normalized:
+            continue
+        if normalized in lowered:
+            return 1.0
+        option_tokens = [token.casefold() for token in _TOKEN_RE.findall(option)]
+        if not option_tokens or not value_tokens:
+            continue
+        overlap = sum(1 for token in option_tokens if token in value_tokens) / len(option_tokens)
+        best = max(best, overlap)
+    return round(best, 2)
 
 
 def _skill_overlap(job_skills: tuple[SkillTag, ...], required: tuple[SkillTag, ...]) -> float:
@@ -63,19 +78,32 @@ class MultiProfileMatchNode:
 
     def _score_profile(self, item: JobRecord, profile: SearchProfile) -> ProfileMatchScore:
         hard_pass = self._passes_hard_constraints(item, profile)
-        title_score = _string_overlap_score(item.title_normalized or item.title, profile.target_roles)
+        role_text = "\n".join(
+            part
+            for part in (
+                item.title_normalized or item.title,
+                item.description,
+                item.role_family,
+                item.domain,
+                item.industry,
+            )
+            if part
+        )
+        title_score = _string_overlap_score(
+            item.title_normalized or item.title, profile.target_roles
+        )
         semantic_role_score = max(
             title_score,
             _string_overlap_score(item.role_family, profile.target_roles),
-            _string_overlap_score(item.domain, profile.target_domains),
+            _string_overlap_score(role_text, profile.target_roles + profile.target_domains),
         )
         explicit_skills = item.skills_explicit + item.skills_inferred
         hard_skill_score = _skill_overlap(explicit_skills, profile.required_skills)
         preferred_skill_score = _skill_overlap(explicit_skills, profile.preferred_skills)
         skills_score = min(1.0, 0.65 * hard_skill_score + 0.35 * preferred_skill_score)
         domain_score = max(
-            _string_overlap_score(item.domain, profile.target_domains),
-            _string_overlap_score(item.industry, profile.target_industries),
+            _string_overlap_score(role_text, profile.target_domains),
+            _string_overlap_score(role_text, profile.target_industries),
         )
         seniority_score = self._seniority_score(item.seniority, profile)
         region_score = self._region_score(item, profile)
@@ -94,7 +122,9 @@ class MultiProfileMatchNode:
             + profile.weights.salary * salary_score
             + profile.weights.culture * culture_score
         )
-        final_score = max(0.0, min(1.0, round(weighted + 0.1 * vacancy_type_score - risk_penalty, 2)))
+        final_score = max(
+            0.0, min(1.0, round(weighted + 0.1 * vacancy_type_score - risk_penalty, 2))
+        )
 
         if not hard_pass:
             decision = MatchDecision.REJECT
@@ -133,12 +163,21 @@ class MultiProfileMatchNode:
             return False
         if profile.employment_types and item.employment_type not in profile.employment_types:
             return False
-        if profile.blocked_companies and item.company is not None and any(
-            company.casefold() in item.company.casefold() for company in profile.blocked_companies
+        if (
+            profile.blocked_companies
+            and item.company is not None
+            and any(
+                company.casefold() in item.company.casefold()
+                for company in profile.blocked_companies
+            )
         ):
             return False
-        if profile.blocked_domains and item.domain is not None and any(
-            domain.casefold() in item.domain.casefold() for domain in profile.blocked_domains
+        if (
+            profile.blocked_domains
+            and item.domain is not None
+            and any(
+                domain.casefold() in item.domain.casefold() for domain in profile.blocked_domains
+            )
         ):
             return False
         if (
@@ -154,7 +193,10 @@ class MultiProfileMatchNode:
     def _seniority_score(self, seniority: Seniority, profile: SearchProfile) -> float:
         if seniority is Seniority.UNKNOWN:
             return 0.5
-        if profile.seniority_min is Seniority.UNKNOWN and profile.seniority_max is Seniority.UNKNOWN:
+        if (
+            profile.seniority_min is Seniority.UNKNOWN
+            and profile.seniority_max is Seniority.UNKNOWN
+        ):
             return 1.0
         current = _SENIORITY_ORDER[seniority]
         min_val = _SENIORITY_ORDER.get(profile.seniority_min, -1)
@@ -162,9 +204,13 @@ class MultiProfileMatchNode:
         return 1.0 if min_val <= current <= max_val else 0.0
 
     def _region_score(self, item: JobRecord, profile: SearchProfile) -> float:
-        values = tuple(value for value in (item.region, item.country, item.city, item.location) if value)
+        values = tuple(
+            value for value in (item.region, item.country, item.city, item.location) if value
+        )
         haystack = " ".join(values).casefold()
-        region_terms = profile.preferred_regions + profile.preferred_countries + profile.preferred_cities
+        region_terms = (
+            profile.preferred_regions + profile.preferred_countries + profile.preferred_cities
+        )
         if not region_terms:
             return 1.0
         return 1.0 if any(term.casefold() in haystack for term in region_terms) else 0.0

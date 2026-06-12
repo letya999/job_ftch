@@ -3,6 +3,12 @@
 **Status**: ACCEPTED
 **Date**: 2026-06-07
 
+> Outdated note (2026-06-12): this ADR is preserved as the original notification-broadcasting decision.
+> Current normalized public contract is `JobRecord`, so references below to legacy `Job`
+> should be read historically. Current architecture references:
+> - [ADR-024](024-canonical-job-contract-and-matching-funnel.md)
+> - [Architecture](../architecture.md)
+
 ## Context
 
 Phase 27 addresses outbound broadcasting of job events after extraction. Existing sinks handle durable output (JSON files, SQLite) or interactive delivery (Telegram posting). Neither handles the "fire webhook to N external systems after each run" use case. The system needs:

@@ -41,8 +41,8 @@ async def test_rss_source_yields_items():
     spec = RSSFeedSourceSpec(feed_url="https://example.com/feed.xml")
     auth = MagicMock()
     store = MagicMock()
-    store.get_run_state = AsyncMock(return_value=None)
-    store.set_run_state = AsyncMock()
+    store.get = AsyncMock(return_value=None)
+    store.set = AsyncMock()
 
     # Mock feedparser response
     mock_feed = MagicMock()
@@ -85,6 +85,8 @@ async def test_rss_source_yields_items():
     assert len(items) == 2
     assert isinstance(items[0], RawItem)
     assert "LLM Engineer" in items[0].text
+    store.get.assert_awaited_once_with(f"rss:{spec.feed_url}:cursor")
+    store.set.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -96,8 +98,8 @@ async def test_rss_source_incremental_dedup():
     auth = MagicMock()
     store = MagicMock()
     # Simulate both IDs already seen
-    store.get_run_state = AsyncMock(return_value="job-1,job-2")
-    store.set_run_state = AsyncMock()
+    store.get = AsyncMock(return_value="job-1,job-2")
+    store.set = AsyncMock()
 
     # Mock feedparser response
     mock_feed = MagicMock()
@@ -138,6 +140,8 @@ async def test_rss_source_incremental_dedup():
             items = [item async for item in source.fetch()]
 
     assert items == []
+    store.get.assert_awaited_once_with(f"rss:{spec.feed_url}:cursor")
+    store.set.assert_not_called()
 
 
 def test_telegram_realtime_spec_roundtrip():

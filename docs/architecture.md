@@ -47,27 +47,37 @@
 | `EmbeddingProvider` | `OpenAIEmbeddingProvider`, `SentenceTransformersProvider` |
 | `VectorBackend` | `QdrantVectorBackend`, `PgVectorBackend` |
 | `AuthProvider` | `EnvAuthProvider`, `FileAuthProvider`, `VaultAuthProvider` |
-| `IngestMode` | `PollingMode`, `EventListenerMode`, `RSSMode`, `WebhookMode`, `WebSocketMode` |
-| `BypassStrategy` | `NoopBypass`, `ProxyRotatorBypass`, `StealthBrowserBypass`, `CaptchaSolverBypass` |
+| `IngestMode` | `PollingMode`, `EventListenerMode`, `WebhookMode`, `WebSocketMode` |
+| `BypassStrategy` | `NoopBypass`, `ProxyRotatorBypass`, `StealthBrowserBypass`, `CaptchaSolverBypass`, `ManagedScraperBypass` |
 
 ---
 
 ## Поток данных
 
-### Основной путь (фаза 10+)
+### Основной путь (текущее состояние)
 
 ```
 Source.fetch()
-  → SanitizeNode          # первые ворота: карантин при нарушении политики
-  → TriageNode            # FilterProfile: пропустить LLM для нерелевантных
-  → DedupNode             # rapidFuzz: проверка по ключам в Store
-  → ExtractionNode        # RawItem → Job через LLM (instructor)
-  → ValidationNode        # нормализация, оценка, маршрутизация review
-  → JobGroupNode          # кросс-источниковая агрегация (фаза 25+)
-  → main Job Sink
-        ↘ review Sink     # пограничные вакансии
-        ↘ posting Sink    # публикация в Telegram
-        ↘ NotificationSink # рассылка событий (фаза 27+)
+  → SanitizeNode                  # первые ворота: карантин при нарушении политики
+  → LanguageContextNode           # язык + дешёвый source context
+  → PostTypeClassificationNode    # что это: job/candidate/announcement/spam/unknown
+  → HardFilterNode                # дешёвые жёсткие фильтры до LLM
+  → DedupNode                     # exact/near-dup checks на raw-уровне
+  → SemanticPrefilterNode         # дешёвый multi-profile relevance gate
+  → ExtractionNode                # RawItem → JobDraft через LLM/heuristics
+  → ExtractionValidationNode      # минимальная полезность и review reasons
+  → TitleCompanyNormalizationNode # JobDraft → JobRecord
+  → LocationWorkModeNormalizationNode
+  → CompensationParsingNode
+  → MultiProfileMatchNode         # финальный profile-aware scoring
+  → RiskScoringNode               # риск отдельно от relevance
+  → QualityScoringNode            # качество отдельно от риска
+  → JobValidationNode             # terminal drop/review gates
+  → JobAggregationNode            # cross-source grouping, attach group_id
+  → main JobRecord Sink
+        ↘ review Sink             # пограничные вакансии
+        ↘ posting Sink            # публикация в Telegram
+        ↘ NotificationSink        # рассылка событий (фаза 27+)
 
 side-channels:
   QuarantinedRawItem → quarantine Sink
@@ -77,13 +87,26 @@ side-channels:
 
 ### Важные инварианты
 
-- `RawItem` живёт только до `ExtractionNode`. После — только `Job`-объекты.
-- `ExtractionNode` — единственная граница смены типа в пайплайне.
-- Все остальные узлы — `Stage[Job, Job]` (same-type).
+- `SanitizeNode` всегда первый.
+- `RawItem` живёт только до `ExtractionNode`.
+- `ExtractionNode` — единственная обязательная граница raw → structured.
+- Текущая целевая семья payload'ов: `RawItem → JobDraft → JobRecord → JobGroup`.
+- `JobDraft` уже несёт source identity/timestamps (`source_record_id`, `source_url`, `fetched_at`, `posted_at`) и extraction provenance.
+- `JobRecord` — публичный canonical contract: кроме normalised content, он несёт `schema_version`, `group_id`, `risk_score`, `risk_level`, `extraction_completeness` и `provenance`.
+- После `ExtractionNode` pipeline больше не возвращается к raw-text routing.
 - `None` из любого узла = дроп элемента с записью причины в `RunSummary`.
 - `RawItemDropped` = управляемый дроп (дедуп, тема).
 - `RawItemRejected` = карантин (политика безопасности).
 - Неожиданные исключения изолированы на уровне элемента — запуск продолжается.
+
+### Целевое состояние funnel
+
+Текущий pipeline уже движется к master plan, но rollout ещё не завершён целиком:
+
+- intake и cheap understanding уже выделены в отдельные узлы;
+- `RoutingNode` как отдельный pipeline node ещё не выделен: сейчас routing реализован на уровне sink composition;
+- canonical contract уже вынес explicit source/risk/provenance поля из `metadata`, но rollout полного master-plan field set ещё не завершён;
+- агрегация уже есть как `JobAggregationNode`, но порядок относительно scoring продолжает эволюционировать вместе с canonical contract rollout.
 
 ---
 
@@ -104,7 +127,7 @@ def create_telegram_channel(spec: SourceSpec, auth: AuthProvider) -> Source:
 my_custom_source = "my_pkg.sources:create_my_source"
 ```
 
-Группы entry points: `job_ftch.sources`, `job_ftch.sinks`, `job_ftch.stores`, `job_ftch.parsers`, `job_ftch.notification_targets`.
+Группы entry points: `job_ftch.sources`, `job_ftch.sinks`, `job_ftch.stores`, `job_ftch.parsers`, `job_ftch.notification_targets`, `job_ftch.bypass`, `job_ftch.job_backends`, `job_ftch.search_backends`, `job_ftch.embedding_providers`, `job_ftch.vector_backends`.
 
 ---
 
@@ -193,7 +216,7 @@ VectorBackend
 
 ## Рассылка событий (Phase 27)
 
-`NotificationSink` реализует `Sink[Job]` и подключается через `FanOutSink`. `Pipeline` не знает о рассылке.
+`NotificationSink` реализует `Sink[JobRecord]` и подключается через `FanOutSink`. `Pipeline` не знает о рассылке.
 
 ```
 NotificationSink
@@ -221,8 +244,14 @@ pipeline = (
     PipelineBuilder()
     .source(SourceSpec(type="telegram_channel", entity="ai_jobs"))
     .source(SourceSpec(type="career_site", url="https://..."))
-    .stage(TriageNode(profile=FilterProfile.load("profiles/ai_roles.yaml")))
+    .stage(SanitizeNode())
+    .stage(LanguageContextNode())
+    .stage(PostTypeClassificationNode())
+    .stage(HardFilterNode(ProfileCatalog.default()))
     .stage(ExtractionNode(llm=OpenAIProvider()))
+    .stage(ExtractionValidationNode())
+    .stage(TitleCompanyNormalizationNode())
+    .stage(MultiProfileMatchNode(ProfileCatalog.default()))
     .sink(JsonFileSink("artifacts/jobs.json"))
     .sink(NotificationSink(config=NotificationConfig.load("notif.yaml")))
     .store(SQLiteStore(".runtime/store.db"))
@@ -236,7 +265,7 @@ summary = await pipeline.run(max_items=500)
 
 ## Версионирование схемы
 
-`Job` содержит поле `schema_version: int`. При изменении поля оператор указывает политику эволюции:
+`JobRecord` содержит поле `schema_version`. При изменении поля оператор указывает политику эволюции:
 
 | Политика | Действие |
 |---|---|

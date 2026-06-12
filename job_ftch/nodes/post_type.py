@@ -33,7 +33,9 @@ class PostTypeClassificationNode:
                 return result
 
         lowered = item.text.casefold()
-        if any(token in lowered for token in ("#candidate", "#резюме", "open to work", "ищу работу")):
+        if any(
+            token in lowered for token in ("#candidate", "#резюме", "open to work", "ищу работу")
+        ):
             return ClassificationResult(PostType.CANDIDATE_SEEKING.value, 0.95, "rules_v2")
         if any(token in lowered for token in ("webinar", "meetup", "course", "конференц", "митап")):
             return ClassificationResult(PostType.ANNOUNCEMENT.value, 0.9, "rules_v2")
@@ -41,7 +43,15 @@ class PostTypeClassificationNode:
             return ClassificationResult(PostType.SPAM.value, 0.95, "rules_v2")
         if any(
             token in lowered
-            for token in ("remote", "salary", "vacancy", "hiring", "join our team", "вакансия", "ищем")
+            for token in (
+                "remote",
+                "salary",
+                "vacancy",
+                "hiring",
+                "join our team",
+                "вакансия",
+                "ищем",
+            )
         ):
             return ClassificationResult(PostType.JOB_POSTING.value, 0.72, "rules_v2")
         return ClassificationResult(PostType.UNKNOWN.value, 0.5, "rules_v2")

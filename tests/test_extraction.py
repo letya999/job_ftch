@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeVar
 
@@ -21,6 +22,8 @@ class ExplodingLLMProvider:
 
 @pytest.mark.asyncio
 async def test_extraction_node_emits_partial_draft_when_llm_fails() -> None:
+    created_at = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    fetched_at = datetime(2026, 1, 1, 12, 5, tzinfo=UTC)
     item = RawItem.model_validate(
         {
             "source_kind": SourceKind.CAREER_SITE,
@@ -28,6 +31,8 @@ async def test_extraction_node_emits_partial_draft_when_llm_fails() -> None:
             "external_id": "1",
             "url": "https://job-boards.greenhouse.io/clickhouse/jobs/1",
             "text": "Senior AI Product Engineer\nRemote Europe\nBuild agent tooling",
+            "created_at": created_at,
+            "fetched_at": fetched_at,
             "metadata": {"job_url": "https://job-boards.greenhouse.io/clickhouse/jobs/1"},
         }
     )
@@ -39,6 +44,11 @@ async def test_extraction_node_emits_partial_draft_when_llm_fails() -> None:
     assert draft.extraction_status is JobExtractionStatus.PARTIAL
     assert draft.company_name_raw == "ClickHouse"
     assert "partial_extraction" in draft.review_reasons
+    assert draft.source_record_id == "1"
+    assert str(draft.source_url) == "https://job-boards.greenhouse.io/clickhouse/jobs/1"
+    assert draft.posted_at == created_at
+    assert draft.fetched_at == fetched_at
+    assert "llm:ExplodingLLMProvider" in draft.provenance.extraction
 
 
 @pytest.mark.asyncio

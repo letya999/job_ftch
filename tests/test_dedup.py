@@ -10,7 +10,8 @@ from job_ftch.domain import (
     processed_key_for_raw_item,
 )
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
-from job_ftch.nodes import DedupNode, HeuristicTriageNode, SanitizeNode
+from job_ftch.nodes import DedupNode, SanitizeNode
+from job_ftch.nodes.triage import HeuristicTriageNode
 
 
 class StubSource:

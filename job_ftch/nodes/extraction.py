@@ -67,6 +67,20 @@ class ExtractedJobFields(BaseModel):
     benefits: tuple[str, ...] = ()
     culture_signals: tuple[str, ...] = ()
 
+    # Plan B extensions
+    years_experience: int | None = None
+    education: str | None = None
+    relocation: bool | None = None
+    visa_support: bool | None = None
+    domain_knowledge: tuple[str, ...] = ()
+    soft_skills: tuple[str, ...] = ()
+    certifications: tuple[str, ...] = ()
+    leadership_level: str | None = None
+    ic_or_manager: str | None = None
+    company_type: str | None = None
+    team_size_hint: str | None = None
+    remote_restrictions: str | None = None
+
 
 def _metadata_text(item: RawItem, keys: tuple[str, ...]) -> str | None:
     for key in keys:
@@ -161,19 +175,35 @@ class ExtractionNode:
             review_reasons.insert(0, JobReviewReason.PARTIAL_EXTRACTION.value)
         metadata = dict(item.metadata)
         metadata["extraction_backend"] = self._llm.__class__.__name__
+        extraction_steps = [f"llm:{self._llm.__class__.__name__}"]
+        if degraded:
+            extraction_steps.append("fallback:degraded_extraction")
+        if title is None:
+            extraction_steps.append("fallback:title")
+        if company is None:
+            extraction_steps.append("fallback:company")
+        if canonical_url is None:
+            extraction_steps.append("fallback:canonical_url")
+        if location is None:
+            extraction_steps.append("fallback:location")
         return JobDraft(
             raw_item_id=item.stable_id,
+            source_record_id=item.external_id,
             source_kind=item.source_kind,
             source_name=item.source_name,
+            source_url=item.url,
             title_raw=title,
             company_name_raw=company,
             description_raw=description,
             canonical_url=canonical_url,
+            fetched_at=item.fetched_at,
+            posted_at=item.created_at,
             location_raw=location,
             work_mode=work_mode,
             compensation=extracted.compensation,
             extraction_status=extraction_status,
             review_reasons=tuple(review_reasons),
+            provenance={"extraction": tuple(extraction_steps)},
             metadata=metadata,
             post_type=extracted.post_type,
             ai_relevance=extracted.ai_relevance,
@@ -193,6 +223,19 @@ class ExtractionNode:
             tools_stack=extracted.tools_stack,
             benefits=extracted.benefits,
             culture_signals=extracted.culture_signals,
+            # Plan B extensions
+            years_experience=extracted.years_experience,
+            education=extracted.education,
+            relocation=extracted.relocation,
+            visa_support=extracted.visa_support,
+            domain_knowledge=extracted.domain_knowledge,
+            soft_skills=extracted.soft_skills,
+            certifications=extracted.certifications,
+            leadership_level=extracted.leadership_level,
+            ic_or_manager=extracted.ic_or_manager,
+            company_type=extracted.company_type,
+            team_size_hint=extracted.team_size_hint,
+            remote_restrictions=extracted.remote_restrictions,
         )
 
     async def _extract_fields(self, item: RawItem) -> tuple[ExtractedJobFields, bool]:

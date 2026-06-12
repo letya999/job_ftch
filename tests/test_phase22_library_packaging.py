@@ -11,7 +11,8 @@ from job_ftch.adapters.fastapi_adapter import create_app
 from job_ftch.adapters.faststream_adapter import register_faststream_handlers
 from job_ftch.adapters.mcp_adapter import create_mcp_server
 from job_ftch.domain.source_spec import LocalFixtureSpec
-from job_ftch.nodes import HeuristicTriageNode, SanitizeNode
+from job_ftch.nodes import SanitizeNode
+from job_ftch.nodes.triage import HeuristicTriageNode
 
 
 class _DummyStore:

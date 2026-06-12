@@ -66,7 +66,9 @@ class SearchProfile(BaseModel):
         object.__setattr__(self, "profile_id", self.profile_id.strip() or "default")
         object.__setattr__(self, "name", self.name.strip() or self.profile_id)
         if self.profile_description is not None:
-            object.__setattr__(self, "profile_description", self.profile_description.strip() or None)
+            object.__setattr__(
+                self, "profile_description", self.profile_description.strip() or None
+            )
         for field_name in (
             "target_roles",
             "target_domains",

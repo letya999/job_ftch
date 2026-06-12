@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from job_ftch.config import Settings
-    from job_ftch.domain import Job
+    from job_ftch.domain import JobRecord
 
 
 def build_sink(settings: Settings):
@@ -33,8 +33,8 @@ def build_rejected_sink(settings: Settings):
     return counted, FailureTolerantSink(counted, sink_name="rejected")
 
 
-def _needs_review(settings: Settings) -> Callable[[Job], bool]:
-    def predicate(job: Job) -> bool:
+def _needs_review(settings: Settings) -> Callable[[JobRecord], bool]:
+    def predicate(job: JobRecord) -> bool:
         return (
             bool(job.review_reasons)
             or (job.quality_score or 0.0) < settings.review_max_quality_score
@@ -43,8 +43,8 @@ def _needs_review(settings: Settings) -> Callable[[Job], bool]:
     return predicate
 
 
-def _should_post(settings: Settings) -> Callable[[Job], bool]:
-    def predicate(job: Job) -> bool:
+def _should_post(settings: Settings) -> Callable[[JobRecord], bool]:
+    def predicate(job: JobRecord) -> bool:
         return (
             not job.review_reasons
             and (job.quality_score or 0.0) >= settings.posting_min_quality_score
@@ -54,9 +54,9 @@ def _should_post(settings: Settings) -> Callable[[Job], bool]:
 
 
 def build_output_sinks(settings: Settings):
-    main_sink: CountedSink[Job] = CountedSink(build_sink(settings))
+    main_sink: CountedSink[JobRecord] = CountedSink(build_sink(settings))
     sink_chain = [main_sink]
-    review_counted: CountedSink[Job] = CountedSink(
+    review_counted: CountedSink[JobRecord] = CountedSink(
         create_sink(settings.review_settings())  # type: ignore[arg-type]
     )
     sink_chain.append(
@@ -64,9 +64,9 @@ def build_output_sinks(settings: Settings):
             [(_needs_review(settings), FailureTolerantSink(review_counted, sink_name="review"))]
         )
     )
-    posting_sink: CountedSink[Job] | None = None
+    posting_sink: CountedSink[JobRecord] | None = None
     if not settings.dry_run and settings.posting_backend != "none":
-        posting_counted: CountedSink[Job] = CountedSink(
+        posting_counted: CountedSink[JobRecord] = CountedSink(
             create_sink(settings.posting_settings())  # type: ignore[arg-type]
         )
         posting_sink = posting_counted

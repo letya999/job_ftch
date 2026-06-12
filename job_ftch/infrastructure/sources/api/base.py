@@ -6,6 +6,7 @@ import httpx
 import structlog
 from pydantic import AnyHttpUrl
 
+from job_ftch.application.watermark import IncrementalCursor
 from job_ftch.domain import RawItem, SourceKind
 
 if TYPE_CHECKING:
@@ -53,11 +54,11 @@ class OfficialAPISource:
                 headers[k] = v
 
         params = self.spec.params.copy()
-        cursor_key = f"{self.source_kind}:{self.source_name}:cursor"
+        cursor_source_id = f"{self.source_kind}:{self.source_name}"
 
         # Load incremental cursor
         if self.store and self.spec.incremental_cursor_field:
-            last_cursor = await self.store.get_run_state(cursor_key)
+            last_cursor = await IncrementalCursor(self.store).get(cursor_source_id)
             if last_cursor:
                 params[self.spec.incremental_cursor_field] = last_cursor
 
@@ -85,7 +86,7 @@ class OfficialAPISource:
                 if items and self.spec.incremental_cursor_field and self.store:
                     first_id = items[0].get("id")
                     if first_id is not None:
-                        await self.store.set_run_state(cursor_key, str(first_id))
+                        await IncrementalCursor(self.store).set(cursor_source_id, str(first_id))
 
             except Exception as e:
                 logger.exception("api_fetch_failed", url=url, error=str(e))

@@ -3,6 +3,16 @@
 **Status**: ACCEPTED
 **Date**: 2026-06-07
 
+> Outdated note (2026-06-12): this ADR is preserved as the Phase 15 decision record.
+> Current implementation drifted in three important ways:
+> 1. `IngestMode` is currently driven via `run(source, on_item)` rather than the original cursor-shaped sketch below.
+> 2. `BypassStrategy` evolved from HTTP-only fetch wrapping into a broader HTTP/browser boundary.
+> 3. `RSSMode` remains roadmap work; the shipped built-ins are narrower than the list below.
+>
+> Current target architecture references:
+> - [ADR-024](024-canonical-job-contract-and-matching-funnel.md)
+> - [Architecture](../architecture.md)
+
 ## Context
 
 Phase 15 introduces sources with different ingestion styles (polling, event-driven, RSS, inbound webhook, WebSocket) and sources protected by anti-scraping measures (IP blocks, CAPTCHAs, JS challenges, rate limits). Without a protocol boundary, each adapter hard-codes both its ingestion style and its bypass mechanism, making them impossible to mix, replace, or test independently.

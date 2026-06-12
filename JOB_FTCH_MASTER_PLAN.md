@@ -886,7 +886,7 @@ Datasets should include:
 
 ## Observability
 
-The project should standardize metrics and reasons from the start.
+The project should standardize metrics, reason codes, and traceability from the start.
 
 Recommended measurements:
 
@@ -900,6 +900,8 @@ Recommended measurements:
 - high-risk rate
 - low-quality rate
 - per-profile acceptance rate
+- job lineage coverage from `RawItem` to `JobRecord`/`JobGroup`
+- run history retention and queryability
 
 ---
 
@@ -950,6 +952,8 @@ Recommended measurements:
 - benchmark fixtures
 - regression suite
 - per-stage metrics
+- job lineage surface
+- run history
 - score quality dashboards
 
 ### Phase 8. Community hardening

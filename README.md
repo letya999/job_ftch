@@ -4,7 +4,26 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Status](https://img.shields.io/badge/status-early%20development-orange.svg)
 
-**job_ftch** is a library-first async ingestion engine for job postings. It fetches from heterogeneous sources (Telegram channels/groups, career sites, official APIs, ATS webhooks), normalises into typed `Job` records, and emits to pluggable sinks — decoupled from any runtime orchestrator. Any wrapper (CLI, FastStream, FastAPI, Dagster, Airflow, MCP server, Telegram bot) is an adapter on top, not part of the core.
+**job_ftch** is a library-first async ingestion engine for job postings. It fetches from heterogeneous sources (Telegram channels/groups, career sites, official APIs, ATS webhooks), moves data through the canonical payload family `RawItem -> JobDraft -> JobRecord -> JobGroup`, and emits normalized records to pluggable sinks — decoupled from any runtime orchestrator. Any wrapper (CLI, FastStream, FastAPI, Dagster, Airflow, MCP server, Telegram bot) is an adapter on top, not part of the core.
+
+---
+
+## Tenant CLI surface
+
+With `--configs-dir` pointing at tenant configs, the operator-facing CLI already exposes the core runtime surface:
+
+```bash
+python app.py --configs-dir config/tenants tenants list
+python app.py --configs-dir config/tenants tenants status ai_jobs
+python app.py --configs-dir config/tenants tenants run ai_jobs
+python app.py --configs-dir config/tenants tenants lineage ai_jobs <job_id>
+python app.py --configs-dir config/tenants runs list --tenant ai_jobs --limit 20
+python app.py --configs-dir config/tenants runs show <run_id> --tenant ai_jobs
+```
+
+`tenants lineage` returns the current `JobLineage` payload for one persisted job, including
+the originating `raw_item_id`, `group_id`, `pipeline_stages`, and `source_run_id`.
+`runs list/show` exposes persisted `RunSummary` history keyed by `source_run_id`.
 
 ---
 
@@ -12,7 +31,9 @@
 
 The system grows through 5 qualitative milestones. Each slide shows the horizontal component layout and key responsibilities at that point.
 
-### Milestone 1 — Phase 10: Linear MVP pipeline (shipped)
+Milestones 1-4 are historical snapshots of earlier phases. They intentionally use the stage names and payload assumptions of their time. The current target shape is described by Milestone 5 and the live documents in `docs/architecture.md` and `JOB_FTCH_MASTER_PLAN.md`.
+
+### Milestone 1 — Phase 10: Linear MVP pipeline (historical snapshot, shipped)
 
 Two sources, one LLM extraction stage, in-memory dedup, JSON output.
 
@@ -47,7 +68,7 @@ graph LR
 
 ---
 
-### Milestone 2 — Phase 13: Multi-source + open registry + persistent store
+### Milestone 2 — Phase 13: Multi-source + open registry + persistent store (historical snapshot)
 
 Declarative `sources.yaml`, `@register_source` open registry, `SQLiteStore` survives restarts, `FilterProfile` replaces hardcoded keywords.
 
@@ -88,7 +109,7 @@ graph LR
 
 ---
 
-### Milestone 3 — Phase 17: Search + scheduler + API adapters + bypass
+### Milestone 3 — Phase 17: Search + scheduler + API adapters + bypass (historical snapshot)
 
 Full-text and vector search, periodic scheduling, official job API sources, pluggable bypass strategies for protected sites.
 
@@ -130,7 +151,7 @@ graph LR
 
 ---
 
-### Milestone 4 — Phase 22: Packaged library + multi-tenant + MCP server
+### Milestone 4 — Phase 22: Packaged library + multi-tenant + MCP server (historical snapshot)
 
 All code under `job_ftch/` package, `PipelineBuilder` fluent API, `TenantConfig` isolation, FastMCP server exposes tools and resources to Claude Code, Cursor, and other MCP clients.
 
@@ -142,7 +163,7 @@ graph LR
         AUTH["AuthProvider\nEnv · File · Vault"]
         subgraph CORE["Pipeline core"]
             COMP["CompositeSource"]
-            PIPE["Sanitize → Triage → Dedup\n→ Extract → Validate"]
+        PIPE["Sanitize → LanguageContext → PostType\n→ HardFilter → Dedup → SemanticPrefilter\n→ Extract → Normalize → Score → Aggregate"]
         end
         subgraph BACKENDS["Backends"]
             PG["PostgreSQLJobBackend\nFTS + pgvector"]
@@ -169,9 +190,12 @@ graph LR
 
 ---
 
-### Milestone 5 — Phase 27: Full platform (final roadmap state)
+### Milestone 5 — Phase 27: Full platform (target roadmap state, partially landed)
 
 Rich domain (lifecycle, canonicalization, schema versioning), cross-source aggregation, observability, and configurable event broadcasting.
+This slide is the target architecture. Parts of it are already in the codebase; other pieces
+such as Prometheus export and broader observability hardening remain
+roadmap work tracked in `docs/roadmap.md`.
 
 ```mermaid
 graph LR
@@ -183,7 +207,7 @@ graph LR
         RT["WebSocketSource\nrealtime"]
     end
     subgraph CORE["job_ftch core"]
-        PIPE["Pipeline\nSanitize → Triage → Dedup\n→ Extract → Validate → Group"]
+        PIPE["Pipeline\nSanitize → LanguageContext → PostType\n→ HardFilter → Dedup → SemanticPrefilter\n→ Extraction → Normalization → Match/Risk/Quality\n→ Aggregation"]
         SCHED["Scheduler"]
         TC["TenantConfig"]
         AUTH["AuthProvider"]
@@ -201,7 +225,7 @@ graph LR
     end
     subgraph OBS["Observability"]
         IC["IncrementalCursor\nunified watermark"]
-        LIN["Lineage\nraw_item → job → group"]
+        LIN["Lineage\nraw_item → job_record → group"]
         PROM["Prometheus exporter"]
         HIST["RunHistory"]
     end
@@ -287,7 +311,7 @@ C4Container
 
         Container(pipeline, "Pipeline core", "Python / asyncio", "Item-by-item orchestration: Source fetch → node chain → Sink emit. RunSummary, exception handling.")
         Container(sources, "Source adapters", "Python", "Telegram (MTProto), CareerSite (HTML), Official APIs, WebhookSource, WebSocketSource, DebugSource.")
-        Container(nodes, "Processing nodes", "Python", "SanitizeNode, TriageNode, DedupNode, ExtractionNode (LLM), ValidationNode, JobGroupNode.")
+        Container(nodes, "Processing nodes", "Python", "SanitizeNode, LanguageContextNode, PostTypeClassificationNode, HardFilterNode, DedupNode, SemanticPrefilterNode, ExtractionNode, ExtractionValidationNode, normalization nodes, MultiProfileMatchNode, RiskScoringNode, QualityScoringNode, JobValidationNode, JobAggregationNode.")
         Container(sinks, "Sink adapters", "Python", "JsonFileSink, SQLiteJobSink, TelegramPublishSink, NotificationSink, FanOutSink.")
 
         Container(store, "Store backends", "asyncpg / aiosqlite", "SQLiteStore, PostgreSQLStore. Dedup keys, run state, IncrementalCursor.")
@@ -350,34 +374,47 @@ C4Component
 
     Container_Boundary(nodes_b, "nodes/") {
         Component(san, "SanitizeNode", "sanitize.py", "First gate. Max length, encoding fixes, quarantine on policy violation.")
-        Component(tri, "TriageNode", "triage.py", "FilterProfile-driven pre-filter. Skips LLM call for irrelevant items.")
-        Component(ded, "DedupNode", "dedup.py", "rapidFuzz near-duplicate check against processed keys in Store.")
-        Component(ext, "ExtractionNode", "extraction.py", "RawItem → Job via LLM (instructor). Partial-extraction fallback via heuristics.")
-        Component(val, "ValidationNode", "validation.py", "Normalise title/company/location, parse compensation, score, route borderline to review sink.")
-        Component(grp, "JobGroupNode", "job_group.py", "Cross-source aggregation. Fingerprint + embedding similarity → JobGroup merge, canonical Job selection.")
+        Component(ctx, "LanguageContextNode", "language_context.py", "Cheap source context and language detection before classification.")
+        Component(pt, "PostTypeClassificationNode", "post_type.py", "Fast classify job_posting / candidate / announcement / spam / unknown.")
+        Component(hf, "HardFilterNode", "hard_filter.py", "Cheap hard gates before expensive extraction.")
+        Component(ded, "DedupNode", "dedup.py", "Raw-level exact/near-duplicate check against processed keys in Store.")
+        Component(pref, "SemanticPrefilterNode", "semantic_prefilter.py", "Cheap multi-profile screening to avoid expensive extraction for obvious misses.")
+        Component(ext, "ExtractionNode", "extraction.py", "RawItem -> JobDraft via LLM (instructor) with heuristic support.")
+        Component(val, "ExtractionValidationNode", "extraction_validation.py", "Minimum structured usefulness checks and early review reasons.")
+        Component(norm, "Normalization nodes", "job_normalization.py", "Draft-to-record normalization for title/company/location/work mode/compensation.")
+        Component(match, "MultiProfileMatchNode", "match_scoring.py", "Per-profile scoring with component scores, decision, and explanation.")
+        Component(rq, "Risk/Quality nodes", "risk.py / quality.py", "Separate risk scoring, quality scoring, and final validation gates.")
+        Component(grp, "JobAggregationNode", "aggregation.py", "Cross-source aggregation. Fingerprint + matching -> JobGroup update, attach group_id.")
     }
 
     Container_Boundary(dom, "domain/") {
-        Component(job, "Job / RawItem", "job.py / raw_item.py", "Pydantic models. Job carries schema_version, lifecycle status, group_id, raw_item_id lineage.")
-        Component(jgm, "JobGroup", "job_group.py", "Aggregated representation of the same job observed from N sources.")
-        Component(cur, "IncrementalCursor", "cursor.py", "Unified watermark: last_seen_id, last_seen_at, page_token. Used by all source adapters.")
-        Component(fp, "FilterProfile", "filter_profile.py", "Configurable relevance: positive_keywords, negative_keywords, required_patterns, min_score.")
+        Component(job, "RawItem / JobDraft / JobRecord", "models.py", "Canonical payload family. JobRecord carries schema_version, source identity/timestamps, normalized fields, explicit risk/quality/matching signals, routing, and provenance.")
+        Component(jgm, "JobGroup", "job_group.py", "Aggregated representation of the same vacancy observed from N sources.")
+        Component(cur, "IncrementalCursor", "watermark.py", "Unified watermark helper backed by StoreConnector. Used by incremental source adapters.")
+        Component(fp, "ProfileCatalog / FilterProfile", "profile.py / filter_profile.py", "Configurable relevance, profile matching preferences, and thresholds.")
         Component(nc, "NotificationConfig", "notification.py", "What/when/where to broadcast: trigger, targets, payload_format, min_score filter.")
     }
 
     Rel(orch, san, "process()")
-    Rel(orch, tri, "process()")
+    Rel(orch, ctx, "process()")
+    Rel(orch, pt, "process()")
+    Rel(orch, hf, "process()")
     Rel(orch, ded, "process()")
+    Rel(orch, pref, "process()")
     Rel(orch, ext, "process()")
     Rel(orch, val, "process()")
+    Rel(orch, norm, "process()")
+    Rel(orch, match, "process()")
+    Rel(orch, rq, "process()")
     Rel(orch, grp, "process()")
     Rel(orch, contracts, "Protocol types")
     Rel(builder, orch, "Constructs")
     Rel(reg, builder, "Provides factories")
-    Rel(ext, job, "Produces Job")
-    Rel(grp, jgm, "Produces JobGroup")
+    Rel(ext, job, "Produces JobDraft")
+    Rel(norm, job, "Produces JobRecord")
+    Rel(grp, jgm, "Updates JobGroup")
     Rel(ded, cur, "Updates watermark")
-    Rel(tri, fp, "Reads FilterProfile")
+    Rel(pref, fp, "Reads profile config")
 ```
 
 ---

@@ -21,6 +21,7 @@ from job_ftch.application.contracts import (
     SearchBackend,
     Sink,
     Source,
+    Stage,
     Store,
     VectorBackend,
 )
@@ -46,7 +47,8 @@ from job_ftch.application.source_loader import load_sources
 from job_ftch.application.telemetry import configure_telemetry
 from job_ftch.config import Settings, get_settings
 from job_ftch.domain import (
-    Job,
+    JobRecord,
+    MatchDecision,
     ProfileCatalog,
     QuarantinedRawItem,
     RawItem,
@@ -60,14 +62,17 @@ from job_ftch.nodes import (
     ExtractionNode,
     ExtractionValidationNode,
     JobAggregationNode,
+    JobLifecycleNode,
     JobValidationNode,
     LocationWorkModeNormalizationNode,
     QualityScoringNode,
+    RoutingNode,
     SanitizeNode,
+    SkillNormalizationNode,
     TitleCompanyNormalizationNode,
 )
 from job_ftch.nodes.hard_filter import HardFilterNode
-from job_ftch.nodes.language_context import LanguageContextNode
+from job_ftch.nodes.language_context import SourceContextNode
 from job_ftch.nodes.match_scoring import MultiProfileMatchNode
 from job_ftch.nodes.post_type import PostTypeClassificationNode
 from job_ftch.nodes.risk import RiskScoringNode
@@ -85,15 +90,15 @@ class PipelineBuilder:
         self._source_specs: list[SourceSpec] = []
         self._source_instance: Source[RawItem] | None = None
         self._auth_provider: AuthProvider | None = None
-        self._stages: list[ProcessingNode[Any]] = []
-        self._sinks: list[Sink[Job]] = []
+        self._stages: list[Stage[Any, Any]] = []
+        self._sinks: list[Sink[JobRecord]] = []
         self._store: Store | None = None
         self._quarantine_sink: Sink[QuarantinedRawItem] | None = None
         self._rejected_sink: Sink[RejectedItem] | None = None
         self._schedule_interval_seconds: int | None = None
         self._default_max_items: int | None = None
-        self._review_sink: CountedSink[Job] | None = None
-        self._posting_sink: CountedSink[Job] | None = None
+        self._review_sink: CountedSink[JobRecord] | None = None
+        self._posting_sink: CountedSink[JobRecord] | None = None
         self._rejected_counted: CountedSink[RejectedItem] | None = None
         self._job_group_store: JobGroupStore | None = None
         self._profile_name: str | None = None
@@ -133,11 +138,11 @@ class PipelineBuilder:
         self._auth_provider = provider
         return self
 
-    def stage(self, node: ProcessingNode[Any]) -> PipelineBuilder:
+    def stage(self, node: Stage[Any, Any]) -> PipelineBuilder:
         self._stages.append(node)
         return self
 
-    def sink(self, sink: Sink[Job]) -> PipelineBuilder:
+    def sink(self, sink: Sink[JobRecord]) -> PipelineBuilder:
         self._sinks.append(sink)
         return self
 
@@ -175,8 +180,8 @@ class PipelineBuilder:
     def set_summary_context(
         self,
         *,
-        review_sink: CountedSink[Job] | None = None,
-        posting_sink: CountedSink[Job] | None = None,
+        review_sink: CountedSink[JobRecord] | None = None,
+        posting_sink: CountedSink[JobRecord] | None = None,
         job_group_store: JobGroupStore | None = None,
         profile_name: str | None = None,
         output_path: Path | None = None,
@@ -198,7 +203,7 @@ class PipelineBuilder:
             raise ValueError(msg)
         return self._store
 
-    def build(self) -> Pipeline[RawItem, Job]:
+    def build(self) -> Pipeline[RawItem, JobRecord]:
         if self._source_instance is None and not self._source_specs:
             msg = "PipelineBuilder requires at least one source."
             raise ValueError(msg)
@@ -214,7 +219,7 @@ class PipelineBuilder:
 
         source = self._source_instance or self._build_source_from_specs()
         sanitize_node = cast(SanitizingNode[RawItem], self._stages[0])
-        processing_nodes = cast(Sequence[ProcessingNode[object]], self._stages[1:])
+        processing_nodes = list(self._stages[1:])
         return Pipeline(
             source=source,
             sanitize_node=sanitize_node,
@@ -301,6 +306,8 @@ def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = No
             "llm_backend": tenant.llm_backend,
             "posting_backend": tenant.posting_backend,
             "dry_run": tenant.dry_run,
+            "metrics_enabled": tenant.metrics_enabled,
+            "metrics_port": tenant.metrics_port,
             "pipeline_max_items_per_run": tenant.pipeline_max_items_per_run,
             "pipeline_max_text_length": tenant.pipeline_max_text_length,
             "filter_profile_path": tenant.filter_profile_path,
@@ -420,10 +427,10 @@ def build_nodes(
     llm: LLMProvider,
     job_group_store: JobGroupStore,
     catalog: ProfileCatalog,
-) -> tuple[SanitizingNode[RawItem], Sequence[ProcessingNode[object]]]:
+) -> tuple[SanitizingNode[RawItem], Sequence[Stage[Any, Any]]]:
     classifier = build_classifier(settings, catalog)
-    nodes: list[ProcessingNode[Any]] = [
-        LanguageContextNode(),
+    nodes: list[Stage[Any, Any]] = [
+        SourceContextNode(),
         PostTypeClassificationNode(classifier=classifier),
         HardFilterNode(catalog),
         DedupNode(store),
@@ -431,13 +438,20 @@ def build_nodes(
         ExtractionNode(llm),
         ExtractionValidationNode(),
         TitleCompanyNormalizationNode(),
+        SkillNormalizationNode(),
         LocationWorkModeNormalizationNode(),
         CompensationParsingNode(),
+        JobLifecycleNode(),
+        JobAggregationNode(job_group_store, attach_group_id=True),
         MultiProfileMatchNode(catalog),
         RiskScoringNode(),
         QualityScoringNode(),
         JobValidationNode(),
-        JobAggregationNode(job_group_store, attach_group_id=True),
+        RoutingNode(
+            accept_threshold=settings.routing_accept_threshold,
+            review_threshold=settings.routing_review_threshold,
+            quality_override_threshold=settings.routing_quality_override_threshold,
+        ),
     ]
 
     if settings.embedding_enabled and settings.vector_backend:
@@ -453,12 +467,12 @@ def build_nodes(
             allowed_career_site_hosts=settings.career_site_allowed_hosts,
             max_text_length=settings.pipeline_max_text_length,
         ),
-        cast("Sequence[ProcessingNode[object]]", nodes),
+        nodes,
     )
 
 
-def build_sink(settings: Settings) -> Sink[Job]:
-    return cast(Sink[Job], create_sink(settings))
+def build_sink(settings: Settings) -> Sink[JobRecord]:
+    return cast(Sink[JobRecord], create_sink(settings))
 
 
 def build_quarantine_sink(settings: Settings) -> Sink[QuarantinedRawItem]:
@@ -479,10 +493,10 @@ def build_rejected_sink(
 
 def build_output_sinks(
     settings: Settings,
-) -> tuple[Sink[Job], CountedSink[Job], CountedSink[Job] | None]:
-    main_sink: CountedSink[Job] = CountedSink(build_sink(settings))
-    sink_chain: list[Sink[Job]] = [main_sink]
-    review_counted: CountedSink[Job] = CountedSink(
+) -> tuple[Sink[JobRecord], CountedSink[JobRecord], CountedSink[JobRecord] | None]:
+    main_sink: CountedSink[JobRecord] = CountedSink(build_sink(settings))
+    sink_chain: list[Sink[JobRecord]] = [main_sink]
+    review_counted: CountedSink[JobRecord] = CountedSink(
         create_sink(settings.review_settings())  # type: ignore[arg-type]
     )
     sink_chain.append(
@@ -490,9 +504,9 @@ def build_output_sinks(
             [(_needs_review(settings), FailureTolerantSink(review_counted, sink_name="review"))],
         )
     )
-    posting_sink: CountedSink[Job] | None = None
+    posting_sink: CountedSink[JobRecord] | None = None
     if not settings.dry_run and settings.posting_backend != "none":
-        posting_counted: CountedSink[Job] = CountedSink(
+        posting_counted: CountedSink[JobRecord] = CountedSink(
             create_sink(settings.posting_settings())  # type: ignore[arg-type]
         )
         posting_sink = posting_counted
@@ -517,8 +531,10 @@ def build_llm(settings: Settings) -> LLMProvider:
     return cast(LLMProvider, create_llm(settings))
 
 
-def _needs_review(settings: Settings) -> Callable[[Job], bool]:
-    def predicate(job: Job) -> bool:
+def _needs_review(settings: Settings) -> Callable[[JobRecord], bool]:
+    def predicate(job: JobRecord) -> bool:
+        if job.routing_decision == MatchDecision.REVIEW:
+            return True
         return (
             bool(job.review_reasons)
             or (job.quality_score or 0.0) < settings.review_max_quality_score
@@ -527,8 +543,10 @@ def _needs_review(settings: Settings) -> Callable[[Job], bool]:
     return predicate
 
 
-def _should_post(settings: Settings) -> Callable[[Job], bool]:
-    def predicate(job: Job) -> bool:
+def _should_post(settings: Settings) -> Callable[[JobRecord], bool]:
+    def predicate(job: JobRecord) -> bool:
+        if job.routing_decision == MatchDecision.ACCEPT:
+            return True
         return (
             not job.review_reasons
             and (job.quality_score or 0.0) >= settings.posting_min_quality_score

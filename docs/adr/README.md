@@ -38,19 +38,20 @@ What are the trade-offs?
 9. [009-sink-fanout-and-routing.md](009-sink-fanout-and-routing.md) — Sink fan-out and routing
 10. [010-reliability-and-recovery-policies.md](010-reliability-and-recovery-policies.md) — Reliability and recovery policies
 
-### Phases 11-27 (planned)
+### Phases 11-27 (current ADR set)
 
-11. [011-source-spec-auth-provider.md](011-source-spec-auth-provider.md) — SourceSpec + AuthProvider separation
-12. [012-store-connector-protocol.md](012-store-connector-protocol.md) — StoreConnector protocol hierarchy
-13. [013-filter-profile-configurable-relevance.md](013-filter-profile-configurable-relevance.md) — FilterProfile: configurable relevance
-14. [014-search-embedding-vector-protocol-stack.md](014-search-embedding-vector-protocol-stack.md) — Search, embedding, and vector protocol stack
-15. [015-ingestion-mode-bypass-strategy.md](015-ingestion-mode-bypass-strategy.md) — IngestMode and BypassStrategy protocols
-16. [016-job-group-cross-source-aggregation.md](016-job-group-cross-source-aggregation.md) — JobGroup: cross-source aggregation
-17. [017-notification-sink-event-broadcasting.md](017-notification-sink-event-broadcasting.md) — NotificationSink: configurable event broadcasting
-18. [018-job-catalog-and-search-architecture.md](018-job-catalog-and-search-architecture.md) — Job Catalog and Persistent Search architecture
-19. [019-embeddings-and-vector-storage-boundary.md](019-embeddings-and-vector-storage-boundary.md) — Embeddings and Vector Storage boundary
-20. [020-registry-fallback-named-backend.md](020-registry-fallback-named-backend.md) — Registry fallback named backend
-21. [021-career-site-monitor-scraper-split.md](021-career-site-monitor-scraper-split.md) — Career-site monitor and scraper split
-22. [022-cloakbrowser-advanced-bypass.md](022-cloakbrowser-advanced-bypass.md) — CloakBrowser advanced bypass
-23. [023-adaptive-scraping-escalation.md](023-adaptive-scraping-escalation.md) — Adaptive scraping escalation
-24. [024-canonical-job-contract-and-matching-funnel.md](024-canonical-job-contract-and-matching-funnel.md) — Canonical job contract and top-tier matching funnel
+11. [011-source-spec-auth-provider.md](011-source-spec-auth-provider.md) — SourceSpec + AuthProvider separation (`ACCEPTED`)
+12. [012-store-connector-protocol.md](012-store-connector-protocol.md) — StoreConnector protocol hierarchy (`ACCEPTED`)
+13. [013-filter-profile-configurable-relevance.md](013-filter-profile-configurable-relevance.md) — FilterProfile: configurable relevance (`ACCEPTED`)
+14. [014-search-embedding-vector-protocol-stack.md](014-search-embedding-vector-protocol-stack.md) — Search, embedding, and vector protocol stack (`ACCEPTED`)
+15. [015-ingestion-mode-bypass-strategy.md](015-ingestion-mode-bypass-strategy.md) — IngestMode and BypassStrategy protocols (`ACCEPTED`)
+16. [016-job-group-cross-source-aggregation.md](016-job-group-cross-source-aggregation.md) — JobGroup: cross-source aggregation (`ACCEPTED`)
+17. [017-notification-sink-event-broadcasting.md](017-notification-sink-event-broadcasting.md) — NotificationSink: configurable event broadcasting (`ACCEPTED`)
+18. [018-job-catalog-and-search-architecture.md](018-job-catalog-and-search-architecture.md) — Job Catalog and Persistent Search architecture (`ACCEPTED`)
+19. [019-embeddings-and-vector-storage-boundary.md](019-embeddings-and-vector-storage-boundary.md) — Embeddings and Vector Storage boundary (`ACCEPTED`)
+20. [020-registry-fallback-named-backend.md](020-registry-fallback-named-backend.md) — Registry fallback named backend (`ACCEPTED`)
+21. [021-career-site-monitor-scraper-split.md](021-career-site-monitor-scraper-split.md) — Career-site monitor and scraper split (`PROPOSED`)
+21b. [021-module-boundary-enforcement.md](021-module-boundary-enforcement.md) — Module boundary enforcement gate (`ACCEPTED`)
+22. [022-cloakbrowser-advanced-bypass.md](022-cloakbrowser-advanced-bypass.md) — CloakBrowser advanced bypass (`ACCEPTED`)
+23. [023-adaptive-scraping-escalation.md](023-adaptive-scraping-escalation.md) — Adaptive scraping escalation (`PROPOSED`)
+24. [024-canonical-job-contract-and-matching-funnel.md](024-canonical-job-contract-and-matching-funnel.md) — Canonical job contract and top-tier matching funnel (`ACCEPTED`)

@@ -125,7 +125,9 @@ def _extract_skill_tags(text: str) -> tuple[SkillTag, ...]:
         "llm",
         "nlp",
     )
-    skills = [SkillTag(canonical_name=skill, source="heuristic") for skill in known if skill in lowered]
+    skills = [
+        SkillTag(canonical_name=skill, source="heuristic") for skill in known if skill in lowered
+    ]
     return tuple(skills)
 
 
@@ -155,8 +157,54 @@ class HeuristicLLMProvider:
             "employment_type": _detect_employment_type(text),
             "skills_explicit": _extract_skill_tags(text),
             "tools_stack": tuple(skill.canonical_name for skill in _extract_skill_tags(text)),
+            # Plan B extensions
+            "years_experience": _detect_experience(text),
+            "education": _detect_education(text),
+            "relocation": _detect_relocation(text),
+            "visa_support": _detect_visa(text),
         }
         return schema.model_validate(payload)
+
+
+def _detect_experience(text: str) -> int | None:
+    # Patterns like "3+ years", "3 года", "от 3 лет", "5+ лет"
+    patterns = [
+        r"(\d+)\s*\+\s*years",
+        r"(\d+)\s*\+\s*лет",
+        r"(\d+)\s*years",
+        r"от\s*(\d+)\s*лет",
+        r"(\d+)\s*год",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _detect_education(text: str) -> str | None:
+    lowered = text.casefold()
+    if any(token in lowered for token in ("phd", "кандидат наук")):
+        return "phd"
+    if any(token in lowered for token in ("master", "магистр")):
+        return "master"
+    if any(token in lowered for token in ("bachelor", "бакалавр", "высшее", "degree")):
+        return "bachelor"
+    return None
+
+
+def _detect_relocation(text: str) -> bool | None:
+    lowered = text.casefold()
+    if any(token in lowered for token in ("relocation", "релокация", "помощь с переездом")):
+        return True
+    return None
+
+
+def _detect_visa(text: str) -> bool | None:
+    lowered = text.casefold()
+    if any(token in lowered for token in ("visa", "виза", "sponsorship")):
+        return True
+    return None
 
 
 @register_llm("heuristic")

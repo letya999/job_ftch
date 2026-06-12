@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from job_ftch.application.contracts import (
     EmbeddingProvider,
@@ -30,7 +30,7 @@ class HybridSearchBackend(SearchBackend):
     def __init__(self, settings: Settings) -> None:
         # We need a job backend that implements both SearchBackend (FTS)
         # and JobGroupStore (to load groups)
-        self.fts_backend = create_job_backend(settings)
+        self.fts_backend: Any = create_job_backend(settings)
         if not isinstance(self.fts_backend, SearchBackend):
             raise TypeError(f"Backend {type(self.fts_backend)} must implement SearchBackend")
         if not isinstance(self.fts_backend, JobGroupStore):
@@ -44,12 +44,12 @@ class HybridSearchBackend(SearchBackend):
         self.job_backend = cast("JobPersistenceBackend", self.fts_backend)
         self.fts_searcher = cast("SearchBackend", self.fts_backend)
 
-        self.embedding_provider = None
-        self.vector_backend = None
+        self.embedding_provider: EmbeddingProvider | None = None
+        self.vector_backend: VectorBackend | None = None
 
         if settings.vector_backend:
-            self.vector_backend = create_vector_backend(settings)
-            self.embedding_provider = create_embedding_provider(settings)
+            self.vector_backend = cast("VectorBackend", create_vector_backend(settings))
+            self.embedding_provider = cast("EmbeddingProvider", create_embedding_provider(settings))
 
     async def search(self, query: str, limit: int = 20) -> list[JobGroup]:
         query = query.strip()
@@ -71,8 +71,8 @@ class HybridSearchBackend(SearchBackend):
             if not self.embedding_provider or not self.vector_backend:
                 return fts_groups[:limit]
 
-            embedding_provider = cast("EmbeddingProvider", self.embedding_provider)
-            vector_backend = cast("VectorBackend", self.vector_backend)
+            embedding_provider = self.embedding_provider
+            vector_backend = self.vector_backend
 
             vectors = await embedding_provider.embed([query])
             if not vectors or not vectors[0]:
@@ -85,8 +85,12 @@ class HybridSearchBackend(SearchBackend):
             seen_groups = set()
             for jid in vector_job_ids:
                 job = await self.job_backend.get_job(jid)
-                if job and "group_id" in job.metadata:
-                    gid = str(job.metadata["group_id"])
+                if job:
+                    gid = job.group_id or (
+                        str(job.metadata["group_id"]) if "group_id" in job.metadata else None
+                    )
+                    if gid is None:
+                        continue
                     if gid not in seen_groups:
                         seen_groups.add(gid)
                         vector_group_ids.append(gid)
@@ -109,6 +113,8 @@ class HybridSearchBackend(SearchBackend):
 
     async def close(self) -> None:
         for component in (self.fts_backend, self.vector_backend):
+            if component is None:
+                continue
             close_fn = getattr(component, "close", None)
             if callable(close_fn):
                 await close_fn()
