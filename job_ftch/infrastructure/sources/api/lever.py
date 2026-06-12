@@ -1,6 +1,6 @@
 from typing import Any
 
-from job_ftch.application.registry import register_source_v2
+from job_ftch.application.registry import register_source_spec
 from job_ftch.domain import RawItem, SourceKind
 from job_ftch.infrastructure.sources.api.base import OfficialAPISource
 
@@ -55,6 +55,6 @@ class LeverAPISource(OfficialAPISource):
         return None  # Lever uses limit param, no cursor pagination for public API
 
 
-@register_source_v2("lever")
+@register_source_spec("lever")
 def _create_lever(spec: Any, auth: Any, store: Any | None = None) -> LeverAPISource:
     return LeverAPISource(spec, auth, store, source_kind=SourceKind.CAREER_SITE)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from importlib import import_module
 from importlib.metadata import entry_points
 from threading import Lock
@@ -33,7 +34,7 @@ SourceFactory = Callable[[Settings], object]
 SinkFactory = Callable[[Settings], object]
 StoreFactory = Callable[[Settings], object]
 LLMFactory = Callable[[Settings], object]
-SourceSpecFactory = Callable[[Any, "AuthProvider"], object]
+SourceSpecFactory = Callable[..., object]
 ParserMatcher = Callable[[str, str], bool]
 ParserFactory = Callable[[], object]
 
@@ -46,6 +47,23 @@ FParser = TypeVar("FParser", bound=ParserFactory)
 FAny = TypeVar("FAny", bound=Callable[..., Any])
 
 
+@dataclass(frozen=True)
+class MonitorEntry:
+    name: str
+    cost: int  # lower = cheaper = tried first in auto-detect
+    rich: bool  # True = returns full payload, no scraper needed
+    factory: Callable[..., Any]  # (spec, http, auth) -> monitor instance OR discover coroutine
+    can_handle: Callable[..., Any] | None = None  # async (url, client) -> dict | None
+
+
+@dataclass(frozen=True)
+class ScraperEntry:
+    name: str
+    factory: Callable[..., Any]  # (config, http) -> scraper instance OR scrape coroutine
+    can_handle: Callable[..., Any] | None = None  # (list[str]) -> dict | None  (static HTML probe)
+    needs_browser: bool = False
+
+
 _source_factories: dict[str, SourceFactory] = {}
 _source_spec_factories: dict[str, SourceSpecFactory] = {}
 _sink_factories: dict[str, SinkFactory] = {}
@@ -54,7 +72,11 @@ _job_group_store_factories: dict[str, StoreFactory] = {}
 _llm_factories: dict[str, LLMFactory] = {}
 _parser_factories: list[tuple[str, ParserMatcher, ParserFactory]] = []
 
+_MONITOR_REGISTRY: list[MonitorEntry] = []
+_SCRAPER_REGISTRY: dict[str, ScraperEntry] = {}
+
 _bypass_factories: dict[str, Callable[..., Any]] = {}
+_AUTH_PROVIDERS: dict[str, Callable[..., object]] = {}
 _job_backend_factories: dict[str, Callable[..., Any]] = {}
 _search_backend_factories: dict[str, Callable[..., Any]] = {}
 _embedding_provider_factories: dict[str, Callable[..., Any]] = {}
@@ -74,7 +96,7 @@ def register_source(kind: str) -> Callable[[FSource], FSource]:
     return decorator
 
 
-def register_source_v2(kind: str) -> Callable[[FSourceV2], FSourceV2]:
+def register_source_spec(kind: str) -> Callable[[FSourceV2], FSourceV2]:
     normalized = kind.strip()
 
     def decorator(factory: FSourceV2) -> FSourceV2:
@@ -146,6 +168,14 @@ def register_bypass(name: str) -> Callable[[FAny], FAny]:
     return decorator
 
 
+def register_auth_provider(name: str) -> Callable[[FAny], FAny]:
+    def decorator(factory: FAny) -> FAny:
+        _AUTH_PROVIDERS[name] = factory
+        return factory
+
+    return decorator
+
+
 def register_job_backend(name: str) -> Callable[[FAny], FAny]:
     def decorator(factory: FAny) -> FAny:
         _job_backend_factories[name] = factory
@@ -178,6 +208,90 @@ def register_vector_backend(name: str) -> Callable[[FAny], FAny]:
     return decorator
 
 
+def register_monitor(
+    name: str,
+    factory: Callable[..., Any],
+    cost: int,
+    rich: bool,
+    can_handle: Callable[..., Any] | None = None,
+) -> None:
+    """Register a board monitor and keep registry sorted by cost."""
+    entry = MonitorEntry(
+        name=name,
+        factory=factory,
+        cost=cost,
+        rich=rich,
+        can_handle=can_handle,
+    )
+    _MONITOR_REGISTRY.append(entry)
+    _MONITOR_REGISTRY.sort(key=lambda x: x.cost)
+
+
+def register_scraper(
+    name: str,
+    factory: Callable[..., Any],
+    can_handle: Callable[..., Any] | None = None,
+    needs_browser: bool = False,
+) -> None:
+    """Register a job scraper."""
+    _SCRAPER_REGISTRY[name] = ScraperEntry(
+        name=name,
+        factory=factory,
+        can_handle=can_handle,
+        needs_browser=needs_browser,
+    )
+
+
+def resolve_monitor(name: str) -> MonitorEntry:
+    """Find a monitor by name."""
+    load_extensions()
+    for entry in _MONITOR_REGISTRY:
+        if entry.name == name:
+            return entry
+    msg = f"Unsupported monitor: {name}"
+    raise ValueError(msg)
+
+
+def resolve_scraper(name: str) -> ScraperEntry:
+    """Find a scraper by name."""
+    load_extensions()
+    entry = _SCRAPER_REGISTRY.get(name)
+    if entry is None:
+        msg = f"Unsupported scraper: {name}"
+        raise ValueError(msg)
+    return entry
+
+
+def resolve_bypass(name: str | None, bypass_config: dict[str, str] | None = None) -> Any:
+    """Resolve a BypassStrategy by name."""
+    load_extensions()
+    name = name or "noop"
+    factory = _bypass_factories.get(name)
+    if factory is None:
+        msg = f"Unsupported bypass strategy: {name}"
+        raise ValueError(msg)
+    try:
+        return factory(bypass_config=bypass_config)
+    except TypeError:
+        return factory()
+
+
+def get_all_monitor_entries() -> list[MonitorEntry]:
+    """Return all registered monitors sorted by cost."""
+    load_extensions()
+    return list(_MONITOR_REGISTRY)
+
+
+def all_monitor_names() -> frozenset[str]:
+    load_extensions()
+    return frozenset(e.name for e in _MONITOR_REGISTRY)
+
+
+def rich_monitor_names() -> frozenset[str]:
+    load_extensions()
+    return frozenset(e.name for e in _MONITOR_REGISTRY if e.rich)
+
+
 def load_extensions() -> None:
     global _builtins_loaded, _entry_points_loaded
     with _lock:
@@ -186,6 +300,7 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.sources.local_fixture",
                 "job_ftch.infrastructure.sources.telegram",
                 "job_ftch.infrastructure.sources.career_site",
+                "job_ftch.infrastructure.sources.career_site_source",
                 "job_ftch.infrastructure.sources.declarative",
                 "job_ftch.infrastructure.stores.in_memory",
                 "job_ftch.infrastructure.stores.sqlite",
@@ -193,6 +308,9 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.stores.job_group_store",
                 "job_ftch.infrastructure.llm.heuristic",
                 "job_ftch.infrastructure.llm.openai_provider",
+                "job_ftch.infrastructure.auth.env_auth",
+                "job_ftch.infrastructure.auth.file_auth",
+                "job_ftch.infrastructure.auth.vault_auth",
                 "job_ftch.sinks.json_file",
                 "job_ftch.sinks.telegram_posting",
                 "job_ftch.infrastructure.backends.jobs.sqlite",
@@ -210,6 +328,9 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.sources.realtime.webhook",
                 "job_ftch.infrastructure.sources.realtime.websocket",
                 "job_ftch.infrastructure.sources.telegram_realtime",
+                "job_ftch.infrastructure.sources.monitors",
+                "job_ftch.infrastructure.sources.scrapers",
+                "job_ftch.infrastructure.bypass",
             ):
                 import_module(module_name)
             _builtins_loaded = True
@@ -235,6 +356,19 @@ def load_extensions() -> None:
 
 def create_source(settings: Settings) -> object:
     load_extensions()
+    if settings.source_backend == "career_site":
+        from job_ftch.domain.source_spec import CareerSiteSpec
+
+        if settings.career_site_url is None:
+            msg = "Career site source requires JOB_FTCH_CAREER_SITE_URL."
+            raise ValueError(msg)
+        return create_source_from_spec(
+            CareerSiteSpec(
+                type="career_site",
+                url=settings.career_site_url,
+                limit=settings.pipeline_max_items_per_run,
+            )
+        )
     factory = _source_factories.get(settings.source_backend)
     if factory is None:
         msg = f"Unsupported source backend: {settings.source_backend}"
@@ -250,14 +384,19 @@ class _NullAuthProvider:
         return {}
 
 
-def create_source_from_spec(spec: SourceSpec, auth: AuthProvider | None = None) -> object:
+def create_source_from_spec(
+    spec: SourceSpec, auth: AuthProvider | None = None, store: Any = None
+) -> object:
     load_extensions()
     effective_auth: AuthProvider = auth if auth is not None else _NullAuthProvider()
     factory = _source_spec_factories.get(spec.type)
     if factory is None:
         msg = f"Unsupported source type: {spec.type}"
         raise ValueError(msg)
-    return factory(spec, effective_auth)
+    try:
+        return factory(spec, effective_auth, store)
+    except TypeError:
+        return factory(spec, effective_auth)
 
 
 def create_sink(settings: Settings, *, quarantine: bool = False) -> object:
@@ -325,11 +464,76 @@ async def create_store_with_fallback(settings: Settings) -> object:
 
 def create_job_group_store(settings: Settings) -> object:
     load_extensions()
-    factory = _job_group_store_factories.get(settings.job_group_store_backend)
+    backend = settings.job_group_store_backend
+    factory = _job_group_store_factories.get(backend)
     if factory is None:
-        msg = f"Unsupported job group store backend: {settings.job_group_store_backend}"
+        msg = f"Unsupported job group store backend: {backend}"
         raise ValueError(msg)
     return factory(settings)
+
+
+async def create_job_group_store_with_fallback(settings: Settings) -> object:
+    """Create job group store with async ping health check and fallback to sqlite/memory."""
+    load_extensions()
+    backend = settings.job_group_store_backend
+    log = structlog.get_logger("job_ftch.registry")
+
+    factory = _job_group_store_factories.get(backend)
+    if factory is None:
+        msg = f"Unsupported job group store backend: {backend}"
+        raise ValueError(msg)
+
+    primary_exc: Exception | None = None
+    store: object | None = None
+    try:
+        store = factory(settings)
+    except Exception as exc:
+        primary_exc = exc
+
+    if store is not None:
+        if hasattr(store, "ping"):
+            try:
+                ok = await store.ping()  # type: ignore[union-attr]
+                if ok:
+                    return store
+                primary_exc = RuntimeError(f"job_group_store ping returned False for backend={backend}")
+            except Exception as exc:
+                primary_exc = exc
+        else:
+            return store
+
+    log.warning(
+        "job_group_store_primary_unavailable_falling_back",
+        backend=backend,
+        error=str(primary_exc),
+    )
+
+    for fallback in ("sqlite", "memory"):
+        if fallback == backend:
+            continue
+        fallback_factory = _job_group_store_factories.get(fallback)
+        if fallback_factory is None:
+            continue
+        try:
+            fallback_store = fallback_factory(settings)
+            if hasattr(fallback_store, "ping"):
+                ok = await fallback_store.ping()  # type: ignore[union-attr]
+                if not ok:
+                    continue
+            log.warning(
+                "job_group_store_falling_back",
+                primary=backend,
+                fallback=fallback,
+                error=str(primary_exc),
+            )
+            return fallback_store
+        except Exception:
+            continue
+
+    if primary_exc is not None:
+        raise primary_exc
+    msg = f"All job_group_store backends failed for primary={backend}"
+    raise RuntimeError(msg)
 
 
 def create_llm(settings: Settings) -> object:
@@ -348,6 +552,16 @@ def resolve_career_site_parser(*, url: str, html: str) -> CareerSiteParser:
             return cast("CareerSiteParser", factory())
     msg = f"Unsupported career site layout for URL: {url}"
     raise ValueError(msg)
+
+
+def create_auth_provider(name: str | None, settings: Settings) -> AuthProvider:
+    load_extensions()
+    normalized = (name or "env").strip().lower()
+    factory = _AUTH_PROVIDERS.get(normalized)
+    if factory is None:
+        msg = f"Unsupported auth provider: {name}"
+        raise ValueError(msg)
+    return factory(settings)
 
 
 def create_job_backend(settings: Settings) -> object:

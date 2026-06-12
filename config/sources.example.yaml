@@ -63,3 +63,26 @@ sources:
   - type: websocket
     url: "wss://realtime.jobboard.com/stream"
     source_name: ws_jobs
+
+  # SPA career site — requires Playwright render
+  - type: career_site
+    url: https://company.com/jobs
+    source_name: company_spa
+    monitor: dom
+    monitor_config:
+      render: true
+      wait: domcontentloaded
+      actions:
+        - action: dismiss_overlays
+
+  # Deel ATS board
+  - type: career_site
+    url: https://jobs.deel.com/acme
+    source_name: deel_acme
+    monitor: deel
+
+  # Eightfold AI portal
+  - type: career_site
+    url: https://acme.eightfold.ai/careers
+    source_name: eightfold_acme
+    monitor: eightfold

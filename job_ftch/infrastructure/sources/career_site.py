@@ -1,4 +1,4 @@
-"""Career-site source adapters with parser auto-detection."""
+"""Career-site source runtime and layout-specific parsers."""
 
 from __future__ import annotations
 
@@ -6,14 +6,13 @@ import asyncio
 import re
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Protocol
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 import httpx
 from selectolax.lexbor import LexborHTMLParser
 
 from job_ftch.application.registry import (
     register_parser,
-    register_source,
     resolve_career_site_parser,
 )
 from job_ftch.domain import RawItem, SourceKind
@@ -23,10 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from types import TracebackType
 
-    from job_ftch.config import Settings
 
-
-_GREENHOUSE_JOB_ID_RE = re.compile(r"/jobs/(?P<job_id>\d+)")
 _BCC_JOB_ID_RE = re.compile(r"/career/(?P<job_id>\d+)/?$")
 
 
@@ -77,13 +73,25 @@ async def _http_session(client: Any, *, own_client: bool) -> AsyncIterator[Any]:
     yield client
 
 
+@asynccontextmanager
+async def client_for_config(
+    client: Any, config: dict[str, Any] | None = None
+) -> AsyncIterator[Any]:
+    """Yield the right HTTP client for a monitor/scraper config.
+
+    When ``skip_ssl`` is enabled for a specific monitor or scraper, create a
+    fresh retrying client with TLS verification disabled for that scope only.
+    Otherwise reuse the outer source client unchanged.
+    """
+    if config and config.get("skip_ssl"):
+        async with build_default_http_client(verify_ssl=False) as insecure_client:
+            yield insecure_client
+        return
+    yield client
+
+
 def _clean_text(value: str) -> str:
     return " ".join(value.split())
-
-
-def _source_name_from_url(url: str) -> str:
-    path = urlsplit(url).path.strip("/")
-    return path.split("/")[-1] or "career-site"
 
 
 def _is_retryable_http_error(exc: Exception) -> bool:
@@ -105,122 +113,6 @@ class _CareerSiteParser(Protocol):
         limit: int,
     ) -> list[RawItem]:
         """Parse a career-site page into RawItems."""
-
-
-class _GreenhouseParser:
-    def _title_without_badge(self, node: Any) -> str:
-        primary_text = node.text(separator=" ", strip=True)
-        badge = node.css_first(".tag-container, .tag-text")
-        if badge is None:
-            return _clean_text(primary_text)
-        badge_text = _clean_text(badge.text(separator=" ", strip=True))
-        cleaned = primary_text.replace(badge_text, " ", 1) if badge_text else primary_text
-        return _clean_text(cleaned)
-
-    def _extract_source_name(self, parser: LexborHTMLParser, url: str) -> str:
-        og_title = parser.css_first('meta[property="og:title"]')
-        if og_title is not None:
-            value = og_title.attributes.get("content")
-            if value:
-                return _clean_text(value)
-        return _source_name_from_url(url)
-
-    def _parse_job_anchor(
-        self,
-        *,
-        board_url: str,
-        source_name: str,
-        anchor: Any,
-        section: str | None,
-        team: str | None,
-    ) -> RawItem | None:
-        href = anchor.attributes.get("href")
-        if not href:
-            return None
-        title_node = anchor.css_first("p.body--medium") or anchor
-        title = self._title_without_badge(title_node)
-        location_node = anchor.css_first("p.body__secondary")
-        location = (
-            _clean_text(location_node.text(separator=" ", strip=True))
-            if location_node is not None
-            else None
-        )
-        full_url = urljoin(board_url, href)
-        job_match = _GREENHOUSE_JOB_ID_RE.search(full_url)
-        external_id = job_match.group("job_id") if job_match is not None else href
-        text_parts = [title, location, section, team]
-        return build_raw_item(
-            source_kind=SourceKind.CAREER_SITE,
-            source_name=source_name,
-            external_id=str(external_id),
-            url=full_url,
-            text="\n".join(part for part in text_parts if part),
-            metadata={
-                "board_url": board_url,
-                "job_url": full_url,
-                "department": section,
-                "team": team,
-                "location": location,
-                "parser": "greenhouse",
-            },
-        )
-
-    async def parse(
-        self,
-        *,
-        client: Any,
-        url: str,
-        html: str,
-        limit: int,
-    ) -> list[RawItem]:
-        parser = LexborHTMLParser(html)
-        source_name = self._extract_source_name(parser, url)
-        container = parser.css_first(".job-posts") or parser
-        items: list[RawItem] = []
-        current_section: str | None = None
-        current_team: str | None = None
-        selectors = "h3.section-header, h4.section-header, h4.sub-section-header, tr.job-post"
-
-        for node in container.css(selectors):
-            tag = node.tag
-            if tag == "h3":
-                current_section = _clean_text(node.text(separator=" ", strip=True))
-                current_team = None
-                continue
-            if tag == "h4":
-                current_team = _clean_text(node.text(separator=" ", strip=True))
-                continue
-            anchor = node.css_first('a[href*="/jobs/"]')
-            if anchor is None:
-                continue
-            item = self._parse_job_anchor(
-                board_url=url,
-                source_name=source_name,
-                anchor=anchor,
-                section=current_section,
-                team=current_team,
-            )
-            if item is not None:
-                items.append(item)
-            if len(items) >= limit:
-                return items
-
-        if items:
-            return items
-
-        for anchor in container.css('a[href*="/jobs/"]'):
-            item = self._parse_job_anchor(
-                board_url=url,
-                source_name=source_name,
-                anchor=anchor,
-                section=None,
-                team=None,
-            )
-            if item is not None:
-                items.append(item)
-            if len(items) >= limit:
-                break
-        return items
 
 
 class _BCCParser:
@@ -404,6 +296,16 @@ class CareerSiteSource:
         return resolve_career_site_parser(url=url, html=html)  # type: ignore[return-value]
 
 
+def build_default_http_client(*, verify_ssl: bool = True) -> _RetryingHttpClient:
+    timeout = httpx.Timeout(15.0, connect=30.0)
+    limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+    return _RetryingHttpClient(
+        httpx.AsyncClient(timeout=timeout, limits=limits, verify=verify_ssl),
+        max_retries=2,
+        retry_delay_seconds=1.0,
+    )
+
+
 def _is_bcc(url: str, html: str) -> bool:
     del url
     parser = LexborHTMLParser(html)
@@ -422,29 +324,3 @@ def _build_yandex_jobs_parser() -> _YandexJobsParser:
 @register_parser("bcc", matcher=_is_bcc)
 def _build_bcc_parser() -> _BCCParser:
     return _BCCParser()
-
-
-@register_source("career_site")
-def _build_career_site_source(settings: Settings) -> CareerSiteSource:
-    if settings.career_site_url is None:
-        msg = "Career site source requires JOB_FTCH_CAREER_SITE_URL."
-        raise ValueError(msg)
-    timeout = httpx.Timeout(settings.career_site_timeout_seconds, connect=30.0)
-    limits = httpx.Limits(
-        max_keepalive_connections=settings.career_site_max_keepalive_connections,
-        max_connections=settings.career_site_max_connections,
-    )
-    client = _RetryingHttpClient(
-        httpx.AsyncClient(timeout=timeout, limits=limits),
-        max_retries=settings.career_site_max_retries,
-        retry_delay_seconds=settings.career_site_retry_delay_seconds,
-    )
-    return CareerSiteSource(
-        client,
-        settings.career_site_url,
-        limit=settings.pipeline_max_items_per_run,
-        own_client=True,
-        parser=_BCCParser(max_concurrency=settings.career_site_detail_concurrency)
-        if urlsplit(settings.career_site_url).hostname in {"www.bcc.kz", "bcc.kz"}
-        else None,
-    )

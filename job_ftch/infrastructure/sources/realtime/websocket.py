@@ -5,7 +5,7 @@ from typing import Any
 import structlog
 
 from job_ftch.application.contracts import AuthProvider
-from job_ftch.application.registry import register_source_v2
+from job_ftch.application.registry import register_source_spec
 from job_ftch.domain import QuarantinedRawItem, RawItem, SourceKind
 from job_ftch.domain.source_spec import WebSocketSourceSpec
 
@@ -75,6 +75,6 @@ class WebSocketSource:
         self._stop.set()
 
 
-@register_source_v2("websocket")
-def _create_websocket_source(spec: Any, auth: AuthProvider) -> WebSocketSource:
+@register_source_spec("websocket")
+def _create_websocket(spec: Any, auth: AuthProvider, store: Any = None) -> WebSocketSource:
     return WebSocketSource(spec, auth)

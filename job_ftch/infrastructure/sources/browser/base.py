@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from job_ftch.application.registry import register_source_v2
+from job_ftch.application.registry import register_source_spec
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -36,6 +36,6 @@ class BrowserSource:
         yield  # make this an async generator
 
 
-@register_source_v2("browser")
-def _create_browser_source(spec: Any, auth: AuthProvider) -> BrowserSource:
+@register_source_spec("browser")
+def _create_browser(spec: Any, auth: AuthProvider, store: Any = None) -> BrowserSource:
     return BrowserSource(spec, auth)

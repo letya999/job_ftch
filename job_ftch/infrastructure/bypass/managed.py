@@ -17,7 +17,7 @@ class ManagedScraperBypass:
         self._api_key = api_key
         self._provider = provider
 
-    def configure(self, client: Any) -> Any:
+    async def apply_http(self, client: Any) -> Any:
         """Returns a new httpx.AsyncClient configured to route via the managed API."""
         import httpx
 
@@ -39,6 +39,12 @@ class ManagedScraperBypass:
                 },
             )
         return client
+
+    def apply_browser_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        return kwargs
+
+    async def apply_page(self, page: Any) -> None:
+        pass
 
 
 @register_bypass("managed_scraper")
