@@ -496,7 +496,9 @@ async def create_job_group_store_with_fallback(settings: Settings) -> object:
                 ok = await store.ping()  # type: ignore[union-attr]
                 if ok:
                     return store
-                primary_exc = RuntimeError(f"job_group_store ping returned False for backend={backend}")
+                primary_exc = RuntimeError(
+                    f"job_group_store ping returned False for backend={backend}"
+                )
             except Exception as exc:
                 primary_exc = exc
         else:
