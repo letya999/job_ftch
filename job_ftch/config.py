@@ -28,7 +28,11 @@ class Settings(BaseSettings):
     pipeline_max_items_per_run: int = Field(default=200, gt=0)
     pipeline_max_text_length: int = Field(default=20_000, ge=256, le=500_000)
     schedule_interval_seconds: int | None = None
+    configs_dir: Path | None = None
     dry_run: bool = False
+    tenant_id: str | None = None
+    tenant_display_name: str | None = None
+    auth_file_path: Path | None = None
     sources_file_path: Path | None = None
     filter_profile_path: Path | None = None
     debug_source_path: Path = Path("fixtures/debug/raw_items.json")
@@ -156,6 +160,8 @@ class Settings(BaseSettings):
         "ollama_base_url",
         "embedding_model",
         "search_language",
+        "tenant_id",
+        "tenant_display_name",
     )
     @classmethod
     def strip_optional_strings(cls, value: str | None) -> str | None:

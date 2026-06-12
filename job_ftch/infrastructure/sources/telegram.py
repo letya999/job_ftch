@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-from job_ftch.application.registry import register_source, register_source_v2
+from job_ftch.application.registry import register_source, register_source_spec
 from job_ftch.domain import RawItem, SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 
@@ -398,10 +398,11 @@ def _build_client_v2(auth_id: str | None, auth: AuthProvider) -> Any:
     return client
 
 
-@register_source_v2("telegram_channel")
+@register_source_spec("telegram_channel")
 def _build_telegram_channel_source_v2(
     spec: TelegramChannelSpec,
     auth: AuthProvider,
+    store: Any = None,
 ) -> TelegramChannelSource:
     from job_ftch.config import get_settings
 
@@ -415,10 +416,11 @@ def _build_telegram_channel_source_v2(
     )
 
 
-@register_source_v2("telegram_group")
+@register_source_spec("telegram_group")
 def _build_telegram_group_source_v2(
     spec: TelegramGroupSpec,
     auth: AuthProvider,
+    store: Any = None,
 ) -> TelegramGroupSource:
     from job_ftch.config import get_settings
 
@@ -432,10 +434,11 @@ def _build_telegram_group_source_v2(
     )
 
 
-@register_source_v2("telegram_comments")
+@register_source_spec("telegram_comments")
 def _build_telegram_comments_source_v2(
     spec: TelegramCommentsSpec,
     auth: AuthProvider,
+    store: Any = None,
 ) -> TelegramCommentSource:
     from job_ftch.config import get_settings
 

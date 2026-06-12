@@ -4,10 +4,10 @@ from job_ftch.application import (
     Pipeline,
     PipelineBuilder,
     RunSummary,
+    TenantRunner,
     configure,
     run,
 )
-from job_ftch.application.builder import TenantConfig
 from job_ftch.application.contracts import (
     EmbeddingProvider,
     JobPersistenceBackend,
@@ -22,7 +22,7 @@ from job_ftch.application.contracts import (
     VectorBackend,
 )
 from job_ftch.config import Settings, get_settings
-from job_ftch.domain import Job, RawItem
+from job_ftch.domain import Job, RawItem, TenantConfig
 
 __all__ = [
     "EmbeddingProvider",
@@ -42,6 +42,7 @@ __all__ = [
     "Stage",
     "Store",
     "TenantConfig",
+    "TenantRunner",
     "VectorBackend",
     "configure",
     "get_settings",

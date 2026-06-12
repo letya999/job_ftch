@@ -15,6 +15,8 @@ if TYPE_CHECKING:
         QuarantinedRawItem,
         RememberedDedupKey,
     )
+    from job_ftch.domain.site_models import MonitorResult, ScrapedPostingPayload
+    from job_ftch.domain.source_spec import CareerSiteSpec
 
 SourceItem = TypeVar("SourceItem", covariant=True)
 StageInput = TypeVar("StageInput", contravariant=True)
@@ -104,6 +106,12 @@ class Store(Protocol):
         source_name: str | None = None,
     ) -> None:
         """Persist arbitrary run state."""
+
+    async def get_source_strategy(self, domain: str) -> dict[str, str] | None:
+        """Fetch cached scraping strategy for a domain."""
+
+    async def save_source_strategy(self, domain: str, monitor: str, bypass: str) -> None:
+        """Cache a successful scraping strategy for a domain."""
 
 
 @runtime_checkable
@@ -226,3 +234,37 @@ class IngestMode(Protocol):
         on_item: Callable[[Any], Awaitable[None]],
     ) -> None:
         """Drive source fetch and call on_item for each yielded item."""
+
+
+@runtime_checkable
+class ProxyManager(Protocol):
+    def get_proxy(self) -> str | None:
+        """Return the next proxy URL from the pool."""
+
+
+@runtime_checkable
+class BypassStrategy(Protocol):
+    async def apply_http(self, client: Any) -> Any:
+        """Apply bypass to an HTTP client (e.g. swap httpx for curl_cffi)."""
+
+    def apply_browser_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Modify Playwright launch kwargs (add proxy, stealth flags, executable_path)."""
+
+    async def apply_page(self, page: Any) -> None:
+        """Apply bypass to a created Playwright page (stealth scripts, behavior simulation)."""
+
+
+@runtime_checkable
+class BoardMonitor(Protocol):
+    """Discovers what jobs exist on a board."""
+
+    async def discover(self, spec: CareerSiteSpec, http: Any) -> MonitorResult: ...
+
+
+@runtime_checkable
+class JobScraper(Protocol):
+    """Extracts structured content from a single job URL."""
+
+    async def scrape(
+        self, url: str, config: dict[str, Any], http: Any
+    ) -> ScrapedPostingPayload | None: ...

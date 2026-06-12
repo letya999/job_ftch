@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from job_ftch.application.registry import register_source_v2
+from job_ftch.application.registry import register_source_spec
 from job_ftch.domain import RawItem, SourceKind
 
 if TYPE_CHECKING:
@@ -84,6 +84,6 @@ class TelegramRealtimeSource:
                     continue
 
 
-@register_source_v2("telegram_realtime")
-def _create_telegram_realtime_source(spec: Any, auth: AuthProvider) -> TelegramRealtimeSource:
+@register_source_spec("telegram_realtime")
+def _create_realtime(spec: Any, auth: AuthProvider, store: Any = None) -> TelegramRealtimeSource:
     return TelegramRealtimeSource(spec, auth)

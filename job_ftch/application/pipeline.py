@@ -54,6 +54,12 @@ class StatsBase:
     failed: int = 0
     new_groups_created: int = 0
     merged_into_group: int = 0
+    monitored: int = 0  # URLs/items discovered by monitor
+    rich_emitted: int = 0  # items from rich monitors (no scraper needed)
+    scraped: int = 0  # items processed by scraper
+    scrape_fallback_used: int = 0  # times fallback scraper was triggered
+    source_partial: bool = False  # at least one monitor was truncated
+    monitor_truncated: int = 0  # count of truncated monitor runs
     drop_reasons: dict[str, int] = field(default_factory=dict)
     quarantine_reasons: dict[str, int] = field(default_factory=dict)
 
@@ -89,6 +95,7 @@ class SourceRunStats(StatsBase):
 @dataclass(slots=True)
 class RunSummary(StatsBase):
     by_source_kind: dict[str, SourceRunStats] = field(default_factory=dict)
+    tenant_id: str | None = None
     applied_profile: str | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
@@ -307,6 +314,26 @@ class Pipeline[PipelineInput, PipelineOutput]:
                         await self._store.mark_processed(processed_key)
                         await self._set_run_state("pipeline.last_processed_key", processed_key)
             summary.finish()
+            # Collect additional stats from source if available (e.g. CareerSiteSource)
+            if hasattr(self._source, "stats"):
+                source_stats = getattr(self._source, "stats", {})
+                for key, val in source_stats.items():
+                    if hasattr(summary, key):
+                        if isinstance(val, int):
+                            setattr(summary, key, getattr(summary, key) + val)
+                        else:
+                            setattr(summary, key, val)
+
+                # Also update by_source_kind if possible
+                source_kind = getattr(self._source, "kind", "career_site")
+                sk_stats = summary.source_stats(source_kind)
+                for key, val in source_stats.items():
+                    if hasattr(sk_stats, key):
+                        if isinstance(val, int):
+                            setattr(sk_stats, key, getattr(sk_stats, key) + val)
+                        else:
+                            setattr(sk_stats, key, val)
+
             try:
                 await self._flush_if_supported(self._sink)
             except Exception:

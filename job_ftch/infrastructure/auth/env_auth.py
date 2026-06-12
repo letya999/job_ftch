@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
+
+from job_ftch.application.registry import register_auth_provider
+
+if TYPE_CHECKING:
+    from job_ftch.config import Settings
 
 
 class EnvAuthProvider:
@@ -15,3 +21,9 @@ class EnvAuthProvider:
             for key, value in os.environ.items()
             if key.startswith(prefix)
         }
+
+
+@register_auth_provider("env")
+def _create_env_auth(settings: Settings) -> EnvAuthProvider:
+    del settings
+    return EnvAuthProvider()

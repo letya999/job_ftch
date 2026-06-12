@@ -42,6 +42,7 @@ def pipeline_setup(
 
 @pytest.mark.asyncio
 async def test_pipeline_rss_to_json_sink(pipeline_setup, habr_ml_rss_xml: str, monkeypatch) -> None:
+    pytest.importorskip("feedparser")
     pipeline, _, temp_json_path = pipeline_setup
 
     # Mock httpx.AsyncClient.get

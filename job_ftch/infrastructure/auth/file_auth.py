@@ -6,8 +6,12 @@ from typing import TYPE_CHECKING
 
 import yaml
 
+from job_ftch.application.registry import register_auth_provider
+
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from job_ftch.config import Settings
 
 
 class FileAuthProvider:
@@ -31,3 +35,11 @@ class FileAuthProvider:
         if not self._loaded:
             self._load()
         return self._secrets.get(source_id, {})
+
+
+@register_auth_provider("file")
+def _create_file_auth(settings: Settings) -> FileAuthProvider:
+    if settings.auth_file_path is None:
+        msg = "auth_file_path is required when auth_provider=file."
+        raise ValueError(msg)
+    return FileAuthProvider(settings.auth_file_path)

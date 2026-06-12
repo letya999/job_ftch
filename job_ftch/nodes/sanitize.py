@@ -172,7 +172,7 @@ class SanitizeNode:
                 item=item,
             ) from exc
         host = parsed.host.lower() if parsed.host is not None else ""
-        if item.source_kind is SourceKind.CAREER_SITE:
+        if item.source_kind is SourceKind.CAREER_SITE and self._allowed_career_site_hosts:
             if not _host_allowed(host, self._allowed_career_site_hosts):
                 allowed = ", ".join(sorted(self._allowed_career_site_hosts))
                 raise RawItemRejected(
