@@ -10,7 +10,12 @@ uv.lock
 
 # local debug / probe artifacts
 *.out
+*.log
 scripts/e2e_probe_stderr*.txt
+.tmp-*
+tmp-*.json
+tmp-*/
+*.session
 
 # env files
 .env
