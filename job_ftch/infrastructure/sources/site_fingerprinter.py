@@ -25,16 +25,24 @@ class SiteProfile:
     detected_config: dict[str, Any]  # extra monitor_config hints
 
 
-async def fingerprint(url: str, client: httpx.AsyncClient) -> SiteProfile:
+async def fingerprint(url: str, client: httpx.AsyncClient | None = None) -> SiteProfile:
     """
     Classifies a website based on a fast plain-HTTP probe.
-    Does NOT use a browser.
+    Does NOT use a browser. Creates its own HTTP client to avoid wrapper incompatibilities.
+    The client parameter is accepted but ignored — fingerprinter is self-contained.
     """
     log = logger.bind(url=url)
 
     try:
         # Phase 0 - plain HTTP GET
-        response = await client.get(url, follow_redirects=True, timeout=8.0)
+        # We create a new client here because the passed-in client might be a wrapper
+        # that doesn't support the 'timeout' or 'follow_redirects' kwargs properly.
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=httpx.Timeout(8.0),
+            headers={"User-Agent": "Mozilla/5.0 (compatible; SiteFingerprinter/1.0)"},
+        ) as probe_client:
+            response = await probe_client.get(url)
     except (httpx.ConnectError, httpx.TimeoutException, httpx.RequestError) as e:
         log.warning("fingerprint_connection_failed", error=str(e))
         return SiteProfile(SiteClass.BLOCKED, ["dom", "api_sniffer"], {})
