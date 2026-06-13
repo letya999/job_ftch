@@ -191,6 +191,18 @@ class TelegramBotService:
             )
             await self._sender.send_message(chat_id, reply)
             return
+        if command == "/sources":
+            sources_tenant_id = args[0] if args else tenant_ids[0]
+            payloads = await self._runner.list_source_health(sources_tenant_id)
+            if not payloads:
+                await self._sender.send_message(chat_id, "No source health yet.")
+                return
+            lines = [
+                f"{item['source_name']}: {item['status']} emitted={item['last_emitted']} failures={item['failure_streak']}"
+                for item in payloads[:10]
+            ]
+            await self._sender.send_message(chat_id, "\n".join(lines))
+            return
         if command == "/run":
             try:
                 self._require_admin(user_id)

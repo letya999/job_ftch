@@ -97,6 +97,16 @@ def create_app(
         summary = await runner.get_status(tenant_id)
         return None if summary is None else summary.as_dict()
 
+    @app.get("/pipeline/sources/{tenant_id}")
+    async def pipeline_sources(
+        tenant_id: str,
+        x_api_key: str | None = Header(default=None),
+    ) -> list[dict[str, Any]]:
+        expected_key = bot_config.bridge_api_key
+        if expected_key and not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        return await runner.list_source_health(tenant_id)
+
     @app.get("/jobs/search")
     async def search_jobs(
         q: str,

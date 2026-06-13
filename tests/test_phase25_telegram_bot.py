@@ -189,6 +189,7 @@ async def test_bot_access_control_and_status_endpoint(
     app = create_app(configs_dir=tmp_path / "configs", runner=runner, bot_service=service)
     webhook = app.routes[("POST", "/webhook/telegram")]
     status = app.routes[("GET", "/pipeline/status/{tenant_id}")]
+    sources = app.routes[("GET", "/pipeline/sources/{tenant_id}")]
     pipeline_run = app.routes[("POST", "/pipeline/run")]
 
     await webhook(
@@ -203,13 +204,39 @@ async def test_bot_access_control_and_status_endpoint(
     )
     summary = await pipeline_run({"tenant_id": "ai_jobs"}, "bridge-key")
     status_payload = await status("ai_jobs")
+    source_payload = await sources("ai_jobs", "bridge-key")
 
     assert sender.messages[0]["text"] == "Access denied."
     assert summary["tenant_id"] == "ai_jobs"
     assert status_payload is not None
     assert status_payload["tenant_id"] == "ai_jobs"
+    assert source_payload[0]["source_id"] == "debug:fixture"
 
     await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_bot_sources_command_reports_source_health(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path)
+    await runner.run_tenant("ai_jobs")
+    sender = FakeSender()
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            allowed_user_ids=(1,),
+            allowed_chat_ids=(100,),
+            admin_user_ids=(1,),
+            rate_limit_seconds=0.0,
+        ),
+    )
+
+    try:
+        await service.handle_command("/sources ai_jobs", chat_id=100, user_id=1)
+        assert "fixture: healthy" in sender.messages[0]["text"]
+    finally:
+        await runner.close()
 
 
 @pytest.mark.asyncio

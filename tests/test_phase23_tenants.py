@@ -255,6 +255,35 @@ def test_merge_run_summaries_accumulates_counts_and_source_stats() -> None:
     assert merged.by_source_id["career_site:bcc_ml"].failed == 1
 
 
+@pytest.mark.asyncio
+async def test_tenant_runner_lists_source_health(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "ai_jobs",
+            "display_name": "AI Jobs",
+            "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+            "store_backend": "sqlite",
+            "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            "job_group_store_backend": "sqlite",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+        }
+    )
+    runner = TenantRunner.from_tenants([tenant])
+
+    try:
+        await runner.run_tenant("ai_jobs")
+        payloads = await runner.list_source_health("ai_jobs")
+        assert len(payloads) == 1
+        assert payloads[0]["source_id"] == "debug:fixture"
+        assert payloads[0]["status"] == "healthy"
+    finally:
+        await runner.close()
+
+
 def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
     stats = SourceRunStats(emitted=0, failed=0, fetched=2)
     payload = _update_source_health_payload(

@@ -282,6 +282,16 @@ class TenantStore:
         )
         await connector.set_add(self._key("source_health_ids"), source_id)
 
+    async def list_source_health(self) -> list[dict[str, Any]]:
+        connector = cast("StoreConnector", self._store)
+        source_ids = sorted(await connector.set_members(self._key("source_health_ids")))
+        payloads: list[dict[str, Any]] = []
+        for source_id in source_ids:
+            payload = await self.get_source_health(source_id)
+            if payload is not None:
+                payloads.append(payload)
+        return payloads
+
     async def get_run_summary(self, run_id: str) -> RunSummary | None:
         connector = cast("StoreConnector", self._store)
         raw = await connector.get(self._key(f"run_history:{run_id}"))
@@ -500,6 +510,9 @@ class TenantRunner:
                 )
             )
         return result
+
+    async def list_source_health(self, tenant_id: str) -> list[dict[str, Any]]:
+        return await self.get_runtime(tenant_id).store.list_source_health()
 
     async def search_jobs(
         self,
