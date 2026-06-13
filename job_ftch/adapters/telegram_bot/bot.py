@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 import httpx
 import structlog
 
-from job_ftch.adapters.profile_inputs import build_candidate_profile_from_payload
+from job_ftch.adapters.profile_inputs import (
+    build_candidate_profile_from_payload,
+    build_profile_from_resume_text,
+)
 from job_ftch.adapters.source_inputs import build_source_spec_from_input
 from job_ftch.adapters.telegram_bot.formatter import format_job_digest, format_job_message
 from job_ftch.application.tenant_runner import TenantRunner
@@ -80,6 +83,7 @@ class TelegramSender(Protocol):
 
 class HttpTelegramBotClient:
     def __init__(self, token: str, *, timeout: float = 10.0) -> None:
+        self._token = token
         self._base_url = f"https://api.telegram.org/bot{token}"
         self._client = httpx.AsyncClient(timeout=timeout)
 
@@ -119,6 +123,16 @@ class HttpTelegramBotClient:
         result = payload.get("result", [])
         return cast("list[dict[str, Any]]", result)
 
+    async def download_file(self, file_id: str) -> bytes:
+        response = await self._client.get(f"{self._base_url}/getFile", params={"file_id": file_id})
+        response.raise_for_status()
+        file_path = response.json()["result"]["file_path"]
+
+        download_url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
+        response = await self._client.get(download_url)
+        response.raise_for_status()
+        return response.content
+
     async def close(self) -> None:
         await self._client.aclose()
 
@@ -154,9 +168,77 @@ class TelegramBotService:
             return
 
         text = message.get("text")
+        document = message.get("document")
+
+        if document and not isinstance(text, str):
+            await self.handle_document(document, chat_id=chat_id, user_id=user_id)
+            return
+
         if not isinstance(text, str):
             return
         await self.handle_command(text, chat_id=chat_id, user_id=user_id)
+
+    async def handle_document(self, document: dict[str, Any], *, chat_id: int, user_id: int) -> None:
+        if not self._is_allowed(user_id=user_id, chat_id=chat_id):
+            return
+
+        file_id = document.get("file_id")
+        file_name = document.get("file_name", "resume.txt")
+        if not file_id:
+            return
+
+        await self._sender.send_message(chat_id, "Processing your resume...")
+
+        try:
+            content = await self._sender.download_file(file_id)
+            text = self._extract_text(content, file_name)
+            if not text.strip():
+                await self._sender.send_message(chat_id, "Could not extract text from the file.")
+                return
+
+            # Default to first tenant if multiple
+            tenant_ids = self._runner.tenant_ids()
+            tenant_id = tenant_ids[0] if tenant_ids else "default"
+
+            managed_profile = build_profile_from_resume_text(text, user_id=str(user_id))
+            await self._runner.save_candidate_profile(tenant_id, managed_profile)
+            await self._runner.set_active_candidate_profile(
+                tenant_id, str(user_id), managed_profile.profile_id
+            )
+
+            await self._sender.send_message(
+                chat_id,
+                f"Profile created from your resume. Active: {managed_profile.profile_id}",
+            )
+        except Exception as exc:
+            logger.error("resume_upload_failed", error=str(exc), exc_info=True)
+            await self._sender.send_message(chat_id, f"Error processing resume: {exc}")
+
+    def _extract_text(self, content: bytes, filename: str) -> str:
+        import io
+
+        if filename.lower().endswith(".pdf"):
+            try:
+                from pypdf import PdfReader
+
+                reader = PdfReader(io.BytesIO(content))
+                return "\n".join(page.extract_text() or "" for page in reader.pages)
+            except ImportError:
+                return "PDF extraction requires 'pypdf' library."
+
+        if filename.lower().endswith(".docx"):
+            try:
+                from docx import Document
+
+                doc = Document(io.BytesIO(content))
+                return "\n".join(p.text for p in doc.paragraphs)
+            except ImportError:
+                return "DOCX extraction requires 'python-docx' library."
+
+        if filename.lower().endswith(".txt"):
+            return content.decode("utf-8", errors="replace")
+
+        return ""
 
     async def handle_command(self, text: str, *, chat_id: int, user_id: int) -> None:
         if not self._is_allowed(user_id=user_id, chat_id=chat_id):

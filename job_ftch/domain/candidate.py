@@ -26,6 +26,7 @@ class CandidateIdentity(BaseModel):
 class CandidateResumeSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    raw_text: str | None = None
     summary: str | None = None
     skills: tuple[SkillTag, ...] = ()
     target_roles: tuple[str, ...] = ()
@@ -33,6 +34,8 @@ class CandidateResumeSnapshot(BaseModel):
 
     @model_validator(mode="after")
     def normalize(self) -> CandidateResumeSnapshot:
+        if self.raw_text is not None:
+            object.__setattr__(self, "raw_text", self.raw_text.strip() or None)
         if self.summary is not None:
             object.__setattr__(self, "summary", self.summary.strip() or None)
         object.__setattr__(

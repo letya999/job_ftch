@@ -8,6 +8,7 @@ from job_ftch.domain import (
     CandidateIdentity,
     CandidateProfile,
     CandidateResumeSnapshot,
+    ManagedCandidateProfile,
     ProfileCatalog,
     SearchProfile,
     SkillTag,
@@ -67,4 +68,102 @@ def build_profile_catalog(profile: CandidateProfile) -> ProfileCatalog:
     return ProfileCatalog(
         catalog_name=profile.identity.display_name or profile.identity.candidate_id,
         profiles=profile.search_profiles,
+    )
+
+
+def build_profile_from_resume_text(
+    text: str, *, user_id: str, profile_id: str | None = None
+) -> ManagedCandidateProfile:
+    """Extract a CandidateProfile from raw resume text using heuristics."""
+    from datetime import UTC, datetime
+
+    profile_id = profile_id or f"resume_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    name = lines[0] if lines else "Unknown"
+    summary = text[:300].strip()
+
+    # Heuristic extraction
+    role_keywords = {
+        "Engineer",
+        "Analyst",
+        "Developer",
+        "Manager",
+        "Lead",
+        "Architect",
+        "Scientist",
+        "Designer",
+    }
+    skill_keywords = {
+        "Python",
+        "SQL",
+        "Java",
+        "Go",
+        "TypeScript",
+        "React",
+        "Postgres",
+        "Kubernetes",
+        "Docker",
+        "Spark",
+        "dbt",
+        "Kafka",
+        "Airflow",
+    }
+
+    found_roles = []
+    for role in role_keywords:
+        if role.lower() in text.lower():
+            found_roles.append(role)
+
+    found_skills = []
+    for skill in skill_keywords:
+        if skill.lower() in text.lower():
+            found_skills.append(skill)
+
+    # Language detection (heuristic)
+    languages = []
+    if any(c in "абвгдеёжзийклмнопрстуфхцчшщъыьэюя" for c in text.lower()):
+        languages.append("ru")
+    if any(c in "abcdefghijklmnopqrstuvwxyz" for c in text.lower()):
+        languages.append("en")
+    if any(c in "әғқңөұүһ" for c in text.lower()):
+        languages.append("kk")
+
+    candidate_profile = build_candidate_profile_from_payload(
+        user_id=user_id,
+        profile_id=profile_id,
+        payload={
+            "name": name,
+            "summary": summary,
+            "target_roles": found_roles,
+            "required_skills": found_skills,
+            "preferred_regions": [],
+        },
+    )
+    # Add languages and threshold
+    search_profiles = list(candidate_profile.search_profiles)
+    if search_profiles:
+        sp = search_profiles[0]
+        search_profiles[0] = sp.model_copy(
+            update={
+                "languages_of_interest": tuple(languages),
+                "relevance_threshold": 0.3,
+            }
+        )
+    candidate_profile = candidate_profile.model_copy(
+        update={
+            "search_profiles": tuple(search_profiles),
+            "resume": CandidateResumeSnapshot(
+                raw_text=text[:5000],
+                summary=summary,
+                target_roles=tuple(found_roles),
+                skills=_skills(tuple(found_skills)),
+            ),
+        }
+    )
+
+    return ManagedCandidateProfile(
+        user_id=user_id,
+        profile_id=profile_id,
+        profile=candidate_profile,
+        updated_at=datetime.now(UTC),
     )
