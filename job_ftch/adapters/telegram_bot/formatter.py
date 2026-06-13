@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from html import escape
+from typing import TYPE_CHECKING
 
-from job_ftch.domain import JobRecord
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from job_ftch.domain import Job, JobRecord
 
 _MAX_TITLE = 200
 _MAX_COMPANY = 100
@@ -25,7 +29,7 @@ def format_job_message(job: JobRecord) -> str:
     return message[:_MAX_TOTAL]
 
 
-def format_job_digest(jobs: list[JobRecord], *, page: int = 0, page_size: int = 5) -> str:
+def format_job_digest(jobs: Sequence[Job], *, page: int = 0, page_size: int = 5) -> str:
     start = page * page_size
     chunk = jobs[start : start + page_size]
     if not chunk:

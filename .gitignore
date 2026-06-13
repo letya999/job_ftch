@@ -62,7 +62,6 @@ global_test_results.jsonl
 
 # Dev artifacts / notes
 JOBSEEK_*.md
-plans/
 
 # Test configs
 config/test_*.yaml
