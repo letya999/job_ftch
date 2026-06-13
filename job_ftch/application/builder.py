@@ -146,6 +146,10 @@ class PipelineBuilder:
         self._sinks.append(sink)
         return self
 
+    def clear_sinks(self) -> PipelineBuilder:
+        self._sinks = []
+        return self
+
     def store(self, store: Store) -> PipelineBuilder:
         self._store = store
         return self

@@ -628,7 +628,39 @@ class TenantRunner:
         }
         runtime.disabled_source_ids = await runtime.store.list_disabled_source_ids()
         self._apply_runtime_sources(runtime)
+        await self._ensure_dynamic_config_loaded(runtime)
         runtime.sources_loaded = True
+
+    async def _ensure_dynamic_config_loaded(self, runtime: TenantRuntime) -> None:
+        posting_backend = await runtime.store.get_run_state("config:posting_backend")
+        posting_entity = await runtime.store.get_run_state("config:telegram_publish_entity")
+
+        updated = False
+        if posting_backend and posting_backend != runtime.settings.posting_backend:
+            runtime.settings.posting_backend = posting_backend
+            updated = True
+        if posting_entity and posting_entity != runtime.settings.telegram_publish_entity:
+            runtime.settings.telegram_publish_entity = posting_entity
+            updated = True
+
+        if updated:
+            output_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
+            runtime.builder.clear_sinks().sink(output_sink)
+            runtime.builder.set_summary_context(
+                review_sink=review_sink,
+                posting_sink=posting_sink,
+                job_group_store=runtime.job_group_store,
+                profile_name=load_profile_catalog(runtime.settings).catalog_name,
+                output_path=runtime.settings.output_path,
+            )
+
+    async def update_posting_config(self, tenant_id: str, channel: str) -> None:
+        runtime = self.get_runtime(tenant_id)
+        await runtime.store.set_run_state("config:posting_backend", "telegram_posting")
+        await runtime.store.set_run_state("config:telegram_publish_entity", channel)
+        # Force reload
+        runtime.sources_loaded = False
+        await self._ensure_runtime_sources_loaded(runtime)
 
     def _apply_runtime_sources(self, runtime: TenantRuntime) -> None:
         effective_sources = _merge_effective_sources(

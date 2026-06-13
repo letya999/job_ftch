@@ -315,6 +315,25 @@ class TelegramBotService:
                 f"Disabled {disabled['source_id']} in {args[0]}.",
             )
             return
+        if command == "/setposting":
+            try:
+                self._require_admin(user_id)
+            except PermissionError as exc:
+                await self._sender.send_message(chat_id, f"Access denied: {exc}")
+                return
+            if len(args) < 2:
+                await self._sender.send_message(
+                    chat_id, "Usage: /setposting <tenant_id> <channel_id_or_username>"
+                )
+                return
+            post_tenant_id, channel = args[0], args[1]
+            await self._runner.update_posting_config(post_tenant_id, channel)
+            await self._sender.send_message(
+                chat_id,
+                f"Posting enabled for {post_tenant_id} to {channel}. "
+                "Backend: telegram_posting.",
+            )
+            return
         if command == "/run":
             try:
                 self._require_admin(user_id)

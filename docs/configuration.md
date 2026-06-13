@@ -180,7 +180,19 @@ Metrics:
 - `JOB_FTCH_METRICS_ENABLED`
 - `JOB_FTCH_METRICS_PORT`
 
-These env vars still matter, but they are no longer the best place to describe a real multi-source installation.
+## Enable Telegram notifications
+
+To send discovered jobs to a Telegram channel or group, set the following environment variables:
+
+```bash
+JOB_FTCH_POSTING_BACKEND=telegram_posting
+JOB_FTCH_TELEGRAM_PUBLISH_ENTITY=@my_channel   # or numeric channel id
+JOB_FTCH_POSTING_MIN_QUALITY_SCORE=0.75         # optional, default 0.8
+```
+
+Telegram posting fires per-job when `job.quality_score >= posting_min_quality_score`.
+
+Alternatively, you can use the bot command `/setposting <tenant_id> <channel>` to enable it at runtime.
 
 ---
 
