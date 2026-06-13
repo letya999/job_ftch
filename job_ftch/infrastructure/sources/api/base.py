@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import structlog
@@ -12,7 +12,7 @@ from job_ftch.domain import RawItem, SourceKind
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from job_ftch.application.contracts import AuthProvider, Store
+    from job_ftch.application.contracts import AuthProvider, Store, StoreConnector
     from job_ftch.domain import QuarantinedRawItem
 
 logger = structlog.get_logger(__name__)
@@ -58,7 +58,9 @@ class OfficialAPISource:
 
         # Load incremental cursor
         if self.store and self.spec.incremental_cursor_field:
-            last_cursor = await IncrementalCursor(self.store).get(cursor_source_id)
+            last_cursor = await IncrementalCursor(cast("StoreConnector", self.store)).get(
+                cursor_source_id
+            )
             if last_cursor:
                 params[self.spec.incremental_cursor_field] = last_cursor
 
@@ -93,7 +95,9 @@ class OfficialAPISource:
                 if items and self.spec.incremental_cursor_field and self.store:
                     first_id = items[0].get("id")
                     if first_id is not None:
-                        await IncrementalCursor(self.store).set(cursor_source_id, str(first_id))
+                        await IncrementalCursor(cast("StoreConnector", self.store)).set(
+                            cursor_source_id, str(first_id)
+                        )
 
             except Exception as e:
                 logger.exception("api_fetch_failed", url=url, error=str(e))

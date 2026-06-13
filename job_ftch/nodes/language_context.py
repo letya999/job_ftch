@@ -53,7 +53,7 @@ class SourceContextNode:
             trust = 1.0
 
         # 3. Parsing hints for Telegram
-        hints = {}
+        hints: dict[str, object] = {}
         if family == "telegram":
             hints["has_hashtags"] = bool(_HASHTAG_RE.search(item.text))
             hints["has_urls"] = bool(_URL_RE.search(item.text))

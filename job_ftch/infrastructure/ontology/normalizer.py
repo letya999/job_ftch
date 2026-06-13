@@ -25,9 +25,10 @@ class OntologyNormalizer:
         if not path.exists():
             return {}
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            data: dict[str, Any] = json.load(f)
+            return data
 
-    def _build_regex_lookup(self, alias_data: dict[str, Any]) -> list[tuple[re.Pattern, str]]:
+    def _build_regex_lookup(self, alias_data: dict[str, Any]) -> list[tuple[re.Pattern[str], str]]:
         lookup = []
         # JSON order is priority. Management/DevOps/Data usually should come before generic Engineering.
         for canonical, data in alias_data.items():

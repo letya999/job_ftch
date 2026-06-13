@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import structlog
@@ -15,7 +15,7 @@ from job_ftch.domain import RawItem, SourceKind
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from job_ftch.application.contracts import AuthProvider, Store
+    from job_ftch.application.contracts import AuthProvider, Store, StoreConnector
     from job_ftch.domain import QuarantinedRawItem
     from job_ftch.domain.source_spec import RSSFeedSourceSpec
 
@@ -56,7 +56,9 @@ class RSSFeedSource:
         # Load seen IDs from store for incremental dedup
         seen_ids: set[str] = set()
         if self.spec.incremental and self.store:
-            raw = await IncrementalCursor(self.store).get(self._cursor_source_id)
+            raw = await IncrementalCursor(cast("StoreConnector", self.store)).get(
+                self._cursor_source_id
+            )
             if raw:
                 seen_ids = set(raw.split(","))
 
@@ -104,7 +106,9 @@ class RSSFeedSource:
             all_seen = seen_ids | set(new_ids)
             # Keep only last 10000 to avoid unbounded growth
             trimmed = set(list(all_seen)[-10000:])
-            await IncrementalCursor(self.store).set(self._cursor_source_id, ",".join(trimmed))
+            await IncrementalCursor(cast("StoreConnector", self.store)).set(
+                self._cursor_source_id, ",".join(trimmed)
+            )
 
 
 @register_source_spec("rss_feed")
