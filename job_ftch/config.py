@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     job_group_store_backend: str = "sqlite"
     llm_backend: str = "heuristic"
     posting_backend: str = "none"
+    notify_mode: str = "instant"  # "instant" (per job) or "digest" (once per run)
     log_level: str = "INFO"
     telemetry_service_name: str = "job_ftch"
     telemetry_console_exporter: bool = False

@@ -58,22 +58,35 @@ class TelegramPostingSink:
         entity: str,
         *,
         own_client: bool = False,
+        notify_mode: str = "instant",
     ) -> None:
         self._client = client
         self._entity = entity
         self._own_client = own_client
-        self._pending_messages: list[str] = []
+        self._notify_mode = notify_mode
+        self._pending_jobs: list[Job] = []
 
     async def emit(self, item: Job) -> None:
-        self._pending_messages.append(_format_job(item))
+        if self._notify_mode == "instant":
+            async with _client_session(self._client, own_client=self._own_client) as client:
+                await client.send_message(self._entity, _format_job(item), link_preview=False)
+        else:
+            self._pending_jobs.append(item)
 
     async def flush(self) -> None:
-        if not self._pending_messages:
+        if not self._pending_jobs:
             return
+        from job_ftch.adapters.telegram_bot.formatter import format_job_digest
+
+        # Split into chunks to avoid message length limits
+        chunk_size = 10
         async with _client_session(self._client, own_client=self._own_client) as client:
-            for message in self._pending_messages:
-                await client.send_message(self._entity, message, link_preview=False)
-        self._pending_messages.clear()
+            for i in range(0, len(self._pending_jobs), chunk_size):
+                chunk = self._pending_jobs[i : i + chunk_size]
+                header = f"<b>Job Digest ({i + 1}-{i + len(chunk)})</b>\n\n"
+                digest = format_job_digest(chunk, page=0, page_size=chunk_size)
+                await client.send_message(self._entity, header + digest, link_preview=False)
+        self._pending_jobs.clear()
 
 
 def _build_telegram_client(settings: Settings) -> TelegramPostingClientLike:
@@ -101,4 +114,5 @@ def _build_telegram_posting_sink(settings: Settings) -> TelegramPostingSink:
         _build_telegram_client(settings),
         settings.telegram_publish_entity,
         own_client=True,
+        notify_mode=settings.notify_mode,
     )

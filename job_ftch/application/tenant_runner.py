@@ -634,6 +634,7 @@ class TenantRunner:
     async def _ensure_dynamic_config_loaded(self, runtime: TenantRuntime) -> None:
         posting_backend = await runtime.store.get_run_state("config:posting_backend")
         posting_entity = await runtime.store.get_run_state("config:telegram_publish_entity")
+        notify_mode = await runtime.store.get_run_state("config:notify_mode")
 
         updated = False
         if posting_backend and posting_backend != runtime.settings.posting_backend:
@@ -641,6 +642,9 @@ class TenantRunner:
             updated = True
         if posting_entity and posting_entity != runtime.settings.telegram_publish_entity:
             runtime.settings.telegram_publish_entity = posting_entity
+            updated = True
+        if notify_mode and notify_mode != runtime.settings.notify_mode:
+            runtime.settings.notify_mode = notify_mode
             updated = True
 
         if updated:
@@ -658,6 +662,16 @@ class TenantRunner:
         runtime = self.get_runtime(tenant_id)
         await runtime.store.set_run_state("config:posting_backend", "telegram_posting")
         await runtime.store.set_run_state("config:telegram_publish_entity", channel)
+        # Force reload
+        runtime.sources_loaded = False
+        await self._ensure_runtime_sources_loaded(runtime)
+
+    async def update_notify_config(self, tenant_id: str, mode: str) -> None:
+        if mode not in ("instant", "digest"):
+            msg = "notify_mode must be 'instant' or 'digest'"
+            raise ValueError(msg)
+        runtime = self.get_runtime(tenant_id)
+        await runtime.store.set_run_state("config:notify_mode", mode)
         # Force reload
         runtime.sources_loaded = False
         await self._ensure_runtime_sources_loaded(runtime)

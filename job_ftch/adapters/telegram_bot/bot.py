@@ -416,6 +416,27 @@ class TelegramBotService:
                 "Backend: telegram_posting.",
             )
             return
+        if command == "/setnotify":
+            try:
+                self._require_admin(user_id)
+            except PermissionError as exc:
+                await self._sender.send_message(chat_id, f"Access denied: {exc}")
+                return
+            if len(args) < 2:
+                await self._sender.send_message(
+                    chat_id, "Usage: /setnotify <tenant_id> <instant|digest>"
+                )
+                return
+            notify_tenant_id, mode = args[0], args[1].lower()
+            try:
+                await self._runner.update_notify_config(notify_tenant_id, mode)
+                await self._sender.send_message(
+                    chat_id,
+                    f"Notification mode for {notify_tenant_id} set to {mode}.",
+                )
+            except ValueError as exc:
+                await self._sender.send_message(chat_id, str(exc))
+            return
         if command == "/addsources":
             try:
                 self._require_admin(user_id)

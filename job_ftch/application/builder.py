@@ -309,6 +309,7 @@ def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = No
             "job_group_store_backend": tenant.job_group_store_backend,
             "llm_backend": tenant.llm_backend,
             "posting_backend": tenant.posting_backend,
+            "notify_mode": tenant.notify_mode,
             "dry_run": tenant.dry_run,
             "metrics_enabled": tenant.metrics_enabled,
             "metrics_port": tenant.metrics_port,

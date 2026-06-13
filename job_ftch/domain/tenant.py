@@ -84,6 +84,7 @@ class TenantConfig(BaseModel):
     job_group_store_backend: str = "sqlite"
     llm_backend: str = "heuristic"
     posting_backend: str = "none"
+    notify_mode: str = "instant"
     dry_run: bool = False
     metrics_enabled: bool = False
     metrics_port: int = 9090
