@@ -416,6 +416,38 @@ class TelegramBotService:
                 "Backend: telegram_posting.",
             )
             return
+        if command == "/addsources":
+            try:
+                self._require_admin(user_id)
+            except PermissionError as exc:
+                await self._sender.send_message(chat_id, f"Access denied: {exc}")
+                return
+            if len(args) < 2:
+                await self._sender.send_message(
+                    chat_id, "Usage: /addsources <tenant_id> <link1> <link2>..."
+                )
+                return
+            tenant_id = args[0]
+            links = args[1:]
+
+            added_count = 0
+            errors = []
+            for link in links:
+                try:
+                    spec = await build_source_spec_from_input(
+                        link,
+                        auth_provider=self._runner.get_runtime(tenant_id).auth_provider,
+                    )
+                    await self._runner.add_source_spec(tenant_id, spec, input_value=link)
+                    added_count += 1
+                except Exception as exc:
+                    errors.append(f"{link}: {exc}")
+
+            msg = f"Added {added_count} sources to {tenant_id}."
+            if errors:
+                msg += "\n\nErrors:\n" + "\n".join(errors)
+            await self._sender.send_message(chat_id, msg)
+            return
         if command == "/run":
             try:
                 self._require_admin(user_id)
