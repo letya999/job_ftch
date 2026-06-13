@@ -424,7 +424,7 @@ async def create_store_with_fallback(settings: Settings) -> object:
     try:
         primary_store = create_store(settings)
     except Exception as exc:
-        if settings.store_fallback_on_error:
+        if settings.store_fallback_on_error and settings.store_backend != "postgres":
             structlog.get_logger("job_ftch.registry").warning(
                 "store_creation_failed_falling_back_to_in_memory",
                 backend=settings.store_backend,
@@ -439,7 +439,7 @@ async def create_store_with_fallback(settings: Settings) -> object:
             return primary_store
 
         # Health check failed
-        if settings.store_fallback_on_error:
+        if settings.store_fallback_on_error and settings.store_backend != "postgres":
             structlog.get_logger("job_ftch.registry").warning(
                 "store_health_check_failed_falling_back_to_in_memory",
                 backend=settings.store_backend,

@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     source_backend: str = "local_fixture"
     sink_backend: str = "json_file"
-    store_backend: str = "sqlite"  # "memory" (tests), "sqlite" (default), "postgres" (requires STORE_DSN)
+    store_backend: str = "postgres"  # "memory" (tests), "sqlite", "postgres" (default)
     job_group_store_backend: str = "sqlite"
     llm_backend: str = "heuristic"
     posting_backend: str = "none"
@@ -143,6 +143,16 @@ class Settings(BaseSettings):
             msg = "backend keys must not be blank"
             raise ValueError(msg)
         return normalized
+
+    @model_validator(mode="after")
+    def validate_postgres_dsn(self) -> Settings:
+        if self.store_backend == "postgres" and not self.store_dsn:
+            raise ValueError(
+                "store_backend='postgres' requires STORE_DSN env var to be set. "
+                "Example: STORE_DSN='postgresql+asyncpg://user:pass@host:5432/dbname'. "
+                "Set store_backend='sqlite' or 'memory' to run without Postgres."
+            )
+        return self
 
     @field_validator("telegram_api_id", mode="before")
     @classmethod

@@ -115,3 +115,16 @@ def test_career_site_allowed_hosts_env_csv_parses_in_settings_constructor(
         "www.bcc.kz",
         "bcc.kz",
     )
+
+
+def test_postgres_backend_requires_dsn() -> None:
+    with pytest.raises(ValueError, match="store_backend='postgres' requires STORE_DSN"):
+        Settings.model_validate({"store_backend": "postgres", "store_dsn": None})
+
+
+def test_postgres_backend_valid_dsn() -> None:
+    settings = Settings.model_validate(
+        {"store_backend": "postgres", "store_dsn": "postgresql+asyncpg://user:pass@host/db"}
+    )
+    assert settings.store_backend == "postgres"
+    assert settings.store_dsn == "postgresql+asyncpg://user:pass@host/db"
