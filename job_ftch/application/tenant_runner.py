@@ -635,6 +635,7 @@ class TenantRunner:
         posting_backend = await runtime.store.get_run_state("config:posting_backend")
         posting_entity = await runtime.store.get_run_state("config:telegram_publish_entity")
         notify_mode = await runtime.store.get_run_state("config:notify_mode")
+        notify_batch_size = await runtime.store.get_run_state("config:notify_batch_size")
 
         updated = False
         if posting_backend and posting_backend != runtime.settings.posting_backend:
@@ -646,6 +647,14 @@ class TenantRunner:
         if notify_mode and notify_mode != runtime.settings.notify_mode:
             runtime.settings.notify_mode = notify_mode
             updated = True
+        if notify_batch_size:
+            try:
+                val = int(notify_batch_size)
+                if val != runtime.settings.notify_batch_size:
+                    runtime.settings.notify_batch_size = val
+                    updated = True
+            except ValueError:
+                pass
 
         if updated:
             output_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
@@ -666,12 +675,16 @@ class TenantRunner:
         runtime.sources_loaded = False
         await self._ensure_runtime_sources_loaded(runtime)
 
-    async def update_notify_config(self, tenant_id: str, mode: str) -> None:
+    async def update_notify_config(
+        self, tenant_id: str, mode: str, batch_size: int | None = None
+    ) -> None:
         if mode not in ("instant", "digest"):
             msg = "notify_mode must be 'instant' or 'digest'"
             raise ValueError(msg)
         runtime = self.get_runtime(tenant_id)
         await runtime.store.set_run_state("config:notify_mode", mode)
+        if batch_size is not None:
+            await runtime.store.set_run_state("config:notify_batch_size", str(batch_size))
         # Force reload
         runtime.sources_loaded = False
         await self._ensure_runtime_sources_loaded(runtime)

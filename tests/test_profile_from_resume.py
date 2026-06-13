@@ -1,5 +1,5 @@
-import pytest
 from job_ftch.adapters.profile_inputs import build_profile_from_resume_text
+
 
 def test_heuristic_extraction():
     text = """

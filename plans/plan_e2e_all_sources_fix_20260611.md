@@ -1,0 +1,829 @@
+# Fix e2e run to cover ALL sources
+
+## Context
+
+**Workspace:** `C:/Users/User/a_projects/job_ftch` (Gemini workspace)
+**Branch:** main
+
+## Problem analysis
+
+Previous e2e run with `--max-items 500` failed to test most sources because:
+- Telegram channel `neuraldeep` alone produces 30 posts + 30 comments * 30 posts = 930 raw items
+- This exhausts the global 500-item budget before career sites are even reached
+- `JobAggregationNode` errors: 40 LLM extraction failures on non-job Telegram content (expected)
+- Career sites: 0 sources tested
+
+## Fix approach
+
+Create a **minimal test config** with very small per-source limits so every source gets tested.
+Run WITHOUT `--max-items` so nothing gets cut off globally.
+
+## Step 1: Create test config
+
+Write `C:/Users/User/a_projects/job_ftch/config/all_sources_e2e_test.yaml`:
+
+```yaml
+# all_sources_e2e_test.yaml - minimal limits for full e2e coverage
+# Each source gets 2-5 items max so the run completes in reasonable time
+# This tests connectivity and parsing, not volume
+
+sources:
+
+  # =====================================================================
+  # SECTION 1: TELEGRAM CHANNELS (20 channels)
+  # limit: 3 posts, comments: 3 posts * 5 comments each
+  # =====================================================================
+
+  - type: telegram_channel
+    entity: neuraldeep
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: neuraldeep
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: aidaparen
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: aidaparen
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: agi_and_rl
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: agi_and_rl
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: elkornacio
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: elkornacio
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: ethichlid
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: ethichlid
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: AI4Dev
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: AI4Dev
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: deordie
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: deordie
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: noflamenogame
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: noflamenogame
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: dsmlkz_news
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: dsmlkz_news
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: data_events
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: data_events
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: junior_pm
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: junior_pm
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: ai_machinelearning_big_data
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: ai_machinelearning_big_data
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: opensourceai
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: opensourceai
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: llm4dev
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: llm4dev
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: big_llm_course
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: big_llm_course
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: data_secrets
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: data_secrets
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: machinelearning_ru
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: machinelearning_ru
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: ai_meetups
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: ai_meetups
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: rodion_ai
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: rodion_ai
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  - type: telegram_channel
+    entity: senioraugur
+    limit: 3
+    interval_seconds: 300
+
+  - type: telegram_comments
+    entity: senioraugur
+    post_limit: 3
+    comment_limit_per_post: 5
+
+  # =====================================================================
+  # SECTION 2: TELEGRAM GROUPS (20 groups, limit: 5)
+  # =====================================================================
+
+  - type: telegram_group
+    entity: vibe_coding_community
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: noflamenogame
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: deordie_chat
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: handlchatru
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: dsml_kz
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: creatory
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: text2image
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: TGStat_Chat
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: neuraldeepchat
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: ru_python
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: it_chat_ru
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: devops_ru_chat
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: mlopschat
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: langchain_russia
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: llm_ru_chat
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: genai_ru
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: data_engineers_ru
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: datascience_ru_chat
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: ai_engineers_ru
+    limit: 5
+    interval_seconds: 300
+
+  - type: telegram_group
+    entity: ai_pm_ru
+    limit: 5
+    interval_seconds: 300
+
+  # =====================================================================
+  # SECTION 3: RU/KZ AGGREGATORS (limit: 5 each)
+  # =====================================================================
+
+  - type: career_site
+    url: "https://hh.ru/search/vacancy?text=machine+learning+engineer&area=113"
+    source_name: hh_mle_ru
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://hh.ru/search/vacancy?text=LLM+engineer&area=113"
+    source_name: hh_llm_ru
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://hh.kz/search/vacancy?text=machine+learning"
+    source_name: hh_kz_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://career.habr.com/vacancies?q=machine+learning"
+    source_name: habr_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://geekjob.ru/vacancies
+    source_name: geekjob
+    monitor: auto
+    bypass: auto
+    monitor_config:
+      skip_ssl: true
+    scraper_config:
+      skip_ssl: true
+    limit: 5
+
+  - type: career_site
+    url: "https://getmatch.ru/vacancies?sp=data+scientist"
+    source_name: getmatch_ds
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://hirify.me/jobs-in-russia
+    source_name: hirify_ru
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://finder.work/vacancies?q=machine+learning"
+    source_name: finder_work_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://vcv.ru/jobs?q=machine+learning"
+    source_name: vcv_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://rabota.ru/vakansii/machine-learning"
+    source_name: rabota_ru_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.superjob.ru/vakansii/machine-learning-inzhener.html"
+    source_name: superjob_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  # =====================================================================
+  # SECTION 4: RU LARGE EMPLOYERS (limit: 5 each)
+  # =====================================================================
+
+  - type: career_site
+    url: "https://yandex.ru/jobs/vacancies?department=machine+learning"
+    source_name: yandex_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.tbank.ru/career/it/"
+    source_name: tbank_it
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://rabota.sber.ru/search?q=machine+learning"
+    source_name: sber_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://team.vk.company/vacancy/
+    source_name: vk_careers
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://career.avito.com/vacancies/
+    source_name: avito_career
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://ozon.tech/vacancies/
+    source_name: ozon_tech
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://job.mts.ru/vacancies?q=machine+learning"
+    source_name: mts_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://careers.kaspersky.com/en/jobs/?category=ai-ml"
+    source_name: kaspersky_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://job.ptsecurity.com
+    source_name: pt_security
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://tech.x5.ru/career"
+    source_name: x5_tech_career
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  # =====================================================================
+  # SECTION 5: KZ LARGE EMPLOYERS (limit: 5 each)
+  # =====================================================================
+
+  - type: career_site
+    url: https://kaspi.kz/guide/career/
+    source_name: kaspi_career
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://freedomholdingcorp.com/careers
+    source_name: freedom_careers
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://people.beeline.kz/
+    source_name: beeline_kz
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://kolesa.group/career/job
+    source_name: kolesa_career
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://halykbank.kz/about/career
+    source_name: halyk_career
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://careers.airastana.com
+    source_name: airastana_career
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://choco.family/career
+    source_name: choco_career
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://jobs.indrive.com/?department=engineering"
+    source_name: indrive_eng
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://btsdigital.kz
+    source_name: btsdigital
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: https://sergek.com/career
+    source_name: sergek_career
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  # =====================================================================
+  # SECTION 6: GLOBAL AGGREGATORS (limit: 5 each)
+  # =====================================================================
+
+  - type: career_site
+    url: "https://www.indeed.com/jobs?q=machine+learning+engineer&remotejobs=1"
+    source_name: indeed_ml_remote
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.glassdoor.com/Job/machine-learning-engineer-jobs-SRCH_KO0,26.htm"
+    source_name: glassdoor_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.monster.com/jobs/search?q=machine+learning+engineer&where=remote"
+    source_name: monster_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.ziprecruiter.com/jobs-search?search=machine+learning+engineer&location=remote"
+    source_name: ziprecruiter_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://wellfound.com/jobs?role=ml-engineer"
+    source_name: wellfound_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.dice.com/jobs?q=machine+learning+engineer&location=remote"
+    source_name: dice_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://builtin.com/jobs/machine-learning"
+    source_name: builtin_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.levels.fyi/jobs?jobFamily=Machine+Learning+Engineer"
+    source_name: levelsfyi_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.simplyhired.com/search?q=machine+learning+engineer&l=remote"
+    source_name: simplyhired_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.careerbuilder.com/jobs?keywords=machine+learning+engineer"
+    source_name: careerbuilder_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.adzuna.com/search?q=machine+learning+engineer"
+    source_name: adzuna_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.reed.co.uk/jobs/machine-learning-engineer-jobs"
+    source_name: reed_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.totaljobs.com/jobs/machine-learning-engineer"
+    source_name: totaljobs_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.jobserve.com/gb/en/Job-Search/?shid=1EB4F5A6EF2E7634DB0B"
+    source_name: jobserve_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://remoteok.com/remote-machine-learning-jobs"
+    source_name: remoteok_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://weworkremotely.com/categories/remote-programming-jobs"
+    source_name: wwr_programming
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.flexjobs.com/search?search=machine+learning+engineer&location=anywhere"
+    source_name: flexjobs_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://jooble.org/jobs-machine-learning-engineer"
+    source_name: jooble_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://www.eurojobs.com/search-results/?search%5Bkeyword%5D=machine+learning"
+    source_name: eurojobs_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+
+  - type: career_site
+    url: "https://jobs.google.com/search?q=machine+learning+engineer&location=remote"
+    source_name: google_jobs_ml
+    monitor: auto
+    bypass: auto
+    limit: 5
+```
+
+## Step 2: Validate YAML and count sources
+
+```powershell
+cd C:/Users/User/a_projects/job_ftch
+uv run python -c "import yaml; d=yaml.safe_load(open('config/all_sources_e2e_test.yaml')); print(f'Sources: {len(d[chr(34)]sources[chr(34)])}')"
+```
+
+Or simpler:
+```powershell
+cd C:/Users/User/a_projects/job_ftch
+uv run python -c "
+import yaml
+d = yaml.safe_load(open('config/all_sources_e2e_test.yaml'))
+sources = d['sources']
+print(f'Total sources: {len(sources)}')
+by_type = {}
+for s in sources:
+    t = s.get('type', 'unknown')
+    by_type[t] = by_type.get(t, 0) + 1
+for t, c in sorted(by_type.items()):
+    print(f'  {t}: {c}')
+"
+```
+
+## Step 3: Install missing dependencies if needed
+
+```powershell
+cd C:/Users/User/a_projects/job_ftch
+uv sync 2>&1 | tail -5
+```
+
+## Step 4: Run the e2e WITHOUT --max-items
+
+This allows every source to be visited. With limit:3-5 per source, total items will be ~111*5 = ~555 max.
+
+```powershell
+cd C:/Users/User/a_projects/job_ftch
+New-Item -ItemType Directory -Force -Path output | Out-Null
+uv run python -m job_ftch pipeline `
+  --sources-file config/all_sources_e2e_test.yaml `
+  --dry-run `
+  --once `
+  --output-path output/e2e_all_sources_20260611.jsonl `
+  --jsonl 2>&1
+```
+
+Capture ALL output. The run will go through all 111 sources sequentially.
+
+**Important:** Let the run complete fully. Do NOT kill it early.
+Expected runtime: 5-20 minutes (Telegram + career sites).
+
+## Step 5: Analyze results
+
+After run completes, run this analysis script:
+
+```powershell
+cd C:/Users/User/a_projects/job_ftch
+uv run python -c "
+import json, sys
+output_file = 'output/e2e_all_sources_20260611.jsonl'
+try:
+    items = [json.loads(l) for l in open(output_file, encoding='utf-8') if l.strip()]
+    print(f'Total extracted jobs: {len(items)}')
+    by_source = {}
+    for item in items:
+        src = item.get('source_name') or item.get('source') or 'unknown'
+        by_source[src] = by_source.get(src, 0) + 1
+    print('By source:')
+    for src, cnt in sorted(by_source.items(), key=lambda x: -x[1]):
+        print(f'  {src}: {cnt}')
+except FileNotFoundError:
+    print('Output file not found')
+except Exception as e:
+    print(f'Error: {e}')
+"
+```
+
+## Step 6: Report
+
+Print a structured report:
+1. Total jobs extracted
+2. Sources with jobs (working)
+3. Sources with 0 items (either no jobs matched filters, or source unreachable)
+4. Any ERROR lines from the pipeline run (grep the captured output for "error" case-insensitive)
+
+Example report format:
+```
+=== E2E RESULTS ===
+Total jobs extracted: N
+Working sources (N): source1, source2, ...
+Zero-item sources (N): source3, source4, ...
+Errors:
+  [list errors]
+```
+
+## Step 7: Copy test config to feature worktree
+
+```powershell
+Copy-Item "C:\Users\User\a_projects\job_ftch\config\all_sources_e2e_test.yaml" `
+          "C:\Users\User\a_projects\job_ftch_p2325\config\all_sources_e2e_test.yaml"
+```
+
+## Step 8: Commit
+
+```powershell
+cd C:/Users/User/a_projects/job_ftch
+git add config/all_sources_e2e_test.yaml
+git commit -m "test(config): add minimal-limit e2e test config for all 111 sources"
+```
+
+Do NOT push.

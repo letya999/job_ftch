@@ -85,6 +85,7 @@ class TenantConfig(BaseModel):
     llm_backend: str = "heuristic"
     posting_backend: str = "none"
     notify_mode: str = "instant"
+    notify_batch_size: int = 10
     dry_run: bool = False
     metrics_enabled: bool = False
     metrics_port: int = 9090

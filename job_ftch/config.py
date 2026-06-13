@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     llm_backend: str = "heuristic"
     posting_backend: str = "none"
     notify_mode: str = "instant"  # "instant" (per job) or "digest" (once per run)
+    notify_batch_size: int = 10
     log_level: str = "INFO"
     telemetry_service_name: str = "job_ftch"
     telemetry_console_exporter: bool = False

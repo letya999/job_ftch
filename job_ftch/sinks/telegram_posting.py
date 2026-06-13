@@ -59,11 +59,13 @@ class TelegramPostingSink:
         *,
         own_client: bool = False,
         notify_mode: str = "instant",
+        notify_batch_size: int = 10,
     ) -> None:
         self._client = client
         self._entity = entity
         self._own_client = own_client
         self._notify_mode = notify_mode
+        self._notify_batch_size = notify_batch_size
         self._pending_jobs: list[Job] = []
 
     async def emit(self, item: Job) -> None:
@@ -79,7 +81,7 @@ class TelegramPostingSink:
         from job_ftch.adapters.telegram_bot.formatter import format_job_digest
 
         # Split into chunks to avoid message length limits
-        chunk_size = 10
+        chunk_size = self._notify_batch_size
         async with _client_session(self._client, own_client=self._own_client) as client:
             for i in range(0, len(self._pending_jobs), chunk_size):
                 chunk = self._pending_jobs[i : i + chunk_size]
@@ -115,4 +117,5 @@ def _build_telegram_posting_sink(settings: Settings) -> TelegramPostingSink:
         settings.telegram_publish_entity,
         own_client=True,
         notify_mode=settings.notify_mode,
+        notify_batch_size=settings.notify_batch_size,
     )

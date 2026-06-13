@@ -80,12 +80,23 @@ class TelegramSender(Protocol):
         reply_markup: dict[str, Any] | None = None,
     ) -> None: ...
 
+    async def download_file(self, file_id: str) -> bytes: ...
+
 
 class HttpTelegramBotClient:
     def __init__(self, token: str, *, timeout: float = 10.0) -> None:
         self._token = token
         self._base_url = f"https://api.telegram.org/bot{token}"
+        self._file_base_url = f"https://api.telegram.org/file/bot{token}"
         self._client = httpx.AsyncClient(timeout=timeout)
+
+    async def download_file(self, file_id: str) -> bytes:
+        response = await self._client.get(f"{self._base_url}/getFile", params={"file_id": file_id})
+        response.raise_for_status()
+        file_path = response.json()["result"]["file_path"]
+        file_response = await self._client.get(f"{self._file_base_url}/{file_path}")
+        file_response.raise_for_status()
+        return file_response.content
 
     async def send_message(
         self,
@@ -122,16 +133,6 @@ class HttpTelegramBotClient:
         payload = response.json()
         result = payload.get("result", [])
         return cast("list[dict[str, Any]]", result)
-
-    async def download_file(self, file_id: str) -> bytes:
-        response = await self._client.get(f"{self._base_url}/getFile", params={"file_id": file_id})
-        response.raise_for_status()
-        file_path = response.json()["result"]["file_path"]
-
-        download_url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
-        response = await self._client.get(download_url)
-        response.raise_for_status()
-        return response.content
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -428,12 +429,18 @@ class TelegramBotService:
                 )
                 return
             notify_tenant_id, mode = args[0], args[1].lower()
+            batch_size = None
+            if len(args) >= 3:
+                try:
+                    batch_size = int(args[2])
+                except ValueError:
+                    pass
             try:
-                await self._runner.update_notify_config(notify_tenant_id, mode)
-                await self._sender.send_message(
-                    chat_id,
-                    f"Notification mode for {notify_tenant_id} set to {mode}.",
-                )
+                await self._runner.update_notify_config(notify_tenant_id, mode, batch_size)
+                msg = f"Notification mode for {notify_tenant_id} set to {mode}."
+                if batch_size:
+                    msg += f" Batch size: {batch_size}."
+                await self._sender.send_message(chat_id, msg)
             except ValueError as exc:
                 await self._sender.send_message(chat_id, str(exc))
             return
@@ -464,10 +471,12 @@ class TelegramBotService:
                 except Exception as exc:
                     errors.append(f"{link}: {exc}")
 
-            msg = f"Added {added_count} sources to {tenant_id}."
-            if errors:
-                msg += "\n\nErrors:\n" + "\n".join(errors)
-            await self._sender.send_message(chat_id, msg)
+            total = len(links)
+            if not errors:
+                await self._sender.send_message(chat_id, f"All {added_count} sources added.")
+            else:
+                msg = f"Added {added_count}/{total} sources.\nFailed:\n" + "\n".join(errors)
+                await self._sender.send_message(chat_id, msg)
             return
         if command == "/run":
             try:
@@ -475,13 +484,13 @@ class TelegramBotService:
             except PermissionError as exc:
                 await self._sender.send_message(chat_id, f"Access denied: {exc}")
                 return
-            tenant_id: str | None = args[0] if args else None
-            if tenant_id is None:
+            run_tenant_id: str | None = args[0] if args else None
+            if run_tenant_id is None:
                 summaries = await self._runner.run_all()
                 await self._sender.send_message(chat_id, f"Ran {len(summaries)} tenant(s).")
                 return
-            summary = await self._runner.run_tenant(tenant_id)
-            await self._sender.send_message(chat_id, f"{tenant_id}: emitted={summary.emitted}")
+            summary = await self._runner.run_tenant(run_tenant_id)
+            await self._sender.send_message(chat_id, f"{run_tenant_id}: emitted={summary.emitted}")
             return
         if command == "/reset":
             try:

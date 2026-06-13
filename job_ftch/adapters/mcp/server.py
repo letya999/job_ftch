@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from job_ftch.adapters.profile_inputs import build_candidate_profile_from_payload
 from job_ftch.adapters.source_inputs import build_source_spec_from_input
@@ -57,7 +57,13 @@ class TenantMCPServer:
         await self.runner.close()
         self.runner = None
 
-    def run(self, *, transport: str = "stdio", host: str = "127.0.0.1", port: int = 8000) -> None:
+    def run(
+        self,
+        *,
+        transport: Literal["stdio", "http", "sse", "streamable-http"] = "stdio",
+        host: str = "127.0.0.1",
+        port: int = 8000,
+    ) -> None:
         self.app.run(transport=transport, host=host, port=port)
 
     def _register_surface(self) -> None:
