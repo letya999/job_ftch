@@ -5,12 +5,12 @@ sources:
 
   # ─── Russian employers (career sites) ───────────────────────────────────────
   - type: career_site
-    url: https://yandex.ru/jobs
+    url: https://yandex.ru/jobs/vacancies
     source_name: yandex_jobs
     monitor: auto
     monitor_config:
       render: true
-      wait: domcontentloaded
+      wait: networkidle
     limit: 5
 
   - type: career_site
@@ -65,7 +65,7 @@ sources:
     limit: 5
 
   - type: career_site
-    url: https://tech.x5.ru/career
+    url: https://x5.ru/career
     source_name: x5_tech_career
     monitor: auto
     monitor_config:
@@ -78,6 +78,9 @@ sources:
     url: https://kaspi.kz/guide/career/
     source_name: kaspi_career
     monitor: auto
+    monitor_config:
+      render: true
+      wait: networkidle
     limit: 5
 
   - type: career_site
