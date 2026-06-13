@@ -134,6 +134,7 @@ def test_fastapi_adapter_registers_routes(monkeypatch: pytest.MonkeyPatch) -> No
     assert app.kwargs["title"] == "job_ftch"
     assert ("POST", "/pipeline/run") in routes
     assert ("GET", "/pipeline/status") in routes
+    assert ("GET", "/pipeline/sources") in routes
     assert ("GET", "/jobs/search") in routes
 
 

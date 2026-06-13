@@ -83,6 +83,7 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
         "get_job_lineage",
         "get_status",
         "list_runs",
+        "list_source_health",
         "list_tenants",
         "reset_tenant",
         "run_all_pipelines",
@@ -99,6 +100,7 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
     tenant_list = await server.app.tools["list_tenants"]()
     latest_jobs = json.loads(await server.app.resources["jobs://{tenant_id}/latest"]("ai_jobs"))
     status_payload = await server.app.tools["get_status"]("ai_jobs")
+    source_health = await server.app.tools["list_source_health"]("ai_jobs")
     run_history = await server.app.tools["list_runs"]("ai_jobs", 10)
     search_results = await server.app.tools["search_jobs"]("senior", "ai_jobs", 10)
     lineage_payload = await server.app.tools["get_job_lineage"](latest_jobs[0]["job_id"], "ai_jobs")
@@ -109,6 +111,7 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
     assert latest_jobs[0]["source_name"] == "fixture"
     assert status_payload is not None
     assert status_payload["tenant_id"] == "ai_jobs"
+    assert source_health[0]["source_id"] == "debug:fixture"
     assert len(run_history) == 1
     assert run_history[0]["source_run_id"] == run_summary["source_run_id"]
     assert len(search_results) == 1

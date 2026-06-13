@@ -73,6 +73,10 @@ class TenantMCPServer:
             return None if summary is None else summary.as_dict()
 
         @self.app.tool
+        async def list_source_health(tenant_id: str) -> list[dict[str, Any]]:
+            return await self._require_runner().list_source_health(tenant_id)
+
+        @self.app.tool
         async def list_runs(tenant_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
             summaries = await self._require_runner().list_runs(tenant_id=tenant_id, limit=limit)
             return [summary.as_dict() for summary in summaries]
