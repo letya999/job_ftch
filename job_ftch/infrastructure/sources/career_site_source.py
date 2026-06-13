@@ -19,7 +19,6 @@ from job_ftch.domain.site_models import (
     ScrapedPostingPayload,
 )
 from job_ftch.infrastructure.sources.career_site import client_for_config
-from job_ftch.infrastructure.sources.monitor_detector import detect_monitor_type
 from job_ftch.infrastructure.sources.site_utils import (
     apply_url_filter,
     apply_url_transform,
@@ -363,7 +362,7 @@ class CareerSiteSource(Source["RawItem"]):
                 )
                 if settle_seconds > 0:
                     await asyncio.sleep(settle_seconds)
-                return cast("str", await page.content())
+                return await page.content()
         except Exception as exc:
             logger.debug("detail_browser_prefetch_failed", url=url, error=str(exc))
             return None

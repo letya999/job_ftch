@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import httpx
@@ -9,7 +9,7 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
-class SiteClass(str, Enum):
+class SiteClass(StrEnum):
     SSR = "SSR"
     SPA = "SPA"
     API_JSON = "API_JSON"

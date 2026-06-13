@@ -24,7 +24,7 @@ class OntologyNormalizer:
     def _load_json(self, path: Path) -> dict[str, Any]:
         if not path.exists():
             return {}
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
 
     def _build_regex_lookup(self, alias_data: dict[str, Any]) -> list[tuple[re.Pattern, str]]:

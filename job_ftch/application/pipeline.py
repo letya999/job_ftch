@@ -11,11 +11,10 @@ from uuid import uuid4
 if TYPE_CHECKING:
     from job_ftch.application.contracts import (
         FlushableSink,
-        ProcessingNode,
         SanitizingNode,
         Sink,
-        Stage,
         Source,
+        Stage,
         Store,
     )
 

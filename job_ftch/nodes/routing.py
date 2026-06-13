@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-from job_ftch.domain import JobRecord, MatchDecision, JobReviewReason
+from job_ftch.domain import JobRecord, JobReviewReason, MatchDecision
 
 ROUTING_REASON_CODES = {
     "PROFILE_MATCH": "profile_match",

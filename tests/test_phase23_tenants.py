@@ -23,6 +23,7 @@ from job_ftch.domain import (
     JobLineage,
     ManagedCandidateProfile,
     RawItem,
+    SourceHealth,
     SourceKind,
     TenantConfig,
     source_spec_identifier,
@@ -219,9 +220,10 @@ async def test_tenant_runner_persists_run_history(tmp_path: Path) -> None:
     assert loaded.tenant_id == "ai_jobs"
     health = await runner.get_runtime("ai_jobs").store.get_source_health("debug:fixture")
     assert health is not None
-    assert health["status"] == "healthy"
-    assert health["success_count"] == 2
-    assert health["failure_streak"] == 0
+    assert health.status == "healthy"
+
+    assert health.success_count == 2
+    assert health.failure_streak == 0
 
     await runner.close()
 
@@ -390,12 +392,23 @@ async def test_tenant_runner_persists_candidate_profiles_and_reranks_latest_jobs
 def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
     stats = SourceRunStats(emitted=0, failed=0, fetched=2)
     payload = _update_source_health_payload(
-        {
-            "baseline_emitted": 10.0,
-            "failure_streak": 0,
-            "success_count": 3,
-            "last_success_at": "2026-06-12T00:00:00+00:00",
-        },
+        SourceHealth(
+            source_id="career_site:bcc_ml",
+            source_kind="career_site",
+            source_name="bcc_ml",
+            last_run_at="2026-06-12T00:00:00+00:00",
+            last_success_at="2026-06-12T00:00:00+00:00",
+            failure_streak=0,
+            success_count=3,
+            last_fetched=10,
+            last_emitted=10,
+            last_failed=0,
+            last_quarantined=0,
+            baseline_emitted=10.0,
+            drift_ratio=1.0,
+            degraded=False,
+            status="healthy",
+        ),
         source_id="career_site:bcc_ml",
         source_kind="career_site",
         source_name="bcc_ml",
@@ -403,9 +416,9 @@ def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
         finished_at=datetime(2026, 6, 13, tzinfo=UTC),
     )
 
-    assert payload["degraded"] is True
-    assert payload["status"] == "degraded"
-    assert payload["drift_ratio"] == 0.0
+    assert payload.degraded is True
+    assert payload.status == "degraded"
+    assert payload.drift_ratio == 0.0
 
     failed = SourceRunStats(emitted=0, failed=1)
     failed_payload = _update_source_health_payload(
@@ -417,7 +430,7 @@ def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
         finished_at=datetime(2026, 6, 13, 1, tzinfo=UTC),
     )
 
-    assert failed_payload["failure_streak"] == 1
+    assert failed_payload.failure_streak == 1
 
 
 @pytest.mark.asyncio

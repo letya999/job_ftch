@@ -12,8 +12,8 @@ from job_ftch.nodes.job_normalization import (
     SkillNormalizationNode,
     TitleCompanyNormalizationNode,
 )
-from job_ftch.nodes.lifecycle import JobLifecycleNode
 from job_ftch.nodes.language_context import SourceContextNode
+from job_ftch.nodes.lifecycle import JobLifecycleNode
 from job_ftch.nodes.match_scoring import MultiProfileMatchNode
 from job_ftch.nodes.post_type import PostTypeClassificationNode
 from job_ftch.nodes.quality import JobValidationNode, QualityScoringNode

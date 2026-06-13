@@ -57,6 +57,7 @@ from job_ftch.domain.runtime_source import (
     source_spec_locator,
     source_spec_name,
 )
+from job_ftch.domain.source_health import SourceHealth
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.domain.tenant import OutputSpec, ScheduleSpec, TenantConfig, TenantInfo
 from job_ftch.domain.triage import TriageRejectionReason
@@ -116,6 +117,7 @@ __all__ = [
     "Seniority",
     "SkillTag",
     "SourceAttribution",
+    "SourceHealth",
     "SourceKind",
     "TenantConfig",
     "TenantInfo",

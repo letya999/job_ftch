@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import random
 import time
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
@@ -39,6 +40,7 @@ from job_ftch.domain import (
     JobRecord,
     ManagedCandidateProfile,
     RuntimeSourceRecord,
+    SourceHealth,
     TenantConfig,
     TenantInfo,
     build_job_lineage,
@@ -114,30 +116,34 @@ def _active_candidate_profile_key(user_id: str) -> str:
 
 
 def _update_source_health_payload(
-    previous: dict[str, Any] | None,
+    previous: SourceHealth | None,
     *,
     source_id: str,
     source_kind: str,
     source_name: str,
     stats: SourceRunStats,
     finished_at: datetime,
-) -> dict[str, Any]:
-    prev = previous or {}
-    baseline_emitted = float(prev.get("baseline_emitted") or 0.0)
-    previous_success = int(prev.get("success_count") or 0)
+    drift_ratio_threshold: float = 0.2,
+    min_baseline_threshold: float = 3.0,
+    failure_streak_pause: int = 3,
+) -> SourceHealth:
+    prev_baseline_emitted = previous.baseline_emitted if previous else 0.0
+    previous_success = previous.success_count if previous else 0
     current_emitted = int(stats.emitted)
     had_failure = stats.failed > 0
     degraded = False
     drift_ratio: float | None = None
-    if baseline_emitted >= 3.0:
-        drift_ratio = current_emitted / baseline_emitted if baseline_emitted > 0 else 0.0
-        degraded = current_emitted == 0 or drift_ratio < 0.2
+    if prev_baseline_emitted >= min_baseline_threshold:
+        drift_ratio = current_emitted / prev_baseline_emitted if prev_baseline_emitted > 0 else 0.0
+        degraded = current_emitted == 0 or drift_ratio < drift_ratio_threshold
 
     if had_failure:
-        failure_streak = int(prev.get("failure_streak") or 0) + 1
-        last_success_at = prev.get("last_success_at")
+        failure_streak = (previous.failure_streak if previous else 0) + 1
+        last_success_at = previous.last_success_at if previous else None
         success_count = previous_success
-        next_baseline = baseline_emitted
+        next_baseline = prev_baseline_emitted
+        if failure_streak >= failure_streak_pause and (not previous or not previous.paused):
+            logger.info("source_auto_paused", source_id=source_id, failure_streak=failure_streak)
     else:
         failure_streak = 0
         last_success_at = finished_at.isoformat()
@@ -145,26 +151,28 @@ def _update_source_health_payload(
         next_baseline = (
             float(current_emitted)
             if success_count == 1
-            else round((baseline_emitted * 0.7) + (current_emitted * 0.3), 4)
+            else round((prev_baseline_emitted * 0.7) + (current_emitted * 0.3), 4)
         )
 
-    return {
-        "source_id": source_id,
-        "source_kind": source_kind,
-        "source_name": source_name,
-        "last_run_at": finished_at.isoformat(),
-        "last_success_at": last_success_at,
-        "failure_streak": failure_streak,
-        "success_count": success_count,
-        "last_fetched": stats.fetched,
-        "last_emitted": current_emitted,
-        "last_failed": stats.failed,
-        "last_quarantined": stats.quarantined,
-        "baseline_emitted": next_baseline,
-        "drift_ratio": drift_ratio,
-        "degraded": degraded,
-        "status": "degraded" if degraded else ("paused" if failure_streak >= 3 else "healthy"),
-    }
+    return SourceHealth(
+        source_id=source_id,
+        source_kind=source_kind,
+        source_name=source_name,
+        last_run_at=finished_at.isoformat(),
+        last_success_at=last_success_at,
+        failure_streak=failure_streak,
+        success_count=success_count,
+        last_fetched=stats.fetched,
+        last_emitted=current_emitted,
+        last_failed=stats.failed,
+        last_quarantined=stats.quarantined,
+        baseline_emitted=next_baseline,
+        drift_ratio=drift_ratio,
+        degraded=degraded,
+        status="degraded" if degraded else ("paused" if failure_streak >= failure_streak_pause else "healthy"),
+        paused=failure_streak >= failure_streak_pause,
+        skipped_runs=0 if not had_failure else (previous.skipped_runs if previous else 0),
+    )
 
 
 def _build_source_listing_payload(
@@ -172,7 +180,7 @@ def _build_source_listing_payload(
     *,
     origin: str,
     enabled: bool,
-    health: dict[str, Any] | None,
+    health: SourceHealth | None,
 ) -> dict[str, Any]:
     source_id = source_spec_identifier(spec)
     payload: dict[str, Any] = {
@@ -196,7 +204,7 @@ def _build_source_listing_payload(
             }
         )
         return payload
-    payload.update(health)
+    payload.update(health.model_dump(mode="json"))
     if not enabled:
         payload["status"] = "disabled"
     return payload
@@ -339,28 +347,28 @@ class TenantStore:
         await connector.set(self._key(f"run_history:{run_id}"), raw)
         await connector.set_add(self._key("run_history_ids"), run_id)
 
-    async def get_source_health(self, source_id: str) -> dict[str, Any] | None:
+    async def get_source_health(self, source_id: str) -> SourceHealth | None:
         connector = cast("StoreConnector", self._store)
         raw = await connector.get(self._key(_source_health_key(source_id)))
         if raw is None:
             return None
         try:
-            return cast("dict[str, Any]", json.loads(raw))
-        except (json.JSONDecodeError, TypeError):
+            return SourceHealth.model_validate_json(raw)
+        except (ValueError, TypeError):
             return None
 
-    async def save_source_health(self, source_id: str, payload: dict[str, Any]) -> None:
+    async def save_source_health(self, source_id: str, health: SourceHealth) -> None:
         connector = cast("StoreConnector", self._store)
         await connector.set(
             self._key(_source_health_key(source_id)),
-            json.dumps(payload, default=_json_default, ensure_ascii=False, sort_keys=True),
+            health.model_dump_json(),
         )
         await connector.set_add(self._key("source_health_ids"), source_id)
 
-    async def list_source_health(self) -> list[dict[str, Any]]:
+    async def list_source_health(self) -> list[SourceHealth]:
         connector = cast("StoreConnector", self._store)
         source_ids = sorted(await connector.set_members(self._key("source_health_ids")))
-        payloads: list[dict[str, Any]] = []
+        payloads: list[SourceHealth] = []
         for source_id in source_ids:
             payload = await self.get_source_health(source_id)
             if payload is not None:
@@ -692,8 +700,84 @@ class TenantRunner:
     async def run_tenant(self, tenant_id: str, *, max_items: int | None = None) -> RunSummary:
         runtime = self.get_runtime(tenant_id)
         await self._ensure_runtime_sources_loaded(runtime)
+
+        # Apply Task 3 (Rate Limit), Task 4 (Jitter), Task 5 (Auto-pause)
+        effective_sources: list[SourceSpec] = []
+        now = datetime.now(UTC)
+
+        # Load health for all potential sources to evaluate runnability
+        base_ids = {source_spec_identifier(s) for s in runtime.base_sources}
+        runtime_ids = set(runtime.runtime_sources.keys())
+        all_ids = base_ids | runtime_ids
+
+        health_map: dict[str, SourceHealth] = {}
+        for sid in all_ids:
+            health = await runtime.store.get_source_health(sid)
+            if health:
+                health_map[sid] = health
+
+        all_specs = list(runtime.base_sources) + [r.spec for r in runtime.runtime_sources.values() if r.enabled]
+        # Filter for unique specs by ID (handling overlaps between base and runtime)
+        seen_specs: set[str] = set()
+        unique_specs: list[SourceSpec] = []
+        for spec in all_specs:
+            sid = source_spec_identifier(spec)
+            if sid in seen_specs or sid in runtime.disabled_source_ids:
+                continue
+            seen_specs.add(sid)
+            unique_specs.append(spec)
+
+        for spec in unique_specs:
+            sid = source_spec_identifier(spec)
+            health = health_map.get(sid)
+
+            # Task 3: Rate Limit
+            if health and health.last_run_at:
+                try:
+                    last_run = datetime.fromisoformat(health.last_run_at)
+                    if last_run.tzinfo is None:
+                        last_run = last_run.replace(tzinfo=UTC)
+                    wait_time = (now - last_run).total_seconds()
+                    if wait_time < spec.rate_limit_min_interval_seconds:
+                        logger.info(
+                            "source_rate_limited",
+                            source_id=sid,
+                            wait_remaining=spec.rate_limit_min_interval_seconds - wait_time,
+                        )
+                        continue
+                except (ValueError, TypeError):
+                    pass
+
+            # Task 5: Auto-pause with Half-open
+            if health and health.paused:
+                health.skipped_runs += 1
+                if health.skipped_runs >= runtime.settings.source_health_probe_every_n_runs:
+                    logger.info("source_probe", source_id=sid, skipped_runs=health.skipped_runs)
+                    health.skipped_runs = 0
+                else:
+                    await runtime.store.save_source_health(sid, health)
+                    continue
+                # Save the updated skipped_runs before probing
+                await runtime.store.save_source_health(sid, health)
+
+            effective_sources.append(spec)
+
+        if not effective_sources:
+            # Return an empty summary if no sources are runnable this cycle
+            summary = RunSummary()
+            summary.tenant_id = tenant_id
+            return summary
+
+        # Task 4: Jitter before dispatching
+        if runtime.settings.scheduler_jitter_seconds > 0:
+            jitter = random.uniform(0.0, runtime.settings.scheduler_jitter_seconds)
+            await asyncio.sleep(jitter)
+
         async with _tenant_run_lock(runtime.settings, tenant_id):
-            summary = await runtime.builder.clone().run_async(max_items=max_items)
+            builder = runtime.builder.clone()
+            builder.sources(effective_sources)
+            summary = await builder.run_async(max_items=max_items)
+
         summary.tenant_id = tenant_id
         await runtime.store.set_run_state(
             "pipeline.run_summary",
@@ -723,16 +807,19 @@ class TenantRunner:
                 source_name=source_name,
                 stats=stats,
                 finished_at=finished_at,
+                drift_ratio_threshold=runtime.settings.source_health_drift_ratio,
+                min_baseline_threshold=runtime.settings.source_health_min_baseline,
+                failure_streak_pause=runtime.settings.source_health_failure_streak_pause,
             )
             await runtime.store.save_source_health(source_id, payload)
-            if payload["degraded"]:
+            if payload.degraded:
                 logger.warning(
                     "source_drift_detected",
                     tenant_id=runtime.tenant.tenant_id,
                     source_id=source_id,
-                    baseline_emitted=payload["baseline_emitted"],
-                    current_emitted=payload["last_emitted"],
-                    drift_ratio=payload["drift_ratio"],
+                    baseline_emitted=payload.baseline_emitted,
+                    current_emitted=payload.last_emitted,
+                    drift_ratio=payload.drift_ratio,
                 )
 
     async def run_all(self, *, concurrency: int = 4) -> list[RunSummary]:
@@ -782,14 +869,15 @@ class TenantRunner:
         return result
 
     async def list_source_health(self, tenant_id: str) -> list[dict[str, Any]]:
-        return await self.get_runtime(tenant_id).store.list_source_health()
+        health_models = await self.get_runtime(tenant_id).store.list_source_health()
+        return [h.model_dump(mode="json") for h in health_models]
 
     async def list_sources(self, tenant_id: str) -> list[dict[str, Any]]:
         runtime = self.get_runtime(tenant_id)
         await self._ensure_runtime_sources_loaded(runtime)
-        health_payloads = await runtime.store.list_source_health()
-        health_by_id = {payload["source_id"]: payload for payload in health_payloads}
-        health_by_name = {payload["source_name"]: payload for payload in health_payloads}
+        health_models = await runtime.store.list_source_health()
+        health_by_id = {h.source_id: h for h in health_models}
+        health_by_name = {h.source_name: h for h in health_models}
         payloads: list[dict[str, Any]] = []
         for spec in runtime.base_sources:
             source_id = source_spec_identifier(spec)

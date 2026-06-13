@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
-from job_ftch.application.pipeline import RunSummary
+if TYPE_CHECKING:
+    from job_ftch.application.pipeline import RunSummary
 
 
 class PrometheusExporter:

@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 import structlog
 
-from job_ftch.application.watermark import IncrementalCursor
 from job_ftch.application.registry import register_source_spec
+from job_ftch.application.watermark import IncrementalCursor
 from job_ftch.domain import RawItem, SourceKind
 
 if TYPE_CHECKING:

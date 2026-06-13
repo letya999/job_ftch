@@ -6,7 +6,7 @@ try:
     from curl_cffi import requests
     _IMPORT_ERROR = None
 except ImportError as exc:
-    requests = None
+    requests: Any = None
     _IMPORT_ERROR = exc
 
 # impersonate value passed as str; curl_cffi validates at runtime

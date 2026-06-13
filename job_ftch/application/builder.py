@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -16,7 +15,6 @@ from job_ftch.application.contracts import (
     EmbeddingProvider,
     JobGroupStore,
     LLMProvider,
-    ProcessingNode,
     SanitizingNode,
     SearchBackend,
     Sink,
@@ -80,6 +78,8 @@ from job_ftch.nodes.semantic_prefilter import SemanticPrefilterNode
 from job_ftch.sinks import CountedSink, FailureTolerantSink, FanOutSink, RoutingSink
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from job_ftch.application.contracts import AuthProvider
 
 
