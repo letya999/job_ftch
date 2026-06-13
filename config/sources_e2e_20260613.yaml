@@ -59,7 +59,7 @@ sources:
     limit: 5
 
   - type: career_site
-    url: https://job.ptsecurity.com
+    url: https://www.ptsecurity.com/ru-ru/about/vacancy/
     source_name: pt_security_job
     monitor: auto
     limit: 5
@@ -117,7 +117,7 @@ sources:
     limit: 5
 
   - type: career_site
-    url: https://jobs.indrive.com
+    url: https://careers.indrive.com
     source_name: indrive_jobs
     monitor: auto
     limit: 5
@@ -129,7 +129,7 @@ sources:
     limit: 5
 
   - type: career_site
-    url: https://sergek.com/career
+    url: https://sergek.com
     source_name: sergek_career
     monitor: auto
     limit: 5
