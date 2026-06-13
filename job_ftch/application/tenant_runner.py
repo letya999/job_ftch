@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from job_ftch.config import Settings
 
 logger = structlog.get_logger(__name__)
+_PROCESS_TENANT_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def _json_default(value: object) -> object:
@@ -527,6 +528,7 @@ async def _tenant_run_lock(settings: Settings, tenant_id: str) -> Any:
     lock_dir = settings.store_path.parent / "tenant_locks"
     lock_dir.mkdir(parents=True, exist_ok=True)
     lock_path = lock_dir / f"{tenant_id}.lock"
+    local_lock = _PROCESS_TENANT_LOCKS.setdefault(str(lock_path), asyncio.Lock())
     deadline = time.monotonic() + 30.0
 
     def _acquire() -> int:
@@ -567,10 +569,11 @@ async def _tenant_run_lock(settings: Settings, tenant_id: str) -> Any:
                 time.sleep(0.1)
 
     fd: int | None = None
-    try:
-        fd = await asyncio.to_thread(_acquire)
-        yield
-    finally:
-        if fd is not None:
-            os.close(fd)
-            lock_path.unlink(missing_ok=True)
+    async with local_lock:
+        try:
+            fd = await asyncio.to_thread(_acquire)
+            yield
+        finally:
+            if fd is not None:
+                os.close(fd)
+                lock_path.unlink(missing_ok=True)

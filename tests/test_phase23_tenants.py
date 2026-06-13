@@ -13,7 +13,7 @@ from job_ftch.application.registry import create_auth_provider
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.pipeline import RunSummary
 from job_ftch.application.tenant_runner import TenantRunner
-from job_ftch.cli import _handle_tenants
+from job_ftch.cli import _handle_tenants, _merge_run_summaries
 from job_ftch.config import Settings
 from job_ftch.domain import JobLineage, RawItem, SourceKind, TenantConfig
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
@@ -209,6 +209,36 @@ async def test_tenant_runner_persists_run_history(tmp_path: Path) -> None:
     await runner.close()
 
 
+def test_merge_run_summaries_accumulates_counts_and_source_stats() -> None:
+    first = RunSummary(
+        fetched=2,
+        emitted=1,
+        failed=0,
+        drop_reasons={"already_processed": 1},
+    )
+    first.source_stats("telegram_channel").fetched = 2
+    first.source_stats("telegram_channel").emitted = 1
+
+    second = RunSummary(
+        fetched=3,
+        emitted=2,
+        failed=1,
+        quarantine_reasons={"policy": 2},
+    )
+    second.source_stats("career_site").fetched = 3
+    second.source_stats("career_site").failed = 1
+
+    merged = _merge_run_summaries([first, second])
+
+    assert merged.fetched == 5
+    assert merged.emitted == 3
+    assert merged.failed == 1
+    assert merged.drop_reasons == {"already_processed": 1}
+    assert merged.quarantine_reasons == {"policy": 2}
+    assert merged.by_source_kind["telegram_channel"].emitted == 1
+    assert merged.by_source_kind["career_site"].failed == 1
+
+
 @pytest.mark.asyncio
 async def test_tenants_cli_lineage_outputs_json(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
@@ -322,9 +352,12 @@ async def test_two_tenant_runners_do_not_duplicate_output(tmp_path: Path) -> Non
     runner_one = TenantRunner.from_tenants([tenant])
     runner_two = TenantRunner.from_tenants([tenant])
 
-    first, second = await asyncio.gather(
-        runner_one.run_tenant("ai_jobs"),
-        runner_two.run_tenant("ai_jobs"),
+    first, second = await asyncio.wait_for(
+        asyncio.gather(
+            runner_one.run_tenant("ai_jobs"),
+            runner_two.run_tenant("ai_jobs"),
+        ),
+        timeout=5.0,
     )
     output_path = tmp_path / "artifacts" / "ai_jobs.json"
     payload = json.loads(output_path.read_text(encoding="utf-8"))

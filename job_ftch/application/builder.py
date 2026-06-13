@@ -338,6 +338,8 @@ def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = No
             "store_pool_min": tenant.store_pool_min,
             "store_pool_max": tenant.store_pool_max,
             "store_fallback_on_error": tenant.store_fallback_on_error,
+            "memory_max_keys": tenant.memory_max_keys,
+            "memory_max_set_members": tenant.memory_max_set_members,
             "job_backend": tenant.job_backend,
             "search_backend": tenant.search_backend,
             "vector_backend": tenant.vector_backend,
@@ -368,9 +370,9 @@ def configure(path: str | Path) -> PipelineBuilder:
     builder.sources(tenant.sources)
     builder.auth(auth)
     builder.store(store)
-    builder.stage(cast(ProcessingNode[Any], sanitize_node))
+    builder.stage(sanitize_node)
     for node in nodes:
-        builder.stage(cast(ProcessingNode[Any], node))
+        builder.stage(node)
     builder.sink(output_sink)
     builder.with_quarantine_sink(build_quarantine_sink(settings))
     builder.with_rejected_sink(rejected_sink, counted=rejected_counted)
@@ -573,7 +575,7 @@ async def run_pipeline_from_settings(settings: Settings) -> RunSummary:
             PipelineBuilder()
             .with_runtime_source(build_source(settings, store=store))
             .store(store)
-            .stage(cast(ProcessingNode[Any], sanitize_node))
+            .stage(sanitize_node)
             .sink(output_sink)
             .with_quarantine_sink(build_quarantine_sink(settings))
             .with_rejected_sink(rejected_sink, counted=rejected_counted)
@@ -587,7 +589,7 @@ async def run_pipeline_from_settings(settings: Settings) -> RunSummary:
             )
         )
         for node in nodes:
-            builder.stage(cast(ProcessingNode[Any], node))
+            builder.stage(node)
         summary = await builder.run_async(max_items=settings.pipeline_max_items_per_run)
         await store.set_run_state("pipeline.status", "finished")
         if summary.finished_at:

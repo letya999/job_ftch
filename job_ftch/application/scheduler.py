@@ -9,6 +9,7 @@ import structlog
 
 from job_ftch.application.pipeline import RunSummary
 from job_ftch.application.source_loader import load_sources
+from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.config import Settings
 
 logger = structlog.get_logger(__name__)
@@ -84,6 +85,17 @@ class Scheduler:
             return self._interval
 
         intervals = []
+        if self.settings.configs_dir and self.settings.configs_dir.exists():
+            try:
+                for tenant in load_tenants(self.settings.configs_dir):
+                    if tenant.schedule and tenant.schedule.interval_seconds:
+                        intervals.append(tenant.schedule.interval_seconds)
+                    for spec in tenant.sources:
+                        if hasattr(spec, "interval_seconds") and spec.interval_seconds:
+                            intervals.append(spec.interval_seconds)
+            except Exception:
+                logger.exception("failed_to_load_tenants_for_interval_calculation")
+
         if self.settings.sources_file_path and self.settings.sources_file_path.exists():
             try:
                 specs = load_sources(self.settings.sources_file_path)

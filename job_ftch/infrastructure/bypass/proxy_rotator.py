@@ -36,9 +36,7 @@ class ProxyRotatorBypass:
     def apply_browser_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         proxy = self._get_next_proxy()
         if proxy:
-            from playwright.async_api import ProxySettings
-
-            kwargs["proxy"] = ProxySettings(server=proxy)
+            kwargs["proxy"] = {"server": proxy}
         return kwargs
 
     async def apply_page(self, page: Any) -> None:

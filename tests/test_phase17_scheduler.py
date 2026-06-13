@@ -55,6 +55,33 @@ sources:
 
 
 @pytest.mark.asyncio
+async def test_scheduler_respects_tenant_schedule_and_source_intervals(tmp_path):
+    configs_dir = tmp_path / "tenants"
+    configs_dir.mkdir()
+    (configs_dir / "ai_jobs.yaml").write_text(
+        """
+tenant_id: ai_jobs
+display_name: AI Jobs
+schedule:
+  interval_seconds: 15
+sources:
+  - type: local_fixture
+    path: fixtures/debug/raw_items.json
+    interval_seconds: 4
+""".strip(),
+        encoding="utf-8",
+    )
+
+    settings = Settings(configs_dir=configs_dir, schedule_interval_seconds=60)
+
+    run_fn = AsyncMock(return_value=MagicMock(spec=RunSummary))
+    scheduler = Scheduler(settings, run_fn)
+
+    interval = scheduler._calculate_interval()
+    assert interval == 4
+
+
+@pytest.mark.asyncio
 async def test_scheduler_graceful_shutdown():
     settings = Settings(schedule_interval_seconds=100)
 

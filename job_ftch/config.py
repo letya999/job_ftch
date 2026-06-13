@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     store_pool_min: int = Field(default=2, gt=0)
     store_pool_max: int = Field(default=10, gt=0)
     store_fallback_on_error: bool = True
+    memory_max_keys: int = Field(default=50_000, gt=0)
+    memory_max_set_members: int = Field(default=50_000, gt=0)
     job_backend: str = "sqlite"
     search_backend: str = "sqlite"
     job_store_path: Path | None = None

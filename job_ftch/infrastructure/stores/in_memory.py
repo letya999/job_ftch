@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import TYPE_CHECKING, cast
 
 from job_ftch.application.registry import register_store
@@ -25,29 +26,58 @@ class InMemoryStore:
     of has_processed() and set_members("processed").
     """
 
-    def __init__(self) -> None:
-        self._kv: dict[str, str] = {}
-        self._sets: dict[str, set[str]] = {}
+    def __init__(
+        self,
+        *,
+        max_keys: int = 50_000,
+        max_set_members: int = 50_000,
+    ) -> None:
+        self._max_keys = max(max_keys, 1)
+        self._max_set_members = max(max_set_members, 1)
+        self._kv: OrderedDict[str, str] = OrderedDict()
+        self._sets: dict[str, OrderedDict[str, None]] = {}
+
+    def _trim_kv(self) -> None:
+        while len(self._kv) > self._max_keys:
+            self._kv.popitem(last=False)
+
+    def _trim_set(self, key: str) -> None:
+        members = self._sets.get(key)
+        if members is None:
+            return
+        while len(members) > self._max_set_members:
+            members.popitem(last=False)
 
     # StoreConnector primitives
 
     async def get(self, key: str) -> str | None:
-        return self._kv.get(key)
+        value = self._kv.get(key)
+        if value is not None:
+            self._kv.move_to_end(key)
+        return value
 
     async def set(self, key: str, value: str) -> None:
         self._kv[key] = value
+        self._kv.move_to_end(key)
+        self._trim_kv()
 
     async def delete(self, key: str) -> None:
         self._kv.pop(key, None)
 
     async def set_add(self, key: str, member: str) -> None:
-        self._sets.setdefault(key, set()).add(member)
+        members = self._sets.setdefault(key, OrderedDict())
+        members[member] = None
+        members.move_to_end(member)
+        self._trim_set(key)
 
     async def set_contains(self, key: str, member: str) -> bool:
-        return member in self._sets.get(key, set())
+        return member in self._sets.get(key, {})
 
     async def set_members(self, key: str) -> frozenset[str]:
-        return frozenset(self._sets.get(key, set()))
+        members = self._sets.get(key)
+        if members is None:
+            return frozenset()
+        return frozenset(members)
 
     async def ping(self) -> bool:
         return True
@@ -56,8 +86,12 @@ class InMemoryStore:
         pass
 
     async def reset_namespace(self, prefix: str) -> None:
-        self._kv = {key: value for key, value in self._kv.items() if not key.startswith(prefix)}
-        self._sets = {key: value for key, value in self._sets.items() if not key.startswith(prefix)}
+        self._kv = OrderedDict(
+            (key, value) for key, value in self._kv.items() if not key.startswith(prefix)
+        )
+        self._sets = {
+            key: value for key, value in self._sets.items() if not key.startswith(prefix)
+        }
 
     # Store methods — built on top of StoreConnector primitives
 
@@ -133,5 +167,7 @@ class InMemoryStore:
 
 @register_store("memory")
 def _build_in_memory_store(settings: Settings) -> InMemoryStore:
-    del settings
-    return InMemoryStore()
+    return InMemoryStore(
+        max_keys=settings.memory_max_keys,
+        max_set_members=settings.memory_max_set_members,
+    )
