@@ -10,7 +10,7 @@
 ## Docs updated
 - [ ] docs/tech_stack.md (if new dependency added)
 - [ ] docs/adr/ (if architectural decision made)
-- [ ] README.md / README_RU.md (if user-facing change)
+- [ ] README.md (if user-facing change)
 
 ## Checklist
 - [ ] `uv run ruff check .` passes

@@ -40,7 +40,7 @@
   adding dependencies requires updating `docs/tech_stack.md`.
   nontrivial architecture changes require an ADR in `docs/adr/`.
 - Important planning docs:
-  repo root `JOB_FTCH_MASTER_PLAN.md` captures the current target architecture and matching funnel.
+  `docs/architecture.md` captures the current target architecture and matching funnel.
   `docs/adr/024-canonical-job-contract-and-matching-funnel.md` captures the same direction as an ADR.
 - ADRs present through 024; latest planning ADR is 024 on canonical job contract and matching funnel.
 - Source spec types (discriminated union in `domain/source_spec.py`):

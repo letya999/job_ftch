@@ -1,6 +1,6 @@
 # Architecture Master Plan
 
-- Read alongside root `JOB_FTCH_MASTER_PLAN.md` and ADR `docs/adr/024-canonical-job-contract-and-matching-funnel.md`.
+- Read ADR `docs/adr/024-canonical-job-contract-and-matching-funnel.md`.
 - Product direction: `job_ftch` is a library-first async ETL core for job-like postings, not a niche AI-only parser.
 - Durable value is the chain:
   multi-source ingest -> triage -> normalize -> dedup -> aggregate -> score -> route -> publish.
