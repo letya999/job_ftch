@@ -216,28 +216,41 @@ async def _open_persistent_page(
 async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     """
     Navigate to a URL with fallback wait strategies.
-    Raises RuntimeError if the page responds with an anti-bot status code (403, 401, 429, 503).
+
+    Some anti-bot systems (e.g. Ozon's cookie/JS challenge) return 403/503 on the first
+    hit and serve 200 once the challenge cookie is set by the in-page JS. For those
+    statuses we wait and reload before giving up, instead of failing immediately.
+    Raises RuntimeError if the page still responds with an anti-bot status (403, 401, 429, 503).
     """
     wait = config.get("wait", DEFAULT_WAIT)
     wait_fallback = config.get("wait_fallback", DEFAULT_WAIT_FALLBACK)
     timeout = config.get("timeout", DEFAULT_TIMEOUT)
+    challenge_retries = config.get("challenge_retries", 1)
+    challenge_wait_ms = config.get("challenge_wait_ms", 6000)
+    blocked = (403, 401, 429, 503)
+    # Statuses that indicate a JS/cookie challenge worth a wait-and-reload (not a hard
+    # rate-limit/auth block); 429/401 are intentionally excluded — reloading does not help.
+    challenge = (403, 503)
 
     try:
         resp = await page.goto(url, wait_until=wait, timeout=timeout)
-        if resp and resp.status in (403, 401, 429, 503):
-            raise RuntimeError(f"Browser navigation blocked with status {resp.status}")
     except Exception as exc:
-        if "Browser navigation blocked" in str(exc):
+        if not wait_fallback or wait == wait_fallback:
             raise
-        if wait_fallback and wait != wait_fallback:
-            log.warning(
-                "browser.navigate_fallback", url=url, error=str(exc), fallback=wait_fallback
-            )
-            resp = await page.goto(url, wait_until=wait_fallback, timeout=timeout)
-            if resp and resp.status in (403, 401, 429, 503):
-                raise RuntimeError(f"Browser navigation blocked with status {resp.status}") from exc
-        else:
-            raise
+        log.warning("browser.navigate_fallback", url=url, error=str(exc), fallback=wait_fallback)
+        resp = await page.goto(url, wait_until=wait_fallback, timeout=timeout)
+
+    attempt = 0
+    while resp is not None and resp.status in challenge and attempt < challenge_retries:
+        attempt += 1
+        log.info(
+            "browser.challenge_retry", url=url, status=resp.status, attempt=attempt
+        )
+        await page.wait_for_timeout(challenge_wait_ms)
+        resp = await page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
+
+    if resp is not None and resp.status in blocked:
+        raise RuntimeError(f"Browser navigation blocked with status {resp.status}")
 
 
 async def dismiss_overlays(page: Page) -> None:
