@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING, Any
 
 try:
     import asyncpg
-except ImportError:
+    _IMPORT_ERROR = None
+except ImportError as exc:
     asyncpg = None  # type: ignore[assignment]
+    _IMPORT_ERROR = exc
 
 from job_ftch.application.registry import register_store
 from job_ftch.infrastructure.stores.sql_adapter import SQLStoreAdapter
@@ -47,8 +49,8 @@ class PostgreSQLStore(SQLStoreAdapter):
     async def _ensure_initialized(self) -> Any:
         if asyncpg is None:
             raise ImportError(
-                "asyncpg is required for PostgreSQLStore. Install with [postgres] extra."
-            )
+                "PostgreSQL backend requires the 'postgres' extra: pip install job-ftch[postgres]"
+            ) from _IMPORT_ERROR
 
         async with self._init_lock:
             if self._pool is None:

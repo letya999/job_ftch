@@ -10,8 +10,10 @@ import structlog
 
 try:
     import asyncpg
-except ImportError:
+    _IMPORT_ERROR = None
+except ImportError as exc:
     asyncpg = None
+    _IMPORT_ERROR = exc
 
 from job_ftch.application.contracts import VectorBackend
 from job_ftch.application.registry import register_vector_backend
@@ -37,7 +39,9 @@ ALLOWED_FILTER_KEYS = {
 class PgVectorBackend(VectorBackend):
     def __init__(self, settings: Settings) -> None:
         if asyncpg is None:
-            raise ImportError("asyncpg is required for pgvector backend")
+            raise ImportError(
+                "pgvector backend requires the 'pgvector' extra: pip install job-ftch[pgvector]"
+            ) from _IMPORT_ERROR
         if not settings.store_dsn:
             raise ValueError("store_dsn is required for pgvector backend")
 

@@ -17,9 +17,11 @@ else:
     try:
         from qdrant_client import AsyncQdrantClient
         from qdrant_client.http import models as rest
-    except ImportError:
+        _IMPORT_ERROR = None
+    except ImportError as exc:
         AsyncQdrantClient = None
         rest = None
+        _IMPORT_ERROR = exc
 
 from job_ftch.application.contracts import VectorBackend
 from job_ftch.application.registry import register_vector_backend
@@ -28,8 +30,10 @@ from job_ftch.application.registry import register_vector_backend
 @register_vector_backend("qdrant")
 class QdrantVectorBackend(VectorBackend):
     def __init__(self, settings: Settings) -> None:
-        if AsyncQdrantClient is None:
-            raise ImportError("qdrant-client is required for qdrant backend")
+        if AsyncQdrantClient is None or rest is None:
+            raise ImportError(
+                "Qdrant backend requires the 'qdrant' extra: pip install job-ftch[qdrant]"
+            ) from _IMPORT_ERROR
 
         self.url = str(settings.qdrant_url)
         self.api_key = settings.qdrant_api_key
