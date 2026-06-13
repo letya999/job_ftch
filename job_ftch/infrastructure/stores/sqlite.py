@@ -43,6 +43,8 @@ class SQLiteStore(SQLStoreAdapter):
 
         async with self._init_lock:
             if self._conn is None:
+                if self._path != ":memory:":
+                    Path(self._path).parent.mkdir(parents=True, exist_ok=True)
                 self._conn = await aiosqlite.connect(self._path)
                 self._conn.row_factory = aiosqlite.Row
                 await self._initialize()

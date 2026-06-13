@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 import httpx
 import structlog
 
+from job_ftch.adapters.source_inputs import build_source_spec_from_input
 from job_ftch.adapters.telegram_bot.formatter import format_job_digest, format_job_message
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
@@ -193,15 +194,59 @@ class TelegramBotService:
             return
         if command == "/sources":
             sources_tenant_id = args[0] if args else tenant_ids[0]
-            payloads = await self._runner.list_source_health(sources_tenant_id)
+            payloads = await self._runner.list_sources(sources_tenant_id)
             if not payloads:
-                await self._sender.send_message(chat_id, "No source health yet.")
+                await self._sender.send_message(chat_id, "No configured sources.")
                 return
             lines = [
-                f"{item['source_name']}: {item['status']} emitted={item['last_emitted']} failures={item['failure_streak']}"
+                f"{item['source_name']}: {item['status']} ({item['origin']})"
                 for item in payloads[:10]
             ]
             await self._sender.send_message(chat_id, "\n".join(lines))
+            return
+        if command == "/addsource":
+            try:
+                self._require_admin(user_id)
+            except PermissionError as exc:
+                await self._sender.send_message(chat_id, f"Access denied: {exc}")
+                return
+            if len(args) < 2:
+                await self._sender.send_message(chat_id, "Usage: /addsource <tenant_id> <link>")
+                return
+            add_tenant_id, link = args[0], args[1]
+            spec = await build_source_spec_from_input(
+                link,
+                auth_provider=self._runner.get_runtime(add_tenant_id).auth_provider,
+            )
+            payload = await self._runner.add_source_spec(
+                add_tenant_id,
+                spec,
+                added_via="telegram_bot",
+                added_by=str(user_id),
+                input_value=link,
+            )
+            await self._sender.send_message(
+                chat_id,
+                f"Added {payload['source_id']} to {add_tenant_id}.",
+            )
+            return
+        if command == "/disablesource":
+            try:
+                self._require_admin(user_id)
+            except PermissionError as exc:
+                await self._sender.send_message(chat_id, f"Access denied: {exc}")
+                return
+            if len(args) < 2:
+                await self._sender.send_message(
+                    chat_id,
+                    "Usage: /disablesource <tenant_id> <source_id>",
+                )
+                return
+            disabled = await self._runner.disable_source(args[0], args[1])
+            await self._sender.send_message(
+                chat_id,
+                f"Disabled {disabled['source_id']} in {args[0]}.",
+            )
             return
         if command == "/run":
             try:

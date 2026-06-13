@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
+from job_ftch.adapters.source_inputs import build_source_spec_from_input
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.config import Settings, get_settings
@@ -75,6 +76,35 @@ class TenantMCPServer:
         @self.app.tool
         async def list_source_health(tenant_id: str) -> list[dict[str, Any]]:
             return await self._require_runner().list_source_health(tenant_id)
+
+        @self.app.tool
+        async def list_sources(tenant_id: str) -> list[dict[str, Any]]:
+            return await self._require_runner().list_sources(tenant_id)
+
+        @self.app.tool
+        async def add_source(
+            tenant_id: str,
+            link: str,
+            source_type: str | None = None,
+            limit: int = 100,
+        ) -> dict[str, Any]:
+            runner = self._require_runner()
+            spec = await build_source_spec_from_input(
+                link,
+                auth_provider=runner.get_runtime(tenant_id).auth_provider,
+                source_type=source_type,
+                limit=limit,
+            )
+            return await runner.add_source_spec(
+                tenant_id,
+                spec,
+                added_via="mcp",
+                input_value=link,
+            )
+
+        @self.app.tool
+        async def disable_source(tenant_id: str, source_id: str) -> dict[str, Any]:
+            return await self._require_runner().disable_source(tenant_id, source_id)
 
         @self.app.tool
         async def list_runs(tenant_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:

@@ -9,6 +9,7 @@ from typing import Any
 
 import structlog
 
+from job_ftch.adapters.source_inputs import build_source_spec_from_input
 from job_ftch.adapters.telegram_bot.bot import (
     HttpTelegramBotClient,
     TelegramBotService,
@@ -105,7 +106,50 @@ def create_app(
         expected_key = bot_config.bridge_api_key
         if expected_key and not hmac.compare_digest(x_api_key or "", expected_key):
             raise HTTPException(status_code=403, detail="Invalid bridge API key.")
-        return await runner.list_source_health(tenant_id)
+        return await runner.list_sources(tenant_id)
+
+    @app.post("/pipeline/sources/{tenant_id}")
+    async def add_pipeline_source(
+        tenant_id: str,
+        payload: dict[str, Any],
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        expected_key = bot_config.bridge_api_key
+        if expected_key and not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        try:
+            spec = await build_source_spec_from_input(
+                str(payload.get("link") or ""),
+                auth_provider=runner.get_runtime(tenant_id).auth_provider,
+                source_type=payload.get("source_type"),
+                limit=int(payload.get("limit") or 100),
+            )
+            return await runner.add_source_spec(
+                tenant_id,
+                spec,
+                added_via="api",
+                added_by=str(payload.get("added_by")) if payload.get("added_by") else None,
+                input_value=str(payload.get("link") or ""),
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/pipeline/sources/{tenant_id}/disable")
+    async def disable_pipeline_source(
+        tenant_id: str,
+        payload: dict[str, Any],
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        expected_key = bot_config.bridge_api_key
+        if expected_key and not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        source_id = payload.get("source_id")
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise HTTPException(status_code=400, detail="source_id is required.")
+        try:
+            return await runner.disable_source(tenant_id, source_id.strip())
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/jobs/search")
     async def search_jobs(

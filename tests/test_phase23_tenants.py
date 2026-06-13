@@ -9,16 +9,23 @@ from typing import TYPE_CHECKING
 import pytest
 
 from job_ftch.application.auth import resolve_auth_provider
+from job_ftch.application.pipeline import RunSummary, SourceRunStats
 from job_ftch.application.registry import create_auth_provider
 from job_ftch.application.tenant_loader import load_tenants
-from job_ftch.application.pipeline import RunSummary, SourceRunStats
 from job_ftch.application.tenant_runner import (
     TenantRunner,
     _update_source_health_payload,
 )
 from job_ftch.cli import _handle_tenants, _merge_run_summaries
 from job_ftch.config import Settings
-from job_ftch.domain import JobLineage, RawItem, SourceKind, TenantConfig
+from job_ftch.domain import (
+    JobLineage,
+    RawItem,
+    SourceKind,
+    TenantConfig,
+    source_spec_identifier,
+)
+from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
 
 if TYPE_CHECKING:
@@ -284,6 +291,58 @@ async def test_tenant_runner_lists_source_health(tmp_path: Path) -> None:
         await runner.close()
 
 
+@pytest.mark.asyncio
+async def test_tenant_runner_persists_runtime_sources_and_disables_them(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "ai_jobs",
+            "display_name": "AI Jobs",
+            "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+            "store_backend": "sqlite",
+            "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            "job_group_store_backend": "sqlite",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+        }
+    )
+    runtime_spec = CareerSiteSpec(
+        type="career_site",
+        url="https://example.com/jobs",
+        source_name="example_com_jobs",
+    )
+    source_id = source_spec_identifier(runtime_spec)
+
+    runner = TenantRunner.from_tenants([tenant])
+    try:
+        added = await runner.add_source_spec("ai_jobs", runtime_spec, added_via="test")
+        listed = await runner.list_sources("ai_jobs")
+        tenants = await runner.list_tenants()
+
+        assert added["source_id"] == source_id
+        assert any(item["source_id"] == source_id and item["origin"] == "runtime" for item in listed)
+        assert tenants[0].source_count == 2
+    finally:
+        await runner.close()
+
+    reloaded = TenantRunner.from_tenants([tenant])
+    try:
+        listed = await reloaded.list_sources("ai_jobs")
+        assert any(item["source_id"] == source_id and item["enabled"] is True for item in listed)
+
+        disabled = await reloaded.disable_source("ai_jobs", source_id)
+        listed_after_disable = await reloaded.list_sources("ai_jobs")
+        tenants = await reloaded.list_tenants()
+
+        assert disabled["status"] == "disabled"
+        assert any(item["source_id"] == source_id and item["status"] == "disabled" for item in listed_after_disable)
+        assert tenants[0].source_count == 1
+    finally:
+        await reloaded.close()
+
+
 def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
     stats = SourceRunStats(emitted=0, failed=0, fetched=2)
     payload = _update_source_health_payload(
@@ -321,19 +380,21 @@ def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
 async def test_tenants_cli_lineage_outputs_json(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    lineage = JobLineage(
-        tenant_id="ai_jobs",
-        job_id="job-1",
-        group_id="group-1",
-        raw_item_id="raw-1",
-        source_record_id="1",
-        source_kind="debug",
-        source_name="fixture",
-        source_url="https://example.com/jobs/1",
-        canonical_url="https://example.com/jobs/1",
-        fetched_at=datetime(2026, 6, 12, tzinfo=UTC),
-        pipeline_stages=("sanitize", "extraction", "aggregation"),
-        source_run_id="run-123",
+    lineage = JobLineage.model_validate(
+        {
+            "tenant_id": "ai_jobs",
+            "job_id": "job-1",
+            "group_id": "group-1",
+            "raw_item_id": "raw-1",
+            "source_record_id": "1",
+            "source_kind": "debug",
+            "source_name": "fixture",
+            "source_url": "https://example.com/jobs/1",
+            "canonical_url": "https://example.com/jobs/1",
+            "fetched_at": datetime(2026, 6, 12, tzinfo=UTC),
+            "pipeline_stages": ("sanitize", "extraction", "aggregation"),
+            "source_run_id": "run-123",
+        }
     )
 
     class _RunnerStub:

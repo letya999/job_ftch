@@ -6,8 +6,8 @@ import asyncio
 import json
 import os
 import time
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -24,7 +24,6 @@ from job_ftch.application.builder import (
     tenant_to_settings,
 )
 from job_ftch.application.pipeline import RunSummary, SourceRunStats
-from job_ftch.application.watermark import IncrementalCursor
 from job_ftch.application.registry import (
     create_job_backend,
     create_job_group_store,
@@ -32,14 +31,19 @@ from job_ftch.application.registry import (
     create_search_backend,
     create_store,
 )
+from job_ftch.application.watermark import IncrementalCursor
 from job_ftch.config import get_settings
 from job_ftch.domain import (
     JobGroup,
     JobLineage,
     JobRecord,
+    RuntimeSourceRecord,
     TenantConfig,
     TenantInfo,
     build_job_lineage,
+    source_spec_identifier,
+    source_spec_locator,
+    source_spec_name,
 )
 from job_ftch.infrastructure.metrics.prometheus import PrometheusExporter
 
@@ -47,15 +51,16 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from job_ftch.application.contracts import (
+        AuthProvider,
         JobGroupStore,
         JobPersistenceBackend,
         LLMProvider,
-        ProcessingNode,
         SearchBackend,
         Store,
         StoreConnector,
     )
     from job_ftch.config import Settings
+    from job_ftch.domain.source_spec import SourceSpec
 
 logger = structlog.get_logger(__name__)
 _PROCESS_TENANT_LOCKS: dict[str, asyncio.Lock] = {}
@@ -79,10 +84,8 @@ def _summary_from_payload(payload: dict[str, Any], *, tenant_id: str | None = No
     for key in ("started_at", "finished_at"):
         value = payload.get(key)
         if isinstance(value, str):
-            try:
+            with suppress(ValueError):
                 payload[key] = datetime.fromisoformat(value)
-            except ValueError:
-                pass
     summary = RunSummary(**payload)
     if tenant_id is not None:
         summary.tenant_id = tenant_id
@@ -91,6 +94,14 @@ def _summary_from_payload(payload: dict[str, Any], *, tenant_id: str | None = No
 
 def _source_health_key(source_id: str) -> str:
     return f"source_health:{source_id}"
+
+
+def _runtime_source_key(source_id: str) -> str:
+    return f"runtime_source:{source_id}"
+
+
+def _source_disabled_key(source_id: str) -> str:
+    return f"source_disabled:{source_id}"
 
 
 def _update_source_health_payload(
@@ -145,6 +156,61 @@ def _update_source_health_payload(
         "degraded": degraded,
         "status": "degraded" if degraded else ("paused" if failure_streak >= 3 else "healthy"),
     }
+
+
+def _build_source_listing_payload(
+    spec: SourceSpec,
+    *,
+    origin: str,
+    enabled: bool,
+    health: dict[str, Any] | None,
+) -> dict[str, Any]:
+    source_id = source_spec_identifier(spec)
+    payload: dict[str, Any] = {
+        "source_id": source_id,
+        "source_kind": spec.type,
+        "source_name": source_spec_name(spec),
+        "locator": source_spec_locator(spec),
+        "origin": origin,
+        "enabled": enabled,
+        "spec": spec.model_dump(mode="json"),
+    }
+    if health is None:
+        payload.update(
+            {
+                "status": "disabled" if not enabled else "pending",
+                "failure_streak": 0,
+                "last_emitted": 0,
+                "last_failed": 0,
+                "last_quarantined": 0,
+                "degraded": False,
+            }
+        )
+        return payload
+    payload.update(health)
+    if not enabled:
+        payload["status"] = "disabled"
+    return payload
+
+
+def _merge_effective_sources(
+    base_sources: tuple[SourceSpec, ...],
+    runtime_sources: dict[str, RuntimeSourceRecord],
+    disabled_source_ids: set[str],
+) -> list[SourceSpec]:
+    merged: list[SourceSpec] = []
+    seen: set[str] = set()
+    for spec in base_sources:
+        source_id = source_spec_identifier(spec)
+        seen.add(source_id)
+        if source_id not in disabled_source_ids:
+            merged.append(spec)
+    for source_id, record in runtime_sources.items():
+        if source_id in seen:
+            continue
+        if record.enabled and source_id not in disabled_source_ids:
+            merged.append(record.spec)
+    return merged
 
 
 class TenantStore:
@@ -292,6 +358,52 @@ class TenantStore:
                 payloads.append(payload)
         return payloads
 
+    async def get_runtime_source(self, source_id: str) -> RuntimeSourceRecord | None:
+        connector = cast("StoreConnector", self._store)
+        raw = await connector.get(self._key(_runtime_source_key(source_id)))
+        if raw is None:
+            return None
+        try:
+            return RuntimeSourceRecord.model_validate_json(raw)
+        except (TypeError, ValueError):
+            return None
+
+    async def save_runtime_source(self, record: RuntimeSourceRecord) -> None:
+        connector = cast("StoreConnector", self._store)
+        await connector.set(
+            self._key(_runtime_source_key(record.source_id)),
+            record.model_dump_json(),
+        )
+        await connector.set_add(self._key("runtime_source_ids"), record.source_id)
+
+    async def list_runtime_sources(self) -> list[RuntimeSourceRecord]:
+        connector = cast("StoreConnector", self._store)
+        source_ids = sorted(await connector.set_members(self._key("runtime_source_ids")))
+        records: list[RuntimeSourceRecord] = []
+        for source_id in source_ids:
+            record = await self.get_runtime_source(source_id)
+            if record is not None:
+                records.append(record)
+        return records
+
+    async def set_source_disabled(self, source_id: str, disabled: bool) -> None:
+        connector = cast("StoreConnector", self._store)
+        key = self._key(_source_disabled_key(source_id))
+        if disabled:
+            await connector.set(key, "1")
+        else:
+            await connector.delete(key)
+        await connector.set_add(self._key("source_disabled_ids"), source_id)
+
+    async def list_disabled_source_ids(self) -> set[str]:
+        connector = cast("StoreConnector", self._store)
+        disabled_ids = sorted(await connector.set_members(self._key("source_disabled_ids")))
+        result: set[str] = set()
+        for source_id in disabled_ids:
+            if await connector.get(self._key(_source_disabled_key(source_id))) is not None:
+                result.add(source_id)
+        return result
+
     async def get_run_summary(self, run_id: str) -> RunSummary | None:
         connector = cast("StoreConnector", self._store)
         raw = await connector.get(self._key(f"run_history:{run_id}"))
@@ -331,12 +443,17 @@ class TenantStore:
 class TenantRuntime:
     tenant: TenantConfig
     settings: Settings
+    auth_provider: AuthProvider
     store: TenantStore
     builder: PipelineBuilder
     job_group_store: JobGroupStore
     search_backend: SearchBackend
     job_backend: JobPersistenceBackend
     metrics_exporter: PrometheusExporter | None = None
+    base_sources: tuple[SourceSpec, ...] = field(default_factory=tuple)
+    runtime_sources: dict[str, RuntimeSourceRecord] = field(default_factory=dict)
+    disabled_source_ids: set[str] = field(default_factory=set)
+    sources_loaded: bool = False
 
 
 class TenantRunner:
@@ -402,12 +519,14 @@ class TenantRunner:
             runtimes[tenant.tenant_id] = TenantRuntime(
                 tenant=tenant,
                 settings=tenant_settings,
+                auth_provider=auth,
                 store=tenant_store,
                 builder=builder,
                 job_group_store=job_group_store,
                 search_backend=cast("SearchBackend", create_search_backend(tenant_settings)),
                 job_backend=cast("JobPersistenceBackend", create_job_backend(tenant_settings)),
                 metrics_exporter=metrics_exporter,
+                base_sources=tuple(tenant.sources),
             )
         return cls(runtimes)
 
@@ -421,8 +540,99 @@ class TenantRunner:
             raise KeyError(msg)
         return runtime
 
+    async def _ensure_runtime_sources_loaded(self, runtime: TenantRuntime) -> None:
+        if runtime.sources_loaded:
+            return
+        runtime.runtime_sources = {
+            record.source_id: record for record in await runtime.store.list_runtime_sources()
+        }
+        runtime.disabled_source_ids = await runtime.store.list_disabled_source_ids()
+        self._apply_runtime_sources(runtime)
+        runtime.sources_loaded = True
+
+    def _apply_runtime_sources(self, runtime: TenantRuntime) -> None:
+        effective_sources = _merge_effective_sources(
+            runtime.base_sources,
+            runtime.runtime_sources,
+            runtime.disabled_source_ids,
+        )
+        runtime.builder.sources(effective_sources)
+        runtime.tenant = runtime.tenant.model_copy(update={"sources": effective_sources})
+
+    async def add_source_spec(
+        self,
+        tenant_id: str,
+        spec: SourceSpec,
+        *,
+        added_via: str = "runtime",
+        added_by: str | None = None,
+        input_value: str | None = None,
+    ) -> dict[str, Any]:
+        runtime = self.get_runtime(tenant_id)
+        await self._ensure_runtime_sources_loaded(runtime)
+        source_id = source_spec_identifier(spec)
+        base_ids = {source_spec_identifier(item) for item in runtime.base_sources}
+        existing_runtime = runtime.runtime_sources.get(source_id)
+
+        if source_id in base_ids and source_id not in runtime.disabled_source_ids:
+            msg = f"Source already configured: {source_id}"
+            raise ValueError(msg)
+        if existing_runtime is not None and existing_runtime.enabled and source_id not in runtime.disabled_source_ids:
+            msg = f"Source already configured: {source_id}"
+            raise ValueError(msg)
+
+        if source_id in base_ids:
+            await runtime.store.set_source_disabled(source_id, False)
+            runtime.disabled_source_ids.discard(source_id)
+        else:
+            record = RuntimeSourceRecord(
+                source_id=source_id,
+                spec=spec,
+                enabled=True,
+                added_via=added_via,
+                added_by=added_by,
+                input_value=input_value,
+            )
+            runtime.runtime_sources[source_id] = record
+            await runtime.store.save_runtime_source(record)
+            await runtime.store.set_source_disabled(source_id, False)
+            runtime.disabled_source_ids.discard(source_id)
+
+        self._apply_runtime_sources(runtime)
+        payloads = await self.list_sources(tenant_id)
+        for payload in payloads:
+            if payload["source_id"] == source_id:
+                return payload
+        msg = f"Failed to activate source: {source_id}"
+        raise RuntimeError(msg)
+
+    async def disable_source(self, tenant_id: str, source_id: str) -> dict[str, Any]:
+        runtime = self.get_runtime(tenant_id)
+        await self._ensure_runtime_sources_loaded(runtime)
+        base_ids = {source_spec_identifier(item) for item in runtime.base_sources}
+        runtime_record = runtime.runtime_sources.get(source_id)
+        if source_id not in base_ids and runtime_record is None:
+            msg = f"Unknown source_id: {source_id}"
+            raise KeyError(msg)
+
+        if runtime_record is not None:
+            runtime_record = runtime_record.model_copy(update={"enabled": False})
+            runtime.runtime_sources[source_id] = runtime_record
+            await runtime.store.save_runtime_source(runtime_record)
+
+        runtime.disabled_source_ids.add(source_id)
+        await runtime.store.set_source_disabled(source_id, True)
+        self._apply_runtime_sources(runtime)
+        payloads = await self.list_sources(tenant_id)
+        for payload in payloads:
+            if payload["source_id"] == source_id:
+                return payload
+        msg = f"Failed to disable source: {source_id}"
+        raise RuntimeError(msg)
+
     async def run_tenant(self, tenant_id: str, *, max_items: int | None = None) -> RunSummary:
         runtime = self.get_runtime(tenant_id)
+        await self._ensure_runtime_sources_loaded(runtime)
         async with _tenant_run_lock(runtime.settings, tenant_id):
             summary = await runtime.builder.clone().run_async(max_items=max_items)
         summary.tenant_id = tenant_id
@@ -500,6 +710,7 @@ class TenantRunner:
         result: list[TenantInfo] = []
         for tenant_id in self.tenant_ids():
             runtime = self.get_runtime(tenant_id)
+            await self._ensure_runtime_sources_loaded(runtime)
             summary = await self.get_status(tenant_id)
             result.append(
                 TenantInfo(
@@ -513,6 +724,38 @@ class TenantRunner:
 
     async def list_source_health(self, tenant_id: str) -> list[dict[str, Any]]:
         return await self.get_runtime(tenant_id).store.list_source_health()
+
+    async def list_sources(self, tenant_id: str) -> list[dict[str, Any]]:
+        runtime = self.get_runtime(tenant_id)
+        await self._ensure_runtime_sources_loaded(runtime)
+        health_payloads = await runtime.store.list_source_health()
+        health_by_id = {payload["source_id"]: payload for payload in health_payloads}
+        health_by_name = {payload["source_name"]: payload for payload in health_payloads}
+        payloads: list[dict[str, Any]] = []
+        for spec in runtime.base_sources:
+            source_id = source_spec_identifier(spec)
+            source_name = source_spec_name(spec)
+            payloads.append(
+                _build_source_listing_payload(
+                    spec,
+                    origin="config",
+                    enabled=source_id not in runtime.disabled_source_ids,
+                    health=health_by_id.get(source_id) or health_by_name.get(source_name),
+                )
+            )
+        for source_id in sorted(runtime.runtime_sources):
+            record = runtime.runtime_sources[source_id]
+            source_name = source_spec_name(record.spec)
+            payloads.append(
+                _build_source_listing_payload(
+                    record.spec,
+                    origin=record.origin,
+                    enabled=record.enabled and source_id not in runtime.disabled_source_ids,
+                    health=health_by_id.get(source_id) or health_by_name.get(source_name),
+                )
+            )
+        payloads.sort(key=lambda item: str(item["source_id"]))
+        return payloads
 
     async def search_jobs(
         self,
@@ -610,7 +853,9 @@ class TenantRunner:
         return None
 
     async def get_config(self, tenant_id: str) -> dict[str, Any]:
-        tenant = self.get_runtime(tenant_id).tenant
+        runtime = self.get_runtime(tenant_id)
+        await self._ensure_runtime_sources_loaded(runtime)
+        tenant = runtime.tenant
         payload = tenant.model_dump(mode="json")
         payload.pop("auth_provider", None)
         return payload
@@ -618,6 +863,10 @@ class TenantRunner:
     async def reset_tenant(self, tenant_id: str) -> None:
         runtime = self.get_runtime(tenant_id)
         await runtime.store.reset_namespace()
+        runtime.runtime_sources.clear()
+        runtime.disabled_source_ids.clear()
+        runtime.sources_loaded = False
+        self._apply_runtime_sources(runtime)
 
     async def close(self) -> None:
         closed: set[int] = set()

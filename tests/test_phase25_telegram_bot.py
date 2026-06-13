@@ -190,6 +190,8 @@ async def test_bot_access_control_and_status_endpoint(
     webhook = app.routes[("POST", "/webhook/telegram")]
     status = app.routes[("GET", "/pipeline/status/{tenant_id}")]
     sources = app.routes[("GET", "/pipeline/sources/{tenant_id}")]
+    add_source = app.routes[("POST", "/pipeline/sources/{tenant_id}")]
+    disable_source = app.routes[("POST", "/pipeline/sources/{tenant_id}/disable")]
     pipeline_run = app.routes[("POST", "/pipeline/run")]
 
     await webhook(
@@ -203,14 +205,26 @@ async def test_bot_access_control_and_status_endpoint(
         "secret",
     )
     summary = await pipeline_run({"tenant_id": "ai_jobs"}, "bridge-key")
+    added = await add_source(
+        "ai_jobs",
+        {"link": "https://example.com/jobs"},
+        "bridge-key",
+    )
     status_payload = await status("ai_jobs")
     source_payload = await sources("ai_jobs", "bridge-key")
+    disabled = await disable_source(
+        "ai_jobs",
+        {"source_id": added["source_id"]},
+        "bridge-key",
+    )
 
     assert sender.messages[0]["text"] == "Access denied."
     assert summary["tenant_id"] == "ai_jobs"
     assert status_payload is not None
     assert status_payload["tenant_id"] == "ai_jobs"
-    assert source_payload[0]["source_id"] == "debug:fixture"
+    assert any(item["source_id"] == "debug:fixture" for item in source_payload)
+    assert added["source_id"] == "career_site:example_com_jobs"
+    assert disabled["status"] == "disabled"
 
     await runner.close()
 
@@ -234,7 +248,43 @@ async def test_bot_sources_command_reports_source_health(tmp_path: Path) -> None
 
     try:
         await service.handle_command("/sources ai_jobs", chat_id=100, user_id=1)
-        assert "fixture: healthy" in sender.messages[0]["text"]
+        assert "fixture: healthy (config)" in sender.messages[0]["text"]
+    finally:
+        await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_bot_can_add_and_disable_runtime_sources(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path)
+    sender = FakeSender()
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            allowed_user_ids=(1,),
+            allowed_chat_ids=(100,),
+            admin_user_ids=(1,),
+            rate_limit_seconds=0.0,
+        ),
+    )
+
+    try:
+        await service.handle_command(
+            "/addsource ai_jobs https://example.com/jobs",
+            chat_id=100,
+            user_id=1,
+        )
+        await service.handle_command("/sources ai_jobs", chat_id=100, user_id=1)
+        await service.handle_command(
+            "/disablesource ai_jobs career_site:example_com_jobs",
+            chat_id=100,
+            user_id=1,
+        )
+
+        assert "Added career_site:example_com_jobs" in sender.messages[0]["text"]
+        assert "example_com_jobs: pending (runtime)" in sender.messages[1]["text"]
+        assert "Disabled career_site:example_com_jobs" in sender.messages[2]["text"]
     finally:
         await runner.close()
 

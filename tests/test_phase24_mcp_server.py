@@ -78,12 +78,15 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
 
     assert server.app.name == "job_ftch"
     assert set(server.app.tools) == {
+        "add_source",
+        "disable_source",
         "get_run",
         "get_job",
         "get_job_lineage",
         "get_status",
         "list_runs",
         "list_source_health",
+        "list_sources",
         "list_tenants",
         "reset_tenant",
         "run_all_pipelines",
@@ -101,6 +104,17 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
     latest_jobs = json.loads(await server.app.resources["jobs://{tenant_id}/latest"]("ai_jobs"))
     status_payload = await server.app.tools["get_status"]("ai_jobs")
     source_health = await server.app.tools["list_source_health"]("ai_jobs")
+    added_source = await server.app.tools["add_source"](
+        "ai_jobs",
+        "https://example.com/jobs",
+        None,
+        100,
+    )
+    listed_sources = await server.app.tools["list_sources"]("ai_jobs")
+    disabled_source = await server.app.tools["disable_source"](
+        "ai_jobs",
+        added_source["source_id"],
+    )
     run_history = await server.app.tools["list_runs"]("ai_jobs", 10)
     search_results = await server.app.tools["search_jobs"]("senior", "ai_jobs", 10)
     lineage_payload = await server.app.tools["get_job_lineage"](latest_jobs[0]["job_id"], "ai_jobs")
@@ -112,6 +126,9 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
     assert status_payload is not None
     assert status_payload["tenant_id"] == "ai_jobs"
     assert source_health[0]["source_id"] == "debug:fixture"
+    assert added_source["source_id"] == "career_site:example_com_jobs"
+    assert any(item["source_id"] == "career_site:example_com_jobs" for item in listed_sources)
+    assert disabled_source["status"] == "disabled"
     assert len(run_history) == 1
     assert run_history[0]["source_run_id"] == run_summary["source_run_id"]
     assert len(search_results) == 1
