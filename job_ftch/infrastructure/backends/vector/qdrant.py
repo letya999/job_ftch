@@ -25,8 +25,8 @@ else:
         rest = None
         _IMPORT_ERROR = exc
 
-from job_ftch.application.contracts import VectorBackend
-from job_ftch.application.registry import register_vector_backend
+from job_ftch.application.contracts import VectorBackend  # noqa: E402
+from job_ftch.application.registry import register_vector_backend  # noqa: E402
 
 
 @register_vector_backend("qdrant")

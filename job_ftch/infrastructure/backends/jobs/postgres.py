@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -92,10 +93,8 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                     m2_path = Path(__file__).parent / "migrations" / "002_postgres_blocking_key.sql"
                     with open(m2_path, encoding="utf-8") as f:
                         m2_sql = f.read()
-                    try:
+                    with contextlib.suppress(Exception):  # Already exists
                         await conn.execute(m2_sql)
-                    except Exception: # Already exists
-                        pass
                         
                 self._schema_initialized = True
         return self._pool

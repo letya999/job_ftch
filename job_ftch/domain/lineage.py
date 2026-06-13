@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003
 from typing import TYPE_CHECKING
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
