@@ -246,7 +246,9 @@ class TelegramBotService:
                     updated_at=datetime.now(UTC),
                 ),
             )
-            await self._runner.set_active_candidate_profile(profile_tenant_id, str(user_id), profile_id)
+            await self._runner.set_active_candidate_profile(
+                profile_tenant_id, str(user_id), profile_id
+            )
             await self._sender.send_message(
                 chat_id,
                 f"Saved profile {profile_payload['profile_id']} for {profile_tenant_id}.",

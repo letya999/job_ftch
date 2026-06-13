@@ -19,6 +19,7 @@ else:
     try:
         from qdrant_client import AsyncQdrantClient
         from qdrant_client.http import models as rest
+
         _IMPORT_ERROR = None
     except ImportError as exc:
         AsyncQdrantClient = None

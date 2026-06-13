@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 try:
     import asyncpg
+
     _IMPORT_ERROR = None
 except ImportError as exc:
     asyncpg = None  # type: ignore[assignment]

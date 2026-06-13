@@ -130,12 +130,13 @@ class CareerSiteSource(Source["RawItem"]):
             # get_ordered_monitors already performs fingerprinting and returns the best monitor list.
             # No separate detect_monitor_type call needed here to avoid extra HTTP requests.
             from job_ftch.infrastructure.sources.monitor_detector import get_ordered_monitors
+
             async with client_for_config(self.http, monitor_config) as _fp_client:
                 try:
                     monitors_to_try = await get_ordered_monitors(self.spec.url, _fp_client)
                 except Exception:
                     monitors_to_try = ["dom", "api_sniffer"]
-            
+
             # Ensure dom and api_sniffer always present as ultimate fallbacks
             for fallback in ["dom", "api_sniffer"]:
                 if fallback not in monitors_to_try:

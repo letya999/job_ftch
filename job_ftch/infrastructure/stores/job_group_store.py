@@ -61,9 +61,7 @@ class InMemoryJobGroupStore:
 
         return group
 
-    async def merge(
-        self, group_id: str, job: JobRecord, merge_confidence: float = 1.0
-    ) -> JobGroup:
+    async def merge(self, group_id: str, job: JobRecord, merge_confidence: float = 1.0) -> JobGroup:
         group = self._groups.get(group_id)
         if not group:
             raise ValueError(f"Group {group_id} not found.")

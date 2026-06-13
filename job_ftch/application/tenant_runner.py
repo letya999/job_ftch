@@ -169,7 +169,9 @@ def _update_source_health_payload(
         baseline_emitted=next_baseline,
         drift_ratio=drift_ratio,
         degraded=degraded,
-        status="degraded" if degraded else ("paused" if failure_streak >= failure_streak_pause else "healthy"),
+        status="degraded"
+        if degraded
+        else ("paused" if failure_streak >= failure_streak_pause else "healthy"),
         paused=failure_streak >= failure_streak_pause,
         skipped_runs=0 if not had_failure else (previous.skipped_runs if previous else 0),
     )
@@ -343,7 +345,9 @@ class TenantStore:
         if not run_id:
             msg = "RunSummary.source_run_id is required to persist run history."
             raise ValueError(msg)
-        raw = json.dumps(summary.as_dict(), default=_json_default, ensure_ascii=False, sort_keys=True)
+        raw = json.dumps(
+            summary.as_dict(), default=_json_default, ensure_ascii=False, sort_keys=True
+        )
         await connector.set(self._key(f"run_history:{run_id}"), raw)
         await connector.set_add(self._key("run_history_ids"), run_id)
 
@@ -479,7 +483,12 @@ class TenantStore:
         try:
             return _summary_from_payload(json.loads(raw), tenant_id=self._tenant_id)
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
-            logger.warning("run_history_decode_failed", tenant_id=self._tenant_id, run_id=run_id, error=str(exc))
+            logger.warning(
+                "run_history_decode_failed",
+                tenant_id=self._tenant_id,
+                run_id=run_id,
+                error=str(exc),
+            )
             return None
 
     async def list_run_summaries(self, *, limit: int = 20) -> list[RunSummary]:
@@ -648,7 +657,11 @@ class TenantRunner:
         if source_id in base_ids and source_id not in runtime.disabled_source_ids:
             msg = f"Source already configured: {source_id}"
             raise ValueError(msg)
-        if existing_runtime is not None and existing_runtime.enabled and source_id not in runtime.disabled_source_ids:
+        if (
+            existing_runtime is not None
+            and existing_runtime.enabled
+            and source_id not in runtime.disabled_source_ids
+        ):
             msg = f"Source already configured: {source_id}"
             raise ValueError(msg)
 
@@ -720,7 +733,9 @@ class TenantRunner:
             if health:
                 health_map[sid] = health
 
-        all_specs = list(runtime.base_sources) + [r.spec for r in runtime.runtime_sources.values() if r.enabled]
+        all_specs = list(runtime.base_sources) + [
+            r.spec for r in runtime.runtime_sources.values() if r.enabled
+        ]
         # Filter for unique specs by ID (handling overlaps between base and runtime)
         seen_specs: set[str] = set()
         unique_specs: list[SourceSpec] = []
@@ -973,7 +988,9 @@ class TenantRunner:
         runtime = self.get_runtime(tenant_id)
         if user_id is None:
             return None
-        resolved_profile_id = profile_id or await runtime.store.get_active_candidate_profile_id(user_id)
+        resolved_profile_id = profile_id or await runtime.store.get_active_candidate_profile_id(
+            user_id
+        )
         if resolved_profile_id is None:
             return None
         return await runtime.store.get_candidate_profile(user_id, resolved_profile_id)
@@ -1116,7 +1133,9 @@ class TenantRunner:
             return await self.get_runtime(tenant_id).store.list_run_summaries(limit=limit)
         summaries: list[RunSummary] = []
         for current_tenant in self.tenant_ids():
-            summaries.extend(await self.get_runtime(current_tenant).store.list_run_summaries(limit=limit))
+            summaries.extend(
+                await self.get_runtime(current_tenant).store.list_run_summaries(limit=limit)
+            )
         summaries.sort(key=_summary_sort_key, reverse=True)
         return summaries[:limit]
 

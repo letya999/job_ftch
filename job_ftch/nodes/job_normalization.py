@@ -67,6 +67,7 @@ class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
     def __init__(self, normalizer: Normalizer | None = None):
         if normalizer is None:
             from job_ftch.infrastructure.ontology.normalizer import get_default_normalizer
+
             normalizer = get_default_normalizer()
         self.normalizer = normalizer
 
@@ -77,15 +78,15 @@ class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
             parts = _COMP_SPLIT_RE.split(title, maxsplit=1)
             if len(parts) == 2:
                 title, company = parts[0].strip(), parts[1].strip()
-        
+
         normalization_steps: list[str] = []
-        
+
         role_family = item.role_family
         if role_family is None and title:
             role_family = self.normalizer.infer_role_family(title)
             if role_family:
                 normalization_steps.append(f"role_family:{role_family}")
-        
+
         seniority = item.seniority
         if seniority is Seniority.UNKNOWN and title:
             inferred = self.normalizer.infer_seniority(title)
@@ -100,12 +101,14 @@ class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
             normalization_steps.append("title:cleaned")
         if company != item.company_name_raw:
             normalization_steps.append("company:cleaned")
-        
+
         record = draft_to_record(item)
         provenance = record.provenance.model_copy(
             update={
                 "normalization": tuple(
-                    list(record.provenance.normalization) + normalization_steps + ["title_company_normalization"]
+                    list(record.provenance.normalization)
+                    + normalization_steps
+                    + ["title_company_normalization"]
                 )
             }
         )
@@ -177,7 +180,8 @@ class CompensationParsingNode:
                 "provenance": item.provenance.model_copy(
                     update={
                         "normalization": tuple(
-                            list(item.provenance.normalization) + ["compensation:parsed_from_description"]
+                            list(item.provenance.normalization)
+                            + ["compensation:parsed_from_description"]
                         )
                     }
                 ),
@@ -189,6 +193,7 @@ class SkillNormalizationNode:
     def __init__(self, normalizer: Normalizer | None = None):
         if normalizer is None:
             from job_ftch.infrastructure.ontology.normalizer import get_default_normalizer
+
             normalizer = get_default_normalizer()
         self.normalizer = normalizer
 

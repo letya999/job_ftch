@@ -33,7 +33,7 @@ class RoutingNode:
     async def process(self, job: JobRecord) -> JobRecord:
         decision = MatchDecision.REJECT
         reasons = list(job.review_reasons)
-        
+
         if not job.profile_scores:
             decision = MatchDecision.REJECT
             if ROUTING_REASON_CODES["NO_PROFILE_MATCH"] not in reasons:
@@ -41,19 +41,26 @@ class RoutingNode:
         else:
             # Find the best profile score
             best_profile = max(job.profile_scores, key=lambda s: s.final_score)
-            
+
             if best_profile.final_score >= self._accept_threshold:
                 decision = MatchDecision.ACCEPT
                 reasons.append(f"{ROUTING_REASON_CODES['PROFILE_MATCH']}:{best_profile.profile_id}")
             elif best_profile.final_score >= self._review_threshold:
                 decision = MatchDecision.REVIEW
-                reasons.append(f"{ROUTING_REASON_CODES['PROFILE_REVIEW']}:{best_profile.profile_id}")
+                reasons.append(
+                    f"{ROUTING_REASON_CODES['PROFILE_REVIEW']}:{best_profile.profile_id}"
+                )
             else:
                 decision = MatchDecision.REJECT
-                reasons.append(f"{ROUTING_REASON_CODES['PROFILE_REJECT']}:{best_profile.profile_id}")
+                reasons.append(
+                    f"{ROUTING_REASON_CODES['PROFILE_REJECT']}:{best_profile.profile_id}"
+                )
 
         # Quality override: if quality is low, move to REVIEW even if profile matched well
-        if decision == MatchDecision.ACCEPT and (job.quality_score or 0.0) < self._quality_override_threshold:
+        if (
+            decision == MatchDecision.ACCEPT
+            and (job.quality_score or 0.0) < self._quality_override_threshold
+        ):
             decision = MatchDecision.REVIEW
             if JobReviewReason.LOW_QUALITY_SCORE.value not in reasons:
                 reasons.append(JobReviewReason.LOW_QUALITY_SCORE.value)

@@ -134,7 +134,9 @@ class TenantMCPServer:
                     updated_at=datetime.now(UTC),
                 ),
             )
-            await self._require_runner().set_active_candidate_profile(tenant_id, user_id, profile_id)
+            await self._require_runner().set_active_candidate_profile(
+                tenant_id, user_id, profile_id
+            )
             return saved
 
         @self.app.tool

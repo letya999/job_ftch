@@ -326,7 +326,9 @@ async def test_tenant_runner_persists_runtime_sources_and_disables_them(tmp_path
         tenants = await runner.list_tenants()
 
         assert added["source_id"] == source_id
-        assert any(item["source_id"] == source_id and item["origin"] == "runtime" for item in listed)
+        assert any(
+            item["source_id"] == source_id and item["origin"] == "runtime" for item in listed
+        )
         assert tenants[0].source_count == 2
     finally:
         await runner.close()
@@ -341,14 +343,19 @@ async def test_tenant_runner_persists_runtime_sources_and_disables_them(tmp_path
         tenants = await reloaded.list_tenants()
 
         assert disabled["status"] == "disabled"
-        assert any(item["source_id"] == source_id and item["status"] == "disabled" for item in listed_after_disable)
+        assert any(
+            item["source_id"] == source_id and item["status"] == "disabled"
+            for item in listed_after_disable
+        )
         assert tenants[0].source_count == 1
     finally:
         await reloaded.close()
 
 
 @pytest.mark.asyncio
-async def test_tenant_runner_persists_candidate_profiles_and_reranks_latest_jobs(tmp_path: Path) -> None:
+async def test_tenant_runner_persists_candidate_profiles_and_reranks_latest_jobs(
+    tmp_path: Path,
+) -> None:
     fixture_path = tmp_path / "fixture.json"
     _write_fixture(fixture_path)
     tenant = TenantConfig.model_validate(

@@ -1,5 +1,7 @@
 """Tests for JobLifecycleNode - status detection in English and Russian."""
+
 import pytest
+
 from job_ftch.domain.models import JobRecord, JobStatus, SourceKind
 from job_ftch.nodes.lifecycle import JobLifecycleNode
 
@@ -22,13 +24,17 @@ def make_record(**kwargs) -> JobRecord:
 # English closed markers
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("text,expected", [
-    ("This position has been filled.", JobStatus.FILLED),
-    ("vacancy closed", JobStatus.FILLED),
-    ("Position closed. Thank you.", JobStatus.FILLED),
-    ("hiring complete", JobStatus.FILLED),
-    ("We are actively hiring Python engineers.", JobStatus.OPEN),
-])
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("This position has been filled.", JobStatus.FILLED),
+        ("vacancy closed", JobStatus.FILLED),
+        ("Position closed. Thank you.", JobStatus.FILLED),
+        ("hiring complete", JobStatus.FILLED),
+        ("We are actively hiring Python engineers.", JobStatus.OPEN),
+    ],
+)
 @pytest.mark.asyncio
 async def test_english_status_markers(text, expected):
     node = JobLifecycleNode()
@@ -41,13 +47,17 @@ async def test_english_status_markers(text, expected):
 # Russian closed markers
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("text,expected_status", [
-    ("Роль закрыта. Спасибо за заявки.", JobStatus.FILLED),
-    ("Вакансия закрыта.", JobStatus.FILLED),
-    ("Позиция закрыта, поиск окончен.", JobStatus.FILLED),
-    ("Набор закрыт.", JobStatus.FILLED),
-    ("Ищем Python разработчика в нашу команду.", JobStatus.OPEN),
-])
+
+@pytest.mark.parametrize(
+    "text,expected_status",
+    [
+        ("Роль закрыта. Спасибо за заявки.", JobStatus.FILLED),
+        ("Вакансия закрыта.", JobStatus.FILLED),
+        ("Позиция закрыта, поиск окончен.", JobStatus.FILLED),
+        ("Набор закрыт.", JobStatus.FILLED),
+        ("Ищем Python разработчика в нашу команду.", JobStatus.OPEN),
+    ],
+)
 @pytest.mark.asyncio
 async def test_russian_closed_markers(text, expected_status):
     """lifecycle.py defines RU markers - this tests them."""
@@ -63,17 +73,21 @@ async def test_russian_closed_markers(text, expected_status):
 # Metadata / boolean flag paths
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("metadata,expected_status", [
-    ({"status": "closed"}, JobStatus.FILLED),
-    ({"status": "filled"}, JobStatus.FILLED),
-    ({"status": "expired"}, JobStatus.FILLED),
-    ({"status": "archived"}, JobStatus.FILLED),
-    ({"closed": True}, JobStatus.FILLED),
-    ({"closed": False}, JobStatus.OPEN),
-    ({"status": "active"}, JobStatus.OPEN),
-    ({"status": "published"}, JobStatus.OPEN),
-    ({}, JobStatus.OPEN),  # no signal -> stays open (default)
-])
+
+@pytest.mark.parametrize(
+    "metadata,expected_status",
+    [
+        ({"status": "closed"}, JobStatus.FILLED),
+        ({"status": "filled"}, JobStatus.FILLED),
+        ({"status": "expired"}, JobStatus.FILLED),
+        ({"status": "archived"}, JobStatus.FILLED),
+        ({"closed": True}, JobStatus.FILLED),
+        ({"closed": False}, JobStatus.OPEN),
+        ({"status": "active"}, JobStatus.OPEN),
+        ({"status": "published"}, JobStatus.OPEN),
+        ({}, JobStatus.OPEN),  # no signal -> stays open (default)
+    ],
+)
 @pytest.mark.asyncio
 async def test_metadata_status_signals(metadata, expected_status):
     """Tests metadata dict-based lifecycle signal paths."""
@@ -86,6 +100,7 @@ async def test_metadata_status_signals(metadata, expected_status):
 # ---------------------------------------------------------------------------
 # OPEN override: metadata says open -> override closed text
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_open_metadata_overrides_closed_text():
@@ -103,6 +118,7 @@ async def test_open_metadata_overrides_closed_text():
 # ---------------------------------------------------------------------------
 # EXPIRED: verify mapping to FILLED
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_expired_mapped_to_filled():

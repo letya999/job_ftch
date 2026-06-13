@@ -10,12 +10,12 @@ class OntologyNormalizer:
     def __init__(self, data_dir: Path | None = None):
         if data_dir is None:
             data_dir = Path(__file__).parent / "data"
-        
+
         self.role_aliases = self._load_json(data_dir / "role_aliases.json")
         self.seniority_aliases = self._load_json(data_dir / "seniority_aliases.json")
         self.skill_aliases = self._load_json(data_dir / "skill_aliases.json")
-        
-        # Build inverted lookup lists for fast matching. 
+
+        # Build inverted lookup lists for fast matching.
         # Keep them as lists of (pattern, canonical) to preserve JSON priority.
         self.role_lookup = self._build_regex_lookup(self.role_aliases)
         self.seniority_lookup = self._build_regex_lookup(self.seniority_aliases)
@@ -43,7 +43,7 @@ class OntologyNormalizer:
                     patterns.append(rf"\b{a_esc}\b")
                 else:
                     patterns.append(a_esc)
-            
+
             combined_re = re.compile("|".join(patterns), re.IGNORECASE)
             lookup.append((combined_re, canonical))
         return lookup

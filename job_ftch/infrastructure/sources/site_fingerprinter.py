@@ -1,6 +1,6 @@
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import httpx
@@ -9,7 +9,7 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
-class SiteClass(str, Enum):
+class SiteClass(StrEnum):
     SSR = "SSR"
     SPA = "SPA"
     API_JSON = "API_JSON"
@@ -67,8 +67,7 @@ async def fingerprint(url: str, client: httpx.AsyncClient | None = None) -> Site
     # Look for common patterns in links that suggest a job list or vacancy details
     # We use a non-capturing group for the keywords to count individual matches properly
     vacancy_link_re = re.compile(
-        r'href=["\'][^"\']*/(?:vacanc|job[s/\-_]|position[s/]|career/\d)',
-        re.IGNORECASE
+        r'href=["\'][^"\']*/(?:vacanc|job[s/\-_]|position[s/]|career/\d)', re.IGNORECASE
     )
     vacancy_links = vacancy_link_re.findall(body_snippet)
 

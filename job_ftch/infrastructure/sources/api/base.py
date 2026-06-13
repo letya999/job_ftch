@@ -83,7 +83,10 @@ class OfficialAPISource:
                     try:
                         yield self._map_to_raw_item(item)
                     except Exception as item_exc:
-                        logger.debug("skipping_unmappable_item", extra={"keys": list(item.keys()), "error": str(item_exc)})
+                        logger.debug(
+                            "skipping_unmappable_item",
+                            extra={"keys": list(item.keys()), "error": str(item_exc)},
+                        )
                         continue
 
                 # Persist incremental cursor (id of first item as next lower bound)

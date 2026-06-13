@@ -34,7 +34,7 @@ class SourceContextNode:
         # 2. Source family and trust scoring
         family = "unknown"
         trust = 0.5
-        
+
         sk = item.source_kind
         if sk == SourceKind.CAREER_SITE:
             family = "career_site"

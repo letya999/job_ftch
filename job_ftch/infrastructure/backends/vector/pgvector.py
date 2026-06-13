@@ -10,6 +10,7 @@ import structlog
 
 try:
     import asyncpg
+
     _IMPORT_ERROR = None
 except ImportError as exc:
     asyncpg = None

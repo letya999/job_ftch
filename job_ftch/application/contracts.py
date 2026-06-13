@@ -8,12 +8,14 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
+    from job_ftch.application.pipeline import RunSummary
     from job_ftch.domain import (
         DuplicateRecord,
         JobGroup,
         JobRecord,
         QuarantinedRawItem,
         RememberedDedupKey,
+        SkillTag,
     )
     from job_ftch.domain.site_models import MonitorResult, ScrapedPostingPayload
     from job_ftch.domain.source_spec import CareerSiteSpec

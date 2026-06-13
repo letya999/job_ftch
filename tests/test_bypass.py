@@ -1,10 +1,10 @@
 import pytest
 
+import job_ftch.infrastructure.bypass.curl_bypass as curl_bypass_module
 from job_ftch.application.registry import resolve_bypass
 from job_ftch.infrastructure.bypass.adaptive import AdaptiveBypassManager
 from job_ftch.infrastructure.bypass.behavior_sim import BehaviorSimBypass
 from job_ftch.infrastructure.bypass.cloak_bypass import CloakBrowserBypass
-import job_ftch.infrastructure.bypass.curl_bypass as curl_bypass_module
 from job_ftch.infrastructure.bypass.curl_bypass import CurlBypass
 from job_ftch.infrastructure.bypass.noop import NoopBypass
 from job_ftch.infrastructure.bypass.proxy_rotator import ProxyRotatorBypass

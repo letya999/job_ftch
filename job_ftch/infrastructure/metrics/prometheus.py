@@ -11,7 +11,9 @@ if TYPE_CHECKING:
 class PrometheusExporter:
     _started_ports: ClassVar[set[int]] = set()
 
-    def __init__(self, *, registry: Any | None = None, start_server: bool = False, port: int = 9090) -> None:
+    def __init__(
+        self, *, registry: Any | None = None, start_server: bool = False, port: int = 9090
+    ) -> None:
         try:
             from prometheus_client import Counter, Gauge, Histogram, start_http_server
         except ImportError as exc:

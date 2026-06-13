@@ -244,9 +244,7 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     attempt = 0
     while resp is not None and resp.status in challenge and attempt < challenge_retries:
         attempt += 1
-        log.info(
-            "browser.challenge_retry", url=url, status=resp.status, attempt=attempt
-        )
+        log.info("browser.challenge_retry", url=url, status=resp.status, attempt=attempt)
         await page.wait_for_timeout(challenge_wait_ms)
         resp = await page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
 

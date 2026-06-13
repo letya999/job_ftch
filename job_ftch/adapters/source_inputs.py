@@ -128,7 +128,10 @@ async def build_source_spec_from_input(
         return channel_spec.model_copy(update={"source_name": source_spec_name(channel_spec)})
 
     parsed = urlsplit(stripped)
-    if normalized_type in {"auto", "career_site", "site", "url"} and parsed.scheme in {"http", "https"}:
+    if normalized_type in {"auto", "career_site", "site", "url"} and parsed.scheme in {
+        "http",
+        "https",
+    }:
         site_spec = CareerSiteSpec(
             type="career_site",
             url=stripped,

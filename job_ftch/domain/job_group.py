@@ -167,15 +167,11 @@ def merge_jobs(jobs: list[JobRecord]) -> JobRecord:
         metadata.update(j.metadata)
 
     provenance = ProvenanceTrail(
-        extraction=tuple(
-            sorted({step for job in jobs for step in job.provenance.extraction})
-        ),
+        extraction=tuple(sorted({step for job in jobs for step in job.provenance.extraction})),
         normalization=tuple(
             sorted({step for job in jobs for step in job.provenance.normalization})
         ),
-        merge=tuple(
-            sorted({step for job in jobs for step in job.provenance.merge})
-        ),
+        merge=tuple(sorted({step for job in jobs for step in job.provenance.merge})),
     )
 
     return canonical.model_copy(

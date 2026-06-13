@@ -13,7 +13,7 @@ from job_ftch.domain import RawItem, SourceKind, TenantConfig
 
 
 class _MetricChild:
-    def __init__(self, metric: "_MetricBase", labels: dict[str, str]) -> None:
+    def __init__(self, metric: _MetricBase, labels: dict[str, str]) -> None:
         self.metric = metric
         self.labels = labels
 
@@ -83,11 +83,21 @@ def test_prometheus_exporter_records_summary_metrics(monkeypatch: pytest.MonkeyP
     asyncio.run(exporter.observe_run(summary, tenant_id="ai_jobs", job_group_total=7))
 
     assert start_calls == [9909]
-    assert exporter._items_fetched.calls == [("inc", {"tenant_id": "ai_jobs", "source_kind": "career_site"}, 3)]
-    assert exporter._items_extracted.calls == [("inc", {"tenant_id": "ai_jobs", "source_kind": "career_site"}, 2)]
-    assert exporter._items_failed.calls == [("inc", {"tenant_id": "ai_jobs", "source_kind": "career_site"}, 1)]
+    assert exporter._items_fetched.calls == [
+        ("inc", {"tenant_id": "ai_jobs", "source_kind": "career_site"}, 3)
+    ]
+    assert exporter._items_extracted.calls == [
+        ("inc", {"tenant_id": "ai_jobs", "source_kind": "career_site"}, 2)
+    ]
+    assert exporter._items_failed.calls == [
+        ("inc", {"tenant_id": "ai_jobs", "source_kind": "career_site"}, 1)
+    ]
     assert exporter._items_dropped.calls == [
-        ("inc", {"tenant_id": "ai_jobs", "source_kind": "career_site", "reason": "already_processed"}, 4)
+        (
+            "inc",
+            {"tenant_id": "ai_jobs", "source_kind": "career_site", "reason": "already_processed"},
+            4,
+        )
     ]
     assert exporter._job_groups_total.calls == [("set", {"tenant_id": "ai_jobs"}, 7)]
     assert exporter._run_duration.calls == [("observe", {"tenant_id": "ai_jobs"}, 12.0)]
@@ -117,7 +127,9 @@ async def test_tenant_runner_emits_prometheus_metrics(
         ) -> None:
             observed.append((tenant_id, summary.emitted, int(job_group_total or 0)))
 
-    monkeypatch.setattr("job_ftch.infrastructure.metrics.prometheus.PrometheusExporter", _ExporterStub)
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.metrics.prometheus.PrometheusExporter", _ExporterStub
+    )
     from job_ftch.application.tenant_runner import TenantRunner
 
     tenant = TenantConfig.model_validate(

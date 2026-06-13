@@ -89,9 +89,7 @@ class InMemoryStore:
         self._kv = OrderedDict(
             (key, value) for key, value in self._kv.items() if not key.startswith(prefix)
         )
-        self._sets = {
-            key: value for key, value in self._sets.items() if not key.startswith(prefix)
-        }
+        self._sets = {key: value for key, value in self._sets.items() if not key.startswith(prefix)}
 
     # Store methods — built on top of StoreConnector primitives
 

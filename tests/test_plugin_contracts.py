@@ -7,15 +7,18 @@ all contract checks automatically against the new plugin.
 
 The InMemoryStore tests at the bottom serve as reference implementations.
 """
-import pytest
-from abc import ABC, abstractmethod
-from job_ftch.domain.models import RawItem, JobRecord
-from job_ftch.application.contracts import PluginMetadata
 
+from abc import ABC, abstractmethod
+
+import pytest
+
+from job_ftch.application.contracts import PluginMetadata
+from job_ftch.domain.models import JobRecord, RawItem
 
 # ---------------------------------------------------------------------------
 # Abstract contract bases
 # ---------------------------------------------------------------------------
+
 
 class TestSourcePluginContract(ABC):
     """Subclass this to contract-test any Source plugin.
@@ -51,8 +54,7 @@ class TestSinkPluginContract(ABC):
         ...
 
     @abstractmethod
-    def make_job_record(self) -> JobRecord:
-        ...
+    def make_job_record(self) -> JobRecord: ...
 
     @pytest.mark.asyncio
     async def test_emit_accepts_job_record(self):
@@ -71,9 +73,13 @@ class TestSinkPluginContract(ABC):
             await sink.emit(job)
         if hasattr(sink, "flush"):
             await sink.flush()
-            state_after_first = getattr(sink, "_flushed_count", None) or getattr(sink, "_buffer", None)
+            state_after_first = getattr(sink, "_flushed_count", None) or getattr(
+                sink, "_buffer", None
+            )
             await sink.flush()
-            state_after_second = getattr(sink, "_flushed_count", None) or getattr(sink, "_buffer", None)
+            state_after_second = getattr(sink, "_flushed_count", None) or getattr(
+                sink, "_buffer", None
+            )
             # Second flush must not change observable state relative to first
             assert state_after_first == state_after_second or state_after_second is None
 
@@ -81,6 +87,7 @@ class TestSinkPluginContract(ABC):
 # ---------------------------------------------------------------------------
 # PluginMetadata validation
 # ---------------------------------------------------------------------------
+
 
 class TestPluginMetadata:
     def test_valid_metadata_constructs(self):
@@ -115,7 +122,15 @@ class TestPluginMetadata:
         assert a == b
 
     def test_metadata_all_plugin_types(self):
-        valid_types = ["source", "sink", "extractor", "classifier", "normalizer", "scorer", "notification_target"]
+        valid_types = [
+            "source",
+            "sink",
+            "extractor",
+            "classifier",
+            "normalizer",
+            "scorer",
+            "notification_target",
+        ]
         for pt in valid_types:
             m = PluginMetadata(name="p", version="1.0.0", plugin_type=pt, description="d")
             assert m.plugin_type == pt

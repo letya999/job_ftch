@@ -266,9 +266,7 @@ def _merge_run_summaries(summaries: list[RunSummary]) -> RunSummary:
             for reason, count in source_stats.drop_reasons.items():
                 target.drop_reasons[reason] = target.drop_reasons.get(reason, 0) + count
             for reason, count in source_stats.quarantine_reasons.items():
-                target.quarantine_reasons[reason] = (
-                    target.quarantine_reasons.get(reason, 0) + count
-                )
+                target.quarantine_reasons[reason] = target.quarantine_reasons.get(reason, 0) + count
         for source_id, source_stats in summary.by_source_id.items():
             source_kind, _, source_name = source_id.partition(":")
             target_identity = merged.source_identity_stats(source_kind, source_name)
@@ -351,7 +349,9 @@ async def _handle_tenants(settings: Settings, args: argparse.Namespace) -> None:
             print(
                 "null"
                 if lineage is None
-                else json.dumps(lineage.model_dump(mode="json"), ensure_ascii=False, indent=2, default=str)
+                else json.dumps(
+                    lineage.model_dump(mode="json"), ensure_ascii=False, indent=2, default=str
+                )
             )
             return
         if args.tenant_command == "reset":

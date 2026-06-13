@@ -70,10 +70,10 @@ class JobAggregationNode:
         # Step 3: fuzzy title match via blocking key
         if self._enable_fuzzy:
             from job_ftch.domain.job_group import compute_blocking_key
-            
+
             blocking_key = compute_blocking_key(job)
             groups = await self._store.find_by_blocking_key(blocking_key, limit=50)
-            
+
             for group in groups:
                 score = self._compute_fuzzy_score(job, group.canonical_job)
                 if score >= self._fuzzy_title_threshold:

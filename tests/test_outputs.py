@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -15,6 +15,9 @@ from job_ftch.nodes.triage import HeuristicTriageNode
 from job_ftch.sinks.counted import CountedSink
 from job_ftch.sinks.json_file import JsonFileSink
 from job_ftch.sinks.telegram_posting import TelegramPostingSink
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class StubSource:

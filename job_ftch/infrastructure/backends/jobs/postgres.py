@@ -26,6 +26,7 @@ from .serialization import dump_group, dump_job, load_group, load_job
 
 try:
     import asyncpg
+
     _IMPORT_ERROR = None
 except ImportError as exc:
     asyncpg = None
@@ -88,14 +89,14 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                     with open(migration_path, encoding="utf-8") as f:
                         schema = f.read()
                     await conn.execute(schema)
-                    
+
                     # Migration 002: blocking_key
                     m2_path = Path(__file__).parent / "migrations" / "002_postgres_blocking_key.sql"
                     with open(m2_path, encoding="utf-8") as f:
                         m2_sql = f.read()
                     with contextlib.suppress(Exception):  # Already exists
                         await conn.execute(m2_sql)
-                        
+
                 self._schema_initialized = True
         return self._pool
 
@@ -212,9 +213,7 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             )
             return [load_group(row["raw_json"]) for row in rows]
 
-    async def merge(
-        self, group_id: str, job: JobRecord, merge_confidence: float = 1.0
-    ) -> JobGroup:
+    async def merge(self, group_id: str, job: JobRecord, merge_confidence: float = 1.0) -> JobGroup:
         job = _coerce_job_record(job)
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
@@ -224,9 +223,7 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             if not row:
                 raise ValueError(f"Group {group_id} not found.")
             group = load_group(row["raw_json"])
-            updated_group = merge_job_into_group(
-                group, job, merge_confidence=merge_confidence
-            )
+            updated_group = merge_job_into_group(group, job, merge_confidence=merge_confidence)
             await self._persist_group(conn, updated_group)
             await self._persist_job(conn, job, updated_group.group_id)
 

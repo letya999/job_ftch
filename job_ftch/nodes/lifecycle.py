@@ -34,7 +34,8 @@ class JobLifecycleNode:
                 "status": status,
                 "provenance": ProvenanceTrail(
                     extraction=item.provenance.extraction,
-                    normalization=item.provenance.normalization + ("lifecycle:explicit_status_signal",),
+                    normalization=item.provenance.normalization
+                    + ("lifecycle:explicit_status_signal",),
                     merge=item.provenance.merge,
                 ),
             }
@@ -58,7 +59,9 @@ class JobLifecycleNode:
                 return JobStatus.OPEN
 
         haystack = "\n".join(
-            part for part in (item.title, item.description, item.title_raw, item.description_raw) if part
+            part
+            for part in (item.title, item.description, item.title_raw, item.description_raw)
+            if part
         ).casefold()
         if any(marker in haystack for marker in _CLOSED_MARKERS):
             return JobStatus.FILLED

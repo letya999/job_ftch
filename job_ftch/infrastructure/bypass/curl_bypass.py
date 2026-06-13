@@ -4,6 +4,7 @@ from job_ftch.application.registry import register_bypass
 
 try:
     from curl_cffi import requests
+
     _IMPORT_ERROR: ImportError | None = None
 except ImportError as exc:  # pragma: no cover
     requests = None  # type: ignore[assignment]

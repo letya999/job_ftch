@@ -74,14 +74,14 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             with open(migration_path, encoding="utf-8") as f:
                 schema = f.read()
             await self._conn.executescript(schema)
-            
+
             # Migration 002: blocking_key
             m2_path = Path(__file__).parent / "migrations" / "002_sqlite_blocking_key.sql"
             with open(m2_path, encoding="utf-8") as f:
                 m2_sql = f.read()
             with contextlib.suppress(Exception):  # Already exists
                 await self._conn.executescript(m2_sql)
-                
+
             await self._conn.commit()
         return self._conn
 
@@ -194,9 +194,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 await conn.rollback()
                 raise
 
-    async def merge(
-        self, group_id: str, job: JobRecord, merge_confidence: float = 1.0
-    ) -> JobGroup:
+    async def merge(self, group_id: str, job: JobRecord, merge_confidence: float = 1.0) -> JobGroup:
         job = _coerce_job_record(job)
         async with self._lock:
             conn = await self._get_conn()
@@ -209,9 +207,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 if not row:
                     raise ValueError(f"Group {group_id} not found.")
                 group = load_group(row[0])
-                updated_group = merge_job_into_group(
-                    group, job, merge_confidence=merge_confidence
-                )
+                updated_group = merge_job_into_group(group, job, merge_confidence=merge_confidence)
                 await self._persist_group(conn, updated_group)
                 await self._persist_job(conn, job, updated_group.group_id)
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -18,6 +18,9 @@ from job_ftch.domain import (
 )
 from job_ftch.infrastructure.llm.openai_provider import OpenAIInstructorLLMProvider
 from job_ftch.nodes.extraction_validation import ExtractionValidationNode
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _job(**overrides: object) -> Job:

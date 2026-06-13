@@ -1,5 +1,7 @@
 """Tests for IncrementalCursor watermark isolation."""
+
 import pytest
+
 from job_ftch.application.watermark import IncrementalCursor
 
 
@@ -52,9 +54,9 @@ class TestIncrementalCursorIsolation:
         connector = FakeStoreConnector()
         cursor_a = IncrementalCursor(connector, namespace="tenant-a")
         cursor_b = IncrementalCursor(connector, namespace="tenant-b")
-        
+
         await cursor_a.set("src1", "2026-01-01T00:00:00")
-        
+
         assert await cursor_a.get("src1") == "2026-01-01T00:00:00"
         assert await cursor_b.get("src1") is None
 
@@ -64,11 +66,11 @@ class TestIncrementalCursorIsolation:
         connector = FakeStoreConnector()
         cursor_a = IncrementalCursor(connector, namespace="tenant-a")
         cursor_b = IncrementalCursor(connector, namespace="tenant-b")
-        
+
         await cursor_a.set("src1", "val-a")
         await cursor_b.set("src1", "val-b")
-        
+
         await cursor_a.reset("src1")
-        
+
         assert await cursor_a.get("src1") is None
         assert await cursor_b.get("src1") == "val-b"
