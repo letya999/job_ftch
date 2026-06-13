@@ -1,0 +1,536 @@
+# config/sources_e2e_20260613.yaml — E2E diagnostic probe, 2026-06-13
+# All sources dry-run only. No auth secrets here.
+
+sources:
+
+  # ─── Russian employers (career sites) ───────────────────────────────────────
+  - type: career_site
+    url: https://yandex.ru/jobs
+    source_name: yandex_jobs
+    monitor: auto
+    monitor_config:
+      render: true
+      wait: domcontentloaded
+    limit: 5
+
+  - type: career_site
+    url: https://www.tbank.ru/career/
+    source_name: tbank_career
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://rabota.sber.ru
+    source_name: sber_rabota
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://team.vk.company
+    source_name: vk_team
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://career.avito.com
+    source_name: avito_career
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://ozon.tech/vacancies/
+    source_name: ozon_tech
+    monitor: auto
+    monitor_config:
+      render: true
+      wait: domcontentloaded
+    limit: 5
+
+  - type: career_site
+    url: https://job.mts.ru
+    source_name: mts_job
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://careers.kaspersky.com
+    source_name: kaspersky_careers
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://job.ptsecurity.com
+    source_name: pt_security_job
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://tech.x5.ru/career
+    source_name: x5_tech_career
+    monitor: auto
+    monitor_config:
+      render: true
+      wait: networkidle
+    limit: 5
+
+  # ─── Kazakhstan employers (career sites) ────────────────────────────────────
+  - type: career_site
+    url: https://kaspi.kz/guide/career/
+    source_name: kaspi_career
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://freedomholdingcorp.com/careers
+    source_name: freedom_holding_careers
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://people.beeline.kz
+    source_name: beeline_kz
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://kolesa.group/career/job
+    source_name: kolesa_group_career
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://halykbank.kz/about/career
+    source_name: halyk_bank_career
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://careers.airastana.com
+    source_name: air_astana_careers
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://choco.family/career
+    source_name: choco_career
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://jobs.indrive.com
+    source_name: indrive_jobs
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://btsdigital.kz
+    source_name: bts_digital
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://sergek.com/career
+    source_name: sergek_career
+    monitor: auto
+    limit: 5
+
+  # ─── Russian-language job aggregators ────────────────────────────────────────
+  # HH.ru — official REST API adapter
+  - type: rest_api
+    base_url: https://api.hh.ru/
+    jobs_endpoint: vacancies
+    params:
+      text: "python developer"
+      area: "1"
+      per_page: "5"
+    source_name: hh_ru
+
+  # HH.kz — same API, Kazakhstan area (area=159)
+  - type: rest_api
+    base_url: https://api.hh.ru/
+    jobs_endpoint: vacancies
+    params:
+      text: "python developer"
+      area: "159"
+      per_page: "5"
+    source_name: hh_kz
+
+  # Habr Career — RSS feed (AI/ML filter)
+  - type: rss_feed
+    feed_url: https://career.habr.com/vacancies/rss?q=machine+learning&type=1
+    source_name: habr_career_ml
+    incremental: false
+
+  - type: career_site
+    url: https://geekjob.ru
+    source_name: geekjob
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://getmatch.ru
+    source_name: getmatch
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://hirify.me
+    source_name: hirify
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://finder.work
+    source_name: finder_work
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://vcv.ru/jobs
+    source_name: vcv_jobs
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://rabota.ru
+    source_name: rabota_ru
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.superjob.ru
+    source_name: superjob
+    monitor: auto
+    limit: 5
+
+  # ─── Global aggregators ───────────────────────────────────────────────────────
+  - type: career_site
+    url: https://www.indeed.com
+    source_name: indeed
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.glassdoor.com
+    source_name: glassdoor
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.monster.com
+    source_name: monster
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.ziprecruiter.com
+    source_name: ziprecruiter
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://wellfound.com/jobs
+    source_name: wellfound
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.dice.com
+    source_name: dice
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://builtin.com/jobs
+    source_name: builtin
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.levels.fyi/jobs
+    source_name: levels_fyi
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.simplyhired.com
+    source_name: simplyhired
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.careerbuilder.com
+    source_name: careerbuilder
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.adzuna.com
+    source_name: adzuna
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.reed.co.uk/jobs
+    source_name: reed_uk
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.totaljobs.com
+    source_name: totaljobs
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.jobserve.com
+    source_name: jobserve
+    monitor: auto
+    limit: 5
+
+  # RemoteOK — has JSON API
+  - type: rest_api
+    base_url: https://remoteok.com/
+    jobs_endpoint: "api?tag=python"
+    source_name: remoteok
+    headers:
+      User-Agent: "Mozilla/5.0 (compatible; job_ftch/1.0)"
+
+  # We Work Remotely — RSS
+  - type: rss_feed
+    feed_url: https://weworkremotely.com/remote-jobs.rss
+    source_name: weworkremotely
+    incremental: false
+
+  - type: career_site
+    url: https://www.flexjobs.com
+    source_name: flexjobs
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://jooble.org
+    source_name: jooble
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://www.eurojobs.com
+    source_name: eurojobs
+    monitor: auto
+    limit: 5
+
+  - type: career_site
+    url: https://jobs.google.com
+    source_name: google_jobs
+    monitor: auto
+    limit: 5
+
+  # ─── Telegram groups (discussion) ────────────────────────────────────────────
+  - type: telegram_group
+    entity: "@vibe_coding_community"
+    source_name: tg_vibe_coding
+    limit: 20
+
+  - type: telegram_group
+    entity: "@noflamenogame"
+    source_name: tg_noflamenogame_group
+    limit: 20
+
+  - type: telegram_group
+    entity: "@deordie_chat"
+    source_name: tg_deordie_chat
+    limit: 20
+
+  - type: telegram_group
+    entity: "@handlchatru"
+    source_name: tg_handlchatru
+    limit: 20
+
+  - type: telegram_group
+    entity: "@dsml_kz"
+    source_name: tg_dsml_kz
+    limit: 20
+
+  - type: telegram_group
+    entity: "@creatory"
+    source_name: tg_creatory
+    limit: 20
+
+  - type: telegram_group
+    entity: "@text2image"
+    source_name: tg_text2image
+    limit: 20
+
+  - type: telegram_group
+    entity: "@TGStat_Chat"
+    source_name: tg_tgstat_chat
+    limit: 20
+
+  - type: telegram_group
+    entity: "@neuraldeepchat"
+    source_name: tg_neuraldeepchat
+    limit: 20
+
+  - type: telegram_group
+    entity: "@ru_python"
+    source_name: tg_ru_python
+    limit: 20
+
+  - type: telegram_group
+    entity: "@it_chat_ru"
+    source_name: tg_it_chat_ru
+    limit: 20
+
+  - type: telegram_group
+    entity: "@devops_ru_chat"
+    source_name: tg_devops_ru_chat
+    limit: 20
+
+  - type: telegram_group
+    entity: "@mlopschat"
+    source_name: tg_mlopschat
+    limit: 20
+
+  - type: telegram_group
+    entity: "@langchain_russia"
+    source_name: tg_langchain_russia
+    limit: 20
+
+  - type: telegram_group
+    entity: "@llm_ru_chat"
+    source_name: tg_llm_ru_chat
+    limit: 20
+
+  - type: telegram_group
+    entity: "@genai_ru"
+    source_name: tg_genai_ru
+    limit: 20
+
+  - type: telegram_group
+    entity: "@data_engineers_ru"
+    source_name: tg_data_engineers_ru
+    limit: 20
+
+  - type: telegram_group
+    entity: "@datascience_ru_chat"
+    source_name: tg_datascience_ru_chat
+    limit: 20
+
+  - type: telegram_group
+    entity: "@ai_engineers_ru"
+    source_name: tg_ai_engineers_ru
+    limit: 20
+
+  - type: telegram_group
+    entity: "@ai_pm_ru"
+    source_name: tg_ai_pm_ru
+    limit: 20
+
+  # ─── Telegram channels (broadcast) ───────────────────────────────────────────
+  - type: telegram_channel
+    entity: "@neuraldeep"
+    source_name: tg_neuraldeep
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@aidaparen"
+    source_name: tg_aidaparen
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@agi_and_rl"
+    source_name: tg_agi_and_rl
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@elkornacio"
+    source_name: tg_elkornacio
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@ethichlid"
+    source_name: tg_ethichlid
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@AI4Dev"
+    source_name: tg_ai4dev
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@deordie"
+    source_name: tg_deordie
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@noflamenogame"
+    source_name: tg_noflamenogame_chan
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@dsmlkz_news"
+    source_name: tg_dsmlkz_news
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@data_events"
+    source_name: tg_data_events
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@junior_pm"
+    source_name: tg_junior_pm
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@ai_machinelearning_big_data"
+    source_name: tg_ai_ml_bigdata
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@opensourceai"
+    source_name: tg_opensourceai
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@llm4dev"
+    source_name: tg_llm4dev
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@big_llm_course"
+    source_name: tg_big_llm_course
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@data_secrets"
+    source_name: tg_data_secrets
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@machinelearning_ru"
+    source_name: tg_machinelearning_ru
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@ai_meetups"
+    source_name: tg_ai_meetups
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@rodion_ai"
+    source_name: tg_rodion_ai
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@senioraugur"
+    source_name: tg_senioraugur
+    limit: 20
+
+    limit: 20
+
+  - type: telegram_channel
+    entity: "@senioraugur"
+    source_name: tg_senioraugur
+    limit: 20

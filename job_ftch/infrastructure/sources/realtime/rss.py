@@ -107,6 +107,6 @@ class RSSFeedSource:
             await IncrementalCursor(self.store).set(self._cursor_source_id, ",".join(trimmed))
 
 
-@register_source_spec("rss")
+@register_source_spec("rss_feed")
 def _create_rss(spec: Any, auth: AuthProvider, store: Any = None) -> RSSFeedSource:
     return RSSFeedSource(spec, auth)
