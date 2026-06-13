@@ -135,25 +135,21 @@ sources:
     limit: 5
 
   # ─── Russian-language job aggregators ────────────────────────────────────────
-  # HH.ru — official REST API adapter
-  - type: rest_api
-    base_url: https://api.hh.ru/
-    jobs_endpoint: vacancies
-    params:
-      text: "python developer"
-      area: "1"
-      per_page: "5"
+  # HH.ru — SSR page (vacancies in HTML, dom monitor finds /vacancy/\d+ links)
+  - type: career_site
+    url: https://hh.ru/vacancies/python-developer
     source_name: hh_ru
+    monitor: dom
+    url_filter: "/vacancy/\\d+"
+    limit: 5
 
-  # HH.kz — same API, Kazakhstan area (area=159)
-  - type: rest_api
-    base_url: https://api.hh.ru/
-    jobs_endpoint: vacancies
-    params:
-      text: "python developer"
-      area: "159"
-      per_page: "5"
+  # HH.kz — same SSR approach for Kazakhstan
+  - type: career_site
+    url: https://hh.kz/vacancies/python-developer
     source_name: hh_kz
+    monitor: dom
+    url_filter: "/vacancy/\\d+"
+    limit: 5
 
   # Habr Career — RSS feed (AI/ML filter)
   - type: rss_feed
@@ -521,13 +517,6 @@ sources:
   - type: telegram_channel
     entity: "@rodion_ai"
     source_name: tg_rodion_ai
-    limit: 20
-
-  - type: telegram_channel
-    entity: "@senioraugur"
-    source_name: tg_senioraugur
-    limit: 20
-
     limit: 20
 
   - type: telegram_channel
