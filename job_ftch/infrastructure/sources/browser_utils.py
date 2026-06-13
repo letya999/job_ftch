@@ -228,9 +228,10 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     challenge_retries = config.get("challenge_retries", 1)
     challenge_wait_ms = config.get("challenge_wait_ms", 6000)
     blocked = (403, 401, 429, 503)
-    # Statuses that indicate a JS/cookie challenge worth a wait-and-reload (not a hard
-    # rate-limit/auth block); 429/401 are intentionally excluded — reloading does not help.
-    challenge = (403, 503)
+    # Statuses worth a wait-and-reload: a JS/cookie challenge (403/503) or a cookie-warmup
+    # rate-limit (429) that clears once the anti-bot cookies are set by the in-page JS.
+    # 401 is excluded — a reload does not resolve genuine authentication failures.
+    challenge = (403, 429, 503)
 
     try:
         resp = await page.goto(url, wait_until=wait, timeout=timeout)
