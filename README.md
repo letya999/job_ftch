@@ -51,7 +51,7 @@ the originating `raw_item_id`, `group_id`, `pipeline_stages`, and `source_run_id
 
 The system grows through 5 qualitative milestones. Each slide shows the horizontal component layout and key responsibilities at that point.
 
-Milestones 1-4 are historical snapshots of earlier phases. They intentionally use the stage names and payload assumptions of their time. The current target shape is described by Milestone 5 and the live documents in `docs/architecture.md` and `JOB_FTCH_MASTER_PLAN.md`.
+Milestones 1-4 are historical snapshots of earlier phases. They intentionally use the stage names and payload assumptions of their time. The current target shape is described by Milestone 5 and the live document in `docs/architecture.md`.
 
 ### Milestone 1 — Phase 10: Linear MVP pipeline (historical snapshot, shipped)
 
