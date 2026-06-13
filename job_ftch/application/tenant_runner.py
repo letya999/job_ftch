@@ -37,6 +37,7 @@ from job_ftch.domain import (
     JobGroup,
     JobLineage,
     JobRecord,
+    ManagedCandidateProfile,
     RuntimeSourceRecord,
     TenantConfig,
     TenantInfo,
@@ -102,6 +103,14 @@ def _runtime_source_key(source_id: str) -> str:
 
 def _source_disabled_key(source_id: str) -> str:
     return f"source_disabled:{source_id}"
+
+
+def _candidate_profile_key(user_id: str, profile_id: str) -> str:
+    return f"candidate_profile:{user_id}:{profile_id}"
+
+
+def _active_candidate_profile_key(user_id: str) -> str:
+    return f"candidate_profile_active:{user_id}"
 
 
 def _update_source_health_payload(
@@ -403,6 +412,56 @@ class TenantStore:
             if await connector.get(self._key(_source_disabled_key(source_id))) is not None:
                 result.add(source_id)
         return result
+
+    async def get_candidate_profile(
+        self,
+        user_id: str,
+        profile_id: str,
+    ) -> ManagedCandidateProfile | None:
+        connector = cast("StoreConnector", self._store)
+        raw = await connector.get(self._key(_candidate_profile_key(user_id, profile_id)))
+        if raw is None:
+            return None
+        try:
+            return ManagedCandidateProfile.model_validate_json(raw)
+        except (TypeError, ValueError):
+            return None
+
+    async def save_candidate_profile(self, record: ManagedCandidateProfile) -> None:
+        connector = cast("StoreConnector", self._store)
+        await connector.set(
+            self._key(_candidate_profile_key(record.user_id, record.profile_id)),
+            record.model_dump_json(),
+        )
+        await connector.set_add(
+            self._key(f"candidate_profile_ids:{record.user_id}"),
+            record.profile_id,
+        )
+
+    async def list_candidate_profiles(self, user_id: str) -> list[ManagedCandidateProfile]:
+        connector = cast("StoreConnector", self._store)
+        profile_ids = sorted(
+            await connector.set_members(self._key(f"candidate_profile_ids:{user_id}"))
+        )
+        records: list[ManagedCandidateProfile] = []
+        for profile_id in profile_ids:
+            record = await self.get_candidate_profile(user_id, profile_id)
+            if record is not None:
+                records.append(record)
+        return records
+
+    async def set_active_candidate_profile(
+        self,
+        user_id: str,
+        profile_id: str,
+    ) -> None:
+        connector = cast("StoreConnector", self._store)
+        await connector.set(self._key(_active_candidate_profile_key(user_id)), profile_id)
+
+    async def get_active_candidate_profile_id(self, user_id: str) -> str | None:
+        connector = cast("StoreConnector", self._store)
+        raw = await connector.get(self._key(_active_candidate_profile_key(user_id)))
+        return None if raw is None else str(raw)
 
     async def get_run_summary(self, run_id: str) -> RunSummary | None:
         connector = cast("StoreConnector", self._store)
@@ -757,17 +816,125 @@ class TenantRunner:
         payloads.sort(key=lambda item: str(item["source_id"]))
         return payloads
 
+    async def save_candidate_profile(
+        self,
+        tenant_id: str,
+        record: ManagedCandidateProfile,
+    ) -> dict[str, Any]:
+        runtime = self.get_runtime(tenant_id)
+        await runtime.store.save_candidate_profile(record)
+        profiles = await self.list_candidate_profiles(tenant_id, record.user_id)
+        for profile in profiles:
+            if profile["profile_id"] == record.profile_id:
+                return profile
+        msg = f"Failed to persist candidate profile: {record.profile_id}"
+        raise RuntimeError(msg)
+
+    async def list_candidate_profiles(
+        self,
+        tenant_id: str,
+        user_id: str,
+    ) -> list[dict[str, Any]]:
+        runtime = self.get_runtime(tenant_id)
+        records = await runtime.store.list_candidate_profiles(user_id)
+        active_profile_id = await runtime.store.get_active_candidate_profile_id(user_id)
+        payloads: list[dict[str, Any]] = []
+        for record in records:
+            payloads.append(
+                {
+                    "user_id": record.user_id,
+                    "profile_id": record.profile_id,
+                    "active": record.profile_id == active_profile_id,
+                    "profile": record.profile.model_dump(mode="json"),
+                    "created_at": record.created_at.isoformat(),
+                    "updated_at": record.updated_at.isoformat(),
+                }
+            )
+        return payloads
+
+    async def set_active_candidate_profile(
+        self,
+        tenant_id: str,
+        user_id: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        runtime = self.get_runtime(tenant_id)
+        record = await runtime.store.get_candidate_profile(user_id, profile_id)
+        if record is None:
+            msg = f"Unknown profile_id: {profile_id}"
+            raise KeyError(msg)
+        await runtime.store.set_active_candidate_profile(user_id, profile_id)
+        profiles = await self.list_candidate_profiles(tenant_id, user_id)
+        for profile in profiles:
+            if profile["profile_id"] == profile_id:
+                return profile
+        msg = f"Failed to activate candidate profile: {profile_id}"
+        raise RuntimeError(msg)
+
+    async def _resolve_candidate_profile(
+        self,
+        tenant_id: str,
+        *,
+        user_id: str | None = None,
+        profile_id: str | None = None,
+    ) -> ManagedCandidateProfile | None:
+        runtime = self.get_runtime(tenant_id)
+        if user_id is None:
+            return None
+        resolved_profile_id = profile_id or await runtime.store.get_active_candidate_profile_id(user_id)
+        if resolved_profile_id is None:
+            return None
+        return await runtime.store.get_candidate_profile(user_id, resolved_profile_id)
+
+    async def _rerank_groups_for_profile(
+        self,
+        groups: list[JobGroup],
+        *,
+        tenant_id: str,
+        user_id: str | None = None,
+        profile_id: str | None = None,
+    ) -> list[JobGroup]:
+        record = await self._resolve_candidate_profile(
+            tenant_id,
+            user_id=user_id,
+            profile_id=profile_id,
+        )
+        if record is None:
+            return groups
+
+        from job_ftch.adapters.profile_inputs import build_profile_catalog
+        from job_ftch.nodes.match_scoring import MultiProfileMatchNode
+
+        node = MultiProfileMatchNode(build_profile_catalog(record.profile))
+        scored: list[tuple[float, JobGroup]] = []
+        for group in groups:
+            job = await node.process(group.canonical_job)
+            if job is None:
+                continue
+            scored_group = group.model_copy(update={"canonical_job": job})
+            scored.append((float(job.best_score or 0.0), scored_group))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [group for _, group in scored]
+
     async def search_jobs(
         self,
         query: str,
         *,
         tenant_id: str | None = None,
+        user_id: str | None = None,
+        profile_id: str | None = None,
         limit: int = 20,
     ) -> list[JobGroup]:
         limit = min(limit, 100)
         tenant_ids = self.tenant_ids()
         if tenant_id is not None:
-            return await self.get_runtime(tenant_id).search_backend.search(query, limit=limit)
+            groups = await self.get_runtime(tenant_id).search_backend.search(query, limit=limit)
+            return await self._rerank_groups_for_profile(
+                groups,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                profile_id=profile_id,
+            )
         if len(tenant_ids) > 1:
             msg = "tenant_id is required when multiple tenants are configured"
             raise ValueError(msg)
@@ -783,8 +950,18 @@ class TenantRunner:
                 seen.add(group.group_id)
                 merged.append(group)
                 if len(merged) >= limit:
-                    return merged
-        return merged
+                    return await self._rerank_groups_for_profile(
+                        merged,
+                        tenant_id=current_tenant,
+                        user_id=user_id,
+                        profile_id=profile_id,
+                    )
+        return await self._rerank_groups_for_profile(
+            merged,
+            tenant_id=tenant_ids[0],
+            user_id=user_id,
+            profile_id=profile_id,
+        )
 
     async def get_job(self, job_id: str, *, tenant_id: str | None = None) -> JobRecord | None:
         if tenant_id is not None:
@@ -819,9 +996,22 @@ class TenantRunner:
                 return lineage
         return None
 
-    async def latest_jobs(self, tenant_id: str, *, limit: int = 10) -> list[JobRecord]:
+    async def latest_jobs(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 10,
+        user_id: str | None = None,
+        profile_id: str | None = None,
+    ) -> list[JobRecord]:
         groups = await self.get_runtime(tenant_id).job_group_store.list_groups(limit=limit)
-        return [group.canonical_job for group in groups]
+        ranked = await self._rerank_groups_for_profile(
+            groups,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            profile_id=profile_id,
+        )
+        return [group.canonical_job for group in ranked]
 
     async def list_runs(
         self,

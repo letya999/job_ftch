@@ -78,12 +78,14 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
 
     assert server.app.name == "job_ftch"
     assert set(server.app.tools) == {
+        "activate_profile",
         "add_source",
         "disable_source",
         "get_run",
         "get_job",
         "get_job_lineage",
         "get_status",
+        "list_profiles",
         "list_runs",
         "list_source_health",
         "list_sources",
@@ -91,6 +93,7 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
         "reset_tenant",
         "run_all_pipelines",
         "run_pipeline",
+        "save_profile",
         "search_jobs",
     }
     assert set(server.app.resources) == {
@@ -104,6 +107,14 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
     latest_jobs = json.loads(await server.app.resources["jobs://{tenant_id}/latest"]("ai_jobs"))
     status_payload = await server.app.tools["get_status"]("ai_jobs")
     source_health = await server.app.tools["list_source_health"]("ai_jobs")
+    saved_profile = await server.app.tools["save_profile"](
+        "ai_jobs",
+        "1",
+        "ml",
+        "machine learning engineer",
+    )
+    listed_profiles = await server.app.tools["list_profiles"]("ai_jobs", "1")
+    active_profile = await server.app.tools["activate_profile"]("ai_jobs", "1", "ml")
     added_source = await server.app.tools["add_source"](
         "ai_jobs",
         "https://example.com/jobs",
@@ -126,6 +137,9 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
     assert status_payload is not None
     assert status_payload["tenant_id"] == "ai_jobs"
     assert source_health[0]["source_id"] == "debug:fixture"
+    assert saved_profile["profile_id"] == "ml"
+    assert listed_profiles[0]["active"] is True
+    assert active_profile["profile_id"] == "ml"
     assert added_source["source_id"] == "career_site:example_com_jobs"
     assert any(item["source_id"] == "career_site:example_com_jobs" for item in listed_sources)
     assert disabled_source["status"] == "disabled"

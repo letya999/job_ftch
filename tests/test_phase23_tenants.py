@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from job_ftch.adapters.profile_inputs import build_candidate_profile_from_payload
 from job_ftch.application.auth import resolve_auth_provider
 from job_ftch.application.pipeline import RunSummary, SourceRunStats
 from job_ftch.application.registry import create_auth_provider
@@ -20,6 +21,7 @@ from job_ftch.cli import _handle_tenants, _merge_run_summaries
 from job_ftch.config import Settings
 from job_ftch.domain import (
     JobLineage,
+    ManagedCandidateProfile,
     RawItem,
     SourceKind,
     TenantConfig,
@@ -341,6 +343,48 @@ async def test_tenant_runner_persists_runtime_sources_and_disables_them(tmp_path
         assert tenants[0].source_count == 1
     finally:
         await reloaded.close()
+
+
+@pytest.mark.asyncio
+async def test_tenant_runner_persists_candidate_profiles_and_reranks_latest_jobs(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "ai_jobs",
+            "display_name": "AI Jobs",
+            "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+            "store_backend": "sqlite",
+            "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            "job_group_store_backend": "sqlite",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+        }
+    )
+    runner = TenantRunner.from_tenants([tenant])
+    try:
+        profile = build_candidate_profile_from_payload(
+            user_id="1",
+            profile_id="ml",
+            payload={"summary": "machine learning engineer"},
+        )
+        saved = await runner.save_candidate_profile(
+            "ai_jobs",
+            ManagedCandidateProfile(user_id="1", profile_id="ml", profile=profile),
+        )
+        activated = await runner.set_active_candidate_profile("ai_jobs", "1", "ml")
+        await runner.run_tenant("ai_jobs")
+        jobs = await runner.latest_jobs("ai_jobs", user_id="1", limit=5)
+        profiles = await runner.list_candidate_profiles("ai_jobs", "1")
+
+        assert saved["profile_id"] == "ml"
+        assert activated["active"] is True
+        assert profiles[0]["active"] is True
+        assert jobs[0].best_profile_id == "ml"
+        assert jobs[0].best_score is not None
+    finally:
+        await runner.close()
 
 
 def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:

@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import hmac
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import structlog
 
+from job_ftch.adapters.profile_inputs import build_candidate_profile_from_payload
 from job_ftch.adapters.source_inputs import build_source_spec_from_input
 from job_ftch.adapters.telegram_bot.bot import (
     HttpTelegramBotClient,
@@ -18,6 +20,7 @@ from job_ftch.adapters.telegram_bot.bot import (
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.config import Settings, get_settings
+from job_ftch.domain import ManagedCandidateProfile
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
 
 logger = structlog.get_logger(__name__)
@@ -151,10 +154,71 @@ def create_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.get("/profiles/{tenant_id}/{user_id}")
+    async def list_profiles(
+        tenant_id: str,
+        user_id: str,
+        x_api_key: str | None = Header(default=None),
+    ) -> list[dict[str, Any]]:
+        expected_key = bot_config.bridge_api_key
+        if expected_key and not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        return await runner.list_candidate_profiles(tenant_id, user_id)
+
+    @app.post("/profiles/{tenant_id}/{user_id}")
+    async def save_profile(
+        tenant_id: str,
+        user_id: str,
+        payload: dict[str, Any],
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        expected_key = bot_config.bridge_api_key
+        if expected_key and not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        profile_id = str(payload.get("profile_id") or "").strip()
+        if not profile_id:
+            raise HTTPException(status_code=400, detail="profile_id is required.")
+        profile = build_candidate_profile_from_payload(
+            user_id=user_id,
+            profile_id=profile_id,
+            payload=payload,
+        )
+        saved = await runner.save_candidate_profile(
+            tenant_id,
+            ManagedCandidateProfile(
+                user_id=user_id,
+                profile_id=profile_id,
+                profile=profile,
+                updated_at=datetime.now(UTC),
+            ),
+        )
+        if bool(payload.get("activate", True)):
+            await runner.set_active_candidate_profile(tenant_id, user_id, profile_id)
+        return saved
+
+    @app.post("/profiles/{tenant_id}/{user_id}/activate")
+    async def activate_profile(
+        tenant_id: str,
+        user_id: str,
+        payload: dict[str, Any],
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        expected_key = bot_config.bridge_api_key
+        if expected_key and not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        profile_id = str(payload.get("profile_id") or "").strip()
+        if not profile_id:
+            raise HTTPException(status_code=400, detail="profile_id is required.")
+        try:
+            return await runner.set_active_candidate_profile(tenant_id, user_id, profile_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.get("/jobs/search")
     async def search_jobs(
         q: str,
         tenant_id: str | None = None,
+        user_id: str | None = None,
         limit: int = 20,
         x_api_key: str | None = Header(default=None),
     ) -> list[dict[str, Any]]:
@@ -162,7 +226,7 @@ def create_app(
         if expected_key and not hmac.compare_digest(x_api_key or "", expected_key):
             raise HTTPException(status_code=403, detail="Invalid bridge API key.")
         limit = min(limit, 100)
-        groups = await runner.search_jobs(q, tenant_id=tenant_id, limit=limit)
+        groups = await runner.search_jobs(q, tenant_id=tenant_id, user_id=user_id, limit=limit)
         return [group.model_dump(mode="json") for group in groups]
 
     return app

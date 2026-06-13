@@ -50,6 +50,7 @@ from job_ftch.domain.profile import (
 )
 from job_ftch.domain.quarantine import QuarantinedRawItem, RawItemRejectionReason
 from job_ftch.domain.rejected import RejectedItem, RejectedOutcome
+from job_ftch.domain.runtime_profile import ManagedCandidateProfile
 from job_ftch.domain.runtime_source import (
     RuntimeSourceRecord,
     source_spec_identifier,
@@ -95,6 +96,7 @@ __all__ = [
     "JobStatus",
     "LanguageCode",
     "MatchDecision",
+    "ManagedCandidateProfile",
     "PostType",
     "OutputSpec",
     "ProfileCatalog",

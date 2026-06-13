@@ -290,6 +290,42 @@ async def test_bot_can_add_and_disable_runtime_sources(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_bot_can_save_and_activate_profiles(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path)
+    sender = FakeSender()
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            allowed_user_ids=(1,),
+            allowed_chat_ids=(100,),
+            admin_user_ids=(1,),
+            rate_limit_seconds=0.0,
+        ),
+    )
+
+    try:
+        await service.handle_command(
+            "/saveprofile ai_jobs ml machine learning engineer",
+            chat_id=100,
+            user_id=1,
+        )
+        await service.handle_command("/profiles ai_jobs", chat_id=100, user_id=1)
+        await service.handle_command(
+            "/activateprofile ai_jobs ml",
+            chat_id=100,
+            user_id=1,
+        )
+
+        assert "Saved profile ml" in sender.messages[0]["text"]
+        assert "ml: active" in sender.messages[1]["text"]
+        assert "Activated profile ml" in sender.messages[2]["text"]
+    finally:
+        await runner.close()
+
+
+@pytest.mark.asyncio
 async def test_webhook_real_fastapi_token_auth(tmp_path: Path) -> None:
     pytest.importorskip("fastapi")
     import httpx
