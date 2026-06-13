@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 
+_IMPORT_ERROR: Exception | None = None
+
 if TYPE_CHECKING:
     from qdrant_client import AsyncQdrantClient
     from qdrant_client.http import models as rest

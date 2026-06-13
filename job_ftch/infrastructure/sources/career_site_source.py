@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from job_ftch.application.contracts import AuthProvider
+    from job_ftch.config import Settings
     from job_ftch.domain import QuarantinedRawItem, RawItem
     from job_ftch.domain.source_spec import CareerSiteSpec
 
@@ -366,7 +367,7 @@ class CareerSiteSource(Source["RawItem"]):
                 )
                 if settle_seconds > 0:
                     await asyncio.sleep(settle_seconds)
-                return await page.content()
+                return cast("str", await page.content())
         except Exception as exc:
             logger.debug("detail_browser_prefetch_failed", url=url, error=str(exc))
             return None
