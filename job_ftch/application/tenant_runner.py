@@ -23,7 +23,7 @@ from job_ftch.application.builder import (
     load_profile_catalog,
     tenant_to_settings,
 )
-from job_ftch.application.pipeline import RunSummary
+from job_ftch.application.pipeline import RunSummary, SourceRunStats
 from job_ftch.application.watermark import IncrementalCursor
 from job_ftch.application.registry import (
     create_job_backend,
@@ -87,6 +87,64 @@ def _summary_from_payload(payload: dict[str, Any], *, tenant_id: str | None = No
     if tenant_id is not None:
         summary.tenant_id = tenant_id
     return summary
+
+
+def _source_health_key(source_id: str) -> str:
+    return f"source_health:{source_id}"
+
+
+def _update_source_health_payload(
+    previous: dict[str, Any] | None,
+    *,
+    source_id: str,
+    source_kind: str,
+    source_name: str,
+    stats: SourceRunStats,
+    finished_at: datetime,
+) -> dict[str, Any]:
+    prev = previous or {}
+    baseline_emitted = float(prev.get("baseline_emitted") or 0.0)
+    previous_success = int(prev.get("success_count") or 0)
+    current_emitted = int(stats.emitted)
+    had_failure = stats.failed > 0
+    degraded = False
+    drift_ratio: float | None = None
+    if baseline_emitted >= 3.0:
+        drift_ratio = current_emitted / baseline_emitted if baseline_emitted > 0 else 0.0
+        degraded = current_emitted == 0 or drift_ratio < 0.2
+
+    if had_failure:
+        failure_streak = int(prev.get("failure_streak") or 0) + 1
+        last_success_at = prev.get("last_success_at")
+        success_count = previous_success
+        next_baseline = baseline_emitted
+    else:
+        failure_streak = 0
+        last_success_at = finished_at.isoformat()
+        success_count = previous_success + 1
+        next_baseline = (
+            float(current_emitted)
+            if success_count == 1
+            else round((baseline_emitted * 0.7) + (current_emitted * 0.3), 4)
+        )
+
+    return {
+        "source_id": source_id,
+        "source_kind": source_kind,
+        "source_name": source_name,
+        "last_run_at": finished_at.isoformat(),
+        "last_success_at": last_success_at,
+        "failure_streak": failure_streak,
+        "success_count": success_count,
+        "last_fetched": stats.fetched,
+        "last_emitted": current_emitted,
+        "last_failed": stats.failed,
+        "last_quarantined": stats.quarantined,
+        "baseline_emitted": next_baseline,
+        "drift_ratio": drift_ratio,
+        "degraded": degraded,
+        "status": "degraded" if degraded else ("paused" if failure_streak >= 3 else "healthy"),
+    }
 
 
 class TenantStore:
@@ -206,6 +264,24 @@ class TenantStore:
         await connector.set(self._key(f"run_history:{run_id}"), raw)
         await connector.set_add(self._key("run_history_ids"), run_id)
 
+    async def get_source_health(self, source_id: str) -> dict[str, Any] | None:
+        connector = cast("StoreConnector", self._store)
+        raw = await connector.get(self._key(_source_health_key(source_id)))
+        if raw is None:
+            return None
+        try:
+            return cast("dict[str, Any]", json.loads(raw))
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    async def save_source_health(self, source_id: str, payload: dict[str, Any]) -> None:
+        connector = cast("StoreConnector", self._store)
+        await connector.set(
+            self._key(_source_health_key(source_id)),
+            json.dumps(payload, default=_json_default, ensure_ascii=False, sort_keys=True),
+        )
+        await connector.set_add(self._key("source_health_ids"), source_id)
+
     async def get_run_summary(self, run_id: str) -> RunSummary | None:
         connector = cast("StoreConnector", self._store)
         raw = await connector.get(self._key(f"run_history:{run_id}"))
@@ -297,9 +373,9 @@ class TenantRunner:
             builder.sources(tenant.sources)
             builder.auth(auth)
             builder.store(tenant_store)
-            builder.stage(cast("ProcessingNode[Any]", sanitize_node))
+            builder.stage(sanitize_node)
             for node in nodes:
-                builder.stage(cast("ProcessingNode[Any]", node))
+                builder.stage(node)
             builder.sink(output_sink)
             builder.with_quarantine_sink(build_quarantine_sink(tenant_settings))
             builder.with_rejected_sink(rejected_sink, counted=rejected_counted)
@@ -347,6 +423,7 @@ class TenantRunner:
             ),
         )
         await runtime.store.save_run_summary(summary)
+        await self._update_source_health(runtime, summary)
         if runtime.metrics_exporter is not None:
             await runtime.metrics_exporter.observe_run(
                 summary,
@@ -354,6 +431,30 @@ class TenantRunner:
                 job_group_total=await runtime.job_group_store.count(),
             )
         return summary
+
+    async def _update_source_health(self, runtime: TenantRuntime, summary: RunSummary) -> None:
+        finished_at = summary.finished_at or datetime.now()
+        for source_id, stats in summary.by_source_id.items():
+            source_kind, _, source_name = source_id.partition(":")
+            previous = await runtime.store.get_source_health(source_id)
+            payload = _update_source_health_payload(
+                previous,
+                source_id=source_id,
+                source_kind=source_kind,
+                source_name=source_name,
+                stats=stats,
+                finished_at=finished_at,
+            )
+            await runtime.store.save_source_health(source_id, payload)
+            if payload["degraded"]:
+                logger.warning(
+                    "source_drift_detected",
+                    tenant_id=runtime.tenant.tenant_id,
+                    source_id=source_id,
+                    baseline_emitted=payload["baseline_emitted"],
+                    current_emitted=payload["last_emitted"],
+                    drift_ratio=payload["drift_ratio"],
+                )
 
     async def run_all(self, *, concurrency: int = 4) -> list[RunSummary]:
         semaphore = asyncio.Semaphore(max(concurrency, 1))

@@ -169,3 +169,7 @@ async def test_run_pipeline_summary_reports_extracted_review_and_rejected(tmp_pa
     assert summary.rejected == 3
     assert summary.posted == 0
     assert summary.by_source_kind["career_site"].extracted == 1
+    assert any(
+        source_id.startswith("career_site:") and stats.extracted == 1
+        for source_id, stats in summary.by_source_id.items()
+    )

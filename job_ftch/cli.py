@@ -269,6 +269,42 @@ def _merge_run_summaries(summaries: list[RunSummary]) -> RunSummary:
                 target.quarantine_reasons[reason] = (
                     target.quarantine_reasons.get(reason, 0) + count
                 )
+        for source_id, source_stats in summary.by_source_id.items():
+            source_kind, _, source_name = source_id.partition(":")
+            target_identity = merged.source_identity_stats(source_kind, source_name)
+            if target_identity is None:
+                continue
+            target_identity.fetched += source_stats.fetched
+            target_identity.sanitized += source_stats.sanitized
+            target_identity.triaged += source_stats.triaged
+            target_identity.extracted += source_stats.extracted
+            target_identity.partial += source_stats.partial
+            target_identity.review += source_stats.review
+            target_identity.duplicates += source_stats.duplicates
+            target_identity.dropped += source_stats.dropped
+            target_identity.emitted += source_stats.emitted
+            target_identity.posted += source_stats.posted
+            target_identity.rejected += source_stats.rejected
+            target_identity.quarantined += source_stats.quarantined
+            target_identity.failed += source_stats.failed
+            target_identity.new_groups_created += source_stats.new_groups_created
+            target_identity.merged_into_group += source_stats.merged_into_group
+            target_identity.monitored += source_stats.monitored
+            target_identity.rich_emitted += source_stats.rich_emitted
+            target_identity.scraped += source_stats.scraped
+            target_identity.scrape_fallback_used += source_stats.scrape_fallback_used
+            target_identity.monitor_truncated += source_stats.monitor_truncated
+            target_identity.source_partial = (
+                target_identity.source_partial or source_stats.source_partial
+            )
+            for reason, count in source_stats.drop_reasons.items():
+                target_identity.drop_reasons[reason] = (
+                    target_identity.drop_reasons.get(reason, 0) + count
+                )
+            for reason, count in source_stats.quarantine_reasons.items():
+                target_identity.quarantine_reasons[reason] = (
+                    target_identity.quarantine_reasons.get(reason, 0) + count
+                )
     return merged
 
 

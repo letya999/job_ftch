@@ -11,8 +11,11 @@ import pytest
 from job_ftch.application.auth import resolve_auth_provider
 from job_ftch.application.registry import create_auth_provider
 from job_ftch.application.tenant_loader import load_tenants
-from job_ftch.application.pipeline import RunSummary
-from job_ftch.application.tenant_runner import TenantRunner
+from job_ftch.application.pipeline import RunSummary, SourceRunStats
+from job_ftch.application.tenant_runner import (
+    TenantRunner,
+    _update_source_health_payload,
+)
 from job_ftch.cli import _handle_tenants, _merge_run_summaries
 from job_ftch.config import Settings
 from job_ftch.domain import JobLineage, RawItem, SourceKind, TenantConfig
@@ -205,6 +208,11 @@ async def test_tenant_runner_persists_run_history(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.source_run_id == first.source_run_id
     assert loaded.tenant_id == "ai_jobs"
+    health = await runner.get_runtime("ai_jobs").store.get_source_health("debug:fixture")
+    assert health is not None
+    assert health["status"] == "healthy"
+    assert health["success_count"] == 2
+    assert health["failure_streak"] == 0
 
     await runner.close()
 
@@ -218,6 +226,9 @@ def test_merge_run_summaries_accumulates_counts_and_source_stats() -> None:
     )
     first.source_stats("telegram_channel").fetched = 2
     first.source_stats("telegram_channel").emitted = 1
+    first_identity = first.source_identity_stats("telegram_channel", "tg_ai_jobs")
+    assert first_identity is not None
+    first_identity.emitted = 1
 
     second = RunSummary(
         fetched=3,
@@ -227,6 +238,9 @@ def test_merge_run_summaries_accumulates_counts_and_source_stats() -> None:
     )
     second.source_stats("career_site").fetched = 3
     second.source_stats("career_site").failed = 1
+    second_identity = second.source_identity_stats("career_site", "bcc_ml")
+    assert second_identity is not None
+    second_identity.failed = 1
 
     merged = _merge_run_summaries([first, second])
 
@@ -237,6 +251,41 @@ def test_merge_run_summaries_accumulates_counts_and_source_stats() -> None:
     assert merged.quarantine_reasons == {"policy": 2}
     assert merged.by_source_kind["telegram_channel"].emitted == 1
     assert merged.by_source_kind["career_site"].failed == 1
+    assert merged.by_source_id["telegram_channel:tg_ai_jobs"].emitted == 1
+    assert merged.by_source_id["career_site:bcc_ml"].failed == 1
+
+
+def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
+    stats = SourceRunStats(emitted=0, failed=0, fetched=2)
+    payload = _update_source_health_payload(
+        {
+            "baseline_emitted": 10.0,
+            "failure_streak": 0,
+            "success_count": 3,
+            "last_success_at": "2026-06-12T00:00:00+00:00",
+        },
+        source_id="career_site:bcc_ml",
+        source_kind="career_site",
+        source_name="bcc_ml",
+        stats=stats,
+        finished_at=datetime(2026, 6, 13, tzinfo=UTC),
+    )
+
+    assert payload["degraded"] is True
+    assert payload["status"] == "degraded"
+    assert payload["drift_ratio"] == 0.0
+
+    failed = SourceRunStats(emitted=0, failed=1)
+    failed_payload = _update_source_health_payload(
+        payload,
+        source_id="career_site:bcc_ml",
+        source_kind="career_site",
+        source_name="bcc_ml",
+        stats=failed,
+        finished_at=datetime(2026, 6, 13, 1, tzinfo=UTC),
+    )
+
+    assert failed_payload["failure_streak"] == 1
 
 
 @pytest.mark.asyncio
