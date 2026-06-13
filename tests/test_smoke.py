@@ -40,7 +40,7 @@ def test_config_loads(monkeypatch: MonkeyPatch) -> None:
         if key.startswith("JOB_FTCH_"):
             monkeypatch.delenv(key, raising=False)
     s = Settings(_env_file=None)
-    assert s.store_backend == "memory"
+    assert s.store_backend == "sqlite"
     assert s.source_backend == "local_fixture"
     assert s.sink_backend == "json_file"
     assert s.log_level == "INFO"

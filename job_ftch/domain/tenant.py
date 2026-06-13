@@ -80,7 +80,7 @@ class TenantConfig(BaseModel):
     )
     source_backend: str = "local_fixture"
     sink_backend: str = "json_file"
-    store_backend: str = "memory"
+    store_backend: str = "sqlite"
     job_group_store_backend: str = "sqlite"
     llm_backend: str = "heuristic"
     posting_backend: str = "none"
