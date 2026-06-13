@@ -8,6 +8,10 @@ __pycache__/
 .venv/
 uv.lock
 
+# local debug / probe artifacts
+*.out
+scripts/e2e_probe_stderr*.txt
+
 # env files
 .env
 .env.dev
