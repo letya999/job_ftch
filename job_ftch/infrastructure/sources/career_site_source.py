@@ -363,7 +363,7 @@ class CareerSiteSource(Source["RawItem"]):
                 )
                 if settle_seconds > 0:
                     await asyncio.sleep(settle_seconds)
-                return await page.content()
+                return str(await page.content())
         except Exception as exc:
             logger.debug("detail_browser_prefetch_failed", url=url, error=str(exc))
             return None

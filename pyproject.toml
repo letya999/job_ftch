@@ -165,6 +165,7 @@ module = [
     "job_ftch.infrastructure.sources.realtime.rss",
     "job_ftch.infrastructure.sources.telegram_realtime",
     "job_ftch.infrastructure.sources.browser.base",
+    "job_ftch.infrastructure.bypass.curl_bypass",
 ]
 warn_unused_ignores = false
 

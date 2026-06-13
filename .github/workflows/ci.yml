@@ -115,7 +115,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install core package (no extras)
-        run: uv pip install .
+        run: uv pip install --system .
       - name: Verify core imports without optional dependencies
         run: |
           python -c "import job_ftch; import job_ftch.application.contracts; import job_ftch.cli"
