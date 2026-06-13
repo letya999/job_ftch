@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from job_ftch.application.contracts import TypeChangingNode
 from job_ftch.domain import (
@@ -13,7 +14,9 @@ from job_ftch.domain import (
     WorkMode,
     draft_to_record,
 )
-from job_ftch.infrastructure.ontology.normalizer import OntologyNormalizer, get_default_normalizer
+
+if TYPE_CHECKING:
+    from job_ftch.application.contracts import Normalizer
 
 _PREFIX_RE = re.compile(r"^(hiring|vacancy|opening|role|ищем|вакансия)\s*[:\-]\s*", re.IGNORECASE)
 _COMP_SPLIT_RE = re.compile(r"\s+(?:at|@|-)\s+", re.IGNORECASE)
@@ -61,8 +64,11 @@ def _normalize_currency(value: str) -> str:
 
 
 class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
-    def __init__(self, normalizer: OntologyNormalizer | None = None):
-        self.normalizer = normalizer or get_default_normalizer()
+    def __init__(self, normalizer: Normalizer | None = None):
+        if normalizer is None:
+            from job_ftch.infrastructure.ontology.normalizer import get_default_normalizer
+            normalizer = get_default_normalizer()
+        self.normalizer = normalizer
 
     async def process(self, item: JobDraft) -> JobRecord | None:
         title = _clean_title(item.title_raw)
@@ -180,8 +186,11 @@ class CompensationParsingNode:
 
 
 class SkillNormalizationNode:
-    def __init__(self, normalizer: OntologyNormalizer | None = None):
-        self.normalizer = normalizer or get_default_normalizer()
+    def __init__(self, normalizer: Normalizer | None = None):
+        if normalizer is None:
+            from job_ftch.infrastructure.ontology.normalizer import get_default_normalizer
+            normalizer = get_default_normalizer()
+        self.normalizer = normalizer
 
     async def process(self, item: JobRecord) -> JobRecord | None:
         skills_explicit = self.normalizer.normalize_skills(item.skills_explicit)

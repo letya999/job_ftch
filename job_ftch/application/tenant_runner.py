@@ -48,7 +48,6 @@ from job_ftch.domain import (
     source_spec_locator,
     source_spec_name,
 )
-from job_ftch.infrastructure.metrics.prometheus import PrometheusExporter
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -58,6 +57,7 @@ if TYPE_CHECKING:
         JobGroupStore,
         JobPersistenceBackend,
         LLMProvider,
+        MetricsExporter,
         SearchBackend,
         Store,
         StoreConnector,
@@ -516,7 +516,7 @@ class TenantRuntime:
     job_group_store: JobGroupStore
     search_backend: SearchBackend
     job_backend: JobPersistenceBackend
-    metrics_exporter: PrometheusExporter | None = None
+    metrics_exporter: MetricsExporter | None = None
     base_sources: tuple[SourceSpec, ...] = field(default_factory=tuple)
     runtime_sources: dict[str, RuntimeSourceRecord] = field(default_factory=dict)
     disabled_source_ids: set[str] = field(default_factory=set)
@@ -536,13 +536,17 @@ class TenantRunner:
     ) -> TenantRunner:
         settings_template = base_settings or get_settings()
         runtimes: dict[str, TenantRuntime] = {}
-        metrics_exporters_by_port: dict[int, PrometheusExporter] = {}
+        metrics_exporters_by_port: dict[int, MetricsExporter] = {}
         for tenant in tenants:
             tenant_settings = tenant_to_settings(tenant, settings_template)
-            metrics_exporter: PrometheusExporter | None = None
+            metrics_exporter: MetricsExporter | None = None
             if tenant_settings.metrics_enabled:
                 metrics_exporter = metrics_exporters_by_port.get(tenant_settings.metrics_port)
                 if metrics_exporter is None:
+                    from job_ftch.infrastructure.metrics.prometheus import (
+                        PrometheusExporter,
+                    )
+
                     metrics_exporter = PrometheusExporter(
                         start_server=True,
                         port=tenant_settings.metrics_port,

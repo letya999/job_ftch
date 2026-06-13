@@ -289,3 +289,23 @@ class JobScraper(Protocol):
     async def scrape(
         self, url: str, config: dict[str, Any], http: Any
     ) -> ScrapedPostingPayload | None: ...
+
+
+class Normalizer(Protocol):
+    """Port for ontology-based normalization services."""
+
+    def infer_role_family(self, title: str, language: str = "unknown") -> str | None: ...
+    def infer_seniority(self, title: str) -> str | None: ...
+    def normalize_skills(self, skills: tuple[SkillTag, ...]) -> tuple[SkillTag, ...]: ...
+
+
+class MetricsExporter(Protocol):
+    """Port for exporting tenant-scoped pipeline metrics."""
+
+    async def observe_run(
+        self,
+        summary: RunSummary,
+        *,
+        tenant_id: str,
+        job_group_total: int | None = None,
+    ) -> None: ...

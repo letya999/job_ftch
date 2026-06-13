@@ -37,6 +37,13 @@ jobs:
       - name: Module boundaries
         run: uv run python scripts/check_module_boundaries.py
 
+      - name: Enforce layer boundaries (no infra imports in domain/application/nodes/sinks)
+        run: |
+          if rg -n '^from job_ftch\.infrastructure|^import job_ftch\.infrastructure' \
+              job_ftch/domain job_ftch/application job_ftch/nodes job_ftch/sinks; then
+            echo "Layer boundary violation: module-level infrastructure import in a pure layer"; exit 1
+          fi
+
       - name: Ruff format check
         run: uv run ruff format --check .
 

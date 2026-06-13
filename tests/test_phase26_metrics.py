@@ -117,8 +117,7 @@ async def test_tenant_runner_emits_prometheus_metrics(
         ) -> None:
             observed.append((tenant_id, summary.emitted, int(job_group_total or 0)))
 
-    monkeypatch.setattr("job_ftch.application.tenant_runner.PrometheusExporter", _ExporterStub)
-
+    monkeypatch.setattr("job_ftch.infrastructure.metrics.prometheus.PrometheusExporter", _ExporterStub)
     from job_ftch.application.tenant_runner import TenantRunner
 
     tenant = TenantConfig.model_validate(

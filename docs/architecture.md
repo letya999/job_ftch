@@ -101,12 +101,12 @@ side-channels:
 
 ### Целевое состояние funnel
 
-Текущий pipeline уже движется к master plan, но rollout ещё не завершён целиком:
+Текущий pipeline уже соответствует целевой архитектуре master plan:
 
 - intake и cheap understanding уже выделены в отдельные узлы;
-- `RoutingNode` как отдельный pipeline node ещё не выделен: сейчас routing реализован на уровне sink composition;
-- canonical contract уже вынес explicit source/risk/provenance поля из `metadata`, но rollout полного master-plan field set ещё не завершён;
-- агрегация уже есть как `JobAggregationNode`, но порядок относительно scoring продолжает эволюционировать вместе с canonical contract rollout.
+- `RoutingNode` полностью реализован (`nodes/routing.py`) и интегрирован в `builder.py`;
+- canonical contract вынес explicit source/risk/provenance поля из `metadata`, rollout основного master-plan field set завершён (остались минорные уточнения ontology/ESCO);
+- агрегация реализована как `JobAggregationNode`, порядок относительно scoring стабилизирован.
 
 ---
 
