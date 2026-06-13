@@ -138,12 +138,25 @@ class CareerSiteSource(Source["RawItem"]):
                     pass
 
         # Monitor escalation chain for "auto"
-        # We try detected monitor, then dom, then api_sniffer
+        # We try fingerprinter-ordered list
         monitors_to_try = []
         if initial_monitor_name == "auto":
-            if detected_monitor and detected_monitor not in ("dom", "api_sniffer"):
-                monitors_to_try.append(detected_monitor)
-            monitors_to_try.extend(["dom", "api_sniffer"])
+            # Use fingerprinter-ordered list instead of fixed fallback
+            from job_ftch.infrastructure.sources.monitor_detector import get_ordered_monitors
+            async with client_for_config(self.http, monitor_config) as _fp_client:
+                try:
+                    fp_monitors = await get_ordered_monitors(self.spec.url, _fp_client)
+                except Exception:
+                    fp_monitors = ["dom", "api_sniffer"]
+            # Prepend any non-dom/api_sniffer detected monitor (e.g. rss_board from can_handle)
+            if detected_monitor and detected_monitor not in fp_monitors:
+                monitors_to_try = [detected_monitor] + fp_monitors
+            else:
+                monitors_to_try = fp_monitors
+            # Ensure dom and api_sniffer always present as ultimate fallbacks
+            for fallback in ["dom", "api_sniffer"]:
+                if fallback not in monitors_to_try:
+                    monitors_to_try.append(fallback)
         else:
             monitors_to_try = [initial_monitor_name]
 
