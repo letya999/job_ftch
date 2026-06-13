@@ -20,12 +20,13 @@ from job_ftch.config import get_settings
 from job_ftch.domain.source_spec import SourceSpec
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
 
-# Configure stdout to handle Unicode by ignoring errors if possible, 
+# Configure stdout to handle Unicode by ignoring errors if possible,
 # or use a more robust way to print to Windows terminal.
 if sys.platform == "win32":
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
 logging.basicConfig(level=logging.ERROR)  # suppress noise
 
@@ -51,7 +52,7 @@ ERROR_PATTERNS: list[tuple[str, str]] = [
     ("ValidationError", "CONFIG_ERROR"),
     ("JobListNotFound", "PARSE_FAILED"),
     ("ParseError", "PARSE_FAILED"),
-    ("EOF when reading a line", "AUTH_REQUIRED"), # Telethon interactive prompt
+    ("EOF when reading a line", "AUTH_REQUIRED"),  # Telethon interactive prompt
 ]
 
 
@@ -73,6 +74,7 @@ async def probe_source(source: Any, source_name: str, source_type: str) -> dict[
     timeout = 120 if source_type == "career_site" else 30
 
     try:
+
         async def collect() -> None:
             async for item in source.fetch():
                 items.append(item)
@@ -81,7 +83,7 @@ async def probe_source(source: Any, source_name: str, source_type: str) -> dict[
 
         await asyncio.wait_for(collect(), timeout=timeout)
         status = "OK" if items else "EMPTY"
-    except asyncio.TimeoutError:
+    except TimeoutError:
         error_category = "TIMEOUT"
         error_detail = f">{timeout}s"
         status = "TIMEOUT"
@@ -109,7 +111,7 @@ async def main() -> None:
     print(f"{'SOURCE':<35} {'TYPE':<20} {'STATUS':<18} {'ITEMS':>5} {'ELAPSED':>8}  NOTE")
     print("-" * 110)
 
-    settings = get_settings()
+    get_settings()
     auth = EnvAuthProvider()
     source_adapter = TypeAdapter(SourceSpec)
 
@@ -117,7 +119,7 @@ async def main() -> None:
     for spec_dict in specs_data:
         source_name = spec_dict.get("source_name", spec_dict.get("entity", "?"))
         source_type = spec_dict.get("type", "?")
-        
+
         try:
             # Parse dict to SourceSpec using discriminated union
             spec = source_adapter.validate_python(spec_dict)
@@ -141,6 +143,7 @@ async def main() -> None:
 
     # Summary by category
     from collections import Counter
+
     counts = Counter(r["status"] for r in results)
     print("\n--- Summary -------------------------------")
     for status, count in sorted(counts.items(), key=lambda x: -x[1]):

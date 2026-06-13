@@ -20,7 +20,10 @@ if __name__ == "__main__":
         Path("config/sources.schema.json"): (sources_adapter.json_schema(), "SourceSpec"),
         Path("artifacts/schemas/RawItem.schema.json"): (RawItem.model_json_schema(), "RawItem"),
         Path("artifacts/schemas/JobDraft.schema.json"): (JobDraft.model_json_schema(), "JobDraft"),
-        Path("artifacts/schemas/JobRecord.schema.json"): (JobRecord.model_json_schema(), "JobRecord"),
+        Path("artifacts/schemas/JobRecord.schema.json"): (
+            JobRecord.model_json_schema(),
+            "JobRecord",
+        ),
         Path("artifacts/schemas/JobGroup.schema.json"): (JobGroup.model_json_schema(), "JobGroup"),
     }
     for path, (schema, name) in outputs.items():

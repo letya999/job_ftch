@@ -4,6 +4,7 @@ import pytest
 
 from job_ftch.application.drops import RawItemDropped
 from job_ftch.domain import Job, JobDraft, JobRecord, JobStatus, RiskLevel, SourceKind, WorkMode
+from job_ftch.infrastructure.ontology.normalizer import get_default_normalizer
 from job_ftch.nodes import (
     CompensationParsingNode,
     JobLifecycleNode,
@@ -60,7 +61,7 @@ def _record(**overrides: object) -> JobRecord:
 
 @pytest.mark.asyncio
 async def test_title_company_normalization_splits_company_from_title() -> None:
-    node = TitleCompanyNormalizationNode()
+    node = TitleCompanyNormalizationNode(get_default_normalizer())
 
     job = await node.process(
         _draft(title_raw="Hiring: AI Infra Engineer at Example AI", company_name_raw=None)

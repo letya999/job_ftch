@@ -68,6 +68,7 @@ def main() -> int:
         application_runtime_exception = module_name in {
             "job_ftch.application.builder",
             "job_ftch.application.pipeline",
+            "job_ftch.application.tenant_runner",
         }
         for node in ast.walk(tree):
             for target, lineno in _import_targets(node):

@@ -64,11 +64,7 @@ def _normalize_currency(value: str) -> str:
 
 
 class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
-    def __init__(self, normalizer: Normalizer | None = None):
-        if normalizer is None:
-            from job_ftch.infrastructure.ontology.normalizer import get_default_normalizer
-
-            normalizer = get_default_normalizer()
+    def __init__(self, normalizer: Normalizer):
         self.normalizer = normalizer
 
     async def process(self, item: JobDraft) -> JobRecord | None:
@@ -190,11 +186,7 @@ class CompensationParsingNode:
 
 
 class SkillNormalizationNode:
-    def __init__(self, normalizer: Normalizer | None = None):
-        if normalizer is None:
-            from job_ftch.infrastructure.ontology.normalizer import get_default_normalizer
-
-            normalizer = get_default_normalizer()
+    def __init__(self, normalizer: Normalizer):
         self.normalizer = normalizer
 
     async def process(self, item: JobRecord) -> JobRecord | None:

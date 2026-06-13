@@ -11,6 +11,7 @@ import yaml
 from job_ftch.application.pipeline import Pipeline
 from job_ftch.domain.source_spec import RSSFeedSourceSpec
 from job_ftch.infrastructure.llm.heuristic import HeuristicLLMProvider
+from job_ftch.infrastructure.ontology.normalizer import get_default_normalizer
 from job_ftch.infrastructure.sources.realtime.rss import RSSFeedSource
 from job_ftch.nodes.extraction import ExtractionNode
 from job_ftch.nodes.job_normalization import TitleCompanyNormalizationNode
@@ -30,7 +31,7 @@ def pipeline_setup(
     source = RSSFeedSource(spec=habr_ml_spec, auth=null_auth, store=in_memory_store)
     sanitize = SanitizeNode(allowed_career_site_hosts=("career.habr.com",))
     extraction = ExtractionNode(llm=HeuristicLLMProvider())
-    normalization = TitleCompanyNormalizationNode()
+    normalization = TitleCompanyNormalizationNode(get_default_normalizer())
     sink = JsonFileSink(output_path=temp_json_path)
 
     pipeline = Pipeline(

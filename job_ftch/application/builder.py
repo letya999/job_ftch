@@ -431,6 +431,9 @@ def build_nodes(
     catalog: ProfileCatalog,
 ) -> tuple[SanitizingNode[RawItem], Sequence[Stage[Any, Any]]]:
     classifier = build_classifier(settings, catalog)
+    from job_ftch.infrastructure.ontology.normalizer import get_default_normalizer
+
+    normalizer = get_default_normalizer()
     nodes: list[Stage[Any, Any]] = [
         SourceContextNode(),
         PostTypeClassificationNode(classifier=classifier),
@@ -439,8 +442,8 @@ def build_nodes(
         SemanticPrefilterNode(catalog),
         ExtractionNode(llm),
         ExtractionValidationNode(),
-        TitleCompanyNormalizationNode(),
-        SkillNormalizationNode(),
+        TitleCompanyNormalizationNode(normalizer),
+        SkillNormalizationNode(normalizer),
         LocationWorkModeNormalizationNode(),
         CompensationParsingNode(),
         JobLifecycleNode(),
