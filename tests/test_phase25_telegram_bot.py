@@ -192,6 +192,9 @@ async def test_bot_access_control_and_status_endpoint(
     sources = app.routes[("GET", "/pipeline/sources/{tenant_id}")]
     add_source = app.routes[("POST", "/pipeline/sources/{tenant_id}")]
     disable_source = app.routes[("POST", "/pipeline/sources/{tenant_id}/disable")]
+    list_profiles = app.routes[("GET", "/profiles/{tenant_id}/{user_id}")]
+    save_profile = app.routes[("POST", "/profiles/{tenant_id}/{user_id}")]
+    activate_profile = app.routes[("POST", "/profiles/{tenant_id}/{user_id}/activate")]
     pipeline_run = app.routes[("POST", "/pipeline/run")]
 
     await webhook(
@@ -217,6 +220,19 @@ async def test_bot_access_control_and_status_endpoint(
         {"source_id": added["source_id"]},
         "bridge-key",
     )
+    saved_profile = await save_profile(
+        "ai_jobs",
+        "1",
+        {"profile_id": "ml", "summary": "machine learning engineer"},
+        "bridge-key",
+    )
+    listed_profiles = await list_profiles("ai_jobs", "1", "bridge-key")
+    active_profile = await activate_profile(
+        "ai_jobs",
+        "1",
+        {"profile_id": "ml"},
+        "bridge-key",
+    )
 
     assert sender.messages[0]["text"] == "Access denied."
     assert summary["tenant_id"] == "ai_jobs"
@@ -225,6 +241,9 @@ async def test_bot_access_control_and_status_endpoint(
     assert any(item["source_id"] == "debug:fixture" for item in source_payload)
     assert added["source_id"] == "career_site:example_com_jobs"
     assert disabled["status"] == "disabled"
+    assert saved_profile["profile_id"] == "ml"
+    assert listed_profiles[0]["active"] is True
+    assert active_profile["profile_id"] == "ml"
 
     await runner.close()
 
