@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -25,8 +26,11 @@ from .serialization import dump_group, dump_job, load_group, load_job
 
 try:
     import asyncpg
-except ImportError:
+    _IMPORT_ERROR = None
+except ImportError as exc:
     asyncpg = None
+    _IMPORT_ERROR = exc
+
 
 if TYPE_CHECKING:
     from job_ftch.config import Settings
@@ -47,7 +51,9 @@ def _coerce_job_record(job: Job | JobRecord) -> JobRecord:
 class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
     def __init__(self, settings: Settings) -> None:
         if asyncpg is None:
-            raise ImportError("asyncpg is required for postgres backend")
+            raise ImportError(
+                "PostgreSQL backend requires the 'postgres' extra: pip install job-ftch[postgres]"
+            ) from _IMPORT_ERROR
         if not settings.store_dsn:
             raise ValueError("store_dsn is required for postgres backend")
 
@@ -87,10 +93,8 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                     m2_path = Path(__file__).parent / "migrations" / "002_postgres_blocking_key.sql"
                     with open(m2_path, encoding="utf-8") as f:
                         m2_sql = f.read()
-                    try:
+                    with contextlib.suppress(Exception):  # Already exists
                         await conn.execute(m2_sql)
-                    except Exception: # Already exists
-                        pass
                         
                 self._schema_initialized = True
         return self._pool

@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from job_ftch.adapters.profile_inputs import build_candidate_profile_from_payload
+from job_ftch.adapters.source_inputs import build_source_spec_from_input
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.config import Settings, get_settings
+from job_ftch.domain import ManagedCandidateProfile
 
 
 def _json_default(value: object) -> object:
@@ -73,6 +77,79 @@ class TenantMCPServer:
             return None if summary is None else summary.as_dict()
 
         @self.app.tool
+        async def list_source_health(tenant_id: str) -> list[dict[str, Any]]:
+            return await self._require_runner().list_source_health(tenant_id)
+
+        @self.app.tool
+        async def list_sources(tenant_id: str) -> list[dict[str, Any]]:
+            return await self._require_runner().list_sources(tenant_id)
+
+        @self.app.tool
+        async def add_source(
+            tenant_id: str,
+            link: str,
+            source_type: str | None = None,
+            limit: int = 100,
+        ) -> dict[str, Any]:
+            runner = self._require_runner()
+            spec = await build_source_spec_from_input(
+                link,
+                auth_provider=runner.get_runtime(tenant_id).auth_provider,
+                source_type=source_type,
+                limit=limit,
+            )
+            return await runner.add_source_spec(
+                tenant_id,
+                spec,
+                added_via="mcp",
+                input_value=link,
+            )
+
+        @self.app.tool
+        async def disable_source(tenant_id: str, source_id: str) -> dict[str, Any]:
+            return await self._require_runner().disable_source(tenant_id, source_id)
+
+        @self.app.tool
+        async def list_profiles(tenant_id: str, user_id: str) -> list[dict[str, Any]]:
+            return await self._require_runner().list_candidate_profiles(tenant_id, user_id)
+
+        @self.app.tool
+        async def save_profile(
+            tenant_id: str,
+            user_id: str,
+            profile_id: str,
+            summary: str,
+        ) -> dict[str, Any]:
+            profile = build_candidate_profile_from_payload(
+                user_id=user_id,
+                profile_id=profile_id,
+                payload={"summary": summary, "name": profile_id},
+            )
+            saved = await self._require_runner().save_candidate_profile(
+                tenant_id,
+                ManagedCandidateProfile(
+                    user_id=user_id,
+                    profile_id=profile_id,
+                    profile=profile,
+                    updated_at=datetime.now(UTC),
+                ),
+            )
+            await self._require_runner().set_active_candidate_profile(tenant_id, user_id, profile_id)
+            return saved
+
+        @self.app.tool
+        async def activate_profile(
+            tenant_id: str,
+            user_id: str,
+            profile_id: str,
+        ) -> dict[str, Any]:
+            return await self._require_runner().set_active_candidate_profile(
+                tenant_id,
+                user_id,
+                profile_id,
+            )
+
+        @self.app.tool
         async def list_runs(tenant_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
             summaries = await self._require_runner().list_runs(tenant_id=tenant_id, limit=limit)
             return [summary.as_dict() for summary in summaries]
@@ -91,11 +168,12 @@ class TenantMCPServer:
         async def search_jobs(
             query: str,
             tenant_id: str | None = None,
+            user_id: str | None = None,
             limit: int = 20,
         ) -> list[dict[str, Any]]:
             limit = min(limit, 100)
             groups = await self._require_runner().search_jobs(
-                query, tenant_id=tenant_id, limit=limit
+                query, tenant_id=tenant_id, user_id=user_id, limit=limit
             )
             return [group.model_dump(mode="json") for group in groups]
 

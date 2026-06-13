@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 from job_ftch.application.registry import register_job_group_store
@@ -78,10 +79,8 @@ class InMemoryJobGroupStore:
         # Update blocking index if it changed (unlikely but possible if canonical changes)
         if updated_group.blocking_key and updated_group.blocking_key != group.blocking_key:
             if group.blocking_key in self._blocking_index:
-                try:
+                with contextlib.suppress(ValueError):
                     self._blocking_index[group.blocking_key].remove(group_id)
-                except ValueError:
-                    pass
             if updated_group.blocking_key not in self._blocking_index:
                 self._blocking_index[updated_group.blocking_key] = []
             self._blocking_index[updated_group.blocking_key].append(group_id)

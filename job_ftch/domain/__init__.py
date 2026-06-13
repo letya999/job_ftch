@@ -50,6 +50,14 @@ from job_ftch.domain.profile import (
 )
 from job_ftch.domain.quarantine import QuarantinedRawItem, RawItemRejectionReason
 from job_ftch.domain.rejected import RejectedItem, RejectedOutcome
+from job_ftch.domain.runtime_profile import ManagedCandidateProfile
+from job_ftch.domain.runtime_source import (
+    RuntimeSourceRecord,
+    source_spec_identifier,
+    source_spec_locator,
+    source_spec_name,
+)
+from job_ftch.domain.source_health import SourceHealth
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.domain.tenant import OutputSpec, ScheduleSpec, TenantConfig, TenantInfo
 from job_ftch.domain.triage import TriageRejectionReason
@@ -89,6 +97,7 @@ __all__ = [
     "JobStatus",
     "LanguageCode",
     "MatchDecision",
+    "ManagedCandidateProfile",
     "PostType",
     "OutputSpec",
     "ProfileCatalog",
@@ -102,11 +111,13 @@ __all__ = [
     "RejectedOutcome",
     "RememberedDedupKey",
     "RiskLevel",
+    "RuntimeSourceRecord",
     "ScheduleSpec",
     "SearchProfile",
     "Seniority",
     "SkillTag",
     "SourceAttribution",
+    "SourceHealth",
     "SourceKind",
     "TenantConfig",
     "TenantInfo",
@@ -129,4 +140,7 @@ __all__ = [
     "job_to_draft",
     "job_to_record",
     "build_job_lineage",
+    "source_spec_identifier",
+    "source_spec_locator",
+    "source_spec_name",
 ]

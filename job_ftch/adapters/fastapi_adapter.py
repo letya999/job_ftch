@@ -41,6 +41,14 @@ def create_app(
             "emitted": await store.get_run_state("pipeline.emitted"),
         }
 
+    @app.get("/pipeline/sources")
+    async def pipeline_sources() -> list[dict[str, Any]]:
+        store = builder.get_store()
+        list_source_health = getattr(store, "list_source_health", None)
+        if callable(list_source_health):
+            return list(await list_source_health())
+        return []
+
     @app.get("/jobs/search")
     async def search_jobs(q: str, limit: int = 20) -> list[dict[str, Any]]:
         if search_backend is None:

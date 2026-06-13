@@ -4,6 +4,7 @@ from job_ftch.application.registry import resolve_bypass
 from job_ftch.infrastructure.bypass.adaptive import AdaptiveBypassManager
 from job_ftch.infrastructure.bypass.behavior_sim import BehaviorSimBypass
 from job_ftch.infrastructure.bypass.cloak_bypass import CloakBrowserBypass
+import job_ftch.infrastructure.bypass.curl_bypass as curl_bypass_module
 from job_ftch.infrastructure.bypass.curl_bypass import CurlBypass
 from job_ftch.infrastructure.bypass.noop import NoopBypass
 from job_ftch.infrastructure.bypass.proxy_rotator import ProxyRotatorBypass
@@ -50,9 +51,31 @@ async def test_resolve_curl_bypass():
     assert isinstance(bypass, CurlBypass)
     assert bypass.impersonate == "safari15_3"
 
-    # Mocking http client
-    res = await bypass.apply_http(None)
-    # Should return a wrapper around curl_cffi AsyncSession
+    class _FakeSession:
+        def __init__(self, *, impersonate: str) -> None:
+            self.impersonate = impersonate
+
+        async def get(self, url: str, allow_redirects: bool = False, **kwargs: object) -> object:
+            return {"url": url, "allow_redirects": allow_redirects, "kwargs": kwargs}
+
+        async def close(self) -> None:
+            return None
+
+    class _FakeRequests:
+        @staticmethod
+        def AsyncSession(*, impersonate: str) -> _FakeSession:
+            return _FakeSession(impersonate=impersonate)
+
+    original_requests = curl_bypass_module.requests
+    original_import_error = curl_bypass_module._IMPORT_ERROR
+    curl_bypass_module.requests = _FakeRequests()
+    curl_bypass_module._IMPORT_ERROR = None
+    try:
+        res = await bypass.apply_http(None)
+    finally:
+        curl_bypass_module.requests = original_requests
+        curl_bypass_module._IMPORT_ERROR = original_import_error
+
     assert hasattr(res, "get")
 
 

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003
+from typing import TYPE_CHECKING
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
-from job_ftch.domain.job_group import JobGroup
 from job_ftch.domain.models import JobRecord, ProvenanceTrail, SourceKind
+
+if TYPE_CHECKING:
+    from job_ftch.domain.job_group import JobGroup
 
 
 class JobLineage(BaseModel):
@@ -83,3 +86,6 @@ def build_job_lineage(
         group_job_ids=group_job_ids,
         group_source_count=group_source_count,
     )
+
+
+JobLineage.model_rebuild()

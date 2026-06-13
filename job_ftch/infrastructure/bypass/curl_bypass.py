@@ -4,10 +4,10 @@ from job_ftch.application.registry import register_bypass
 
 try:
     from curl_cffi import requests
-
-    _CURL_CFFI_AVAILABLE = True
-except ImportError:
-    _CURL_CFFI_AVAILABLE = False
+    _IMPORT_ERROR: ImportError | None = None
+except ImportError as exc:  # pragma: no cover
+    requests = None  # type: ignore[assignment]
+    _IMPORT_ERROR = exc
 
 # impersonate value passed as str; curl_cffi validates at runtime
 
@@ -21,11 +21,10 @@ class CurlBypass:
         self.impersonate = impersonate
 
     async def apply_http(self, client: Any) -> Any:
-        if not _CURL_CFFI_AVAILABLE:
-            import structlog
-
-            structlog.get_logger().warning("curl_cffi not installed, falling back to httpx")
-            return client
+        if requests is None:
+            raise ImportError(
+                "Curl bypass requires the 'stealth' extra: pip install job-ftch[stealth]"
+            ) from _IMPORT_ERROR
 
         # Create an AsyncSession from curl_cffi that has the same basic async interface as httpx
         # cast(Any) avoids the Literal mismatch — curl_cffi validates the value at runtime

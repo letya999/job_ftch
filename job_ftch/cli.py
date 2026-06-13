@@ -11,6 +11,7 @@ from job_ftch.application.builder import (
     run_search_from_settings,
     show_status_from_settings,
 )
+from job_ftch.application.pipeline import RunSummary
 from job_ftch.application.scheduler import Scheduler
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import TenantRunner
@@ -197,8 +198,7 @@ def main() -> int:
     elif args.command == "pipeline" and args.status:
         asyncio.run(show_status_from_settings(settings))
     elif args.command == "pipeline" and args.daemon:
-        scheduler = Scheduler(settings, run_pipeline_from_settings)
-        asyncio.run(scheduler.run_forever())
+        asyncio.run(_run_scheduler(settings))
     else:
         asyncio.run(run_pipeline_from_settings(settings))
     return 0
@@ -209,6 +209,122 @@ def _load_tenant_runner(settings: Settings) -> TenantRunner:
         msg = "--configs-dir or JOB_FTCH_CONFIGS_DIR is required for tenant commands."
         raise ValueError(msg)
     return TenantRunner.from_tenants(load_tenants(settings.configs_dir), base_settings=settings)
+
+
+def _merge_run_summaries(summaries: list[RunSummary]) -> RunSummary:
+    merged = RunSummary()
+    for summary in summaries:
+        merged.fetched += summary.fetched
+        merged.sanitized += summary.sanitized
+        merged.triaged += summary.triaged
+        merged.extracted += summary.extracted
+        merged.partial += summary.partial
+        merged.review += summary.review
+        merged.duplicates += summary.duplicates
+        merged.dropped += summary.dropped
+        merged.emitted += summary.emitted
+        merged.posted += summary.posted
+        merged.rejected += summary.rejected
+        merged.quarantined += summary.quarantined
+        merged.failed += summary.failed
+        merged.new_groups_created += summary.new_groups_created
+        merged.merged_into_group += summary.merged_into_group
+        merged.monitored += summary.monitored
+        merged.rich_emitted += summary.rich_emitted
+        merged.scraped += summary.scraped
+        merged.scrape_fallback_used += summary.scrape_fallback_used
+        merged.monitor_truncated += summary.monitor_truncated
+        merged.source_partial = merged.source_partial or summary.source_partial
+
+        for reason, count in summary.drop_reasons.items():
+            merged.drop_reasons[reason] = merged.drop_reasons.get(reason, 0) + count
+        for reason, count in summary.quarantine_reasons.items():
+            merged.quarantine_reasons[reason] = merged.quarantine_reasons.get(reason, 0) + count
+        for source_kind, source_stats in summary.by_source_kind.items():
+            target = merged.source_stats(source_kind)
+            target.fetched += source_stats.fetched
+            target.sanitized += source_stats.sanitized
+            target.triaged += source_stats.triaged
+            target.extracted += source_stats.extracted
+            target.partial += source_stats.partial
+            target.review += source_stats.review
+            target.duplicates += source_stats.duplicates
+            target.dropped += source_stats.dropped
+            target.emitted += source_stats.emitted
+            target.posted += source_stats.posted
+            target.rejected += source_stats.rejected
+            target.quarantined += source_stats.quarantined
+            target.failed += source_stats.failed
+            target.new_groups_created += source_stats.new_groups_created
+            target.merged_into_group += source_stats.merged_into_group
+            target.monitored += source_stats.monitored
+            target.rich_emitted += source_stats.rich_emitted
+            target.scraped += source_stats.scraped
+            target.scrape_fallback_used += source_stats.scrape_fallback_used
+            target.monitor_truncated += source_stats.monitor_truncated
+            target.source_partial = target.source_partial or source_stats.source_partial
+            for reason, count in source_stats.drop_reasons.items():
+                target.drop_reasons[reason] = target.drop_reasons.get(reason, 0) + count
+            for reason, count in source_stats.quarantine_reasons.items():
+                target.quarantine_reasons[reason] = (
+                    target.quarantine_reasons.get(reason, 0) + count
+                )
+        for source_id, source_stats in summary.by_source_id.items():
+            source_kind, _, source_name = source_id.partition(":")
+            target_identity = merged.source_identity_stats(source_kind, source_name)
+            if target_identity is None:
+                continue
+            target_identity.fetched += source_stats.fetched
+            target_identity.sanitized += source_stats.sanitized
+            target_identity.triaged += source_stats.triaged
+            target_identity.extracted += source_stats.extracted
+            target_identity.partial += source_stats.partial
+            target_identity.review += source_stats.review
+            target_identity.duplicates += source_stats.duplicates
+            target_identity.dropped += source_stats.dropped
+            target_identity.emitted += source_stats.emitted
+            target_identity.posted += source_stats.posted
+            target_identity.rejected += source_stats.rejected
+            target_identity.quarantined += source_stats.quarantined
+            target_identity.failed += source_stats.failed
+            target_identity.new_groups_created += source_stats.new_groups_created
+            target_identity.merged_into_group += source_stats.merged_into_group
+            target_identity.monitored += source_stats.monitored
+            target_identity.rich_emitted += source_stats.rich_emitted
+            target_identity.scraped += source_stats.scraped
+            target_identity.scrape_fallback_used += source_stats.scrape_fallback_used
+            target_identity.monitor_truncated += source_stats.monitor_truncated
+            target_identity.source_partial = (
+                target_identity.source_partial or source_stats.source_partial
+            )
+            for reason, count in source_stats.drop_reasons.items():
+                target_identity.drop_reasons[reason] = (
+                    target_identity.drop_reasons.get(reason, 0) + count
+                )
+            for reason, count in source_stats.quarantine_reasons.items():
+                target_identity.quarantine_reasons[reason] = (
+                    target_identity.quarantine_reasons.get(reason, 0) + count
+                )
+    return merged
+
+
+async def _run_scheduler(settings: Settings) -> None:
+    if settings.configs_dir is None:
+        scheduler = Scheduler(settings, run_pipeline_from_settings)
+        await scheduler.run_forever()
+        return
+
+    runner = _load_tenant_runner(settings)
+
+    async def run_all_tenants(_: Settings) -> RunSummary:
+        summaries = await runner.run_all()
+        return _merge_run_summaries(summaries)
+
+    scheduler = Scheduler(settings, run_all_tenants)
+    try:
+        await scheduler.run_forever()
+    finally:
+        await runner.close()
 
 
 async def _handle_tenants(settings: Settings, args: argparse.Namespace) -> None:

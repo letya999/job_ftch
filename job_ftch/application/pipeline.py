@@ -11,10 +11,10 @@ from uuid import uuid4
 if TYPE_CHECKING:
     from job_ftch.application.contracts import (
         FlushableSink,
-        ProcessingNode,
         SanitizingNode,
         Sink,
         Source,
+        Stage,
         Store,
     )
 
@@ -97,6 +97,7 @@ class SourceRunStats(StatsBase):
 @dataclass(slots=True)
 class RunSummary(StatsBase):
     by_source_kind: dict[str, SourceRunStats] = field(default_factory=dict)
+    by_source_id: dict[str, SourceRunStats] = field(default_factory=dict)
     tenant_id: str | None = None
     applied_profile: str | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -116,21 +117,54 @@ class RunSummary(StatsBase):
             self.by_source_kind[key] = stats
         return stats
 
-    def record_source_drop(self, source_kind: object | None, reason: str) -> None:
+    def source_identity_stats(
+        self, source_kind: object | None, source_name: object | None
+    ) -> SourceRunStats | None:
+        normalized_name = str(source_name).strip() if source_name is not None else ""
+        if not normalized_name:
+            return None
+        key = f"{source_kind or 'unknown'}:{normalized_name}"
+        stats = self.by_source_id.get(key)
+        if stats is None:
+            stats = SourceRunStats()
+            self.by_source_id[key] = stats
+        return stats
+
+    def record_source_drop(
+        self, source_kind: object | None, reason: str, source_name: object | None = None
+    ) -> None:
         self.record_drop(reason)
         self.source_stats(source_kind).record_drop(reason)
+        stats = self.source_identity_stats(source_kind, source_name)
+        if stats is not None:
+            stats.record_drop(reason)
 
-    def record_source_quarantine(self, source_kind: object | None, reason: str) -> None:
+    def record_source_quarantine(
+        self, source_kind: object | None, reason: str, source_name: object | None = None
+    ) -> None:
         self.record_quarantine(reason)
         self.source_stats(source_kind).record_quarantine(reason)
+        stats = self.source_identity_stats(source_kind, source_name)
+        if stats is not None:
+            stats.record_quarantine(reason)
 
-    def record_source_group_created(self, source_kind: object | None) -> None:
+    def record_source_group_created(
+        self, source_kind: object | None, source_name: object | None = None
+    ) -> None:
         self.record_group_created()
         self.source_stats(source_kind).record_group_created()
+        stats = self.source_identity_stats(source_kind, source_name)
+        if stats is not None:
+            stats.record_group_created()
 
-    def record_source_merged_into_group(self, source_kind: object | None) -> None:
+    def record_source_merged_into_group(
+        self, source_kind: object | None, source_name: object | None = None
+    ) -> None:
         self.record_merged_into_group()
         self.source_stats(source_kind).record_merged_into_group()
+        stats = self.source_identity_stats(source_kind, source_name)
+        if stats is not None:
+            stats.record_merged_into_group()
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -180,7 +214,11 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     break
                 summary.fetched += 1
                 source_kind = getattr(item, "source_kind", None)
+                source_name = getattr(item, "source_name", None)
                 summary.source_stats(source_kind).fetched += 1
+                source_identity = summary.source_identity_stats(source_kind, source_name)
+                if source_identity is not None:
+                    source_identity.fetched += 1
                 if await self._handle_pre_quarantined_item(item, summary):
                     continue
                 item_id = getattr(item, "stable_id", None)
@@ -197,7 +235,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
                         if processed_key is not None and await self._store.has_processed(
                             processed_key
                         ):
-                            summary.record_source_drop(source_kind, "already_processed")
+                            summary.record_source_drop(
+                                source_kind, "already_processed", source_name
+                            )
                             item_span.set_attribute("job_ftch.result", "already_processed")
                             self._logger.info(
                                 "pipeline_item_skipped",
@@ -208,7 +248,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
                         failure_item = item
                         sanitized = await self._sanitize_node.process(cast("PipelineInput", item))
                         if sanitized is None:
-                            summary.record_source_drop(source_kind, "node_returned_none")
+                            summary.record_source_drop(
+                                source_kind, "node_returned_none", source_name
+                            )
                             item_span.set_attribute("job_ftch.result", "dropped")
                             self._logger.info(
                                 "pipeline_item_dropped",
@@ -219,6 +261,8 @@ class Pipeline[PipelineInput, PipelineOutput]:
                             continue
                         summary.sanitized += 1
                         summary.source_stats(source_kind).sanitized += 1
+                        if source_identity is not None:
+                            source_identity.sanitized += 1
                         current: Any = sanitized
                         failure_item = current
                         for node in self._nodes:
@@ -228,7 +272,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
                             next_item = await node.process(current)
                             if next_item is None:
                                 current = None
-                                summary.record_source_drop(source_kind, "node_returned_none")
+                                summary.record_source_drop(
+                                    source_kind, "node_returned_none", source_name
+                                )
                                 item_span.set_attribute("job_ftch.result", "dropped")
                                 self._logger.info(
                                     "pipeline_item_dropped",
@@ -252,7 +298,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
                             continue
                         summary.triaged += 1
                         summary.source_stats(source_kind).triaged += 1
-                        self._record_output_stats(current, summary, source_kind)
+                        if source_identity is not None:
+                            source_identity.triaged += 1
+                        self._record_output_stats(current, summary, source_kind, source_name)
                         if isinstance(current, JobRecord):
                             current = current.model_copy(
                                 update={
@@ -268,15 +316,21 @@ class Pipeline[PipelineInput, PipelineOutput]:
                         await self._sink.emit(cast("PipelineOutput", current))
                         summary.emitted += 1
                         summary.source_stats(source_kind).emitted += 1
+                        if source_identity is not None:
+                            source_identity.emitted += 1
                         item_span.set_attribute("job_ftch.result", "emitted")
                         finalized = True
                 except RawItemDropped as exc:
-                    summary.record_source_drop(source_kind, exc.reason.value)
+                    summary.record_source_drop(source_kind, exc.reason.value, source_name)
                     summary.record_rejected()
                     summary.source_stats(source_kind).record_rejected()
+                    if source_identity is not None:
+                        source_identity.record_rejected()
                     if exc.reason.value.startswith("duplicate_"):
                         summary.record_duplicate()
                         summary.source_stats(source_kind).record_duplicate()
+                        if source_identity is not None:
+                            source_identity.record_duplicate()
                     self._logger.info(
                         "pipeline_item_dropped",
                         item_id=item_id,
@@ -292,10 +346,12 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     )
                     finalized = True
                 except RawItemRejected as exc:
-                    summary.record_source_drop(source_kind, exc.reason.value)
-                    summary.record_source_quarantine(source_kind, exc.reason.value)
+                    summary.record_source_drop(source_kind, exc.reason.value, source_name)
+                    summary.record_source_quarantine(source_kind, exc.reason.value, source_name)
                     summary.record_rejected()
                     summary.source_stats(source_kind).record_rejected()
+                    if source_identity is not None:
+                        source_identity.record_rejected()
                     self._logger.info(
                         "pipeline_item_quarantined",
                         item_id=item_id,
@@ -317,6 +373,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     summary.record_rejected()
                     summary.source_stats(source_kind).record_failure()
                     summary.source_stats(source_kind).record_rejected()
+                    if source_identity is not None:
+                        source_identity.record_failure()
+                        source_identity.record_rejected()
                     self._logger.exception(
                         "pipeline_item_failed",
                         item_id=item_id,
@@ -349,12 +408,19 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 # Also update by_source_kind if possible
                 source_kind = getattr(self._source, "kind", "career_site")
                 sk_stats = summary.source_stats(source_kind)
+                source_name = getattr(self._source, "source_name", None)
+                sid_stats = summary.source_identity_stats(source_kind, source_name)
                 for key, val in source_stats.items():
                     if hasattr(sk_stats, key):
                         if isinstance(val, int):
                             setattr(sk_stats, key, getattr(sk_stats, key) + val)
                         else:
                             setattr(sk_stats, key, val)
+                    if sid_stats is not None and hasattr(sid_stats, key):
+                        if isinstance(val, int):
+                            setattr(sid_stats, key, getattr(sid_stats, key) + val)
+                        else:
+                            setattr(sid_stats, key, val)
 
             try:
                 await self._flush_if_supported(self._sink)
@@ -400,8 +466,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
         if not isinstance(item, QuarantinedRawItem):
             return False
         source_kind = item.source_kind
-        summary.record_source_drop(source_kind, item.reason.value)
-        summary.record_source_quarantine(source_kind, item.reason.value)
+        source_name = item.source_name
+        summary.record_source_drop(source_kind, item.reason.value, source_name)
+        summary.record_source_quarantine(source_kind, item.reason.value, source_name)
         self._logger.info(
             "pipeline_source_item_quarantined",
             reason=item.reason.value,
@@ -409,6 +476,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
         )
         summary.record_rejected()
         summary.source_stats(source_kind).record_rejected()
+        source_identity = summary.source_identity_stats(source_kind, source_name)
+        if source_identity is not None:
+            source_identity.record_rejected()
         await self._emit_rejected_item(
             item=item,
             outcome=RejectedOutcome.QUARANTINED,
@@ -458,17 +528,25 @@ class Pipeline[PipelineInput, PipelineOutput]:
         item: object,
         summary: RunSummary,
         source_kind: object | None,
+        source_name: object | None,
     ) -> None:
         if not isinstance(item, Job):
             return
         summary.extracted += 1
         summary.source_stats(source_kind).extracted += 1
+        source_identity = summary.source_identity_stats(source_kind, source_name)
+        if source_identity is not None:
+            source_identity.extracted += 1
         if item.extraction_status is JobExtractionStatus.PARTIAL:
             summary.partial += 1
             summary.source_stats(source_kind).partial += 1
+            if source_identity is not None:
+                source_identity.partial += 1
         if item.review_reasons:
             summary.review += 1
             summary.source_stats(source_kind).review += 1
+            if source_identity is not None:
+                source_identity.review += 1
 
     async def _emit_rejected_item(
         self,

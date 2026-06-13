@@ -8,6 +8,23 @@
 
 ---
 
+## Статус поддержки типов источников
+
+Статус поддержки типов источников. Stable = готово к эксплуатации, Experimental = работает, но менее проверено, Planned = есть спецификация, не для продакшена.
+
+| Тип источника | Статус |
+|---|---|
+| `telegram_channel` / `telegram_group` / `telegram_comments` | Stable |
+| `career_site` / `declarative_html` (DOM + ATS monitors) | Stable |
+| `rss_feed` | Stable |
+| `local_fixture` | Stable (dev/testing) |
+| Официальные API: `rest_api`, `greenhouse`, `hh`, `lever`, `superjob` | Experimental |
+| `browser` / `hard_scraper` | Experimental (поддерживается сообществом) |
+| `telegram_realtime` | Experimental |
+| `webhook` / `websocket` (push/realtime) | Planned |
+
+---
+
 ## Tenant CLI surface
 
 Если `--configs-dir` указывает на каталог tenant-конфигов, операторский CLI уже открывает
@@ -29,6 +46,9 @@ python app.py --configs-dir config/tenants runs show <run_id> --tenant ai_jobs
 ---
 
 ## Эволюция архитектуры
+
+> ПРИМЕЧАНИЕ: Это ЦЕЛЕВАЯ архитектура (roadmap), а не текущее состояние реализации.
+> Актуальный статус см. в Таблице поддержки выше.
 
 Система растёт через 5 качественных переходов. Каждый слайд показывает горизонтальный состав компонентов и их ключевые обязанности на данном этапе.
 

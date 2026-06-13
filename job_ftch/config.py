@@ -87,6 +87,13 @@ class Settings(BaseSettings):
     store_pool_min: int = Field(default=2, gt=0)
     store_pool_max: int = Field(default=10, gt=0)
     store_fallback_on_error: bool = True
+    memory_max_keys: int = Field(default=50_000, gt=0)
+    memory_max_set_members: int = Field(default=50_000, gt=0)
+    source_health_drift_ratio: float = Field(default=0.2, ge=0.0, le=1.0)
+    source_health_min_baseline: float = Field(default=3.0, ge=0.0)
+    source_health_failure_streak_pause: int = Field(default=3, gt=0)
+    source_health_probe_every_n_runs: int = Field(default=5, gt=0)
+    scheduler_jitter_seconds: float = Field(default=0.0, ge=0.0)
     job_backend: str = "sqlite"
     search_backend: str = "sqlite"
     job_store_path: Path | None = None

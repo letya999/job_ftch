@@ -10,7 +10,7 @@ from job_ftch.application.identity import JobIdentityMatcher
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import JobGroupStore
-    from job_ftch.domain import Job, JobRecord
+    from job_ftch.domain import JobRecord
 
 
 class JobAggregationNode:

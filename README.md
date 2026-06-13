@@ -8,6 +8,23 @@
 
 ---
 
+## Support status of source types
+
+Support status of source types. Stable = production-ready, Experimental = works but less battle-tested, Planned = spec exists, not production.
+
+| Source type | Status |
+|---|---|
+| `telegram_channel` / `telegram_group` / `telegram_comments` | Stable |
+| `career_site` / `declarative_html` (DOM + ATS monitors) | Stable |
+| `rss_feed` | Stable |
+| `local_fixture` | Stable (dev/testing) |
+| Official APIs: `rest_api`, `greenhouse`, `hh`, `lever`, `superjob` | Experimental |
+| `browser` / `hard_scraper` | Experimental (community-maintained) |
+| `telegram_realtime` | Experimental |
+| `webhook` / `websocket` (push/realtime) | Planned |
+
+---
+
 ## Tenant CLI surface
 
 With `--configs-dir` pointing at tenant configs, the operator-facing CLI already exposes the core runtime surface:
@@ -28,6 +45,9 @@ the originating `raw_item_id`, `group_id`, `pipeline_stages`, and `source_run_id
 ---
 
 ## Evolutionary architecture
+
+> NOTE: This is the TARGET architecture (roadmap), not the current implemented state.
+> See the Support Matrix above for what ships today.
 
 The system grows through 5 qualitative milestones. Each slide shows the horizontal component layout and key responsibilities at that point.
 

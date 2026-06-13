@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import httpx
 import structlog
 
+from job_ftch.adapters.profile_inputs import build_candidate_profile_from_payload
+from job_ftch.adapters.source_inputs import build_source_spec_from_input
 from job_ftch.adapters.telegram_bot.formatter import format_job_digest, format_job_message
 from job_ftch.application.tenant_runner import TenantRunner
+from job_ftch.domain import ManagedCandidateProfile
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
 
 logger = structlog.get_logger(__name__)
@@ -191,6 +195,124 @@ class TelegramBotService:
             )
             await self._sender.send_message(chat_id, reply)
             return
+        if command == "/sources":
+            sources_tenant_id = args[0] if args else tenant_ids[0]
+            payloads = await self._runner.list_sources(sources_tenant_id)
+            if not payloads:
+                await self._sender.send_message(chat_id, "No configured sources.")
+                return
+            lines = [
+                f"{item['source_name']}: {item['status']} ({item['origin']})"
+                for item in payloads[:10]
+            ]
+            await self._sender.send_message(chat_id, "\n".join(lines))
+            return
+        if command == "/profiles":
+            profiles_tenant_id = args[0] if args else tenant_ids[0]
+            payloads = await self._runner.list_candidate_profiles(
+                profiles_tenant_id,
+                str(user_id),
+            )
+            if not payloads:
+                await self._sender.send_message(chat_id, "No profiles yet.")
+                return
+            lines = [
+                f"{item['profile_id']}: {'active' if item['active'] else 'inactive'}"
+                for item in payloads
+            ]
+            await self._sender.send_message(chat_id, "\n".join(lines))
+            return
+        if command == "/saveprofile":
+            if len(args) < 3:
+                await self._sender.send_message(
+                    chat_id,
+                    "Usage: /saveprofile <tenant_id> <profile_id> <summary>",
+                )
+                return
+            profile_tenant_id = args[0]
+            profile_id = args[1]
+            profile_summary = arg_text.split(" ", maxsplit=2)[2].strip()
+            candidate_profile = build_candidate_profile_from_payload(
+                user_id=str(user_id),
+                profile_id=profile_id,
+                payload={"summary": profile_summary, "name": profile_id},
+            )
+            profile_payload = await self._runner.save_candidate_profile(
+                profile_tenant_id,
+                ManagedCandidateProfile(
+                    user_id=str(user_id),
+                    profile_id=profile_id,
+                    profile=candidate_profile,
+                    updated_at=datetime.now(UTC),
+                ),
+            )
+            await self._runner.set_active_candidate_profile(profile_tenant_id, str(user_id), profile_id)
+            await self._sender.send_message(
+                chat_id,
+                f"Saved profile {profile_payload['profile_id']} for {profile_tenant_id}.",
+            )
+            return
+        if command == "/activateprofile":
+            if len(args) < 2:
+                await self._sender.send_message(
+                    chat_id,
+                    "Usage: /activateprofile <tenant_id> <profile_id>",
+                )
+                return
+            payload = await self._runner.set_active_candidate_profile(
+                args[0],
+                str(user_id),
+                args[1],
+            )
+            await self._sender.send_message(
+                chat_id,
+                f"Activated profile {payload['profile_id']} in {args[0]}.",
+            )
+            return
+        if command == "/addsource":
+            try:
+                self._require_admin(user_id)
+            except PermissionError as exc:
+                await self._sender.send_message(chat_id, f"Access denied: {exc}")
+                return
+            if len(args) < 2:
+                await self._sender.send_message(chat_id, "Usage: /addsource <tenant_id> <link>")
+                return
+            add_tenant_id, link = args[0], args[1]
+            spec = await build_source_spec_from_input(
+                link,
+                auth_provider=self._runner.get_runtime(add_tenant_id).auth_provider,
+            )
+            payload = await self._runner.add_source_spec(
+                add_tenant_id,
+                spec,
+                added_via="telegram_bot",
+                added_by=str(user_id),
+                input_value=link,
+            )
+            await self._sender.send_message(
+                chat_id,
+                f"Added {payload['source_id']} to {add_tenant_id}.",
+            )
+            return
+        if command == "/disablesource":
+            try:
+                self._require_admin(user_id)
+            except PermissionError as exc:
+                await self._sender.send_message(chat_id, f"Access denied: {exc}")
+                return
+            if len(args) < 2:
+                await self._sender.send_message(
+                    chat_id,
+                    "Usage: /disablesource <tenant_id> <source_id>",
+                )
+                return
+            disabled = await self._runner.disable_source(args[0], args[1])
+            await self._sender.send_message(
+                chat_id,
+                f"Disabled {disabled['source_id']} in {args[0]}.",
+            )
+            return
         if command == "/run":
             try:
                 self._require_admin(user_id)
@@ -218,7 +340,9 @@ class TelegramBotService:
         if command == "/digest":
             digest_tenant_id = args[0] if args else tenant_ids[0]
             jobs = await self._runner.latest_jobs(
-                digest_tenant_id, limit=self._config.digest_size * 3
+                digest_tenant_id,
+                limit=self._config.digest_size * 3,
+                user_id=str(user_id),
             )
             await self._sender.send_message(
                 chat_id,
@@ -237,7 +361,12 @@ class TelegramBotService:
                 search_tenant_id = args[-1]
                 args = args[:-1]
             query = " ".join(args)
-            results = await self._runner.search_jobs(query, tenant_id=search_tenant_id, limit=10)
+            results = await self._runner.search_jobs(
+                query,
+                tenant_id=search_tenant_id,
+                user_id=str(user_id),
+                limit=10,
+            )
             if not results:
                 await self._sender.send_message(chat_id, "No matches.")
                 return

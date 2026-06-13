@@ -19,7 +19,6 @@ from job_ftch.domain.site_models import (
     ScrapedPostingPayload,
 )
 from job_ftch.infrastructure.sources.career_site import client_for_config
-from job_ftch.infrastructure.sources.monitor_detector import detect_monitor_type
 from job_ftch.infrastructure.sources.site_utils import (
     apply_url_filter,
     apply_url_transform,
@@ -31,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from job_ftch.application.contracts import AuthProvider
+    from job_ftch.config import Settings
     from job_ftch.domain import QuarantinedRawItem, RawItem
     from job_ftch.domain.source_spec import CareerSiteSpec
 

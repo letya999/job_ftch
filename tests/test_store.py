@@ -93,3 +93,29 @@ async def test_incremental_cursor_uses_unified_key_pattern() -> None:
     await cursor.reset("rss:feed")
 
     assert await cursor.get("rss:feed") is None
+
+
+@pytest.mark.asyncio
+async def test_in_memory_store_evicts_oldest_kv_entries_when_capped() -> None:
+    store = InMemoryStore(max_keys=2)
+
+    await store.set("one", "1")
+    await store.set("two", "2")
+    await store.set("three", "3")
+
+    assert await store.get("one") is None
+    assert await store.get("two") == "2"
+    assert await store.get("three") == "3"
+
+
+@pytest.mark.asyncio
+async def test_in_memory_store_evicts_oldest_set_members_when_capped() -> None:
+    store = InMemoryStore(max_set_members=2)
+
+    await store.set_add("processed", "one")
+    await store.set_add("processed", "two")
+    await store.set_add("processed", "three")
+
+    assert await store.set_contains("processed", "one") is False
+    assert await store.set_contains("processed", "two") is True
+    assert await store.set_contains("processed", "three") is True

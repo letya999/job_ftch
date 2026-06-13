@@ -100,6 +100,8 @@ class TenantConfig(BaseModel):
     store_pool_min: int = 2
     store_pool_max: int = 10
     store_fallback_on_error: bool = True
+    memory_max_keys: int = 50_000
+    memory_max_set_members: int = 50_000
     job_backend: str = "sqlite"
     search_backend: str = "sqlite"
     vector_backend: str | None = None

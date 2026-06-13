@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -78,10 +79,8 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             m2_path = Path(__file__).parent / "migrations" / "002_sqlite_blocking_key.sql"
             with open(m2_path, encoding="utf-8") as f:
                 m2_sql = f.read()
-            try:
+            with contextlib.suppress(Exception):  # Already exists
                 await self._conn.executescript(m2_sql)
-            except Exception: # Already exists
-                pass
                 
             await self._conn.commit()
         return self._conn

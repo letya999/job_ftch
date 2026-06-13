@@ -189,6 +189,12 @@ async def test_bot_access_control_and_status_endpoint(
     app = create_app(configs_dir=tmp_path / "configs", runner=runner, bot_service=service)
     webhook = app.routes[("POST", "/webhook/telegram")]
     status = app.routes[("GET", "/pipeline/status/{tenant_id}")]
+    sources = app.routes[("GET", "/pipeline/sources/{tenant_id}")]
+    add_source = app.routes[("POST", "/pipeline/sources/{tenant_id}")]
+    disable_source = app.routes[("POST", "/pipeline/sources/{tenant_id}/disable")]
+    list_profiles = app.routes[("GET", "/profiles/{tenant_id}/{user_id}")]
+    save_profile = app.routes[("POST", "/profiles/{tenant_id}/{user_id}")]
+    activate_profile = app.routes[("POST", "/profiles/{tenant_id}/{user_id}/activate")]
     pipeline_run = app.routes[("POST", "/pipeline/run")]
 
     await webhook(
@@ -202,14 +208,140 @@ async def test_bot_access_control_and_status_endpoint(
         "secret",
     )
     summary = await pipeline_run({"tenant_id": "ai_jobs"}, "bridge-key")
+    added = await add_source(
+        "ai_jobs",
+        {"link": "https://example.com/jobs"},
+        "bridge-key",
+    )
     status_payload = await status("ai_jobs")
+    source_payload = await sources("ai_jobs", "bridge-key")
+    disabled = await disable_source(
+        "ai_jobs",
+        {"source_id": added["source_id"]},
+        "bridge-key",
+    )
+    saved_profile = await save_profile(
+        "ai_jobs",
+        "1",
+        {"profile_id": "ml", "summary": "machine learning engineer"},
+        "bridge-key",
+    )
+    listed_profiles = await list_profiles("ai_jobs", "1", "bridge-key")
+    active_profile = await activate_profile(
+        "ai_jobs",
+        "1",
+        {"profile_id": "ml"},
+        "bridge-key",
+    )
 
     assert sender.messages[0]["text"] == "Access denied."
     assert summary["tenant_id"] == "ai_jobs"
     assert status_payload is not None
     assert status_payload["tenant_id"] == "ai_jobs"
+    assert any(item["source_id"] == "debug:fixture" for item in source_payload)
+    assert added["source_id"] == "career_site:example_com_jobs"
+    assert disabled["status"] == "disabled"
+    assert saved_profile["profile_id"] == "ml"
+    assert listed_profiles[0]["active"] is True
+    assert active_profile["profile_id"] == "ml"
 
     await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_bot_sources_command_reports_source_health(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path)
+    await runner.run_tenant("ai_jobs")
+    sender = FakeSender()
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            allowed_user_ids=(1,),
+            allowed_chat_ids=(100,),
+            admin_user_ids=(1,),
+            rate_limit_seconds=0.0,
+        ),
+    )
+
+    try:
+        await service.handle_command("/sources ai_jobs", chat_id=100, user_id=1)
+        assert "fixture: healthy (config)" in sender.messages[0]["text"]
+    finally:
+        await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_bot_can_add_and_disable_runtime_sources(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path)
+    sender = FakeSender()
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            allowed_user_ids=(1,),
+            allowed_chat_ids=(100,),
+            admin_user_ids=(1,),
+            rate_limit_seconds=0.0,
+        ),
+    )
+
+    try:
+        await service.handle_command(
+            "/addsource ai_jobs https://example.com/jobs",
+            chat_id=100,
+            user_id=1,
+        )
+        await service.handle_command("/sources ai_jobs", chat_id=100, user_id=1)
+        await service.handle_command(
+            "/disablesource ai_jobs career_site:example_com_jobs",
+            chat_id=100,
+            user_id=1,
+        )
+
+        assert "Added career_site:example_com_jobs" in sender.messages[0]["text"]
+        assert "example_com_jobs: pending (runtime)" in sender.messages[1]["text"]
+        assert "Disabled career_site:example_com_jobs" in sender.messages[2]["text"]
+    finally:
+        await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_bot_can_save_and_activate_profiles(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path)
+    sender = FakeSender()
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            allowed_user_ids=(1,),
+            allowed_chat_ids=(100,),
+            admin_user_ids=(1,),
+            rate_limit_seconds=0.0,
+        ),
+    )
+
+    try:
+        await service.handle_command(
+            "/saveprofile ai_jobs ml machine learning engineer",
+            chat_id=100,
+            user_id=1,
+        )
+        await service.handle_command("/profiles ai_jobs", chat_id=100, user_id=1)
+        await service.handle_command(
+            "/activateprofile ai_jobs ml",
+            chat_id=100,
+            user_id=1,
+        )
+
+        assert "Saved profile ml" in sender.messages[0]["text"]
+        assert "ml: active" in sender.messages[1]["text"]
+        assert "Activated profile ml" in sender.messages[2]["text"]
+    finally:
+        await runner.close()
 
 
 @pytest.mark.asyncio
