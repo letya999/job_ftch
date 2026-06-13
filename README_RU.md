@@ -6,6 +6,25 @@
 
 **job_ftch** — это open-source асинхронный конвейер (pipeline), который собирает вакансии из Telegram-каналов, групп, комментариев к постам и карьерных сайтов компаний. Он нормализует их в единую схему Job и выдает структурированный JSON.
 
+---
+
+## Статус поддержки типов источников
+
+Статус поддержки типов источников. Stable = готово к эксплуатации, Experimental = работает, но менее проверено, Planned = есть спецификация, не для продакшена.
+
+| Тип источника | Статус |
+|---|---|
+| `telegram_channel` / `telegram_group` / `telegram_comments` | Stable |
+| `career_site` / `declarative_html` (DOM + ATS monitors) | Stable |
+| `rss_feed` | Stable |
+| `local_fixture` | Stable (dev/testing) |
+| Официальные API: `rest_api`, `greenhouse`, `hh`, `lever`, `superjob` | Experimental |
+| `browser` / `hard_scraper` | Experimental (поддерживается сообществом) |
+| `telegram_realtime` | Experimental |
+| `webhook` / `websocket` (push/realtime) | Planned |
+
+---
+
 ## Почему?
 Вакансии на AI-роли (LLM Engineer, AI PM, MLOps, AgentOps, AI Infra) разбросаны по десяткам Telegram-чатов. Единого структурированного источника для этих нишевых, но быстрорастущих ролей не существует.
 
