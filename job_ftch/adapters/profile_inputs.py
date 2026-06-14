@@ -225,19 +225,23 @@ async def embed_profile_examples(
         if pos_texts:
             try:
                 # Type hint for mypy if needed, but we keep it dynamic for Protocol
-                vecs = await embedding_provider.embed(pos_texts)  # type: ignore[attr-defined]
-                if vecs:
-                    # Average positive example vectors
-                    dim = len(vecs[0])
-                    avg = [sum(v[d] for v in vecs) / len(vecs) for d in range(dim)]
-                    pos_vector = tuple(avg)
+                _embed_fn = getattr(embedding_provider, "embed_query", getattr(embedding_provider, "embed", None))
+                if _embed_fn:
+                    vecs = await _embed_fn(pos_texts)
+                    if vecs:
+                        # Average positive example vectors
+                        dim = len(vecs[0])
+                        avg = [sum(v[d] for v in vecs) / len(vecs) for d in range(dim)]
+                        pos_vector = tuple(avg)
             except Exception:
                 pass  # embedding failed, skip
 
         if neg_texts:
             try:
-                vecs = await embedding_provider.embed(neg_texts)  # type: ignore[attr-defined]
-                neg_vectors = tuple(tuple(v) for v in vecs)
+                _embed_fn = getattr(embedding_provider, "embed_query", getattr(embedding_provider, "embed", None))
+                if _embed_fn:
+                    vecs = await _embed_fn(neg_texts)
+                    neg_vectors = tuple(tuple(v) for v in vecs)
             except Exception:
                 pass
 

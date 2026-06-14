@@ -46,3 +46,34 @@ class FastEmbedProvider:
             return [vec.tolist() for vec in model.embed(texts)]
 
         return await loop.run_in_executor(None, _sync_embed)
+
+    @property
+    def dimensions(self) -> int:
+        """Return the embedding dimension for the current model."""
+        return 384  # multilingual-e5-small default; override via config if needed
+
+    async def embed_query(self, texts: list[str]) -> list[list[float]]:
+        """Embed query texts with 'query: ' prefix (for profile examples / search queries)."""
+        if not texts:
+            return []
+        prefixed = [f"query: {t}" for t in texts]
+        loop = asyncio.get_running_loop()
+
+        def _sync_embed() -> list[list[float]]:
+            model = self._get_model()
+            return [vec.tolist() for vec in model.embed(prefixed)]
+
+        return await loop.run_in_executor(None, _sync_embed)
+
+    async def embed_passage(self, texts: list[str]) -> list[list[float]]:
+        """Embed passage texts with 'passage: ' prefix (for job postings / documents)."""
+        if not texts:
+            return []
+        prefixed = [f"passage: {t}" for t in texts]
+        loop = asyncio.get_running_loop()
+
+        def _sync_embed() -> list[list[float]]:
+            model = self._get_model()
+            return [vec.tolist() for vec in model.embed(prefixed)]
+
+        return await loop.run_in_executor(None, _sync_embed)

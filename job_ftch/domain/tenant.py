@@ -108,6 +108,7 @@ class TenantConfig(BaseModel):
     search_backend: str = "sqlite"
     vector_backend: str | None = None
     embedding_enabled: bool = False
+    language_detection_enabled: bool = False
     embedding_provider: str = "openai"
     search_language: str = "simple"
 

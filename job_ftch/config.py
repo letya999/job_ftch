@@ -101,6 +101,7 @@ class Settings(BaseSettings):
     job_store_path: Path | None = None
     search_language: str = "simple"
     embedding_enabled: bool = False
+    language_detection_enabled: bool = False
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int | None = None

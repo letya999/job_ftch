@@ -349,6 +349,7 @@ def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = No
             "search_backend": tenant.search_backend,
             "vector_backend": tenant.vector_backend,
             "embedding_enabled": tenant.embedding_enabled,
+            "language_detection_enabled": tenant.language_detection_enabled,
             "embedding_provider": tenant.embedding_provider,
             "search_language": tenant.search_language,
         }
@@ -454,6 +455,12 @@ def build_nodes(
         JobLifecycleNode(),
         JobAggregationNode(job_group_store, attach_group_id=True),
     ]
+
+    if settings.language_detection_enabled:
+        from job_ftch.adapters.language_detector import LinguaLanguageDetector
+        from job_ftch.nodes.language_detection import LanguageDetectionNode
+
+        nodes.append(LanguageDetectionNode(LinguaLanguageDetector()))
 
     if settings.embedding_enabled and settings.vector_backend:
         provider = cast("EmbeddingProvider", create_embedding_provider(settings))

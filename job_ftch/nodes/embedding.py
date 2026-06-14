@@ -34,7 +34,8 @@ class EmbeddingNode(ProcessingNode[JobRecord]):
             return job
 
         try:
-            vectors = await self.provider.embed([text])
+            embed_fn = getattr(self.provider, "embed_passage", self.provider.embed)
+            vectors = await embed_fn([text])
             if vectors and vectors[0]:
                 payload: dict[str, object] = {
                     "job_id": job.stable_id,

@@ -311,3 +311,11 @@ class MetricsExporter(Protocol):
         tenant_id: str,
         job_group_total: int | None = None,
     ) -> None: ...
+
+
+@runtime_checkable
+class LanguageDetectorPort(Protocol):
+    """Port for language detection of job text."""
+
+    def detect(self, text: str) -> str:
+        """Detect language of text. Returns ISO 639-1 code: 'ru', 'en', 'kz', or 'unknown'."""

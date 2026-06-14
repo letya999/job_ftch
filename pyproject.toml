@@ -50,6 +50,7 @@ realtime = [
     "websockets>=12.0",
 ]
 resume = ["pypdf>=4.0", "python-docx>=1.1", "pdfminer.six>=20231228"]
+language = ["lingua-language-detector>=2.0"]
 all = [
     "aiosqlite>=0.20",
     "asyncpg>=0.31.0",
@@ -77,6 +78,7 @@ all = [
     "openai>=1.30",
     "instructor>=1.4",
     "telethon>=1.36",
+    "lingua-language-detector>=2.0",
 ]
 
 [project.scripts]
