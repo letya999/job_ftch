@@ -14,6 +14,9 @@ import structlog
 
 from job_ftch.config import Settings
 
+from .plugin import PluginDescriptor, PluginKind
+from .plugin_registry import PluginRegistry, _default_registry
+
 if TYPE_CHECKING:
     from job_ftch.application.contracts import AuthProvider
     from job_ftch.domain.source_spec import SourceSpec
@@ -82,66 +85,144 @@ _job_backend_factories: dict[str, Callable[..., Any]] = {}
 _search_backend_factories: dict[str, Callable[..., Any]] = {}
 _embedding_provider_factories: dict[str, Callable[..., Any]] = {}
 _vector_backend_factories: dict[str, Callable[..., Any]] = {}
+_reranker_factories: dict[str, Callable[[Settings], Any]] = {}
 _lock = Lock()
 _builtins_loaded = False
 _entry_points_loaded = False
 
 
-def register_source(kind: str) -> Callable[[FSource], FSource]:
+def get_registry() -> PluginRegistry:
+    """Return the global plugin registry."""
+    return _default_registry
+
+
+def register_source(
+    kind: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FSource], FSource]:
     normalized = kind.strip()
 
     def decorator(factory: FSource) -> FSource:
         _source_factories[normalized] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=normalized,
+                kind=PluginKind.SOURCE,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
 
 
-def register_source_spec(kind: str) -> Callable[[FSourceV2], FSourceV2]:
+def register_source_spec(
+    kind: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FSourceV2], FSourceV2]:
     normalized = kind.strip()
 
     def decorator(factory: FSourceV2) -> FSourceV2:
         _source_spec_factories[normalized] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=normalized,
+                kind=PluginKind.SOURCE,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
 
 
-def register_sink(kind: str) -> Callable[[FSink], FSink]:
+def register_sink(
+    kind: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FSink], FSink]:
     normalized = kind.strip()
 
     def decorator(factory: FSink) -> FSink:
         _sink_factories[normalized] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=normalized,
+                kind=PluginKind.SINK,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
 
 
-def register_store(kind: str) -> Callable[[FStore], FStore]:
+def register_store(
+    kind: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FStore], FStore]:
     normalized = kind.strip()
 
     def decorator(factory: FStore) -> FStore:
         _store_factories[normalized] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=normalized,
+                kind=PluginKind.STORE,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
 
 
-def register_job_group_store(kind: str) -> Callable[[FStore], FStore]:
+def register_job_group_store(
+    kind: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FStore], FStore]:
     normalized = kind.strip()
 
     def decorator(factory: FStore) -> FStore:
         _job_group_store_factories[normalized] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=normalized,
+                kind=PluginKind.JOB_GROUP_STORE,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
 
 
-def register_llm(kind: str) -> Callable[[FLLM], FLLM]:
+def register_llm(
+    kind: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FLLM], FLLM]:
     normalized = kind.strip()
 
     def decorator(factory: FLLM) -> FLLM:
         _llm_factories[normalized] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=normalized,
+                kind=PluginKind.LLM,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
@@ -151,60 +232,164 @@ def register_parser(
     kind: str,
     *,
     matcher: ParserMatcher,
+    version: str = "0.0.0",
+    requires_extras: tuple[str, ...] = (),
 ) -> Callable[[FParser], FParser]:
     normalized = kind.strip()
 
     def decorator(factory: FParser) -> FParser:
         _parser_factories.append((normalized, matcher, factory))
+        _default_registry.register(
+            PluginDescriptor(
+                name=normalized,
+                kind=PluginKind.PARSER,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
 
 
-def register_bypass(name: str) -> Callable[[FAny], FAny]:
+def register_bypass(
+    name: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FAny], FAny]:
     def decorator(factory: FAny) -> FAny:
         _bypass_factories[name] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=name,
+                kind=PluginKind.BYPASS,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
 
 
-def register_auth_provider(name: str) -> Callable[[FAny], FAny]:
+def register_auth_provider(
+    name: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FAny], FAny]:
     def decorator(factory: FAny) -> FAny:
         _AUTH_PROVIDERS[name] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=name,
+                kind=PluginKind.AUTH,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
 
 
-def register_job_backend(name: str) -> Callable[[FAny], FAny]:
+def register_job_backend(
+    name: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FAny], FAny]:
     def decorator(factory: FAny) -> FAny:
         _job_backend_factories[name] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=name,
+                kind=PluginKind.JOB_BACKEND,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
 
 
-def register_search_backend(name: str) -> Callable[[FAny], FAny]:
+def register_search_backend(
+    name: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FAny], FAny]:
     def decorator(factory: FAny) -> FAny:
         _search_backend_factories[name] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=name,
+                kind=PluginKind.SEARCH_BACKEND,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
 
 
-def register_embedding_provider(name: str) -> Callable[[FAny], FAny]:
+def register_embedding_provider(
+    name: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FAny], FAny]:
     def decorator(factory: FAny) -> FAny:
         _embedding_provider_factories[name] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=name,
+                kind=PluginKind.EMBEDDING,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
 
     return decorator
 
 
-def register_vector_backend(name: str) -> Callable[[FAny], FAny]:
+def register_vector_backend(
+    name: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[FAny], FAny]:
     def decorator(factory: FAny) -> FAny:
         _vector_backend_factories[name] = factory
+        _default_registry.register(
+            PluginDescriptor(
+                name=name,
+                kind=PluginKind.VECTOR,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
         return factory
+
+    return decorator
+
+
+def register_reranker(
+    name: str, *, version: str = "0.0.0", requires_extras: tuple[str, ...] = ()
+) -> Callable[[Callable[[Settings], Any]], Callable[[Settings], Any]]:
+    def decorator(fn: Callable[[Settings], Any]) -> Callable[[Settings], Any]:
+        _reranker_factories[name] = fn
+        _default_registry.register(
+            PluginDescriptor(
+                name=name,
+                kind=PluginKind.RERANKER,
+                factory=fn,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
+        return fn
 
     return decorator
 
@@ -215,6 +400,8 @@ def register_monitor(
     cost: int,
     rich: bool,
     can_handle: Callable[..., Any] | None = None,
+    version: str = "0.0.0",
+    requires_extras: tuple[str, ...] = (),
 ) -> None:
     """Register a board monitor and keep registry sorted by cost."""
     entry = MonitorEntry(
@@ -226,6 +413,16 @@ def register_monitor(
     )
     _MONITOR_REGISTRY.append(entry)
     _MONITOR_REGISTRY.sort(key=lambda x: x.cost)
+    _default_registry.register(
+        PluginDescriptor(
+            name=name,
+            kind=PluginKind.MONITOR,
+            factory=factory,
+            version=version,
+            requires_extras=requires_extras,
+        ),
+        overwrite=True,
+    )
 
 
 def register_scraper(
@@ -233,6 +430,8 @@ def register_scraper(
     factory: Callable[..., Any],
     can_handle: Callable[..., Any] | None = None,
     needs_browser: bool = False,
+    version: str = "0.0.0",
+    requires_extras: tuple[str, ...] = (),
 ) -> None:
     """Register a job scraper."""
     _SCRAPER_REGISTRY[name] = ScraperEntry(
@@ -240,6 +439,16 @@ def register_scraper(
         factory=factory,
         can_handle=can_handle,
         needs_browser=needs_browser,
+    )
+    _default_registry.register(
+        PluginDescriptor(
+            name=name,
+            kind=PluginKind.SCRAPER,
+            factory=factory,
+            version=version,
+            requires_extras=requires_extras,
+        ),
+        overwrite=True,
     )
 
 
@@ -334,6 +543,7 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.llm.heuristic",
                 "job_ftch.infrastructure.llm.openai_provider",
                 "job_ftch.infrastructure.llm.fastembed_provider",
+                "job_ftch.infrastructure.llm.reranker_provider",
                 "job_ftch.infrastructure.auth.env_auth",
                 "job_ftch.infrastructure.auth.file_auth",
                 "job_ftch.infrastructure.auth.vault_auth",
@@ -376,6 +586,7 @@ def load_extensions() -> None:
             "job_ftch.search_backends",
             "job_ftch.embedding_providers",
             "job_ftch.vector_backends",
+            "job_ftch.rerankers",
         ):
             for candidate in entry_points(group=group):
                 loaded = candidate.load()
@@ -619,3 +830,12 @@ def create_vector_backend(settings: Settings) -> object | None:
         msg = f"Unsupported vector backend: {settings.vector_backend}"
         raise ValueError(msg)
     return cast("object", factory(settings))
+
+
+def create_reranker(settings: Settings) -> Any | None:
+    load_extensions()
+    name = getattr(settings, "reranker_model", "jina-v2-multilingual")
+    factory = _reranker_factories.get(name)
+    if factory is None:
+        return None
+    return factory(settings)

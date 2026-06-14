@@ -2,6 +2,21 @@
 
 Этот документ содержит описание архитектурных улучшений и функциональных возможностей, необходимых для превращения `job_ftch` в полностью автономную семантическую систему. Эти пункты отложены для реализации в рамках следующих этапов развития.
 
+## 29. Plugin Registry Phase 2 — RuntimeAdapter Protocol + AdapterHost
+
+**Проблема:** Рантайм-адаптеры (FastAPI, MCP, Dagster, FastStream) не имеют
+формального lifecycle-контракта. Нет единого способа запустить несколько
+адаптеров в одном процессе и корректно их остановить.
+
+**Решение (отложено до post-MVP):**
+- `RuntimeAdapter` Protocol: `startup(builder)`, `stop(timeout)`, `health()`, `state`
+- `AdapterState` машина: CREATED → STARTING → RUNNING → DEGRADED → STOPPING → STOPPED
+- `AdapterHost`: координирует несколько RuntimeAdapter-ов, останавливает запущенные при сбое
+- Переписать FastAPI, MCP, Dagster, FastStream адаптеры под этот Protocol
+
+**Зависимость:** Требует решения по multi-adapter process (MCP + FastAPI одновременно).
+**Приоритет:** Низкий на MVP. Нужен когда появится production deployment с несколькими адаптерами.
+
 ## 1. Семантический интеллект (Local-First Semantic)
 **Проблема:** Текущая фильтрация (`TriageNode`) базируется на поиске подстрок и ключевых слов, что создает много шума (false positives).
 **Решение:**

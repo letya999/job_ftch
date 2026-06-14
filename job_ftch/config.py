@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     search_language: str = "simple"
     embedding_enabled: bool = False
     language_detection_enabled: bool = False
+    translation_enabled: bool = False
+    translation_target_language: str = "ru"
+    reranker_enabled: bool = False
+    reranker_model: str = "jina-v2-multilingual"
+    reranker_top_k: int = 50
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int | None = None
@@ -185,6 +190,8 @@ class Settings(BaseSettings):
         "ollama_base_url",
         "embedding_model",
         "search_language",
+        "reranker_model",
+        "translation_target_language",
         "tenant_id",
         "tenant_display_name",
     )

@@ -319,3 +319,22 @@ class LanguageDetectorPort(Protocol):
 
     def detect(self, text: str) -> str:
         """Detect language of text. Returns ISO 639-1 code: 'ru', 'en', 'kz', or 'unknown'."""
+
+
+@runtime_checkable
+class TranslatorPort(Protocol):
+    """Port for machine translation between language pairs."""
+
+    async def translate(self, text: str, source_lang: str, target_lang: str) -> str:
+        """Translate text from source_lang to target_lang. Returns original text on failure."""
+
+    def supports(self, source_lang: str, target_lang: str) -> bool:
+        """Return True if this translator can handle the given language pair."""
+
+
+@runtime_checkable
+class CrossEncoderPort(Protocol):
+    """Port for cross-encoder based result reranking."""
+
+    async def rerank(self, query: str, documents: list[str]) -> list[float]:
+        """Score each document against query. Returns list of float scores (same order as docs)."""

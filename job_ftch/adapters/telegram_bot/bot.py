@@ -30,6 +30,8 @@ logger = structlog.get_logger(__name__)
 if TYPE_CHECKING:
     import asyncio
 
+    from job_ftch.application.contracts import CrossEncoderPort
+
 
 def _parse_csv_ints(raw: str | None) -> tuple[int, ...]:
     if raw is None:
@@ -153,11 +155,13 @@ class TelegramBotService:
         sender: TelegramSender,
         config: TelegramBotConfig,
         embedding_provider: object | None = None,
+        reranker: CrossEncoderPort | None = None,
     ) -> None:
         self._runner = runner
         self._sender = sender
         self._config = config
         self._embedding_provider = embedding_provider
+        self._reranker = reranker
         self._last_seen_at: dict[int, float] = {}
         self._upload_mode: dict[int, str] = {}  # user_id -> mode
 
@@ -665,9 +669,20 @@ class TelegramBotService:
             digest_tenant_id = args[0] if args else tenant_ids[0]
             jobs = await self._runner.latest_jobs(
                 digest_tenant_id,
-                limit=self._config.digest_size * 3,
+                limit=self._config.digest_size * 5,  # fetch more for reranking
                 user_id=str(user_id),
             )
+            # Rerank if reranker available
+            if self._reranker and len(jobs) > 1:
+                try:
+                    # Simple heuristic: use the last part of search profiles or generic query
+                    profile_query = "software engineer Python developer"  # TODO: get from profile
+                    docs = [f"{j.title} {j.description[:200]}" for j in jobs]
+                    scores = await self._reranker.rerank(profile_query, docs)
+                    jobs = [j for j, _ in sorted(zip(jobs, scores, strict=False), key=lambda x: x[1], reverse=True)]
+                    jobs = jobs[: self._config.digest_size * 3]
+                except Exception as exc:
+                    logger.warning("reranking_failed", error=str(exc))
             await self._sender.send_message(
                 chat_id,
                 format_job_digest(jobs, page=0, page_size=self._config.digest_size),

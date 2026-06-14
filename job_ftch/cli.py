@@ -461,15 +461,34 @@ def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
 
         embedding_provider = create_embedding_provider(settings)
 
+    reranker = None
+    if settings.reranker_enabled:
+        from job_ftch.application.registry import create_reranker
+
+        reranker = create_reranker(settings)
+
     if args.webhook:
         try:
             import uvicorn
 
             from job_ftch.adapters.telegram_bot.api import create_app
+            from job_ftch.adapters.telegram_bot.bot import (
+                HttpTelegramBotClient,
+                TelegramBotService,
+            )
         except ImportError:
             print("Install job-ftch[api] to use webhook mode.")
             raise SystemExit(1) from None
-        app = create_app(configs_dir=settings.configs_dir, runner=runner)
+
+        client = HttpTelegramBotClient(bot_config.token)
+        service = TelegramBotService(
+            runner=runner,
+            sender=client,
+            config=bot_config,
+            embedding_provider=embedding_provider,
+            reranker=reranker,
+        )
+        app = create_app(configs_dir=settings.configs_dir, runner=runner, bot_service=service)
         uvicorn.run(app, host=args.host, port=args.port)
     else:
         client = HttpTelegramBotClient(bot_config.token)
@@ -478,6 +497,7 @@ def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
             sender=client,
             config=bot_config,
             embedding_provider=embedding_provider,
+            reranker=reranker,
         )
         interval = settings.schedule_interval_seconds or (4 * 3600)
         asyncio.run(

@@ -462,6 +462,15 @@ def build_nodes(
 
         nodes.append(LanguageDetectionNode(LinguaLanguageDetector()))
 
+    if settings.translation_enabled:
+        from job_ftch.adapters.translation import CTranslate2Translator
+        from job_ftch.nodes.translation import TranslationNode
+
+        translator = CTranslate2Translator()
+        nodes.append(
+            TranslationNode(translator, target_language=settings.translation_target_language)
+        )
+
     if settings.embedding_enabled and settings.vector_backend:
         provider = cast("EmbeddingProvider", create_embedding_provider(settings))
         vector_backend = cast("VectorBackend", create_vector_backend(settings))
