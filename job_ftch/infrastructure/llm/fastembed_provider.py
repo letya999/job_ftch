@@ -1,4 +1,5 @@
 """FastEmbed-based local embedding provider (ONNX, no GPU required)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -29,6 +30,7 @@ class FastEmbedProvider:
     def _get_model(self) -> Any:
         if self._model is None:
             from fastembed import TextEmbedding
+
             self._model = TextEmbedding(model_name=self._model_name)
             logger.info("fastembed_model_loaded", model=self._model_name)
         return self._model
@@ -42,4 +44,5 @@ class FastEmbedProvider:
         def _sync_embed() -> list[list[float]]:
             model = self._get_model()
             return [vec.tolist() for vec in model.embed(texts)]
+
         return await loop.run_in_executor(None, _sync_embed)

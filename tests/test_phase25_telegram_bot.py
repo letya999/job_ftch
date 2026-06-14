@@ -417,7 +417,9 @@ async def test_bot_access_control_variants(tmp_path: Path) -> None:
             rate_limit_seconds=0.0,
         ),
     )
-    await service.handle_update({"message": {"chat": {"id": 100}, "from": {"id": 1}, "text": "/start"}})
+    await service.handle_update(
+        {"message": {"chat": {"id": 100}, "from": {"id": 1}, "text": "/start"}}
+    )
     assert not sender.messages
 
     # 2. Allow if open_access=True
@@ -432,7 +434,9 @@ async def test_bot_access_control_variants(tmp_path: Path) -> None:
             rate_limit_seconds=0.0,
         ),
     )
-    await service.handle_update({"message": {"chat": {"id": 100}, "from": {"id": 1}, "text": "/start"}})
+    await service.handle_update(
+        {"message": {"chat": {"id": 100}, "from": {"id": 1}, "text": "/start"}}
+    )
     assert sender.messages
     assert "Available tenants" in sender.messages[0]["text"]
     sender.messages.clear()
@@ -448,12 +452,16 @@ async def test_bot_access_control_variants(tmp_path: Path) -> None:
             rate_limit_seconds=0.0,
         ),
     )
-    await service.handle_update({"message": {"chat": {"id": 100}, "from": {"id": 1}, "text": "/start"}})
+    await service.handle_update(
+        {"message": {"chat": {"id": 100}, "from": {"id": 1}, "text": "/start"}}
+    )
     assert sender.messages
     sender.messages.clear()
 
     # 4. Deny if user_id not in allowed_user_ids
-    await service.handle_update({"message": {"chat": {"id": 100}, "from": {"id": 2}, "text": "/start"}})
+    await service.handle_update(
+        {"message": {"chat": {"id": 100}, "from": {"id": 2}, "text": "/start"}}
+    )
     assert not sender.messages
 
     await runner.close()
@@ -487,11 +495,11 @@ async def test_bot_mode_command(tmp_path: Path) -> None:
 async def test_bot_with_scheduler(tmp_path: Path) -> None:
     from job_ftch.adapters.telegram_bot.bot import HttpTelegramBotClient
     from job_ftch.cli import _run_bot_with_scheduler
-    
+
     runner = _build_runner(tmp_path)
     # Mock runner.run_all to see if it's called
     runner.run_all = AsyncMock(return_value=[])
-    
+
     sender = FakeSender()
     service = TelegramBotService(
         runner=runner,
@@ -502,14 +510,14 @@ async def test_bot_with_scheduler(tmp_path: Path) -> None:
         ),
     )
     client = HttpTelegramBotClient("token")
-    
+
     stop_event = asyncio.Event()
-    
+
     # We want it to run at least once then stop
     async def _auto_stop():
         await asyncio.sleep(0.2)
         stop_event.set()
-        
+
     # Patch run_polling_loop to return immediately
     with patch("job_ftch.adapters.telegram_bot.bot.run_polling_loop", new_callable=AsyncMock):
         await asyncio.gather(
@@ -518,11 +526,11 @@ async def test_bot_with_scheduler(tmp_path: Path) -> None:
                 client=client,
                 runner=runner,
                 interval_seconds=0.1,
-                stop_event=stop_event
+                stop_event=stop_event,
             ),
-            _auto_stop()
+            _auto_stop(),
         )
-    
+
     assert runner.run_all.called
     await runner.close()
     await client.close()

@@ -5,7 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import structlog
-from openai import AsyncOpenAI
+
+try:
+    from openai import AsyncOpenAI
+
+    _OPENAI_AVAILABLE = True
+except ImportError:
+    AsyncOpenAI = None  # type: ignore[assignment, misc]
+    _OPENAI_AVAILABLE = False
 
 from job_ftch.application.contracts import EmbeddingProvider
 from job_ftch.application.registry import register_embedding_provider
@@ -17,6 +24,8 @@ if TYPE_CHECKING:
 @register_embedding_provider("openai")
 class OpenAIEmbeddingProvider(EmbeddingProvider):
     def __init__(self, settings: Settings) -> None:
+        if not _OPENAI_AVAILABLE:
+            raise ImportError("openai is required. Install with: pip install 'job_ftch[openai]'")
         if not settings.openai_api_key:
             raise ValueError("openai_api_key is required for OpenAIEmbeddingProvider")
 

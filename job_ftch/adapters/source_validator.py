@@ -1,4 +1,5 @@
 """Reachability checks for URL and Telegram sources before adding to tenant."""
+
 from __future__ import annotations
 
 import httpx
@@ -36,6 +37,7 @@ async def validate_sources(
                 entity = link.lstrip("@").replace("https://t.me/", "").replace("t.me/", "")
                 # Telethon: try get_entity — if it raises, channel not accessible
                 from telethon import TelegramClient as _TelegramClient
+
                 if isinstance(telegram_client, _TelegramClient):
                     await telegram_client.get_entity(entity)
                 results[link] = (True, "")

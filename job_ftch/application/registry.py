@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import import_module
@@ -292,6 +293,30 @@ def rich_monitor_names() -> frozenset[str]:
     return frozenset(e.name for e in _MONITOR_REGISTRY if e.rich)
 
 
+_OPTIONAL_BUILTIN_MODULES = frozenset(
+    {
+        "job_ftch.infrastructure.llm.openai_provider",
+        "job_ftch.infrastructure.embeddings.openai_provider",
+        "job_ftch.infrastructure.sources.telegram",
+        "job_ftch.infrastructure.sources.telegram_realtime",
+        "job_ftch.infrastructure.stores.sqlite",
+        "job_ftch.infrastructure.backends.jobs.sqlite",
+        "job_ftch.infrastructure.sources.realtime.rss",
+        "job_ftch.infrastructure.sources.realtime.webhook",
+        "job_ftch.infrastructure.sources.realtime.websocket",
+        "job_ftch.infrastructure.sources.browser.base",
+        "job_ftch.infrastructure.bypass.curl_bypass",
+        "job_ftch.infrastructure.embeddings.sentence_transformers_provider",
+        "job_ftch.infrastructure.embeddings.ollama_provider",
+        "job_ftch.infrastructure.backends.vector.pgvector",
+        "job_ftch.infrastructure.backends.vector.qdrant",
+        "job_ftch.infrastructure.backends.search.hybrid",
+        "job_ftch.infrastructure.stores.postgres",
+        "job_ftch.infrastructure.backends.jobs.postgres",
+    }
+)
+
+
 def load_extensions() -> None:
     global _builtins_loaded, _entry_points_loaded
     with _lock:
@@ -333,7 +358,11 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.sources.scrapers",
                 "job_ftch.infrastructure.bypass",
             ):
-                import_module(module_name)
+                if module_name in _OPTIONAL_BUILTIN_MODULES:
+                    with contextlib.suppress(ImportError):
+                        import_module(module_name)
+                else:
+                    import_module(module_name)
             _builtins_loaded = True
         if _entry_points_loaded:
             return

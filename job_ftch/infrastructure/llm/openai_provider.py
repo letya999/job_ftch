@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import instructor
+try:
+    import instructor
+
+    _INSTRUCTOR_AVAILABLE = True
+except ImportError:
+    instructor = None  # type: ignore[assignment]
+    _INSTRUCTOR_AVAILABLE = False
 
 from job_ftch.application.registry import register_llm
 
@@ -44,6 +50,10 @@ class OpenAIInstructorLLMProvider:
         timeout_seconds: float,
         max_retries: int,
     ) -> None:
+        if not _INSTRUCTOR_AVAILABLE:
+            raise ImportError(
+                "openai and instructor are required. Install with: pip install 'job_ftch[openai]'"
+            )
         self._model = model
         self._max_retries = max_retries
         self._client = instructor.from_provider(

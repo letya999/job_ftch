@@ -28,7 +28,7 @@ def create_definitions(builder: PipelineBuilder, specs: list[SourceSpec]) -> Any
         @asset(name=asset_name)
         def _run_asset(spec: SourceSpec = spec) -> Any:
             summary = asyncio.run(builder.clone().sources([spec]).run_async())
-            return MaterializeResult(metadata=summary.as_dict())  # type: ignore[arg-type]
+            return MaterializeResult(metadata=summary.as_dict())
 
         assets.append(_run_asset)
     return Definitions(assets=assets)

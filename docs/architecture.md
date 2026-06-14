@@ -214,7 +214,11 @@ VectorBackend
 
 ---
 
-## Рассылка событий (Phase 27)
+## Рассылка событий (Phase 27 — не реализовано)
+
+> **Статус**: архитектурный план, код не написан. `NotificationSink` и все
+> перечисленные ниже таргеты (WebhookTarget, NATSTarget, KafkaTarget и др.)
+> запланированы на Phase 27 и в текущей кодовой базе отсутствуют.
 
 `NotificationSink` реализует `Sink[JobRecord]` и подключается через `FanOutSink`. `Pipeline` не знает о рассылке.
 

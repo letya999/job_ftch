@@ -12,37 +12,36 @@ def test_heuristic_extraction():
     """
     profile_managed = build_profile_from_resume_text(text, user_id="123")
     profile = profile_managed.profile
-    
+
     assert profile.identity.display_name == "Ivan Ivanov / Иван Иванов"
-    
+
     skills = [s.canonical_name for s in profile.search_profiles[0].required_skills]
     assert "Python" in skills
     assert "SQL" in skills
     assert "Postgres" in skills
     assert "Kubernetes" in skills
     assert "Docker" in skills
-    
+
     assert "Developer" in profile.search_profiles[0].target_roles
     assert "Lead" in profile.search_profiles[0].target_roles
-    
+
     assert "ru" in profile.search_profiles[0].languages_of_interest
     assert "en" in profile.search_profiles[0].languages_of_interest
     assert profile.search_profiles[0].relevance_threshold == 0.3
     assert profile.resume.raw_text == text[:5000].strip()
 
 
-
 def test_add_example_to_profile():
     from job_ftch.adapters.profile_inputs import add_example_to_profile
-    
+
     text = "Senior Python Developer"
     managed = build_profile_from_resume_text(text, user_id="123")
-    
+
     # Add positive example
     example1 = "Job description for a great role"
     managed2 = add_example_to_profile(managed, example1, kind="positive_job")
     assert example1 in managed2.profile.search_profiles[0].positive_example_texts
-    
+
     # Add negative example
     example2 = "Spam job"
     managed3 = add_example_to_profile(managed2, example2, kind="negative_job")

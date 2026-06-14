@@ -177,6 +177,7 @@ def add_example_to_profile(
 ) -> ManagedCandidateProfile:
     """Add a text example to the first search profile of the candidate."""
     from datetime import UTC, datetime
+
     if not managed.profile.search_profiles:
         return managed
     sp = managed.profile.search_profiles[0]
@@ -190,9 +191,7 @@ def add_example_to_profile(
             update={"positive_example_texts": sp.positive_example_texts + (text_trimmed,)}
         )
     updated_profiles = (updated_sp,) + managed.profile.search_profiles[1:]
-    updated_profile = managed.profile.model_copy(
-        update={"search_profiles": updated_profiles}
-    )
+    updated_profile = managed.profile.model_copy(update={"search_profiles": updated_profiles})
     return ManagedCandidateProfile(
         user_id=managed.user_id,
         profile_id=managed.profile_id,

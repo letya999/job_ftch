@@ -192,7 +192,9 @@ class TelegramBotService:
             return
         await self.handle_command(text, chat_id=chat_id, user_id=user_id)
 
-    async def handle_document(self, document: dict[str, Any], *, chat_id: int, user_id: int) -> None:
+    async def handle_document(
+        self, document: dict[str, Any], *, chat_id: int, user_id: int
+    ) -> None:
         if not self._is_allowed(user_id=user_id, chat_id=chat_id):
             return
 
@@ -498,8 +500,7 @@ class TelegramBotService:
             await self._runner.update_posting_config(post_tenant_id, channel)
             await self._sender.send_message(
                 chat_id,
-                f"Posting enabled for {post_tenant_id} to {channel}. "
-                "Backend: telegram_posting.",
+                f"Posting enabled for {post_tenant_id} to {channel}. Backend: telegram_posting.",
             )
             return
         if command == "/setnotify":

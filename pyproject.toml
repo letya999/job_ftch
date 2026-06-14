@@ -19,23 +19,18 @@ dependencies = [
     "pydantic-settings>=2.3",
     "httpx>=0.27",
     "selectolax>=0.3",
-    "telethon>=1.36",
     "rapidfuzz>=3.9",
-    "openai>=1.30",
-    "instructor>=1.4",
     "opentelemetry-api>=1.25",
     "opentelemetry-sdk>=1.25",
     "structlog>=24.2",
-    "aiosqlite>=0.20",
-    "feedparser>=6.0.12",
-    "jmespath>=1.0",
     "defusedxml>=0.7.1",
 ]
 
 [project.optional-dependencies]
 browser = ["playwright>=1.45"]
 stealth = ["playwright-stealth>=2.0.3", "curl-cffi>=0.15.0"]
-bot = ["fastapi>=0.115", "uvicorn>=0.30"]
+openai = ["openai>=1.30", "instructor>=1.4"]
+telegram = ["telethon>=1.36"]
 dagster = ["dagster>=1.8"]
 faststream = ["faststream>=0.5"]
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
@@ -79,6 +74,9 @@ all = [
     "pypdf>=4.0",
     "python-docx>=1.1",
     "pdfminer.six>=20231228",
+    "openai>=1.30",
+    "instructor>=1.4",
+    "telethon>=1.36",
 ]
 
 [project.scripts]
@@ -130,6 +128,8 @@ dev = [
     "httpx",
     "types-setuptools",
     "aiosqlite>=0.20",
+    "openai>=1.30",
+    "instructor>=1.4",
 ]
 
 # Tell hatchling which Python packages to include in the wheel
@@ -172,13 +172,15 @@ module = [
     "job_ftch.infrastructure.sources.telegram_realtime",
     "job_ftch.infrastructure.sources.browser.base",
     "job_ftch.infrastructure.bypass.curl_bypass",
+    "job_ftch.infrastructure.llm.openai_provider",
+    "job_ftch.infrastructure.embeddings.openai_provider",
 ]
 warn_unused_ignores = false
 
 [[tool.mypy.overrides]]
 module = [
     "app",
-    "live_probe",
+    "scripts.live_probe",
     "scripts.export_schema",
     "job_ftch.application.registry",
     "job_ftch.infrastructure.sources.browser_utils",

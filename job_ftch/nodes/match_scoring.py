@@ -158,9 +158,7 @@ class MultiProfileMatchNode:
             0.0,
             min(
                 1.0,
-                round(
-                    weighted + 0.1 * vacancy_type_score - risk_penalty - neg_vector_penalty, 2
-                ),
+                round(weighted + 0.1 * vacancy_type_score - risk_penalty - neg_vector_penalty, 2),
             ),
         )
 

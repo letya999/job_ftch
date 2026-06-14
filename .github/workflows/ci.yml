@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra openai --extra telegram --extra sqlite --extra feeds
 
       - name: Ruff lint
         run: uv run ruff check .
@@ -59,7 +59,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra openai --extra telegram --extra sqlite --extra feeds
 
       - name: mypy
         run: uv run mypy job_ftch
@@ -76,7 +76,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra openai --extra telegram --extra sqlite --extra feeds
 
       - name: Run tests
         run: uv run pytest tests/ --cov --cov-report=xml -v
@@ -100,7 +100,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra openai --extra telegram --extra sqlite --extra feeds
 
       - name: Bandit security scan
         run: uv run bandit -r job_ftch scripts/check_module_boundaries.py -ll

@@ -26,6 +26,7 @@
 | `structlog` | 0 | Структурированное JSON-логирование |
 | `opentelemetry-api` | 0 | Трейсинг без привязки к вендору |
 | `opentelemetry-sdk` | 0 | SDK трейсинга |
+| `defusedxml >= 0.7.1` | 0 | Безопасный XML парсинг (Personio, RSS boards, Sitemap) |
 
 ---
 
@@ -66,7 +67,7 @@ SQLAlchemy не используется: `asyncpg` на прямых запро
 
 | Библиотека | Extras group | Фаза | Назначение |
 |---|---|---|---|
-| `APScheduler >= 4` | `[scheduler]` | 17 | Cron / interval триггеры для периодических запусков |
+| — | — | 17 | Чистый `asyncio` (`application/scheduler.py`). APScheduler не используется (RM-087). |
 
 ---
 
@@ -74,7 +75,6 @@ SQLAlchemy не используется: `asyncpg` на прямых запро
 
 | Библиотека / сервис | Extras group | Фаза | Назначение |
 |---|---|---|---|
-| `aiohttp-socks` | `[proxy]` | 15 | SOCKS5 прокси-ротатор |
 | ScrapeOps / Apify | настраивается | 16 | Управляемые облачные скраперы (ManagedScraperBypass) |
 
 ---
@@ -104,7 +104,7 @@ SQLAlchemy не используется: `asyncpg` на прямых запро
 
 | Библиотека | Extras group | Фаза | Назначение |
 |---|---|---|---|
-| `aiogram >= 3` | `[bot]` | 23 | Telegram Bot API: polling + webhook |
+| — | — | 23 | Telegram Bot API потребляется напрямую через `httpx`. Фреймворки (aiogram и др.) не используются. |
 
 ---
 

@@ -16,6 +16,10 @@ from job_ftch.domain import (
     SourceKind,
     WorkMode,
 )
+
+pytest.importorskip(
+    "instructor", reason="requires job_ftch[openai]: pip install 'job_ftch[openai]'"
+)
 from job_ftch.infrastructure.llm.openai_provider import OpenAIInstructorLLMProvider
 from job_ftch.nodes.extraction_validation import ExtractionValidationNode
 

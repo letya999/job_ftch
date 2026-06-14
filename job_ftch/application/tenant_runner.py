@@ -996,7 +996,6 @@ class TenantRunner:
         msg = f"Failed to persist candidate profile: {record.profile_id}"
         raise RuntimeError(msg)
 
-
     async def get_candidate_profile(
         self,
         tenant_id: str,
