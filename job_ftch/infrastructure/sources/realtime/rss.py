@@ -64,7 +64,8 @@ class RSSFeedSource:
 
         # Fetch
         headers: dict[str, str] = {}
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        from job_ftch.config import get_settings
+        async with httpx.AsyncClient(timeout=get_settings().rss_timeout_seconds) as client:
             try:
                 response = await client.get(feed_url, headers=headers)
                 response.raise_for_status()

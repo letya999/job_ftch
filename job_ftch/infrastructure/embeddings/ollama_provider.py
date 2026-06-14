@@ -22,6 +22,7 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
         # Ollama doesn't explicitly expose dimensions without pulling or running,
         # but we can configure it or default to a common size like 4096 (llama3) or 768 (nomic)
         self._dimensions = settings.embedding_dimensions or 768
+        self.timeout = settings.ollama_timeout_seconds
         self._logger = structlog.get_logger("job_ftch.ollama_embedding")
 
     @property
@@ -46,7 +47,7 @@ class OllamaEmbeddingProvider(EmbeddingProvider):
                             "model": self.model,
                             "prompt": text,
                         },
-                        timeout=30.0,
+                        timeout=self.timeout,
                     )
                     response.raise_for_status()
                     data = response.json()

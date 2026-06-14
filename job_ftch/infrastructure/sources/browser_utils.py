@@ -22,8 +22,6 @@ DEFAULT_USER_AGENT = (
 
 DEFAULT_WAIT = "networkidle"
 DEFAULT_WAIT_FALLBACK = "domcontentloaded"
-DEFAULT_TIMEOUT = 30_000
-CONTEXT_TIMEOUT = 120_000
 
 BROWSER_KEYS = frozenset(
     {
@@ -126,7 +124,8 @@ async def open_page(
 
     context: BrowserContext = await browser.new_context(**context_kwargs)
 
-    context.set_default_timeout(config.get("timeout", DEFAULT_TIMEOUT))
+    from job_ftch.config import get_settings
+    context.set_default_timeout(config.get("timeout", get_settings().browser_default_timeout_ms))
 
     if config.get("cookies"):
         await context.add_cookies(config["cookies"])
@@ -176,7 +175,7 @@ async def _open_persistent_page(
         "viewport": config.get("viewport", {"width": 1440, "height": 900}),
         "locale": config.get("locale", "en-US"),
         "ignore_https_errors": config.get("skip_ssl", False),
-        "timeout": CONTEXT_TIMEOUT,
+        "timeout": get_settings().browser_context_timeout_ms,
     }
 
     if use_proxy:
@@ -191,7 +190,7 @@ async def _open_persistent_page(
 
     context: BrowserContext = await pw.chromium.launch_persistent_context(**launch_kwargs)
 
-    context.set_default_timeout(config.get("timeout", DEFAULT_TIMEOUT))
+    context.set_default_timeout(config.get("timeout", get_settings().browser_default_timeout_ms))
 
     if config.get("cookies"):
         await context.add_cookies(config["cookies"])
@@ -224,8 +223,10 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     """
     wait = config.get("wait", DEFAULT_WAIT)
     wait_fallback = config.get("wait_fallback", DEFAULT_WAIT_FALLBACK)
-    timeout = config.get("timeout", DEFAULT_TIMEOUT)
-    challenge_retries = config.get("challenge_retries", 1)
+    from job_ftch.config import get_settings
+    settings = get_settings()
+    timeout = config.get("timeout", settings.browser_default_timeout_ms)
+    challenge_retries = config.get("challenge_retries", settings.browser_challenge_retries)
     challenge_wait_ms = config.get("challenge_wait_ms", 6000)
     blocked = (403, 401, 429, 503)
     # Statuses worth a wait-and-reload: a JS/cookie challenge (403/503) or a cookie-warmup

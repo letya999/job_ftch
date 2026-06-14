@@ -495,7 +495,6 @@ def build_nodes(
 
     return (
         SanitizeNode(
-            allowed_career_site_hosts=settings.career_site_allowed_hosts,
             max_text_length=settings.pipeline_max_text_length,
         ),
         nodes,

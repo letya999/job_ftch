@@ -26,7 +26,6 @@ from job_ftch.infrastructure.sources.monitors.shared import (
 logger = structlog.get_logger("job_ftch.monitors.lever")
 
 BATCH_SIZE = 100
-_RETRY_ATTEMPTS = 3
 _RETRY_BASE_DELAY = 0.5
 
 _PAGE_PATTERNS = [
@@ -144,10 +143,15 @@ async def _get_page_with_retry(
     url: str,
     params: dict[str, Any],
     *,
-    retries: int = _RETRY_ATTEMPTS,
+    retries: int | None = None,
     base_delay: float = _RETRY_BASE_DELAY,
 ) -> list[dict[str, Any]]:
     last_exc: Exception | None = None
+    if retries is None:
+        from job_ftch.config import get_settings
+
+        retries = get_settings().monitor_max_retries
+
     for attempt in range(retries):
         try:
             resp = await client.get(url, params=params, headers=_API_HEADERS)

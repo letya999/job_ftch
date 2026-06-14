@@ -75,6 +75,7 @@ def test_build_telegram_client_applies_retry_and_timeout_settings(
 
     assert isinstance(client, FakeTelegramClient)
     assert captured["kwargs"] == {
+        "proxy": None,
         "timeout": 12.5,
         "request_retries": 4,
         "connection_retries": 6,

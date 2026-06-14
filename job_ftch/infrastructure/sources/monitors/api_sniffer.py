@@ -235,7 +235,8 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> Mo
 
         # Replace fixed sleep with networkidle
         try:
-            await page.wait_for_load_state("networkidle", timeout=10_000)
+            from job_ftch.config import get_settings
+            await page.wait_for_load_state("networkidle", timeout=get_settings().browser_default_timeout_ms)
         except Exception:
             await asyncio.sleep(settle_seconds)
 

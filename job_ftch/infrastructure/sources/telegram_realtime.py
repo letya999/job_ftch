@@ -53,12 +53,35 @@ class TelegramRealtimeSource:
             raise ImportError("telethon is required for telegram_realtime sources.")
 
         creds = self.auth.resolve(self.spec.auth_source_id or "telegram")
-        api_id = int(creds.get("api_id", 0))
-        api_hash = creds.get("api_hash", "")
+        from pathlib import Path
+        from job_ftch.config import get_settings
+        from job_ftch.infrastructure.sources.telegram import _get_proxy_config
+        settings = get_settings()
+
+        # Fallback to Settings-style env vars when AuthProvider returns nothing
+        api_id = int(creds.get("api_id") or settings.telegram_api_id or 0)
+        api_hash = creds.get("api_hash") or settings.telegram_api_hash or ""
+
+        auth_id = self.spec.auth_source_id
+        if not auth_id:
+            # Reuse the configured session
+            session_path = Path(str(settings.telegram_session_path).removesuffix(".session"))
+        else:
+            session_path = Path(".runtime/telegram") / auth_id
+        session_path.parent.mkdir(parents=True, exist_ok=True)
 
         queue: asyncio.Queue[RawItem] = asyncio.Queue()
 
-        async with TelegramClient("session", api_id, api_hash) as client:
+        async with TelegramClient(
+            str(session_path),
+            api_id,
+            api_hash,
+            proxy=_get_proxy_config(settings),
+            timeout=settings.telegram_timeout_seconds,
+            request_retries=settings.telegram_request_retries,
+            connection_retries=settings.telegram_connection_retries,
+            retry_delay=settings.telegram_retry_delay_seconds,
+        ) as client:
 
             @client.on(events.NewMessage(chats=[self.spec.entity]))  # type: ignore[untyped-decorator]
             async def handler(event: Any) -> None:

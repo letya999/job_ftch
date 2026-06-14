@@ -66,7 +66,8 @@ class OfficialAPISource:
 
         url = f"{self.spec.base_url}{self.spec.jobs_endpoint}"
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        from job_ftch.config import get_settings
+        async with httpx.AsyncClient(timeout=get_settings().api_timeout_seconds) as client:
             # Simple pagination handling
             # (In a real implementation we would loop and handle cursor/offset/link)
             try:

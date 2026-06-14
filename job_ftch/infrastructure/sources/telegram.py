@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Any, Protocol
 from job_ftch.application.registry import register_source, register_source_spec
 from job_ftch.domain import RawItem, SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -175,6 +178,61 @@ def _message_to_raw_item(
     )
 
 
+async def _safe_iter_messages(
+    client: Any,
+    chat: object,
+    limit: int,
+    reply_to: int | None = None,
+    min_jitter: float = 1.0,
+    max_jitter: float = 4.0,
+) -> AsyncIterator[object]:
+    """Safe pagination fetching chunks with Jitter and FloodWaitError handling."""
+    import asyncio
+    import random
+
+    from telethon import errors
+
+    yielded = 0
+    offset_id = 0
+
+    while yielded < limit:
+        chunk_size = min(100, limit - yielded)
+        try:
+            messages = await client.get_messages(
+                chat,
+                limit=chunk_size,
+                offset_id=offset_id,
+                reply_to=reply_to,
+            )
+            if not messages:
+                break
+
+            for msg in messages:
+                yield msg
+                yielded += 1
+                offset_id = msg.id
+
+            if len(messages) < chunk_size:
+                break
+
+            if yielded < limit:
+                # Sleep before fetching the next chunk
+                await asyncio.sleep(random.uniform(min_jitter, max_jitter))
+
+        except errors.FloodWaitError as exc:
+            logger.warning(
+                "telegram_flood_wait_caught",
+                chat=getattr(chat, "id", str(chat)),
+                sleep_seconds=exc.seconds,
+                yielded=yielded,
+            )
+            break
+        except Exception as exc:
+            if _is_skippable_comment_thread_error(exc):
+                break
+            raise
+
+
 def _is_skippable_comment_thread_error(exc: Exception) -> bool:
     return exc.__class__.__name__ == "MsgIdInvalidError" and "GetRepliesRequest" in str(exc)
 
@@ -186,22 +244,26 @@ class TelegramChannelSource:
         channel: str,
         *,
         limit: int = 100,
-        wait_time: float | None = None,
+        min_jitter: float = 1.0,
+        max_jitter: float = 4.0,
         own_client: bool = False,
     ) -> None:
         self._client = client
         self._channel = channel
         self._limit = limit
-        self._wait_time = wait_time
+        self._min_jitter = min_jitter
+        self._max_jitter = max_jitter
         self._own_client = own_client
 
     async def fetch(self) -> AsyncIterator[RawItem]:
         async with _client_session(self._client, own_client=self._own_client) as client:
             chat = await client.get_entity(self._channel)
-            async for message in client.iter_messages(
+            async for message in _safe_iter_messages(
+                client,
                 chat,
                 limit=self._limit,
-                wait_time=self._wait_time,
+                min_jitter=self._min_jitter,
+                max_jitter=self._max_jitter,
             ):
                 item = _message_to_raw_item(
                     source_kind=SourceKind.TELEGRAM_CHANNEL,
@@ -220,22 +282,26 @@ class TelegramGroupSource:
         group: str,
         *,
         limit: int = 100,
-        wait_time: float | None = None,
+        min_jitter: float = 1.0,
+        max_jitter: float = 4.0,
         own_client: bool = False,
     ) -> None:
         self._client = client
         self._group = group
         self._limit = limit
-        self._wait_time = wait_time
+        self._min_jitter = min_jitter
+        self._max_jitter = max_jitter
         self._own_client = own_client
 
     async def fetch(self) -> AsyncIterator[RawItem]:
         async with _client_session(self._client, own_client=self._own_client) as client:
             chat = await client.get_entity(self._group)
-            async for message in client.iter_messages(
+            async for message in _safe_iter_messages(
+                client,
                 chat,
                 limit=self._limit,
-                wait_time=self._wait_time,
+                min_jitter=self._min_jitter,
+                max_jitter=self._max_jitter,
             ):
                 item = _message_to_raw_item(
                     source_kind=SourceKind.TELEGRAM_GROUP,
@@ -255,33 +321,39 @@ class TelegramCommentSource:
         *,
         post_limit: int = 20,
         comment_limit_per_post: int = 50,
-        wait_time: float | None = None,
+        min_jitter: float = 1.0,
+        max_jitter: float = 4.0,
         own_client: bool = False,
     ) -> None:
         self._client = client
         self._channel = channel
         self._post_limit = post_limit
         self._comment_limit_per_post = comment_limit_per_post
-        self._wait_time = wait_time
+        self._min_jitter = min_jitter
+        self._max_jitter = max_jitter
         self._own_client = own_client
 
     async def fetch(self) -> AsyncIterator[RawItem]:
         async with _client_session(self._client, own_client=self._own_client) as client:
             chat = await client.get_entity(self._channel)
-            async for post in client.iter_messages(
+            async for post in _safe_iter_messages(
+                client,
                 chat,
                 limit=self._post_limit,
-                wait_time=self._wait_time,
+                min_jitter=self._min_jitter,
+                max_jitter=self._max_jitter,
             ):
                 post_id = _get_attr(post, "id")
                 if not isinstance(post_id, int):
                     continue
                 try:
-                    async for comment in client.iter_messages(
+                    async for comment in _safe_iter_messages(
+                        client,
                         chat,
                         limit=self._comment_limit_per_post,
                         reply_to=post_id,
-                        wait_time=self._wait_time,
+                        min_jitter=self._min_jitter,
+                        max_jitter=self._max_jitter,
                     ):
                         item = _message_to_raw_item(
                             source_kind=SourceKind.TELEGRAM_COMMENT,
@@ -301,6 +373,22 @@ class TelegramCommentSource:
                     raise
 
 
+def _get_proxy_config(settings: Settings) -> dict[str, Any] | None:
+    if not settings.telegram_proxy_type or not settings.telegram_proxy_host or not settings.telegram_proxy_port:
+        return None
+    
+    proxy_dict = {
+        "proxy_type": settings.telegram_proxy_type.lower(),
+        "addr": settings.telegram_proxy_host,
+        "port": settings.telegram_proxy_port,
+    }
+    if settings.telegram_proxy_username:
+        proxy_dict["username"] = settings.telegram_proxy_username
+    if settings.telegram_proxy_password:
+        proxy_dict["password"] = settings.telegram_proxy_password
+    return proxy_dict
+
+
 def _build_telegram_client(settings: Settings) -> Any:
     if settings.telegram_api_id is None or settings.telegram_api_hash is None:
         msg = "Telegram sources require JOB_FTCH_TELEGRAM_API_ID and JOB_FTCH_TELEGRAM_API_HASH."
@@ -315,6 +403,7 @@ def _build_telegram_client(settings: Settings) -> Any:
         str(settings.telegram_session_path),
         settings.telegram_api_id,
         settings.telegram_api_hash,
+        proxy=_get_proxy_config(settings),
         timeout=settings.telegram_timeout_seconds,
         request_retries=settings.telegram_request_retries,
         connection_retries=settings.telegram_connection_retries,
@@ -353,7 +442,8 @@ def _build_telegram_comment_source(settings: Settings) -> TelegramCommentSource:
         settings.telegram_entity or "",
         post_limit=settings.telegram_comment_post_limit,
         comment_limit_per_post=settings.telegram_comment_limit_per_post,
-        wait_time=settings.telegram_history_wait_time_seconds,
+        min_jitter=settings.telegram_jitter_min_seconds,
+        max_jitter=settings.telegram_jitter_max_seconds,
         own_client=True,
     )
 
@@ -389,6 +479,7 @@ def _build_client_v2(auth_id: str | None, auth: AuthProvider) -> Any:
         str(session_path),
         int(api_id_val),
         api_hash,
+        proxy=_get_proxy_config(settings),
         timeout=settings.telegram_timeout_seconds,
         request_retries=settings.telegram_request_retries,
         connection_retries=settings.telegram_connection_retries,
@@ -411,7 +502,8 @@ def _build_telegram_channel_source_v2(
         _build_client_v2(spec.auth_source_id, auth),
         spec.entity,
         limit=spec.limit,
-        wait_time=settings.telegram_history_wait_time_seconds,
+        min_jitter=settings.telegram_jitter_min_seconds,
+        max_jitter=settings.telegram_jitter_max_seconds,
         own_client=True,
     )
 
@@ -429,7 +521,8 @@ def _build_telegram_group_source_v2(
         _build_client_v2(spec.auth_source_id, auth),
         spec.entity,
         limit=spec.limit,
-        wait_time=settings.telegram_history_wait_time_seconds,
+        min_jitter=settings.telegram_jitter_min_seconds,
+        max_jitter=settings.telegram_jitter_max_seconds,
         own_client=True,
     )
 
@@ -448,6 +541,7 @@ def _build_telegram_comments_source_v2(
         spec.entity,
         post_limit=spec.post_limit,
         comment_limit_per_post=spec.comment_limit_per_post,
-        wait_time=settings.telegram_history_wait_time_seconds,
+        min_jitter=settings.telegram_jitter_min_seconds,
+        max_jitter=settings.telegram_jitter_max_seconds,
         own_client=True,
     )

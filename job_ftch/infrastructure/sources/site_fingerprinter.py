@@ -37,9 +37,10 @@ async def fingerprint(url: str, client: httpx.AsyncClient | None = None) -> Site
         # Phase 0 - plain HTTP GET
         # We create a new client here because the passed-in client might be a wrapper
         # that doesn't support the 'timeout' or 'follow_redirects' kwargs properly.
+        from job_ftch.config import get_settings
         async with httpx.AsyncClient(
             follow_redirects=True,
-            timeout=httpx.Timeout(8.0),
+            timeout=httpx.Timeout(get_settings().fingerprinter_timeout_seconds),
             headers={"User-Agent": "Mozilla/5.0 (compatible; SiteFingerprinter/1.0)"},
         ) as probe_client:
             response = await probe_client.get(url)

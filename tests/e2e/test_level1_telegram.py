@@ -48,11 +48,10 @@ async def test_telegram_fixture_unit(
         m.peer_id.channel_id = msg_data["peer_id"]["channel_id"]
         mock_messages.append(m)
 
-    async def mock_iter_messages(*args, **kwargs):
-        for m in mock_messages:
-            yield m
+    async def mock_get_messages(*args, **kwargs):
+        return mock_messages
 
-    mock_client.iter_messages = mock_iter_messages
+    mock_client.get_messages = mock_get_messages
     mock_client.get_entity = AsyncMock(return_value=MagicMock())
 
     # TelegramChannelSource takes client, channel, limit, etc. in __init__

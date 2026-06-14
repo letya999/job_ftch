@@ -297,12 +297,21 @@ class CareerSiteSource:
 
 
 def build_default_http_client(*, verify_ssl: bool = True) -> _RetryingHttpClient:
-    timeout = httpx.Timeout(15.0, connect=30.0)
-    limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
+    from job_ftch.config import get_settings
+
+    settings = get_settings()
+    timeout = httpx.Timeout(
+        settings.career_site_timeout_seconds,
+        connect=settings.career_site_connect_timeout_seconds,
+    )
+    limits = httpx.Limits(
+        max_keepalive_connections=settings.career_site_max_keepalive_connections,
+        max_connections=settings.career_site_max_connections,
+    )
     return _RetryingHttpClient(
         httpx.AsyncClient(timeout=timeout, limits=limits, verify=verify_ssl),
-        max_retries=2,
-        retry_delay_seconds=1.0,
+        max_retries=settings.career_site_max_retries,
+        retry_delay_seconds=settings.career_site_retry_delay_seconds,
     )
 
 
@@ -323,4 +332,6 @@ def _build_yandex_jobs_parser() -> _YandexJobsParser:
 
 @register_parser("bcc", matcher=_is_bcc)
 def _build_bcc_parser() -> _BCCParser:
-    return _BCCParser()
+    from job_ftch.config import get_settings
+
+    return _BCCParser(max_concurrency=get_settings().career_site_detail_concurrency)

@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 logger = structlog.get_logger("job_ftch.monitors.workday")
 
 PAGE_SIZE = 20
-_RETRY_ATTEMPTS = 3
 _RETRY_BASE_DELAY = 1.0
 
 _URL_RE = re.compile(
@@ -56,9 +55,14 @@ async def _post_page_with_retry(
     list_url: str,
     payload: dict[str, Any],
     *,
-    retries: int = _RETRY_ATTEMPTS,
+    retries: int | None = None,
     base_delay: float = _RETRY_BASE_DELAY,
 ) -> dict[str, Any]:
+    if retries is None:
+        from job_ftch.config import get_settings
+
+        retries = get_settings().monitor_max_retries
+
     for attempt in range(retries):
         try:
             resp = await client.post(list_url, json=payload)

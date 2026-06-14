@@ -65,7 +65,13 @@ class Settings(BaseSettings):
     telegram_message_limit: int = Field(default=100, gt=0)
     telegram_comment_post_limit: int = Field(default=20, gt=0)
     telegram_comment_limit_per_post: int = Field(default=50, gt=0)
-    telegram_history_wait_time_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
+    telegram_jitter_min_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
+    telegram_jitter_max_seconds: float = Field(default=4.0, ge=0.0, le=120.0)
+    telegram_proxy_type: str | None = None
+    telegram_proxy_host: str | None = None
+    telegram_proxy_port: int | None = None
+    telegram_proxy_username: str | None = None
+    telegram_proxy_password: str | None = None
     telegram_timeout_seconds: float = Field(default=10.0, gt=0.0, le=120.0)
     telegram_request_retries: int = Field(default=3, ge=0, le=20)
     telegram_connection_retries: int = Field(default=3, ge=0, le=20)
@@ -76,14 +82,22 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     openai_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     openai_max_retries: int = Field(default=2, ge=0, le=10)
-    career_site_url: str | None = None
     career_site_timeout_seconds: float = Field(default=15.0, gt=0.0, le=300.0)
+    career_site_connect_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     career_site_max_retries: int = Field(default=2, ge=0, le=10)
     career_site_retry_delay_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
     career_site_max_connections: int = Field(default=10, gt=0, le=200)
     career_site_max_keepalive_connections: int = Field(default=5, gt=0, le=200)
     career_site_detail_concurrency: int = Field(default=5, gt=0, le=50)
-    career_site_allowed_hosts: Annotated[tuple[str, ...], NoDecode] = ()
+    browser_default_timeout_ms: int = Field(default=30000, gt=0)
+    browser_context_timeout_ms: int = Field(default=120000, gt=0)
+    browser_challenge_retries: int = Field(default=1, ge=0)
+    monitor_timeout_seconds: float = Field(default=15.0, gt=0.0, le=300.0)
+    monitor_max_retries: int = Field(default=3, ge=0, le=10)
+    rss_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+    api_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+    ollama_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+    fingerprinter_timeout_seconds: float = Field(default=8.0, gt=0.0, le=300.0)
     store_path: Path = Path(".runtime/job_ftch.db")
     store_dsn: str | None = None
     store_pool_min: int = Field(default=2, gt=0)
@@ -173,7 +187,6 @@ class Settings(BaseSettings):
     @field_validator(
         "telegram_api_hash",
         "telegram_entity",
-        "career_site_url",
         "openai_api_key",
         "openai_model",
         "openai_base_url",
@@ -194,6 +207,10 @@ class Settings(BaseSettings):
         "translation_target_language",
         "tenant_id",
         "tenant_display_name",
+        "telegram_proxy_type",
+        "telegram_proxy_host",
+        "telegram_proxy_username",
+        "telegram_proxy_password",
     )
     @classmethod
     def strip_optional_strings(cls, value: str | None) -> str | None:
@@ -202,23 +219,11 @@ class Settings(BaseSettings):
         stripped = value.strip()
         return stripped or None
 
-    @field_validator("career_site_allowed_hosts", mode="before")
-    @classmethod
-    def normalize_career_site_allowed_hosts(cls, value: object) -> object:
-        if value is None:
-            return ()
-        if isinstance(value, str):
-            stripped = value.strip()
-            if not stripped:
-                return ()
-            if stripped.startswith("["):
-                decoded = json.loads(stripped)
-                return cls.normalize_career_site_allowed_hosts(decoded)
-            parts = [part.strip().lower() for part in value.split(",")]
-            return tuple(part for part in parts if part)
-        if isinstance(value, (list, tuple)):
-            return tuple(str(part).strip().lower() for part in value if str(part).strip())
-        return value
+    @model_validator(mode="after")
+    def validate_telegram_jitter(self) -> Settings:
+        if self.telegram_jitter_min_seconds > self.telegram_jitter_max_seconds:
+            raise ValueError("telegram_jitter_min_seconds cannot be greater than telegram_jitter_max_seconds.")
+        return self
 
     @model_validator(mode="after")
     def validate_dependencies(self) -> Settings:
@@ -258,20 +263,6 @@ class Settings(BaseSettings):
             and not self.openai_api_key
         ):
             msg = "openai_api_key is required when embedding_provider=openai."
-            raise ValueError(msg)
-
-        if self.source_backend != "career_site" or self.career_site_url is None:
-            return self
-
-        parsed = urlsplit(self.career_site_url)
-        if parsed.scheme != "https":
-            msg = "career_site_url must use https."
-            raise ValueError(msg)
-
-        host = parsed.hostname.lower() if parsed.hostname is not None else None
-        if host is None or host not in self.career_site_allowed_hosts:
-            allowed = ", ".join(self.career_site_allowed_hosts)
-            msg = f"career_site_url host must be one of: {allowed}"
             raise ValueError(msg)
 
         return self

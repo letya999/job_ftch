@@ -78,7 +78,6 @@ def test_app_quarantines_multisource_negative_fixture_end_to_end(tmp_path: Path)
             "JOB_FTCH_STORE_BACKEND": "memory",
             "JOB_FTCH_JOB_GROUP_STORE_BACKEND": "memory",
             "JOB_FTCH_QUARANTINE_OUTPUT_PATH": str(quarantine_path),
-            "JOB_FTCH_CAREER_SITE_ALLOWED_HOSTS": '["job-boards.greenhouse.io","www.bcc.kz","bcc.kz"]',
         },
     )
 
@@ -89,9 +88,9 @@ def test_app_quarantines_multisource_negative_fixture_end_to_end(tmp_path: Path)
     output_payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert output_payload["schema_version"] == "job_ftch.job.v1"
     assert output_payload["items"] == []
-    assert len(quarantine_records) == 6
+    assert len(quarantine_records) == 5
     assert Counter(record["payload"]["reason"] for record in quarantine_records) == {
-        "disallowed_url_host": 2,
+        "disallowed_url_host": 1,
         "invalid_raw_item": 2,
         "invalid_origin_url": 1,
         "empty_source_name": 1,

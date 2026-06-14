@@ -67,30 +67,32 @@ class FakeTelegramClient:
     async def get_entity(self, entity: object) -> FakeChat:
         return self._chat
 
-    def iter_messages(
+    async def get_messages(
         self,
         entity: object,
         *,
-        limit: int | None = None,
+        limit: int = 100,
+        offset_id: int = 0,
         reply_to: int | None = None,
-        wait_time: float | None = None,
-    ):  # type: ignore[no-untyped-def]
+    ) -> list[FakeMessage]:
         self.calls.append(
             {
                 "entity": entity,
                 "limit": limit,
                 "reply_to": reply_to,
-                "wait_time": wait_time,
+                "offset_id": offset_id,
             }
         )
         items = self._messages if reply_to is None else self._comments_by_post_id.get(reply_to, [])
-        sliced = items[:limit] if limit is not None else items
-
-        async def _iterate() -> Any:
-            for item in sliced:
-                yield item
-
-        return _iterate()
+        if offset_id:
+            try:
+                idx = next(i for i, msg in enumerate(items) if msg.id == offset_id)
+                sliced = items[idx + 1:idx + 1 + limit]
+            except StopIteration:
+                sliced = []
+        else:
+            sliced = items[:limit]
+        return sliced
 
 
 class FakeResponse:
@@ -172,7 +174,7 @@ async def test_telegram_channel_source_maps_real_world_fixture() -> None:
         [_parse_message(message) for message in payload["messages"]],
     )
 
-    items = await _collect(TelegramChannelSource(client, "TelegramTips", limit=10, wait_time=1.5))
+    items = await _collect(TelegramChannelSource(client, "TelegramTips", limit=10, min_jitter=1.5, max_jitter=1.5))
 
     assert len(items) == 1
     assert items[0].source_kind is SourceKind.TELEGRAM_CHANNEL
@@ -183,7 +185,7 @@ async def test_telegram_channel_source_maps_real_world_fixture() -> None:
             "entity": client._chat,
             "limit": 10,
             "reply_to": None,
-            "wait_time": 1.5,
+            "offset_id": 0,
         }
     ]
 
@@ -249,13 +251,13 @@ async def test_telegram_comment_source_keeps_post_lineage() -> None:
             "entity": client._chat,
             "limit": 5,
             "reply_to": None,
-            "wait_time": None,
+            "offset_id": 0,
         },
         {
             "entity": client._chat,
             "limit": 5,
             "reply_to": 209,
-            "wait_time": None,
+            "offset_id": 0,
         },
     ]
 
@@ -266,28 +268,23 @@ async def test_telegram_comment_source_skips_invalid_reply_threads() -> None:
         pass
 
     class ReplyErrorClient(FakeTelegramClient):
-        def iter_messages(  # type: ignore[no-untyped-def]
+        async def get_messages(
             self,
             entity: object,
             *,
-            limit: int | None = None,
+            limit: int = 100,
+            offset_id: int = 0,
             reply_to: int | None = None,
-            wait_time: float | None = None,
-        ):
+        ) -> list[FakeMessage]:
             if reply_to == 209:
-
-                async def _fail() -> Any:
-                    raise MsgIdInvalidError(
-                        "The message ID used in the peer was invalid (caused by GetRepliesRequest)"
-                    )
-                    yield  # pragma: no cover
-
-                return _fail()
-            return super().iter_messages(
+                raise MsgIdInvalidError(
+                    "The message ID used in the peer was invalid (caused by GetRepliesRequest)"
+                )
+            return await super().get_messages(
                 entity,
                 limit=limit,
+                offset_id=offset_id,
                 reply_to=reply_to,
-                wait_time=wait_time,
             )
 
     payload = json.loads(
