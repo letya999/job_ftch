@@ -996,6 +996,17 @@ class TenantRunner:
         msg = f"Failed to persist candidate profile: {record.profile_id}"
         raise RuntimeError(msg)
 
+
+    async def get_candidate_profile(
+        self,
+        tenant_id: str,
+        user_id: str,
+        profile_id: str,
+    ) -> ManagedCandidateProfile | None:
+        """Get a specific candidate profile by ID."""
+        runtime = self.get_runtime(tenant_id)
+        return await runtime.store.get_candidate_profile(user_id, profile_id)
+
     async def list_candidate_profiles(
         self,
         tenant_id: str,

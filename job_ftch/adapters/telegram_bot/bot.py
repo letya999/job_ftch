@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -11,10 +12,12 @@ import httpx
 import structlog
 
 from job_ftch.adapters.profile_inputs import (
+    add_example_to_profile,
     build_candidate_profile_from_payload,
     build_profile_from_resume_text,
 )
 from job_ftch.adapters.source_inputs import build_source_spec_from_input
+from job_ftch.adapters.source_validator import validate_sources
 from job_ftch.adapters.telegram_bot.formatter import format_job_digest, format_job_message
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.domain import ManagedCandidateProfile
@@ -48,6 +51,7 @@ class TelegramBotConfig:
     admin_user_ids: tuple[int, ...] = ()
     rate_limit_seconds: float = 1.0
     digest_size: int = 5
+    open_access: bool = False
 
 
 def load_bot_config(
@@ -68,6 +72,7 @@ def load_bot_config(
         admin_user_ids=_parse_csv_ints(payload.get("admin_user_ids")),
         rate_limit_seconds=float(payload.get("rate_limit_seconds", "1.0")),
         digest_size=int(payload.get("digest_size", "5")),
+        open_access=payload.get("open_access", "false").lower() == "true",
     )
 
 
@@ -150,6 +155,7 @@ class TelegramBotService:
         self._sender = sender
         self._config = config
         self._last_seen_at: dict[int, float] = {}
+        self._upload_mode: dict[int, str] = {}  # user_id -> mode
 
     @property
     def config(self) -> TelegramBotConfig:
@@ -162,6 +168,10 @@ class TelegramBotService:
         chat_id = int(message["chat"]["id"])
         user = message.get("from") or update.get("callback_query", {}).get("from") or {}
         user_id = int(user.get("id", 0))
+
+        if not self._is_allowed(user_id=user_id, chat_id=chat_id):
+            logger.warning("telegram_bot_access_denied", chat_id=chat_id, user_id=user_id)
+            return  # silently deny at update level, no reply to prevent enumeration
 
         callback = update.get("callback_query")
         if isinstance(callback, dict) and isinstance(callback.get("data"), str):
@@ -188,7 +198,8 @@ class TelegramBotService:
         if not file_id:
             return
 
-        await self._sender.send_message(chat_id, "Processing your resume...")
+        mode = self._upload_mode.get(user_id, "positive_resume")
+        await self._sender.send_message(chat_id, f"Processing your {mode.replace('_', ' ')}...")
 
         try:
             content = await self._sender.download_file(file_id)
@@ -201,19 +212,78 @@ class TelegramBotService:
             tenant_ids = self._runner.tenant_ids()
             tenant_id = tenant_ids[0] if tenant_ids else "default"
 
-            managed_profile = build_profile_from_resume_text(text, user_id=str(user_id))
-            await self._runner.save_candidate_profile(tenant_id, managed_profile)
-            await self._runner.set_active_candidate_profile(
-                tenant_id, str(user_id), managed_profile.profile_id
-            )
+            if mode == "positive_resume":
+                managed_profile = build_profile_from_resume_text(text, user_id=str(user_id))
+                await self._runner.save_candidate_profile(tenant_id, managed_profile)
+                await self._runner.set_active_candidate_profile(
+                    tenant_id, str(user_id), managed_profile.profile_id
+                )
+                await self._sender.send_message(
+                    chat_id,
+                    f"Profile created from your resume. Active: {managed_profile.profile_id}",
+                )
+            elif mode == "negative_resume":
+                # Load existing active profile if any
+                profiles = await self._runner.list_candidate_profiles(tenant_id, str(user_id))
+                active_profile_payload = next((p for p in profiles if p["active"]), None)
 
-            await self._sender.send_message(
-                chat_id,
-                f"Profile created from your resume. Active: {managed_profile.profile_id}",
-            )
+                if active_profile_payload:
+                    existing_profile = await self._runner.get_candidate_profile(
+                        tenant_id, str(user_id), active_profile_payload["profile_id"]
+                    )
+                    if existing_profile:
+                        updated_profile = add_example_to_profile(
+                            existing_profile, text, kind="negative_resume"
+                        )
+                        await self._runner.save_candidate_profile(tenant_id, updated_profile)
+                        await self._sender.send_message(
+                            chat_id, "Negative resume example added to your active profile."
+                        )
+                    else:
+                        await self._sender.send_message(
+                            chat_id, "Error: Could not load your active profile."
+                        )
+                else:
+                    # Create new one but mark example as negative
+                    managed_profile = build_profile_from_resume_text(text, user_id=str(user_id))
+                    updated_profile = add_example_to_profile(
+                        managed_profile, text, kind="negative_resume"
+                    )
+                    await self._runner.save_candidate_profile(tenant_id, updated_profile)
+                    await self._runner.set_active_candidate_profile(
+                        tenant_id, str(user_id), updated_profile.profile_id
+                    )
+                    await self._sender.send_message(
+                        chat_id,
+                        f"New profile created with negative resume example. Active: {updated_profile.profile_id}",
+                    )
+            elif mode in ("positive_job", "negative_job"):
+                profiles = await self._runner.list_candidate_profiles(tenant_id, str(user_id))
+                active_profile_payload = next((p for p in profiles if p["active"]), None)
+
+                if not active_profile_payload:
+                    await self._sender.send_message(
+                        chat_id, "Error: You must have an active profile to add job examples."
+                    )
+                    return
+
+                active_profile = await self._runner.get_candidate_profile(
+                    tenant_id, str(user_id), active_profile_payload["profile_id"]
+                )
+                if active_profile:
+                    updated_profile = add_example_to_profile(active_profile, text, kind=mode)
+                    await self._runner.save_candidate_profile(tenant_id, updated_profile)
+                    await self._sender.send_message(
+                        chat_id, f"Job example added as {mode.replace('_', ' ')} to your profile."
+                    )
+                else:
+                    await self._sender.send_message(
+                        chat_id, "Error: Could not load your active profile."
+                    )
+
         except Exception as exc:
-            logger.error("resume_upload_failed", error=str(exc), exc_info=True)
-            await self._sender.send_message(chat_id, f"Error processing resume: {exc}")
+            logger.error("upload_failed", mode=mode, error=str(exc), exc_info=True)
+            await self._sender.send_message(chat_id, f"Error processing upload: {exc}")
 
     def _extract_text(self, content: bytes, filename: str) -> str:
         import io
@@ -431,10 +501,8 @@ class TelegramBotService:
             notify_tenant_id, mode = args[0], args[1].lower()
             batch_size = None
             if len(args) >= 3:
-                try:
+                with contextlib.suppress(ValueError):
                     batch_size = int(args[2])
-                except ValueError:
-                    pass
             try:
                 await self._runner.update_notify_config(notify_tenant_id, mode, batch_size)
                 msg = f"Notification mode for {notify_tenant_id} set to {mode}."
@@ -458,9 +526,23 @@ class TelegramBotService:
             tenant_id = args[0]
             links = args[1:]
 
+            validation = await validate_sources(links)
+            valid_links = [link for link in links if validation[link][0]]
+            failed_validation = [
+                (link, validation[link][1]) for link in links if not validation[link][0]
+            ]
+
+            if failed_validation:
+                fail_msg = "The following sources are unreachable:\n" + "\n".join(
+                    f"  {link}: {reason}" for link, reason in failed_validation
+                )
+                fail_msg += "\nPlease fix them and resend."
+                await self._sender.send_message(chat_id, fail_msg)
+                return
+
             added_count = 0
             errors = []
-            for link in links:
+            for link in valid_links:
                 try:
                     spec = await build_source_spec_from_input(
                         link,
@@ -501,6 +583,18 @@ class TelegramBotService:
             tenant_id = args[0]
             await self._runner.reset_tenant(tenant_id)
             await self._sender.send_message(chat_id, f"Reset {tenant_id}")
+            return
+        if command == "/mode":
+            valid_modes = ["positive_resume", "negative_resume", "positive_job", "negative_job"]
+            if not args or args[0] not in valid_modes:
+                await self._sender.send_message(
+                    chat_id,
+                    f"Usage: /mode <{'|'.join(valid_modes)}>\nCurrent mode: {self._upload_mode.get(user_id, 'positive_resume')}",
+                )
+                return
+            mode = args[0]
+            self._upload_mode[user_id] = mode
+            await self._sender.send_message(chat_id, f"Upload mode set to: {mode}")
             return
         if command == "/digest":
             digest_tenant_id = args[0] if args else tenant_ids[0]
@@ -581,6 +675,8 @@ class TelegramBotService:
     def _is_allowed(self, *, user_id: int, chat_id: int) -> bool:
         allowed_users = self._config.allowed_user_ids
         allowed_chats = self._config.allowed_chat_ids
+        if not allowed_users and not allowed_chats and not self._config.open_access:
+            return False  # secure by default: deny all if not configured
         user_ok = not allowed_users or user_id in allowed_users
         chat_ok = not allowed_chats or chat_id in allowed_chats
         return user_ok and chat_ok

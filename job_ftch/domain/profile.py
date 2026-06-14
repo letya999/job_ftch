@@ -58,6 +58,8 @@ class SearchProfile(BaseModel):
     required_skills: tuple[SkillTag, ...] = ()
     preferred_skills: tuple[SkillTag, ...] = ()
     culture_preferences: tuple[str, ...] = ()
+    positive_example_texts: tuple[str, ...] = ()
+    negative_example_texts: tuple[str, ...] = ()
     relevance_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
     weights: ProfileWeights = Field(default_factory=ProfileWeights)
 
@@ -83,6 +85,8 @@ class SearchProfile(BaseModel):
             "preferred_countries",
             "preferred_cities",
             "culture_preferences",
+            "positive_example_texts",
+            "negative_example_texts",
         ):
             values = getattr(self, field_name)
             normalized = tuple(v.strip() for v in values if v.strip())

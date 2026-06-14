@@ -167,3 +167,35 @@ def build_profile_from_resume_text(
         profile=candidate_profile,
         updated_at=datetime.now(UTC),
     )
+
+
+def add_example_to_profile(
+    managed: ManagedCandidateProfile,
+    text: str,
+    *,
+    kind: str,  # "positive_resume", "negative_resume", "positive_job", "negative_job"
+) -> ManagedCandidateProfile:
+    """Add a text example to the first search profile of the candidate."""
+    from datetime import UTC, datetime
+    if not managed.profile.search_profiles:
+        return managed
+    sp = managed.profile.search_profiles[0]
+    text_trimmed = text.strip()[:5000]
+    if kind.startswith("negative"):
+        updated_sp = sp.model_copy(
+            update={"negative_example_texts": sp.negative_example_texts + (text_trimmed,)}
+        )
+    else:
+        updated_sp = sp.model_copy(
+            update={"positive_example_texts": sp.positive_example_texts + (text_trimmed,)}
+        )
+    updated_profiles = (updated_sp,) + managed.profile.search_profiles[1:]
+    updated_profile = managed.profile.model_copy(
+        update={"search_profiles": updated_profiles}
+    )
+    return ManagedCandidateProfile(
+        user_id=managed.user_id,
+        profile_id=managed.profile_id,
+        profile=updated_profile,
+        updated_at=datetime.now(UTC),
+    )

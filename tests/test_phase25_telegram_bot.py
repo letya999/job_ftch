@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import sys
+import asyncio
 from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -234,7 +236,7 @@ async def test_bot_access_control_and_status_endpoint(
         "bridge-key",
     )
 
-    assert sender.messages[0]["text"] == "Access denied."
+    assert not sender.messages
     assert summary["tenant_id"] == "ai_jobs"
     assert status_payload is not None
     assert status_payload["tenant_id"] == "ai_jobs"
@@ -396,3 +398,131 @@ async def test_webhook_real_fastapi_token_auth(tmp_path: Path) -> None:
         assert response.status_code == 200
 
     await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_bot_access_control_variants(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path)
+    sender = FakeSender()
+
+    # 1. Deny by default if not configured
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            allowed_user_ids=(),
+            allowed_chat_ids=(),
+            open_access=False,
+            rate_limit_seconds=0.0,
+        ),
+    )
+    await service.handle_update({"message": {"chat": {"id": 100}, "from": {"id": 1}, "text": "/start"}})
+    assert not sender.messages
+
+    # 2. Allow if open_access=True
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            allowed_user_ids=(),
+            allowed_chat_ids=(),
+            open_access=True,
+            rate_limit_seconds=0.0,
+        ),
+    )
+    await service.handle_update({"message": {"chat": {"id": 100}, "from": {"id": 1}, "text": "/start"}})
+    assert sender.messages
+    assert "Available tenants" in sender.messages[0]["text"]
+    sender.messages.clear()
+
+    # 3. Allow if user_id in allowed_user_ids
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            allowed_user_ids=(1,),
+            open_access=False,
+            rate_limit_seconds=0.0,
+        ),
+    )
+    await service.handle_update({"message": {"chat": {"id": 100}, "from": {"id": 1}, "text": "/start"}})
+    assert sender.messages
+    sender.messages.clear()
+
+    # 4. Deny if user_id not in allowed_user_ids
+    await service.handle_update({"message": {"chat": {"id": 100}, "from": {"id": 2}, "text": "/start"}})
+    assert not sender.messages
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_bot_mode_command(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path)
+    sender = FakeSender()
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            allowed_user_ids=(1,),
+            open_access=False,
+            rate_limit_seconds=0.0,
+        ),
+    )
+
+    await service.handle_command("/mode negative_resume", chat_id=100, user_id=1)
+    assert "Upload mode set to: negative_resume" in sender.messages[0]["text"]
+
+    await service.handle_command("/mode invalid", chat_id=100, user_id=1)
+    assert "Usage: /mode" in sender.messages[1]["text"]
+
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_bot_with_scheduler(tmp_path: Path) -> None:
+    from job_ftch.cli import _run_bot_with_scheduler
+    from job_ftch.adapters.telegram_bot.bot import HttpTelegramBotClient
+    
+    runner = _build_runner(tmp_path)
+    # Mock runner.run_all to see if it's called
+    runner.run_all = AsyncMock(return_value=[])
+    
+    sender = FakeSender()
+    service = TelegramBotService(
+        runner=runner,
+        sender=sender,
+        config=TelegramBotConfig(
+            token="token",
+            allowed_user_ids=(1,),
+        ),
+    )
+    client = HttpTelegramBotClient("token")
+    
+    stop_event = asyncio.Event()
+    
+    # We want it to run at least once then stop
+    async def _auto_stop():
+        await asyncio.sleep(0.2)
+        stop_event.set()
+        
+    # Patch run_polling_loop to return immediately
+    with patch("job_ftch.adapters.telegram_bot.bot.run_polling_loop", new_callable=AsyncMock):
+        await asyncio.gather(
+            _run_bot_with_scheduler(
+                service=service,
+                client=client,
+                runner=runner,
+                interval_seconds=0.1,
+                stop_event=stop_event
+            ),
+            _auto_stop()
+        )
+    
+    assert runner.run_all.called
+    await runner.close()
+    await client.close()

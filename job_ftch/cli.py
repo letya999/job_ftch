@@ -5,6 +5,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from typing import TYPE_CHECKING
+
+import structlog
+
+if TYPE_CHECKING:
+    from job_ftch.adapters.telegram_bot.bot import HttpTelegramBotClient, TelegramBotService
 
 from job_ftch.application.builder import (
     run_pipeline_from_settings,
@@ -133,6 +139,9 @@ def parse_args() -> argparse.Namespace:
     )
 
     return parser.parse_args()
+
+
+logger = structlog.get_logger(__name__)
 
 
 def build_settings(args: argparse.Namespace) -> Settings:
@@ -388,13 +397,37 @@ async def _handle_runs(settings: Settings, args: argparse.Namespace) -> None:
         await runner.close()
 
 
+async def _run_bot_with_scheduler(
+    service: TelegramBotService,
+    client: HttpTelegramBotClient,
+    runner: TenantRunner,
+    interval_seconds: int,
+    stop_event: asyncio.Event | None = None,
+) -> None:
+    """Run bot polling and tenant pipeline scheduler concurrently."""
+    from job_ftch.adapters.telegram_bot.bot import run_polling_loop
+
+    async def _scheduler_loop() -> None:
+        while stop_event is None or not stop_event.is_set():
+            await asyncio.sleep(interval_seconds)
+            try:
+                await runner.run_all()
+                logger.info("scheduled_run_complete", tenants=runner.tenant_ids())
+            except Exception as exc:
+                logger.error("scheduled_run_failed", error=str(exc))
+
+    await asyncio.gather(
+        run_polling_loop(service=service, client=client, stop_event=stop_event),
+        _scheduler_loop(),
+    )
+
+
 def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
     try:
         from job_ftch.adapters.telegram_bot.bot import (
             HttpTelegramBotClient,
             TelegramBotService,
             load_bot_config,
-            run_polling_loop,
         )
         from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
     except ImportError:
@@ -422,7 +455,15 @@ def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
     else:
         client = HttpTelegramBotClient(bot_config.token)
         service = TelegramBotService(runner=runner, sender=client, config=bot_config)
-        asyncio.run(run_polling_loop(service=service, client=client))
+        interval = settings.schedule_interval_seconds or (4 * 3600)
+        asyncio.run(
+            _run_bot_with_scheduler(
+                service=service,
+                client=client,
+                runner=runner,
+                interval_seconds=interval,
+            )
+        )
 
 
 def _run_mcp_server(settings: Settings, args: argparse.Namespace) -> None:
