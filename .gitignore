@@ -53,6 +53,7 @@ jobs_*.json
 artifacts/
 output/
 .runtime/
+.serena/
 
 # Test run artifacts
 *.jsonl
@@ -63,8 +64,16 @@ global_test_results.jsonl
 # Dev artifacts / notes
 JOBSEEK_*.md
 
-# Test configs
+# Test/dev configs (not for prod)
 config/test_*.yaml
+config/sources_e2e_*.yaml
+config/all_sources_e2e_test.yaml
+config/tg_debug_*.yaml
+config/tg_11ch_safe.yaml
+config/tg_channels_11.yaml
+
+# Debug fixtures
+fixtures/debug/
 
 # Agent test-run output (quiet pytest redirect)
 .pytest.out
