@@ -27,12 +27,14 @@ if TYPE_CHECKING:
 router = Router(name="search_digest")
 
 
+import time
+
 @router.message(Command("digest"))
 async def cmd_digest(
     message: Message,
     runner: TenantRunner,
     config: TelegramBotConfig,
-    reranker: CrossEncoderPort | None = None,
+    state: FSMContext,
 ) -> None:
     """Handle /digest command."""
     if message.text is None:
@@ -42,33 +44,31 @@ async def cmd_digest(
     digest_tenant_id = args[0] if args else (tenant_ids[0] if tenant_ids else "default")
     user_id_str = str(message.from_user.id if message.from_user else 0)
 
+    # Fetch a larger pool to rerank via active profile natively
+    pool_size = config.digest_size * 10
     jobs = await runner.latest_jobs(
         digest_tenant_id,
-        limit=config.digest_size * 5,  # fetch more for reranking
+        limit=pool_size,
         user_id=user_id_str,
     )
 
-    if reranker and len(jobs) > 1:
-        try:
-            # Simple heuristic: use a generic query for now
-            # TODO: get specific interests from profile if available
-            profile_query = "software engineer developer"
-            docs = [f"{j.title} {(j.description or '')[:200]}" for j in jobs]
-            scores = await reranker.rerank(profile_query, docs)
-            jobs = [
-                j
-                for j, _ in sorted(
-                    zip(jobs, scores, strict=False), key=lambda x: x[1], reverse=True
-                )
-            ]
-        except Exception:
-            pass  # Fallback to default order
+    if not jobs:
+        await message.answer("No jobs available.")
+        return
+
+    # Store ordered job IDs in FSM
+    digest_hash = hashlib.md5(f"digest_{user_id_str}_{time.time()}".encode()).hexdigest()[:8]
+    job_ids = [j.item_id for j in jobs]
+    await state.update_data(
+        {f"digest_jobs_{digest_hash}": job_ids, f"tenant_{digest_hash}": digest_tenant_id}
+    )
 
     # Format first page
-    text = format_job_digest(jobs, page=0, page_size=config.digest_size)
+    page_jobs = jobs[:config.digest_size]
+    text = format_job_digest(page_jobs, page=0, page_size=config.digest_size)
     total_pages = (len(jobs) + config.digest_size - 1) // config.digest_size
 
-    kb = build_digest_kb(tenant_id=digest_tenant_id, page=0, total_pages=total_pages)
+    kb = build_digest_kb(digest_hash=digest_hash, page=0, total_pages=total_pages)
     await message.answer(text, reply_markup=kb)
 
 
@@ -78,26 +78,39 @@ async def handle_digest_page(
     callback_data: DigestPage,
     runner: TenantRunner,
     config: TelegramBotConfig,
+    state: FSMContext,
 ) -> None:
     """Handle digest pagination."""
     if not isinstance(callback.message, Message):
         return
-    jobs = await runner.latest_jobs(
-        callback_data.tenant_id,
-        limit=(callback_data.page + 1) * config.digest_size,
-    )
+        
+    data = await state.get_data()
+    job_ids = data.get(f"digest_jobs_{callback_data.digest_hash}")
+    tenant_id = data.get(f"tenant_{callback_data.digest_hash}")
+
+    if not job_ids:
+        await callback.answer("Digest session expired. Please run /digest again.", show_alert=True)
+        return
+
+    start_idx = callback_data.page * config.digest_size
+    end_idx = start_idx + config.digest_size
+    page_ids = job_ids[start_idx:end_idx]
+
+    jobs = []
+    for jid in page_ids:
+        job = await runner.get_job(jid, tenant_id=tenant_id)
+        if job:
+            jobs.append(job)
+
+    if not jobs:
+        await callback.answer("No more jobs.", show_alert=True)
+        return
 
     text = format_job_digest(jobs, page=callback_data.page, page_size=config.digest_size)
-    # We don't know total jobs easily without fetching all, but we can guess
-    # For simplicity, always show "Next" if we got a full page
-    total_pages = (
-        callback_data.page + 2
-        if len(jobs) >= (callback_data.page + 1) * config.digest_size
-        else callback_data.page + 1
-    )
+    total_pages = (len(job_ids) + config.digest_size - 1) // config.digest_size
 
     kb = build_digest_kb(
-        tenant_id=callback_data.tenant_id,
+        digest_hash=callback_data.digest_hash,
         page=callback_data.page,
         total_pages=total_pages,
     )

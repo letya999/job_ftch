@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from aiogram.types import Message
 
     from job_ftch.application.tenant_runner import TenantRunner
+    from adapters.telegram_bot.config import TelegramBotConfig
 
 router = Router(name="base")
 
@@ -55,7 +56,9 @@ async def cmd_status(message: Message, runner: TenantRunner) -> None:
 
 
 @router.message(Command("sources"))
-async def cmd_sources(message: Message, runner: TenantRunner) -> None:
+async def cmd_sources(
+    message: Message, runner: TenantRunner, config: TelegramBotConfig
+) -> None:
     """Handle /sources command."""
     args = message.text.split()[1:] if message.text else []
     tenant_ids = runner.tenant_ids()
@@ -65,8 +68,13 @@ async def cmd_sources(message: Message, runner: TenantRunner) -> None:
     if not payloads:
         await message.answer("No configured sources.")
         return
-    lines = [
-        f"{item['source_name']}: {item['status']} ({item['origin']})"
-        for item in payloads[:10]
-    ]
+
+    is_admin = bool(message.from_user and message.from_user.id in config.admin_user_ids)
+    lines = []
+    for item in payloads[:10]:
+        if is_admin:
+            lines.append(f"{item['source_name']}: {item['status']} ({item['origin']})")
+        else:
+            lines.append(f"{item['source_name']}: {item['status']}")
+            
     await message.answer("\n".join(lines))

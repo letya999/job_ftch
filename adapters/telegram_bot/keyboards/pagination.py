@@ -10,7 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 class DigestPage(CallbackData, prefix="dp"):
     """Callback data for digest pagination."""
 
-    tenant_id: str
+    digest_hash: str
     page: int
 
 
@@ -21,21 +21,21 @@ class SearchPage(CallbackData, prefix="sp"):
     page: int
 
 
-def build_digest_kb(tenant_id: str, page: int, total_pages: int) -> InlineKeyboardMarkup:
+def build_digest_kb(digest_hash: str, page: int, total_pages: int) -> InlineKeyboardMarkup:
     """Build keyboard for digest pagination."""
     builder = InlineKeyboardBuilder()
     if page > 0:
         builder.add(
             InlineKeyboardButton(
                 text="⬅️ Previous",
-                callback_data=DigestPage(tenant_id=tenant_id, page=page - 1).pack(),
+                callback_data=DigestPage(digest_hash=digest_hash, page=page - 1).pack(),
             )
         )
     if page < total_pages - 1:
         builder.add(
             InlineKeyboardButton(
                 text="Next ➡️",
-                callback_data=DigestPage(tenant_id=tenant_id, page=page + 1).pack(),
+                callback_data=DigestPage(digest_hash=digest_hash, page=page + 1).pack(),
             )
         )
     return builder.as_markup()

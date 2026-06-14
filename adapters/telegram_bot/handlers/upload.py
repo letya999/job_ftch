@@ -86,7 +86,7 @@ async def set_mode(callback: CallbackQuery, callback_data: ModeCallback, state: 
     await callback.message.edit_text(f"Upload mode set to: {callback_data.mode.replace('_', ' ')}")
 
 
-@router.message(F.document)
+@router.message(F.document, F.chat.type == "private")
 async def handle_document(
     message: Message,
     bot: Bot,
