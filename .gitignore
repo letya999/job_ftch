@@ -81,3 +81,9 @@ fixtures/debug/
 # Docker
 docker-compose.yml
 docker-compose.override.yml
+
+# Extra caches/envs
+.benchmarks/
+.hypothesis/
+.venv-*/
+*.xlsx
