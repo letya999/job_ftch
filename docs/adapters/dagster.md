@@ -2,7 +2,7 @@
 
 ```python
 from job_ftch import configure
-from job_ftch.adapters.dagster_adapter import create_definitions
+from adapters.dagster.adapter import create_definitions
 from job_ftch.domain.source_spec import LocalFixtureSpec
 
 builder = configure("config/tenant.yaml")

@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from job_ftch.adapters.source_validator import check_url_reachable, validate_sources
+from job_ftch.application.source_validator import check_url_reachable, validate_sources
 
 
 @pytest.mark.asyncio
@@ -44,7 +44,7 @@ async def test_validate_sources_mixed():
         return False, "404"
 
     with patch(
-        "job_ftch.adapters.source_validator.check_url_reachable", side_effect=mock_reachable
+        "job_ftch.application.source_validator.check_url_reachable", side_effect=mock_reachable
     ):
         results = await validate_sources(links)
         assert results["https://ok.com"] == (True, "")

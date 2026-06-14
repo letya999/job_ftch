@@ -7,12 +7,14 @@ import pytest
 from job_ftch.config import Settings
 from scripts.evaluate_extraction import evaluate_fixture
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 @pytest.mark.asyncio
 async def test_extraction_evaluation_harness_reports_gold_fixture_matches() -> None:
     report = await evaluate_fixture(
         Settings.model_validate({"llm_backend": "heuristic"}),
-        Path("fixtures/extraction/gold_samples.jsonl"),
+        _REPO_ROOT / "fixtures" / "extraction" / "gold_samples.jsonl",
     )
 
     assert report["samples"] == 2

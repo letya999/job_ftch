@@ -71,7 +71,7 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
 
     monkeypatch.setitem(sys.modules, "fastmcp", type("FastMCPModule", (), {"FastMCP": FakeMCP}))
 
-    from job_ftch.adapters.mcp.server import create_server
+    from adapters.mcp.server import create_server
 
     server = create_server(configs_dir=configs_dir)
     await server.startup()
@@ -180,7 +180,7 @@ async def test_mcp_server_real_fastmcp_tool_handlers(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    from job_ftch.adapters.mcp.server import create_server
+    from adapters.mcp.server import create_server
 
     server = create_server(configs_dir=configs_dir)
     await server.startup()

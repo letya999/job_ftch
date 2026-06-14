@@ -149,3 +149,37 @@ async def test_pipeline_detects_near_duplicates_and_reruns_are_idempotent() -> N
     assert rerun_summary.emitted == 0
     assert rerun_summary.drop_reasons["already_processed"] == 1
     assert rerun_sink.items == []
+
+
+# ---------------------------------------------------------------------------
+# Store-error behaviour (P2 — from TEST_IMPROVEMENTS.md §9)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_dedup_node_store_error_propagates() -> None:
+    """When store.has_dedup_key() raises, DedupNode must propagate the exception."""
+
+    class ExplodingStore:
+        async def has_dedup_key(self, key: str) -> bool:
+            raise RuntimeError("store unavailable")
+
+        async def list_dedup_keys(self, kind: str | None = None) -> tuple[object, ...]:
+            return ()
+
+        async def remember_dedup_key(self, record: object) -> None:
+            pass
+
+        async def record_duplicate(self, record: object) -> None:
+            pass
+
+    node = DedupNode(ExplodingStore())  # type: ignore[arg-type]
+    item = _career_item(
+        external_id="1",
+        job_url="https://careers.acme.com/1",
+        text="Senior ML Engineer at Acme Corp remote position",
+    )
+
+    with pytest.raises(RuntimeError, match="store unavailable"):
+        await node.process(item)

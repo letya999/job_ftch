@@ -1,11 +1,8 @@
 """Tests for profile example management functions."""
+
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
-import pytest
-
-from job_ftch.adapters.profile_inputs import (
+from job_ftch.application.profile_inputs import (
     add_example_to_profile,
     build_profile_from_resume_text,
     list_examples,

@@ -1,4 +1,5 @@
 """Cross-encoder reranker using fastembed TextCrossEncoder."""
+
 from __future__ import annotations
 
 import asyncio
@@ -33,6 +34,7 @@ class JinaRerankerProvider:
     def _get_model(self) -> Any:
         if self._model is None:
             from fastembed.rerank.cross_encoder import TextCrossEncoder
+
             self._model = TextCrossEncoder(model_name=self._model_name)
             logger.info("reranker_model_loaded", model=self._model_name)
         return self._model

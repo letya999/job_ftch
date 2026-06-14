@@ -2,7 +2,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from job_ftch.adapters.telegram_bot.bot import TelegramBotService
+pytest.importorskip("aiogram")
+
+from adapters.telegram_bot.bot import TelegramBotService
 from job_ftch.domain.source_spec import TelegramChannelSpec
 
 
@@ -28,7 +30,7 @@ async def test_bot_addsources_command():
 
     # Mock build_source_spec_from_input
     with MagicMock():
-        import job_ftch.adapters.telegram_bot.bot as bot_module
+        import adapters.telegram_bot.bot as bot_module
 
         original_build = bot_module.build_source_spec_from_input
         bot_module.build_source_spec_from_input = AsyncMock(
@@ -66,7 +68,7 @@ async def test_bot_addsources_partial_failure():
     service = TelegramBotService(runner=runner, sender=sender, config=config)
 
     with MagicMock():
-        import job_ftch.adapters.telegram_bot.bot as bot_module
+        import adapters.telegram_bot.bot as bot_module
 
         original_build = bot_module.build_source_spec_from_input
 

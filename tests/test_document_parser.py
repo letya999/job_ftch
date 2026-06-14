@@ -1,9 +1,8 @@
 """Tests for document text extraction."""
+
 from __future__ import annotations
 
-import pytest
-
-from job_ftch.adapters.document_parser import parse_document
+from job_ftch.infrastructure.document_parser import parse_document
 
 
 def test_parse_txt():
@@ -28,7 +27,7 @@ def test_parse_html():
 
 
 def test_parse_unknown_extension_utf8():
-    content = "Привет мир".encode("utf-8")
+    content = "Привет мир".encode()
     result = parse_document(content, "file.xyz")
     assert "Привет" in result
 

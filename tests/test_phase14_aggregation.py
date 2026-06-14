@@ -1,3 +1,4 @@
+# DEPRECATED: migrated to tests/nodes/test_aggregation.py
 """Comprehensive unit and integration tests for Phase 14 — Cross-source job aggregation."""
 
 import pytest

@@ -8,7 +8,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from job_ftch.adapters.telegram_bot.bot import TelegramBotConfig, TelegramBotService
+pytest.importorskip("aiogram")
+
+from adapters.telegram_bot.bot import TelegramBotConfig, TelegramBotService
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.domain import RawItem, SourceKind, TenantConfig
 
@@ -120,7 +122,7 @@ async def test_webhook_bridge_handles_run_and_search_updates(
         ),
     )
 
-    from job_ftch.adapters.telegram_bot.api import create_app
+    from adapters.telegram_bot.api import create_app
 
     app = create_app(configs_dir=tmp_path / "configs", runner=runner, bot_service=service)
 
@@ -186,7 +188,7 @@ async def test_bot_access_control_and_status_endpoint(
             rate_limit_seconds=0.0,
         ),
     )
-    from job_ftch.adapters.telegram_bot.api import create_app
+    from adapters.telegram_bot.api import create_app
 
     app = create_app(configs_dir=tmp_path / "configs", runner=runner, bot_service=service)
     webhook = app.routes[("POST", "/webhook/telegram")]
@@ -351,7 +353,7 @@ async def test_webhook_real_fastapi_token_auth(tmp_path: Path) -> None:
     pytest.importorskip("fastapi")
     import httpx
 
-    from job_ftch.adapters.telegram_bot.api import create_app
+    from adapters.telegram_bot.api import create_app
 
     runner = _build_runner(tmp_path)
     sender = FakeSender()
@@ -493,7 +495,7 @@ async def test_bot_mode_command(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_bot_with_scheduler(tmp_path: Path) -> None:
-    from job_ftch.adapters.telegram_bot.bot import HttpTelegramBotClient
+    from adapters.telegram_bot.bot import HttpTelegramBotClient
     from job_ftch.cli import _run_bot_with_scheduler
 
     runner = _build_runner(tmp_path)
@@ -519,7 +521,7 @@ async def test_bot_with_scheduler(tmp_path: Path) -> None:
         stop_event.set()
 
     # Patch run_polling_loop to return immediately
-    with patch("job_ftch.adapters.telegram_bot.bot.run_polling_loop", new_callable=AsyncMock):
+    with patch("adapters.telegram_bot.bot.run_polling_loop", new_callable=AsyncMock):
         await asyncio.gather(
             _run_bot_with_scheduler(
                 service=service,

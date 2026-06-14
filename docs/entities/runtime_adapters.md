@@ -65,7 +65,7 @@ FastAPI-серверу с просьбой запустить разные ис�
 ## Встроенные адаптеры
 
 ### 1. FastAPI Adapter Предоставляет стандартный REST API.
-```python from job_ftch.adapters.fastapi_adapter import create_app
+```python from adapters.fastapi.adapter import create_app
 
 app = create_app(builder, search_backend=search_backend)
 # Эндпоинты:
@@ -79,7 +79,7 @@ app = create_app(builder, search_backend=search_backend)
 ### 2. MCP Adapter (TenantMCPServer)
 Предоставляет Model Context Protocol (MCP) сервер для
 интеграции с AI-агентами (например, Claude Desktop).
-```python from job_ftch.adapters.mcp.server import create_server
+```python from adapters.mcp.server import create_server
 
 server = create_server(configs_dir="config/tenants")
 await server.startup()
@@ -91,7 +91,7 @@ server.run(transport="stdio")
 пайплайнами.
 
 ### 3. Dagster Adapter Интеграция с ETL-оркестратором Dagster.
-```python from job_ftch.adapters.dagster_adapter import create_definitions
+```python from adapters.dagster.adapter import create_definitions
 
 # Превращает конфигурации (SourceSpec) в Asset'ы Dagster defs = create_definitions(builder, specs=source_specs)
 ```
@@ -100,7 +100,7 @@ server.run(transport="stdio")
 enterprise-среде.
 
 ### 4. FastStream Adapter Интеграция с брокерами сообщений (Kafka, RabbitMQ, NATS).
-```python from job_ftch.adapters.faststream_adapter import register_faststream_handlers
+```python from adapters.faststream.adapter import register_faststream_handlers
 
 register_faststream_handlers(
     broker,

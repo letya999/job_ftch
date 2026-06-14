@@ -1,4 +1,5 @@
 """Tests for JinaRerankerProvider (mocked)."""
+
 from __future__ import annotations
 
 import pytest

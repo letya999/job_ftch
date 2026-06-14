@@ -1,3 +1,4 @@
+# DEPRECATED: migrated to tests/nodes/test_hard_filter.py
 import json
 
 import pytest

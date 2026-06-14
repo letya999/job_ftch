@@ -1,4 +1,5 @@
 """Buffering sink that collects items in memory for batch post-processing."""
+
 from __future__ import annotations
 
 

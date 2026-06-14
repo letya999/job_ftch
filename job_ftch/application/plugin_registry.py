@@ -34,8 +34,9 @@ class PluginRegistry:
     def all_entries(self) -> list[PluginEntry]:
         return list(self._entries.values())
 
-    def mark_state(self, kind: PluginKind, name: str, state: PluginState,
-                   error: Exception | None = None) -> None:
+    def mark_state(
+        self, kind: PluginKind, name: str, state: PluginState, error: Exception | None = None
+    ) -> None:
         entry = self._entries.get((kind, name))
         if entry is not None:
             entry.state = state
@@ -45,5 +46,6 @@ class PluginRegistry:
         """Test helper — clears all registrations."""
         with self._lock:
             self._entries.clear()
+
 
 _default_registry = PluginRegistry()

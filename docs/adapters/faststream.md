@@ -4,7 +4,7 @@
 from faststream.nats import NatsBroker
 
 from job_ftch import configure
-from job_ftch.adapters.faststream_adapter import register_faststream_handlers
+from adapters.faststream.adapter import register_faststream_handlers
 
 broker = NatsBroker("nats://localhost:4222")
 builder = configure("config/tenant.yaml")

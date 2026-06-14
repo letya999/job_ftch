@@ -23,7 +23,7 @@ class QualityScoringNode:
         score += 0.1 if item.location else 0.0
         score += 0.1 if item.work_mode.value != "unknown" else 0.0
         score += 0.1 if item.compensation else 0.0
-        score += 0.15 if len(item.description) >= 120 else 0.05
+        score += 0.15 if len(item.description or "") >= 120 else 0.05
         score += 0.1 * (item.relevance_score or 0.0)
         score += 0.05 if item.skills_explicit else 0.0
         score -= min(0.2, 0.05 * len(item.risk_signals))

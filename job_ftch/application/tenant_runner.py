@@ -1080,7 +1080,7 @@ class TenantRunner:
         if record is None:
             return groups
 
-        from job_ftch.adapters.profile_inputs import build_profile_catalog
+        from job_ftch.application.profile_inputs import build_profile_catalog
         from job_ftch.nodes.match_scoring import MultiProfileMatchNode
 
         node = MultiProfileMatchNode(build_profile_catalog(record.profile))

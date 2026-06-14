@@ -19,7 +19,7 @@ def job_to_draft(job: Job) -> JobDraft:
         languages_detected=job.languages_detected,
         title_raw=job.title_raw or job.title,
         company_name_raw=job.company,
-        description_raw=job.description,
+        description_raw=job.description or "",
         location_raw=job.location,
         work_mode=job.work_mode,
         compensation=job.compensation,
@@ -125,7 +125,7 @@ def draft_to_record(draft: JobDraft) -> JobRecord:
 def job_to_record(job: Job) -> JobRecord:
     return JobRecord(
         **job.model_dump(),
-        description_raw=job.description,
+        description_raw=job.description or "",
         description_clean=job.description,
         company_name_raw=job.company,
         company_name_normalized=job.company_canonical or job.company,

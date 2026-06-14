@@ -1,3 +1,4 @@
+# DEPRECATED: migrated to tests/nodes/test_normalization.py
 import pytest
 
 from job_ftch.domain import JobDraft, JobRecord, Seniority, SkillTag, SourceKind

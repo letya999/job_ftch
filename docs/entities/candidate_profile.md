@@ -71,7 +71,7 @@
 которая берет сырой текст резюме и автоматически (с помощью
 языковой модели) формирует `ManagedCandidateProfile`.
 
-```python from job_ftch.adapters.profile_inputs import build_profile_from_resume_text
+```python from job_ftch.application.profile_inputs import build_profile_from_resume_text
 
 # Отдаем просто сырой текст из PDF managed_profile = build_profile_from_resume_text(
     text="Опытный Python разработчик, 5 лет в ML, работал с FastAPI...",

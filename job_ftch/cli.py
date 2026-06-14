@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import structlog
 
 if TYPE_CHECKING:
-    from job_ftch.adapters.telegram_bot.bot import HttpTelegramBotClient, TelegramBotService
+    from adapters.telegram_bot.bot import HttpTelegramBotClient, TelegramBotService
 
 from job_ftch.application.builder import (
     run_pipeline_from_settings,
@@ -418,7 +418,7 @@ async def _run_bot_with_scheduler(
 
         asyncio.create_task(_warmup())
 
-    from job_ftch.adapters.telegram_bot.bot import run_polling_loop
+    from adapters.telegram_bot.bot import run_polling_loop
 
     async def _scheduler_loop() -> None:
         while stop_event is None or not stop_event.is_set():
@@ -437,7 +437,7 @@ async def _run_bot_with_scheduler(
 
 def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
     try:
-        from job_ftch.adapters.telegram_bot.bot import (
+        from adapters.telegram_bot.bot import (
             HttpTelegramBotClient,
             TelegramBotService,
             load_bot_config,
@@ -471,8 +471,8 @@ def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
         try:
             import uvicorn
 
-            from job_ftch.adapters.telegram_bot.api import create_app
-            from job_ftch.adapters.telegram_bot.bot import (
+            from adapters.telegram_bot.api import create_app
+            from adapters.telegram_bot.bot import (
                 HttpTelegramBotClient,
                 TelegramBotService,
             )
@@ -480,15 +480,12 @@ def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
             print("Install job-ftch[api] to use webhook mode.")
             raise SystemExit(1) from None
 
-        client = HttpTelegramBotClient(bot_config.token)
-        service = TelegramBotService(
+        app = create_app(
+            configs_dir=settings.configs_dir,
             runner=runner,
-            sender=client,
-            config=bot_config,
             embedding_provider=embedding_provider,
             reranker=reranker,
         )
-        app = create_app(configs_dir=settings.configs_dir, runner=runner, bot_service=service)
         uvicorn.run(app, host=args.host, port=args.port)
     else:
         client = HttpTelegramBotClient(bot_config.token)
@@ -514,7 +511,7 @@ def _run_mcp_server(settings: Settings, args: argparse.Namespace) -> None:
     if settings.configs_dir is None:
         msg = "--configs-dir or JOB_FTCH_CONFIGS_DIR is required for mcp-server."
         raise ValueError(msg)
-    from job_ftch.adapters.mcp.server import create_server
+    from adapters.mcp.server import create_server
 
     server = create_server(configs_dir=settings.configs_dir, base_settings=settings)
     asyncio.run(server.startup())

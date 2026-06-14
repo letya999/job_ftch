@@ -233,3 +233,73 @@ async def test_pipeline_quarantines_source_fetch_failures(tmp_path: Path) -> Non
     assert summary.failed == 1
     assert summary.quarantined == 1
     assert quarantine_record["reason"] == RawItemRejectionReason.SOURCE_FETCH_ERROR
+
+
+# ---------------------------------------------------------------------------
+# Boundary tests (P2 — from TEST_IMPROVEMENTS.md §8)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "length,should_pass",
+    [
+        (11, True),  # length - 1
+        (12, True),  # exactly at limit
+        (13, False),  # length + 1
+    ],
+)
+@pytest.mark.asyncio
+async def test_sanitize_node_text_length_boundary(length: int, should_pass: bool) -> None:
+    """SanitizeNode truncates text at exactly max_text_length boundary."""
+    node = SanitizeNode(max_text_length=12)
+    item = RawItem.model_construct(
+        stable_id="",
+        source_kind=SourceKind.DEBUG,
+        source_name="debug",
+        external_id="1",
+        url=None,
+        text="x" * length,
+        metadata={},
+    )
+    if should_pass:
+        result = await node.process(item)
+        assert result is not None
+    else:
+        with pytest.raises(RawItemRejected) as exc:
+            await node.process(item)
+        assert exc.value.reason == RawItemRejectionReason.TEXT_TOO_LONG
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sanitize_node_url_with_port_allowed() -> None:
+    """URLs containing explicit port numbers are accepted when host is whitelisted."""
+    node = SanitizeNode(allowed_career_site_hosts=("careers.example.com",))
+    item = RawItem(
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="Example",
+        external_id="1",
+        url="https://careers.example.com:443/job/1",
+        text="Valid job description here with enough content.",
+    )
+    result = await node.process(item)
+    assert result is not None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sanitize_node_rejects_invisible_only_external_id() -> None:
+    """external_id consisting solely of invisible Unicode characters is rejected."""
+    node = SanitizeNode()
+    item = RawItem.model_construct(
+        stable_id="",
+        source_kind=SourceKind.DEBUG,
+        source_name="debug",
+        external_id="\u200b\u00a0",
+        url=None,
+        text="valid text that is long enough",
+        metadata={},
+    )
+    with pytest.raises(RawItemRejected):
+        await node.process(item)

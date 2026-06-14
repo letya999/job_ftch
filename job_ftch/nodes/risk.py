@@ -19,7 +19,7 @@ class RiskScoringNode:
             signals.append("suspicious_domain")
         if "telegram" in lowered and "dm" in lowered and item.canonical_url is None:
             signals.append("contact_only_apply_flow")
-        if len(item.description) < 80:
+        if len(item.description or "") < 80:
             signals.append("low_information_density")
 
         risk_score = min(1.0, round(len(set(signals)) * 0.2, 2))

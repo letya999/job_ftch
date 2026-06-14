@@ -1,4 +1,4 @@
-from job_ftch.adapters.profile_inputs import build_profile_from_resume_text
+from job_ftch.application.profile_inputs import build_profile_from_resume_text
 
 
 def test_heuristic_extraction():
@@ -32,7 +32,7 @@ def test_heuristic_extraction():
 
 
 def test_add_example_to_profile():
-    from job_ftch.adapters.profile_inputs import add_example_to_profile
+    from job_ftch.application.profile_inputs import add_example_to_profile
 
     text = "Senior Python Developer"
     managed = build_profile_from_resume_text(text, user_id="123")

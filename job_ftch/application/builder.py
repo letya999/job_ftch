@@ -457,13 +457,13 @@ def build_nodes(
     ]
 
     if settings.language_detection_enabled:
-        from job_ftch.adapters.language_detector import LinguaLanguageDetector
+        from job_ftch.infrastructure.language.detector import LinguaLanguageDetector
         from job_ftch.nodes.language_detection import LanguageDetectionNode
 
         nodes.append(LanguageDetectionNode(LinguaLanguageDetector()))
 
     if settings.translation_enabled:
-        from job_ftch.adapters.translation import CTranslate2Translator
+        from job_ftch.infrastructure.language.translator import CTranslate2Translator
         from job_ftch.nodes.translation import TranslationNode
 
         translator = CTranslate2Translator()

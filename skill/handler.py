@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from job_ftch.adapters.mcp.server import create_server
+from adapters.mcp.server import create_server
 
 if TYPE_CHECKING:
     from pathlib import Path

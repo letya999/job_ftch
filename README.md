@@ -8,6 +8,22 @@
 
 ---
 
+### Core Concept & Entities
+**job_ftch** ingests jobs from Telegram, career sites, and APIs, then normalizes, deduplicates, and scores them against candidate profiles. The final vacancies are delivered via a Telegram bot, MCP server, or CLI.
+
+| Entity | Description | Docs |
+| :--- | :--- | :--- |
+| **RawItem** | Unprocessed data from source (HTML, Telegram message). | [entities/RawItem](docs/entities/README.md) |
+| **JobDraft** | Extracted but not yet normalized job data. | [entities/JobDraft](docs/entities/README.md) |
+| **JobRecord** | Fully normalized and scored job record. | [entities/JobRecord](docs/entities/README.md) |
+| **JobGroup** | Canonical job aggregated across multiple sources. | [entities/JobGroup](docs/entities/README.md) |
+| **SourceSpec** | Declarative configuration for a job source. | [entities/SourceSpec](docs/entities/README.md) |
+| **FilterProfile** | Matching criteria (keywords, relevance) for a tenant. | [entities/FilterProfile](docs/entities/README.md) |
+| **RunSummary** | Statistics and outcome of a single pipeline run. | [entities/RunSummary](docs/entities/README.md) |
+| **RuntimeAdapter**| Wrapper for specific runtimes (Bot, MCP, FastAPI). | [entities/RuntimeAdapter](docs/entities/README.md) |
+
+---
+
 ## Support status of source types
 
 Support status of source types. Stable = production-ready, Experimental = works but less battle-tested, Planned = spec exists, not production.
@@ -190,7 +206,7 @@ graph LR
             QD["QdrantVectorBackend\nsemantic search"]
         end
     end
-    subgraph ADAPTERS["Runtime adapters"]
+    subgraph ADAPTERS["adapters/ (repo root)"]
         MCP["FastMCP server\nstdio + SSE / HTTP\ntools: search_jobs · run_pipeline\nresources: job://"]
         FST["FastStream worker\nqueue consumer"]
         SCHED["Scheduler daemon"]
@@ -255,7 +271,7 @@ graph LR
         NATS["NATSTarget"]
         SLACK["SlackTarget · DiscordTarget"]
     end
-    subgraph ADAPTERS["Adapters"]
+    subgraph ADAPTERS["adapters/ (repo root)"]
         MCP["FastMCP server\n15+ tools · job:// resources"]
         BOT["Telegram bot\naiogram · /search · /subscribe · /digest"]
         FAPI["FastAPI bridge\nwebhook mode"]
@@ -325,9 +341,9 @@ C4Container
 
     Container_Boundary(jf, "job_ftch system") {
         Container(cli, "CLI runner", "Python / app.py", "Assembles pipeline from Settings / TenantConfig and runs once or as daemon.")
-        Container(mcp, "FastMCP server", "Python / FastMCP", "MCP protocol server. 15+ tools and job:// resources. stdio + SSE transports.")
-        Container(bot, "Telegram bot", "Python / aiogram", "/search, /subscribe, /digest. Polling; optional FastAPI webhook bridge.")
-        Container(fst, "FastStream worker", "Python / FastStream", "Wraps pipeline as message queue consumer/producer.")
+        Container(mcp, "FastMCP server", "adapters/mcp/", "MCP protocol server. 15+ tools and job:// resources. stdio + SSE transports.")
+        Container(bot, "Telegram bot", "adapters/telegram_bot/", "/search, /subscribe, /digest. Polling; optional FastAPI webhook bridge.")
+        Container(fst, "FastStream worker", "adapters/faststream/", "Wraps pipeline as message queue consumer/producer.")
 
         Container(pipeline, "Pipeline core", "Python / asyncio", "Item-by-item orchestration: Source fetch → node chain → Sink emit. RunSummary, exception handling.")
         Container(sources, "Source adapters", "Python", "Telegram (MTProto), CareerSite (HTML), Official APIs, WebhookSource, WebSocketSource, DebugSource.")
@@ -442,7 +458,7 @@ C4Component
 ## Quick Start
 
 ```bash
-git clone https://github.com/[owner]/job_ftch
+git clone https://github.com/<OWNER>/job_ftch
 cd job_ftch
 uv sync
 cp .env.example .env
@@ -457,24 +473,16 @@ uv run python app.py \
   --max-items 20
 ```
 
-Run a Telegram channel:
+### Run the Telegram bot (Docker)
 
+1. Fill `TELEGRAM_BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and `OPENAI_API_KEY` in `.env`.
+2. Launch the monolith MVP (core + bot in one container):
 ```bash
-uv run python app.py \
-  --source-backend telegram_channel \
-  --telegram-entity ai_jobs \
-  --max-items 100
+docker compose up -d
 ```
+See `adapters/telegram_bot/` for details.
 
-Run a career site:
-
-```bash
-uv run python app.py \
-  --source-backend career_site \
-  --career-site-url https://job-boards.greenhouse.io/clickhouse
-```
-
-Evaluate extraction quality offline:
+### Manual runs via CLI
 
 ```bash
 uv run python scripts/evaluate_extraction.py \

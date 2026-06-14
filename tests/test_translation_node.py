@@ -1,7 +1,9 @@
 """Tests for TranslationNode."""
+
 from __future__ import annotations
 
 import pytest
+
 from job_ftch.domain import JobRecord
 
 
@@ -19,6 +21,7 @@ def make_job_record():
         }
         defaults.update(kwargs)
         return JobRecord(**defaults)
+
     return _make
 
 

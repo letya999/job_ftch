@@ -105,6 +105,9 @@ jobs:
       - name: Bandit security scan
         run: uv run bandit -r job_ftch scripts/check_module_boundaries.py -ll
 
+      - name: Dependency security audit
+        run: uv run pip-audit --ignore-vuln GHSA-w596-868m-8v6m
+
   core-import-check:
     name: Core Import Hygiene
     runs-on: ubuntu-latest

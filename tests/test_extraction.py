@@ -71,7 +71,8 @@ async def test_heuristic_llm_provider_extracts_work_mode_and_title() -> None:
 
 @pytest.mark.asyncio
 async def test_gold_samples_regression_fixture() -> None:
-    fixture_path = Path("fixtures/extraction/gold_samples.jsonl")
+    _REPO_ROOT = Path(__file__).resolve().parents[1]
+    fixture_path = _REPO_ROOT / "fixtures" / "extraction" / "gold_samples.jsonl"
     extractor = ExtractionNode(HeuristicLLMProvider())
 
     for line in fixture_path.read_text(encoding="utf-8").splitlines():

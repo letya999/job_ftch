@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from job_ftch.adapters.source_inputs import build_source_spec_from_input
+from job_ftch.application.source_inputs import build_source_spec_from_input
 
 
 @pytest.mark.asyncio
@@ -22,7 +22,7 @@ async def test_build_source_spec_from_telegram_input_auto_detects_group(
         return "telegram_group"
 
     monkeypatch.setattr(
-        "job_ftch.adapters.source_inputs._detect_telegram_source_type",
+        "job_ftch.application.source_inputs._detect_telegram_source_type",
         _fake_detect,
     )
 

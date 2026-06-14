@@ -422,7 +422,7 @@ class Job(BaseModel):
     title: str | None = None
     company: str | None = None
     company_canonical: str | None = None
-    description: str = Field(min_length=1)
+    description: str | None = Field(default=None, min_length=1)
     canonical_url: AnyHttpUrl | None = None
     location: str | None = None
     work_mode: WorkMode = WorkMode.UNKNOWN

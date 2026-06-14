@@ -6,11 +6,11 @@ from typing import cast
 
 import pytest
 
+from adapters.dagster.adapter import create_definitions
+from adapters.fastapi.adapter import create_app
+from adapters.faststream.adapter import register_faststream_handlers
+from adapters.mcp.adapter import create_mcp_server
 from job_ftch import PipelineBuilder
-from job_ftch.adapters.dagster_adapter import create_definitions
-from job_ftch.adapters.fastapi_adapter import create_app
-from job_ftch.adapters.faststream_adapter import register_faststream_handlers
-from job_ftch.adapters.mcp_adapter import create_mcp_server
 from job_ftch.domain.source_spec import LocalFixtureSpec
 from job_ftch.nodes import SanitizeNode
 from job_ftch.nodes.triage import HeuristicTriageNode
@@ -163,6 +163,7 @@ def test_mcp_adapter_registers_tool_and_resource(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setitem(sys.modules, "fastmcp", SimpleNamespace(FastMCP=FakeMCP))
 
     import warnings
+
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         server = create_mcp_server(_DummyBuilder())

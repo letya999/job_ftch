@@ -1,3 +1,4 @@
+# DEPRECATED: migrated to tests/nodes/test_dedup.py and tests/nodes/test_quality.py
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

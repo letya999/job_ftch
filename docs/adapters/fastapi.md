@@ -2,7 +2,7 @@
 
 ```python
 from job_ftch import configure
-from job_ftch.adapters.fastapi_adapter import create_app
+from adapters.fastapi.adapter import create_app
 
 builder = configure("config/tenant.yaml")
 app = create_app(builder)

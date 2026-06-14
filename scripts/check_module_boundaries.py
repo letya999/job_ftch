@@ -36,7 +36,7 @@ def _is_allowed_domain(target: str) -> bool:
             "job_ftch.infrastructure",
             "job_ftch.nodes",
             "job_ftch.sinks",
-            "job_ftch.adapters",
+            "adapters",
         )
     )
 
@@ -48,16 +48,14 @@ def _is_allowed_application(target: str) -> bool:
     if head in STDLIB or head in {"pydantic", "structlog", "yaml", "opentelemetry"}:
         return True
     return not target.startswith(
-        ("job_ftch.infrastructure", "job_ftch.nodes", "job_ftch.sinks", "job_ftch.adapters")
+        ("job_ftch.infrastructure", "job_ftch.nodes", "job_ftch.sinks", "adapters")
     )
 
 
 def _is_allowed_nodes(target: str) -> bool:
     if not target:
         return True
-    return not (
-        target.startswith("job_ftch.infrastructure") or target.startswith("job_ftch.adapters")
-    )
+    return not (target.startswith("job_ftch.infrastructure") or target.startswith("adapters"))
 
 
 def main() -> int:
@@ -69,6 +67,7 @@ def main() -> int:
             "job_ftch.application.builder",
             "job_ftch.application.pipeline",
             "job_ftch.application.tenant_runner",
+            "job_ftch.application.source_inputs",
         }
         for node in ast.walk(tree):
             for target, lineno in _import_targets(node):

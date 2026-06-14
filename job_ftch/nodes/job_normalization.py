@@ -162,7 +162,7 @@ class CompensationParsingNode:
     async def process(self, item: JobRecord) -> JobRecord | None:
         if item.compensation is not None:
             return item
-        match = _SALARY_RE.search(item.description)
+        match = _SALARY_RE.search(item.description or "")
         if match is None:
             return item
         compensation = CompensationRange(

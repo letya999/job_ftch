@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from job_ftch.adapters.profile_inputs import build_candidate_profile_from_payload
 from job_ftch.application.auth import resolve_auth_provider
 from job_ftch.application.pipeline import RunSummary, SourceRunStats
+from job_ftch.application.profile_inputs import build_candidate_profile_from_payload
 from job_ftch.application.registry import create_auth_provider
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import (
@@ -565,7 +565,9 @@ async def test_two_tenant_runners_do_not_duplicate_output(tmp_path: Path) -> Non
     output_path = tmp_path / "artifacts" / "ai_jobs.json"
     payload = json.loads(output_path.read_text(encoding="utf-8"))
 
-    assert sorted([first.emitted, second.emitted]) == [0, 1]
+    # Invariant: exactly one item in output regardless of runner scheduling order.
+    # Using sum instead of sorted([0,1]) to be deterministic on slow CI.
+    assert first.emitted + second.emitted == 1
     assert len(payload["items"]) == 1
 
     await runner_one.close()

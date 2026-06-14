@@ -24,13 +24,14 @@ dependencies = [
     "opentelemetry-sdk>=1.25",
     "structlog>=24.2",
     "defusedxml>=0.7.1",
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]
 browser = ["playwright>=1.45"]
 stealth = ["playwright-stealth>=2.0.3", "curl-cffi>=0.15.0"]
 openai = ["openai>=1.30", "instructor>=1.4"]
-telegram = ["telethon>=1.36"]
+telegram = ["telethon>=1.36", "aiogram>=3.7"]
 dagster = ["dagster>=1.8"]
 faststream = ["faststream>=0.5"]
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
@@ -120,7 +121,7 @@ job_ftch = "job_ftch.cli:main"
 # Notification target plugins go here
 
 [project.entry-points."job_ftch.mcp_servers"]
-default = "job_ftch.adapters.mcp.server:create_server"
+default = "adapters.mcp.server:create_server"
 
 [dependency-groups]
 dev = [
@@ -130,8 +131,11 @@ dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
+    "pytest-benchmark>=4.0",
     "bandit[toml]>=1.7",
     "httpx",
+    "hypothesis>=6.100",
+    "syrupy>=4.0",
     "types-setuptools",
     "aiosqlite>=0.20",
     "openai>=1.30",
@@ -152,7 +156,7 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # allow assert in tests
-"job_ftch/adapters/*.py" = ["TC001"]
+"adapters/**/*.py" = ["TC001"]
 "job_ftch/application/builder.py" = ["TC001", "TC006"]
 
 [tool.mypy]
@@ -200,6 +204,10 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-v"
 markers = [
+    "unit: pure unit-tests, no I/O, <50ms",
+    "integration: tests with SQLite, filesystem, <5s",
+    "slow: full E2E with TenantRunner, >5s",
+    "llm: requires LLM keys (OPENAI_API_KEY)",
     "e2e: marks tests as end-to-end (deselect with -m 'not e2e')",
     "network: marks tests requiring real network access",
     "telegram: marks tests requiring Telegram credentials",

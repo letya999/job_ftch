@@ -47,7 +47,7 @@ def _format_job(job: Job) -> str:
     if job.canonical_url is not None:
         parts.append(f"URL: {job.canonical_url}")
     parts.append("")
-    parts.append(job.description)
+    parts.append(job.description or "")
     return "\n".join(parts)
 
 
@@ -78,7 +78,7 @@ class TelegramPostingSink:
     async def flush(self) -> None:
         if not self._pending_jobs:
             return
-        from job_ftch.adapters.telegram_bot.formatter import format_job_digest
+        from adapters.telegram_bot.formatter import format_job_digest
 
         # Split into chunks to avoid message length limits
         chunk_size = self._notify_batch_size

@@ -1,4 +1,5 @@
 """Tests for E5 query/passage prefix methods on FastEmbedProvider."""
+
 from __future__ import annotations
 
 import pytest
@@ -6,12 +7,14 @@ import pytest
 
 class _MockFastEmbedModel:
     """Mock that captures the texts passed to embed()."""
+
     def __init__(self) -> None:
         self.last_texts: list[str] = []
 
     def embed(self, texts: list[str]):
         self.last_texts = list(texts)
         import numpy as np
+
         return [np.array([0.1, 0.2, 0.3]) for _ in texts]
 
 

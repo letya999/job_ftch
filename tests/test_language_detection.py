@@ -1,4 +1,5 @@
 """Tests for language detection node and adapter."""
+
 from __future__ import annotations
 
 import pytest

@@ -1,0 +1,19 @@
+# serializer version: 1
+# name: test_pipeline_json_envelope_matches_snapshot
+  dict({
+    'items': list([
+      dict({
+        'created_at': None,
+        'external_id': 'snap-1',
+        'metadata': dict({
+        }),
+        'schema_version': '1',
+        'source_kind': 'debug',
+        'source_name': 'debug',
+        'text': 'Senior Python Engineer remote position in AI company',
+        'url': None,
+      }),
+    ]),
+    'schema_version': 'job_ftch.job.v1',
+  })
+# ---

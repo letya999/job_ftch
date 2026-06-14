@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 from job_ftch.application import (
     LLMProvider,
     ProcessingNode,
@@ -133,16 +135,18 @@ def test_protocol_contracts_runtime_checkable() -> None:
     assert isinstance(MinimalLLMProvider(), LLMProvider)
 
 
-def test_minimal_store_implements_namespaced_run_state() -> None:
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_minimal_store_implements_namespaced_run_state() -> None:
     store = MinimalStore()
-    import asyncio
-
-    asyncio.run(store.set_run_state("cursor", "123", source_kind="tg", source_name="chan"))
-    assert asyncio.run(store.get_run_state("cursor", source_kind="tg", source_name="chan")) == "123"
-    assert asyncio.run(store.get_run_state("cursor")) is None
+    await store.set_run_state("cursor", "123", source_kind="tg", source_name="chan")
+    assert await store.get_run_state("cursor", source_kind="tg", source_name="chan") == "123"
+    assert await store.get_run_state("cursor") is None
 
 
-def test_minimal_store_supports_dedup_records() -> None:
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_minimal_store_supports_dedup_records() -> None:
     store = MinimalStore()
     record = RememberedDedupKey(
         key="content:test",
@@ -164,11 +168,9 @@ def test_minimal_store_supports_dedup_records() -> None:
         details="duplicate",
     )
 
-    import asyncio
+    await store.remember_dedup_key(record)
+    await store.record_duplicate(duplicate)
 
-    asyncio.run(store.remember_dedup_key(record))
-    asyncio.run(store.record_duplicate(duplicate))
-
-    assert asyncio.run(store.has_dedup_key("content:test")) is True
-    assert asyncio.run(store.list_dedup_keys(DedupKeyKind.CONTENT.value)) == (record,)
-    assert asyncio.run(store.list_duplicate_records()) == (duplicate,)
+    assert await store.has_dedup_key("content:test") is True
+    assert await store.list_dedup_keys(DedupKeyKind.CONTENT.value) == (record,)
+    assert await store.list_duplicate_records() == (duplicate,)

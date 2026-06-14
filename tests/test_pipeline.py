@@ -20,6 +20,8 @@ from job_ftch.sinks.json_file import JsonFileSink
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from syrupy import SnapshotAssertion
+
 
 class StubSource:
     def __init__(self, items: list[RawItem]) -> None:
@@ -179,3 +181,139 @@ def test_app_runs_local_pipeline_command(tmp_path: Path) -> None:
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == "job_ftch.job.v1"
     assert len(payload["items"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# FanOutSink failure semantics (P2 — TEST_IMPROVEMENTS.md §10)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fanout_sink_raises_on_first_sink_failure(tmp_path: Path) -> None:
+    """FanOutSink is fail-fast: exception from the first sink propagates immediately.
+
+    Design decision: FanOutSink iterates sinks sequentially.  When one raises
+    the remaining sinks are NOT called (no silent partial writes).  Callers that
+    need best-effort fan-out should wrap individual sinks with their own try/except.
+    """
+    good_path = tmp_path / "good.json"
+    calls: list[str] = []
+
+    class ExplodingSink:
+        async def emit(self, item: object) -> None:
+            calls.append("exploding")
+            raise OSError("disk full")
+
+    class TrackingSink:
+        async def emit(self, item: object) -> None:
+            calls.append("tracking")
+
+    fanout = FanOutSink([ExplodingSink(), TrackingSink()])  # type: ignore[type-arg]
+
+    with pytest.raises(OSError, match="disk full"):
+        await fanout.emit({"id": "1"})
+
+    # ExplodingSink was called; TrackingSink was NOT reached (fail-fast)
+    assert calls == ["exploding"]
+    # good_path was never written
+    assert not good_path.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_fanout_sink_succeeds_when_all_sinks_healthy(tmp_path: Path) -> None:
+    """FanOutSink emits to all sinks when none raise."""
+    left_calls: list[object] = []
+    right_calls: list[object] = []
+
+    class LeftSink:
+        async def emit(self, item: object) -> None:
+            left_calls.append(item)
+
+    class RightSink:
+        async def emit(self, item: object) -> None:
+            right_calls.append(item)
+
+    fanout = FanOutSink([LeftSink(), RightSink()])  # type: ignore[type-arg]
+    await fanout.emit({"id": "1"})
+
+    assert left_calls == [{"id": "1"}]
+    assert right_calls == [{"id": "1"}]
+
+
+# ---------------------------------------------------------------------------
+# Schema backward compatibility (P3 — TEST_IMPROVEMENTS.md §15)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_json_output_schema_version_is_stable() -> None:
+    """Schema version in output must be explicit."""
+    from job_ftch.config import Settings
+
+    assert Settings().output_schema_version == "job_ftch.job.v1"
+
+
+@pytest.mark.integration
+def test_job_record_serialization_round_trip() -> None:
+    """Serialization of JobRecord to JSON and back must be lossless."""
+    from job_ftch.domain import JobRecord, SourceKind, WorkMode
+
+    record = JobRecord(
+        raw_item_id="1",
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="Acme",
+        title="ML Engineer",
+        company="OpenAI",
+        work_mode=WorkMode.REMOTE,
+        description="Write code.",
+    )
+    serialized = record.model_dump(mode="json")
+    restored = JobRecord.model_validate(serialized)
+    assert restored == record
+
+
+# ---------------------------------------------------------------------------
+# Snapshot test — JSON envelope format (P3 — TEST_IMPROVEMENTS.md §12)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_pipeline_json_envelope_matches_snapshot(
+    tmp_path: Path, snapshot: SnapshotAssertion
+) -> None:
+    """Pin the JSON output envelope format with syrupy.
+
+    Strips volatile fields (stable_id, fetched_at) before comparing so the
+    snapshot is deterministic across runs.
+    """
+    from syrupy import SnapshotAssertion  # noqa: F401 — type-check guard
+
+    items = [
+        RawItem(
+            source_kind=SourceKind.DEBUG,
+            source_name="debug",
+            external_id="snap-1",
+            text="Senior Python Engineer remote position in AI company",
+        ),
+    ]
+    out_path = tmp_path / "snap_out.json"
+    pipeline = Pipeline(
+        source=StubSource(items),
+        sanitize_node=SanitizeNode(),
+        nodes=[],
+        sink=JsonFileSink(out_path, schema_version="job_ftch.job.v1"),
+        store=InMemoryStore(),
+    )
+
+    await pipeline.run()
+
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    # Strip volatile fields to keep snapshot deterministic
+    for item in payload.get("items", []):
+        item.pop("stable_id", None)
+        item.pop("fetched_at", None)
+
+    assert payload == snapshot
