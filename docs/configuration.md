@@ -166,6 +166,15 @@ Search and vector:
 - `JOB_FTCH_QDRANT_COLLECTION`
 - `JOB_FTCH_OLLAMA_BASE_URL`
 
+NLP retrieval quality (all default to `false`/off):
+
+- `JOB_FTCH_LANGUAGE_DETECTION_ENABLED` — enable `LanguageDetectionNode`; requires `[language]` extras
+- `JOB_FTCH_TRANSLATION_ENABLED` — enable `TranslationNode` (RU↔EN only); requires `[translation]` extras
+- `JOB_FTCH_TRANSLATION_TARGET_LANGUAGE` — target language for translation (default: `ru`)
+- `JOB_FTCH_RERANKER_ENABLED` — enable cross-encoder reranking in `/digest`; requires `[fastembed]`
+- `JOB_FTCH_RERANKER_MODEL` — reranker model key (default: `jina-v2-multilingual`)
+- `JOB_FTCH_RERANKER_TOP_K` — candidates fetched before reranking (default: `50`)
+
 Outputs:
 
 - `JOB_FTCH_OUTPUT_PATH`

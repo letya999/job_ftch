@@ -10,6 +10,12 @@
   `aiosqlite`, `asyncpg`, `qdrant-client`, `pgvector`, `sentence-transformers`, `torch`.
   `feedparser` in `[feeds]` group - required for RSSFeedSource. NOT in core deps.
   `playwright` optional for BrowserSource (checked at import time, raises ImportError if missing).
+  `pypdf`, `python-docx` in `[documents]` group - document parsing for bot uploads (PDF, DOCX).
+- NLP retrieval quality deps (all opt-in, added in MVP batch B/C):
+  `[language]`: `lingua-language-detector>=2.0` — 72+ language detection including KZ; loads ~500MB models at first call. Enabled via `LANGUAGE_DETECTION_ENABLED=true`.
+  `[translation]`: `ctranslate2`, `sentencepiece`, `huggingface_hub` — CPU-fast RU/EN translation via Helsinki-NLP opus-mt; models ~300MB downloaded to `.runtime/translation_models/` on first call. KZ not supported — `supports()` returns False and TranslationNode skips silently. Enabled via `TRANSLATION_ENABLED=true`.
+  Reranker: `jinaai/jina-reranker-v2-base-multilingual` via existing `fastembed` dep (`TextCrossEncoder`). No new package. Enabled via `RERANKER_ENABLED=true`.
+- fastembed critical note: `intfloat/multilingual-e5-small` requires `"query: "` prefix for queries and `"passage: "` prefix for passages. Without prefixes retrieval quality drops ~10-15%. `FastEmbedProvider.embed_query()` and `embed_passage()` handle this. Call sites use duck-typing: `getattr(provider, "embed_query", provider.embed)` — backward compatible with any EmbeddingProvider.
 - Storage & Search:
   SQLite (FTS5) for local persistence/search.
   PostgreSQL (tsvector) for production persistence/search.

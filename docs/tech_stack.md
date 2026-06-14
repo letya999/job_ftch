@@ -36,8 +36,24 @@
 |---|---|---|---|
 | `openai` | `[openai]` | 0 | OpenAI API клиент |
 | `instructor` | `[openai]` | 0 | Структурированное извлечение (RawItem → JobDraft) через LLM |
-| `fastembed` | `[fastembed]` | MVP | Локальные мультиязычные ONNX-эмбеддинги без GPU (альтернатива sentence-transformers) |
+| `fastembed` | `[fastembed]` | MVP | Локальные мультиязычные ONNX-эмбеддинги без GPU; включает `TextCrossEncoder` для реранкинга |
 | `sentence-transformers` | `[embeddings]` | 14 | Локальные эмбеддинги для семантического поиска |
+
+**Важно для fastembed**: модель `intfloat/multilingual-e5-small` требует префиксов `"query: "` для запросов и `"passage: "` для документов. Без них качество поиска падает на 10-15%. `FastEmbedProvider.embed_query()` / `embed_passage()` добавляют префиксы автоматически.
+
+---
+
+## NLP качество поиска (opt-in, MVP batch B/C)
+
+| Библиотека | Extras group | Назначение |
+|---|---|---|
+| `lingua-language-detector>=2.0` | `[language]` | Определение языка вакансий (72+ языка, включая KZ). Модели ~500MB при первом запуске. |
+| `ctranslate2` | `[translation]` | CPU-быстрый машинный перевод RU↔EN через Helsinki-NLP opus-mt |
+| `sentencepiece` | `[translation]` | Токенизатор для opus-mt |
+| `huggingface_hub` | `[translation]` | Скачивание моделей перевода (~300MB в `.runtime/translation_models/`) |
+| `jinaai/jina-reranker-v2-base-multilingual` | через `fastembed` | Cross-encoder реранкинг (278M, 100+ языков, ~200-500ms CPU) |
+
+KZ: определяется lingua (`kk→kz`), перевод не поддерживается (нет opus-mt модели) — `TranslatorPort.supports()` возвращает False, пропускается молча. Векторный поиск работает кросс-лингвально нативно.
 
 ---
 
