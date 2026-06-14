@@ -257,3 +257,57 @@ async def embed_profile_examples(
         profile=updated_profile,
         updated_at=datetime.now(UTC),
     )
+
+
+def remove_example_from_profile(
+    managed: ManagedCandidateProfile,
+    kind: str,
+    index: int,
+) -> ManagedCandidateProfile:
+    """Remove an example text from the first search profile by type and index.
+
+    kind must be one of: positive_resume, negative_resume, positive_job, negative_job.
+    If index is out of range, returns unchanged profile.
+    """
+    from datetime import UTC, datetime
+
+    if not managed.profile.search_profiles:
+        return managed
+    sp = managed.profile.search_profiles[0]
+
+    is_negative = kind.startswith("negative")
+    texts = sp.negative_example_texts if is_negative else sp.positive_example_texts
+
+    if index < 0 or index >= len(texts):
+        return managed  # out of range — no-op, safe
+
+    new_texts = texts[:index] + texts[index + 1:]
+
+    if is_negative:
+        updated_sp = sp.model_copy(update={"negative_example_texts": new_texts})
+    else:
+        updated_sp = sp.model_copy(update={"positive_example_texts": new_texts})
+
+    updated_profiles = (updated_sp,) + managed.profile.search_profiles[1:]
+    updated_profile = managed.profile.model_copy(update={"search_profiles": updated_profiles})
+    return ManagedCandidateProfile(
+        user_id=managed.user_id,
+        profile_id=managed.profile_id,
+        profile=updated_profile,
+        updated_at=datetime.now(UTC),
+    )
+
+
+def list_examples(managed: ManagedCandidateProfile) -> dict[str, list[str]]:
+    """Return all example texts grouped by kind from the first search profile."""
+    if not managed.profile.search_profiles:
+        return {"positive_resume": [], "negative_resume": [], "positive_job": [], "negative_job": []}
+    sp = managed.profile.search_profiles[0]
+    pos = list(sp.positive_example_texts)
+    neg = list(sp.negative_example_texts)
+    return {
+        "positive_resume": pos,
+        "negative_resume": neg,
+        "positive_job": [],   # stored in positive_example_texts for now
+        "negative_job": [],   # stored in negative_example_texts for now
+    }

@@ -405,6 +405,19 @@ async def _run_bot_with_scheduler(
     stop_event: asyncio.Event | None = None,
 ) -> None:
     """Run bot polling and tenant pipeline scheduler concurrently."""
+    # Background warmup: load model before first user request
+    embedding_provider = getattr(service, "_embedding_provider", None)
+    if embedding_provider is not None:
+
+        async def _warmup() -> None:
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                # Type ignore because it's a dynamic protocol/object
+                await embedding_provider.embed(["warmup"])
+
+        asyncio.create_task(_warmup())
+
     from job_ftch.adapters.telegram_bot.bot import run_polling_loop
 
     async def _scheduler_loop() -> None:
@@ -442,6 +455,12 @@ def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
     auth = EnvAuthProvider()
     bot_config = load_bot_config(auth)
 
+    embedding_provider = None
+    if settings.embedding_provider:
+        from job_ftch.application.registry import create_embedding_provider
+
+        embedding_provider = create_embedding_provider(settings)
+
     if args.webhook:
         try:
             import uvicorn
@@ -454,7 +473,12 @@ def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
         uvicorn.run(app, host=args.host, port=args.port)
     else:
         client = HttpTelegramBotClient(bot_config.token)
-        service = TelegramBotService(runner=runner, sender=client, config=bot_config)
+        service = TelegramBotService(
+            runner=runner,
+            sender=client,
+            config=bot_config,
+            embedding_provider=embedding_provider,
+        )
         interval = settings.schedule_interval_seconds or (4 * 3600)
         asyncio.run(
             _run_bot_with_scheduler(

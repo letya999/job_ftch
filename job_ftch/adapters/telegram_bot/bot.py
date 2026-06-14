@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 import httpx
 import structlog
 
+from job_ftch.adapters.document_parser import parse_document
 from job_ftch.adapters.profile_inputs import (
     add_example_to_profile,
     build_candidate_profile_from_payload,
@@ -303,30 +304,7 @@ class TelegramBotService:
             await self._sender.send_message(chat_id, f"Error processing upload: {exc}")
 
     def _extract_text(self, content: bytes, filename: str) -> str:
-        import io
-
-        if filename.lower().endswith(".pdf"):
-            try:
-                from pypdf import PdfReader
-
-                reader = PdfReader(io.BytesIO(content))
-                return "\n".join(page.extract_text() or "" for page in reader.pages)
-            except ImportError:
-                return "PDF extraction requires 'pypdf' library."
-
-        if filename.lower().endswith(".docx"):
-            try:
-                from docx import Document
-
-                doc = Document(io.BytesIO(content))
-                return "\n".join(p.text for p in doc.paragraphs)
-            except ImportError:
-                return "DOCX extraction requires 'python-docx' library."
-
-        if filename.lower().endswith(".txt"):
-            return content.decode("utf-8", errors="replace")
-
-        return ""
+        return parse_document(content, filename)
 
     async def handle_command(self, text: str, *, chat_id: int, user_id: int) -> None:
         if not self._is_allowed(user_id=user_id, chat_id=chat_id):
@@ -611,6 +589,77 @@ class TelegramBotService:
             mode = args[0]
             self._upload_mode[user_id] = mode
             await self._sender.send_message(chat_id, f"Upload mode set to: {mode}")
+            return
+        if command == "/list_examples":
+            tenant_id = tenant_ids[0] if tenant_ids else "default"
+            profiles = await self._runner.list_candidate_profiles(tenant_id, str(user_id))
+            active_profile_payload = next((p for p in profiles if p["active"]), None)
+            if not active_profile_payload:
+                await self._sender.send_message(chat_id, "No active profile. Upload a resume first.")
+                return
+            active_profile = await self._runner.get_candidate_profile(
+                tenant_id, str(user_id), active_profile_payload["profile_id"]
+            )
+            if not active_profile or not active_profile.profile.search_profiles:
+                await self._sender.send_message(chat_id, "No examples found in active profile.")
+                return
+            sp = active_profile.profile.search_profiles[0]
+            filter_type = args[0] if args else None
+            example_lines: list[str] = []
+            # Show all or filtered
+            show_types: list[str] = (
+                [filter_type] if filter_type in ("positive_resume", "negative_resume", "positive_job", "negative_job")
+                else ["positive_resume", "negative_resume"]
+            )
+            for ex_type in show_types:
+                texts = sp.positive_example_texts if "positive" in ex_type else sp.negative_example_texts
+                label = ex_type.replace("_", " ").title()
+                if texts:
+                    example_lines.append(f"{label} ({len(texts)}):")
+                    for idx, t in enumerate(texts):
+                        preview = t[:80].replace("\n", " ")
+                        example_lines.append(f"  [{idx}] {preview}...")
+                else:
+                    example_lines.append(f"{label}: none")
+            await self._sender.send_message(chat_id, "\n".join(example_lines) if example_lines else "No examples.")
+            return
+        if command == "/delete_example":
+            if len(args) < 2:
+                await self._sender.send_message(
+                    chat_id,
+                    "Usage: /delete_example <type> <index>\n"
+                    "Types: positive_resume, negative_resume, positive_job, negative_job",
+                )
+                return
+            ex_type = args[0]
+            valid_types = {"positive_resume", "negative_resume", "positive_job", "negative_job"}
+            if ex_type not in valid_types:
+                await self._sender.send_message(chat_id, f"Invalid type. Use: {', '.join(sorted(valid_types))}")
+                return
+            try:
+                ex_index = int(args[1])
+            except ValueError:
+                await self._sender.send_message(chat_id, "Index must be an integer.")
+                return
+            tenant_id = tenant_ids[0] if tenant_ids else "default"
+            profiles = await self._runner.list_candidate_profiles(tenant_id, str(user_id))
+            active_profile_payload = next((p for p in profiles if p["active"]), None)
+            if not active_profile_payload:
+                await self._sender.send_message(chat_id, "No active profile found.")
+                return
+            active_profile = await self._runner.get_candidate_profile(
+                tenant_id, str(user_id), active_profile_payload["profile_id"]
+            )
+            if not active_profile:
+                await self._sender.send_message(chat_id, "Could not load active profile.")
+                return
+            from job_ftch.adapters.profile_inputs import remove_example_from_profile
+            updated_profile = remove_example_from_profile(active_profile, ex_type, ex_index)
+            if self._embedding_provider:
+                from job_ftch.adapters.profile_inputs import embed_profile_examples
+                updated_profile = await embed_profile_examples(updated_profile, self._embedding_provider)
+            await self._runner.save_candidate_profile(tenant_id, updated_profile)
+            await self._sender.send_message(chat_id, f"Deleted {ex_type}[{ex_index}] from your profile.")
             return
         if command == "/digest":
             digest_tenant_id = args[0] if args else tenant_ids[0]
