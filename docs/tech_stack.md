@@ -35,6 +35,7 @@
 |---|---|---|---|
 | `openai` | `[openai]` | 0 | OpenAI API клиент |
 | `instructor` | `[openai]` | 0 | Структурированное извлечение (RawItem → JobDraft) через LLM |
+| `fastembed` | `[fastembed]` | MVP | Локальные мультиязычные ONNX-эмбеддинги без GPU (альтернатива sentence-transformers) |
 | `sentence-transformers` | `[embeddings]` | 14 | Локальные эмбеддинги для семантического поиска |
 
 ---

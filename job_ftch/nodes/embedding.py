@@ -53,6 +53,9 @@ class EmbeddingNode(ProcessingNode[JobRecord]):
                     vector=vectors[0],
                     payload=payload,
                 )
+                # Store vector on job for inline scoring by MultiProfileMatchNode
+                updated_metadata = {**job.metadata, "embedding_vector": vectors[0]}
+                return job.model_copy(update={"metadata": updated_metadata})
         except Exception as e:
             self._logger.warning("embedding_failed", job_id=job.stable_id, error=str(e))
             # Continue pipeline, vector embeddings are optional infrastructure enhancement

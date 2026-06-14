@@ -9,13 +9,14 @@ class ProfileWeights(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     title: float = Field(default=0.2, ge=0.0, le=1.0)
-    semantic_role: float = Field(default=0.2, ge=0.0, le=1.0)
-    skills: float = Field(default=0.25, ge=0.0, le=1.0)
+    semantic_role: float = Field(default=0.15, ge=0.0, le=1.0)
+    skills: float = Field(default=0.2, ge=0.0, le=1.0)
     domain: float = Field(default=0.1, ge=0.0, le=1.0)
     seniority: float = Field(default=0.1, ge=0.0, le=1.0)
     region: float = Field(default=0.1, ge=0.0, le=1.0)
     salary: float = Field(default=0.03, ge=0.0, le=1.0)
     culture: float = Field(default=0.02, ge=0.0, le=1.0)
+    vector: float = Field(default=0.1, ge=0.0, le=1.0)
 
 
 class CompensationExpectation(BaseModel):
@@ -60,6 +61,8 @@ class SearchProfile(BaseModel):
     culture_preferences: tuple[str, ...] = ()
     positive_example_texts: tuple[str, ...] = ()
     negative_example_texts: tuple[str, ...] = ()
+    embedding_vector: tuple[float, ...] | None = None
+    negative_embedding_vectors: tuple[tuple[float, ...], ...] = ()
     relevance_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
     weights: ProfileWeights = Field(default_factory=ProfileWeights)
 

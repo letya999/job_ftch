@@ -199,3 +199,62 @@ def add_example_to_profile(
         profile=updated_profile,
         updated_at=datetime.now(UTC),
     )
+
+
+async def embed_profile_examples(
+    managed: ManagedCandidateProfile,
+    embedding_provider: object,  # EmbeddingProvider Protocol
+) -> ManagedCandidateProfile:
+    """Compute embedding vectors for profile's example texts and store them."""
+    from datetime import UTC, datetime
+
+    if not managed.profile.search_profiles:
+        return managed
+
+    updated_profiles = list(managed.profile.search_profiles)
+    for i, sp in enumerate(updated_profiles):
+        pos_texts = list(sp.positive_example_texts) + (
+            [managed.profile.resume.raw_text]
+            if managed.profile.resume and managed.profile.resume.raw_text
+            else []
+        )
+        neg_texts = list(sp.negative_example_texts)
+
+        pos_vector: tuple[float, ...] | None = None
+        neg_vectors: tuple[tuple[float, ...], ...] = ()
+
+        if pos_texts:
+            try:
+                # Type hint for mypy if needed, but we keep it dynamic for Protocol
+                vecs = await embedding_provider.embed(pos_texts)  # type: ignore[attr-defined]
+                if vecs:
+                    # Average positive example vectors
+                    dim = len(vecs[0])
+                    avg = [sum(v[d] for v in vecs) / len(vecs) for d in range(dim)]
+                    pos_vector = tuple(avg)
+            except Exception:
+                pass  # embedding failed, skip
+
+        if neg_texts:
+            try:
+                vecs = await embedding_provider.embed(neg_texts)  # type: ignore[attr-defined]
+                neg_vectors = tuple(tuple(v) for v in vecs)
+            except Exception:
+                pass
+
+        updated_profiles[i] = sp.model_copy(
+            update={
+                "embedding_vector": pos_vector,
+                "negative_embedding_vectors": neg_vectors,
+            }
+        )
+
+    updated_profile = managed.profile.model_copy(
+        update={"search_profiles": tuple(updated_profiles)}
+    )
+    return ManagedCandidateProfile(
+        user_id=managed.user_id,
+        profile_id=managed.profile_id,
+        profile=updated_profile,
+        updated_at=datetime.now(UTC),
+    )

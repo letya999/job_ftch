@@ -58,6 +58,19 @@ def _skill_overlap(job_skills: tuple[SkillTag, ...], required: tuple[SkillTag, .
     return min(1.0, hits / max(1, len(required)))
 
 
+def _cosine_sim(v1: tuple[float, ...], v2: tuple[float, ...]) -> float:
+    import math
+
+    if not v1 or not v2 or len(v1) != len(v2):
+        return 0.0
+    dot = sum(a * b for a, b in zip(v1, v2, strict=False))
+    m1 = math.sqrt(sum(a * a for a in v1))
+    m2 = math.sqrt(sum(b * b for b in v2))
+    if m1 == 0 or m2 == 0:
+        return 0.0
+    return max(0.0, min(1.0, dot / (m1 * m2)))
+
+
 class MultiProfileMatchNode:
     def __init__(self, catalog: ProfileCatalog) -> None:
         self._catalog = catalog
@@ -109,6 +122,24 @@ class MultiProfileMatchNode:
         region_score = self._region_score(item, profile)
         salary_score = self._salary_score(item, profile)
         culture_score = self._culture_score(item, profile)
+
+        # Vector scoring
+        job_vector = item.metadata.get("embedding_vector")
+        vector_score = 0.0
+        neg_vector_penalty = 0.0
+        if job_vector and isinstance(job_vector, (list, tuple)):
+            job_vector = tuple(job_vector)
+            if profile.embedding_vector:
+                vector_score = _cosine_sim(job_vector, profile.embedding_vector)
+            if profile.negative_embedding_vectors:
+                sims = [_cosine_sim(job_vector, nv) for nv in profile.negative_embedding_vectors]
+                # If very similar to any negative example, penalize
+                max_neg_sim = max(sims) if sims else 0.0
+                if max_neg_sim > 0.8:
+                    neg_vector_penalty = 0.5
+                elif max_neg_sim > 0.7:
+                    neg_vector_penalty = 0.2
+
         risk_penalty = min(1.0, 0.15 * len(item.risk_signals))
         vacancy_type_score = 1.0 if item.post_type.value == "job_posting" else 0.0
 
@@ -121,9 +152,16 @@ class MultiProfileMatchNode:
             + profile.weights.region * region_score
             + profile.weights.salary * salary_score
             + profile.weights.culture * culture_score
+            + profile.weights.vector * vector_score
         )
         final_score = max(
-            0.0, min(1.0, round(weighted + 0.1 * vacancy_type_score - risk_penalty, 2))
+            0.0,
+            min(
+                1.0,
+                round(
+                    weighted + 0.1 * vacancy_type_score - risk_penalty - neg_vector_penalty, 2
+                ),
+            ),
         )
 
         if not hard_pass:
@@ -137,7 +175,7 @@ class MultiProfileMatchNode:
 
         explanation = (
             f"title={title_score:.2f} semantic={semantic_role_score:.2f} skills={skills_score:.2f} "
-            f"domain={domain_score:.2f} seniority={seniority_score:.2f} region={region_score:.2f}"
+            f"domain={domain_score:.2f} vector={vector_score:.2f} neg_p={neg_vector_penalty:.2f}"
         )
         return ProfileMatchScore(
             profile_id=profile.profile_id,
@@ -152,6 +190,8 @@ class MultiProfileMatchNode:
             region_score=region_score,
             salary_score=salary_score,
             culture_score=culture_score,
+            vector_score=vector_score,
+            neg_vector_penalty=neg_vector_penalty,
             risk_penalty=risk_penalty,
             final_score=final_score,
             decision=decision,

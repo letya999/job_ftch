@@ -15,6 +15,7 @@ from job_ftch.adapters.profile_inputs import (
     add_example_to_profile,
     build_candidate_profile_from_payload,
     build_profile_from_resume_text,
+    embed_profile_examples,
 )
 from job_ftch.adapters.source_inputs import build_source_spec_from_input
 from job_ftch.adapters.source_validator import validate_sources
@@ -150,10 +151,12 @@ class TelegramBotService:
         runner: TenantRunner,
         sender: TelegramSender,
         config: TelegramBotConfig,
+        embedding_provider: object | None = None,
     ) -> None:
         self._runner = runner
         self._sender = sender
         self._config = config
+        self._embedding_provider = embedding_provider
         self._last_seen_at: dict[int, float] = {}
         self._upload_mode: dict[int, str] = {}  # user_id -> mode
 
@@ -214,6 +217,10 @@ class TelegramBotService:
 
             if mode == "positive_resume":
                 managed_profile = build_profile_from_resume_text(text, user_id=str(user_id))
+                if self._embedding_provider:
+                    managed_profile = await embed_profile_examples(
+                        managed_profile, self._embedding_provider
+                    )
                 await self._runner.save_candidate_profile(tenant_id, managed_profile)
                 await self._runner.set_active_candidate_profile(
                     tenant_id, str(user_id), managed_profile.profile_id
@@ -235,6 +242,10 @@ class TelegramBotService:
                         updated_profile = add_example_to_profile(
                             existing_profile, text, kind="negative_resume"
                         )
+                        if self._embedding_provider:
+                            updated_profile = await embed_profile_examples(
+                                updated_profile, self._embedding_provider
+                            )
                         await self._runner.save_candidate_profile(tenant_id, updated_profile)
                         await self._sender.send_message(
                             chat_id, "Negative resume example added to your active profile."
@@ -272,6 +283,10 @@ class TelegramBotService:
                 )
                 if active_profile:
                     updated_profile = add_example_to_profile(active_profile, text, kind=mode)
+                    if self._embedding_provider:
+                        updated_profile = await embed_profile_examples(
+                            updated_profile, self._embedding_provider
+                        )
                     await self._runner.save_candidate_profile(tenant_id, updated_profile)
                     await self._sender.send_message(
                         chat_id, f"Job example added as {mode.replace('_', ' ')} to your profile."

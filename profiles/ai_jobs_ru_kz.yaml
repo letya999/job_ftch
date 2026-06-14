@@ -38,6 +38,10 @@ exclude_keywords:
   - "newsletter"
   - "digest"
   - "podcast"
-relevance_threshold: 0.0
+relevance_threshold: 0.5
+weights:
+  vector: 0.2
+  title: 0.15
+  skills: 0.2
 min_text_tokens: 10
 min_text_chars: 50

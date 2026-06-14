@@ -1,5 +1,7 @@
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from job_ftch.adapters.telegram_bot.bot import TelegramBotService
 from job_ftch.domain.source_spec import TelegramChannelSpec
 

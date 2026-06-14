@@ -453,15 +453,6 @@ def build_nodes(
         CompensationParsingNode(),
         JobLifecycleNode(),
         JobAggregationNode(job_group_store, attach_group_id=True),
-        MultiProfileMatchNode(catalog),
-        RiskScoringNode(),
-        QualityScoringNode(),
-        JobValidationNode(),
-        RoutingNode(
-            accept_threshold=settings.routing_accept_threshold,
-            review_threshold=settings.routing_review_threshold,
-            quality_override_threshold=settings.routing_quality_override_threshold,
-        ),
     ]
 
     if settings.embedding_enabled and settings.vector_backend:
@@ -471,6 +462,20 @@ def build_nodes(
             from job_ftch.nodes.embedding import EmbeddingNode
 
             nodes.append(EmbeddingNode(provider=provider, vector_backend=vector_backend))
+
+    nodes.extend(
+        [
+            MultiProfileMatchNode(catalog),
+            RiskScoringNode(),
+            QualityScoringNode(),
+            JobValidationNode(),
+            RoutingNode(
+                accept_threshold=settings.routing_accept_threshold,
+                review_threshold=settings.routing_review_threshold,
+                quality_override_threshold=settings.routing_quality_override_threshold,
+            ),
+        ]
+    )
 
     return (
         SanitizeNode(

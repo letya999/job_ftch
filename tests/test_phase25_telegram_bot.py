@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
-import asyncio
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
@@ -485,8 +485,8 @@ async def test_bot_mode_command(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_bot_with_scheduler(tmp_path: Path) -> None:
-    from job_ftch.cli import _run_bot_with_scheduler
     from job_ftch.adapters.telegram_bot.bot import HttpTelegramBotClient
+    from job_ftch.cli import _run_bot_with_scheduler
     
     runner = _build_runner(tmp_path)
     # Mock runner.run_all to see if it's called

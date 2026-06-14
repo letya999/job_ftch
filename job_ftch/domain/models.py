@@ -194,6 +194,8 @@ class ProfileMatchScore(BaseModel):
     region_score: float = Field(default=0.0, ge=0.0, le=1.0)
     salary_score: float = Field(default=0.0, ge=0.0, le=1.0)
     culture_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    vector_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    neg_vector_penalty: float = Field(default=0.0, ge=0.0, le=1.0)
     risk_penalty: float = Field(default=0.0, ge=0.0, le=1.0)
     final_score: float = Field(default=0.0, ge=0.0, le=1.0)
     decision: MatchDecision = MatchDecision.REVIEW

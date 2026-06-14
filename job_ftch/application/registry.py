@@ -308,6 +308,7 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.stores.job_group_store",
                 "job_ftch.infrastructure.llm.heuristic",
                 "job_ftch.infrastructure.llm.openai_provider",
+                "job_ftch.infrastructure.llm.fastembed_provider",
                 "job_ftch.infrastructure.auth.env_auth",
                 "job_ftch.infrastructure.auth.file_auth",
                 "job_ftch.infrastructure.auth.vault_auth",

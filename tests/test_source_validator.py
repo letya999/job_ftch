@@ -1,6 +1,9 @@
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
+
 from job_ftch.adapters.source_validator import check_url_reachable, validate_sources
+
 
 @pytest.mark.asyncio
 async def test_check_url_reachable_success():
