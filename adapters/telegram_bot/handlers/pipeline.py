@@ -1,6 +1,9 @@
 import asyncio
+import ipaddress
+import socket
 import time
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 import aiohttp
 import structlog
@@ -18,17 +21,63 @@ logger = structlog.get_logger(__name__)
 router = Router(name="pipeline")
 
 
+def _host_resolves_to_blocked_ip(hostname: str | None) -> bool:
+    """True if hostname resolves to a loopback/private/link-local/reserved/unspecified IP.
+
+    Used as an SSRF guard before issuing outbound liveness requests against URLs that
+    originate from untrusted scraped content.
+    """
+    if not hostname:
+        return True
+    try:
+        infos = socket.getaddrinfo(hostname, None)
+    except (socket.gaierror, UnicodeError, ValueError):
+        # Unresolvable host -> treat as not-alive (caller returns False), don't connect.
+        return True
+    for info in infos:
+        ip_str = info[4][0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return True
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            return True
+    return False
+
+
 async def _url_is_alive(url: str | None) -> bool:
-    """Quick HEAD check for non-Telegram URLs. Returns True for Telegram URLs without checking."""
+    """Quick HEAD check for non-Telegram URLs. Returns True for Telegram URLs without checking.
+
+    SSRF-guarded: URLs come from untrusted scraped content, so the resolved host is validated
+    against private/loopback/link-local/reserved ranges before any outbound request, and
+    redirects are NOT followed (a public host must not bounce us into the internal network).
+    """
     if not url:
         return False
     url_str = str(url)
     # Telegram links can't be HEAD-checked without auth, assume alive
     if "t.me" in url_str or "telegram.me" in url_str:
         return True
+    parsed = urlparse(url_str)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if _host_resolves_to_blocked_ip(parsed.hostname):
+        return False
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.head(url_str, timeout=aiohttp.ClientTimeout(total=3), allow_redirects=True) as resp:
+            async with session.head(
+                url_str,
+                timeout=aiohttp.ClientTimeout(total=3),
+                allow_redirects=False,
+            ) as resp:
+                # 2xx/3xx = reachable; 3xx is treated as alive without following the hop.
                 return resp.status < 400
     except Exception:
         return False
