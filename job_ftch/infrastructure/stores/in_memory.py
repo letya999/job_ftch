@@ -64,6 +64,9 @@ class InMemoryStore:
     async def delete(self, key: str) -> None:
         self._kv.pop(key, None)
 
+    async def clear_set(self, key: str) -> None:
+        self._sets.pop(key, None)
+
     async def set_add(self, key: str, member: str) -> None:
         members = self._sets.setdefault(key, OrderedDict())
         members[member] = None

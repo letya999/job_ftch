@@ -21,9 +21,17 @@ class SearchPage(CallbackData, prefix="sp"):
     page: int
 
 
-def build_digest_kb(digest_hash: str, page: int, total_pages: int) -> InlineKeyboardMarkup:
+def build_digest_kb(
+    digest_hash: str,
+    page: int,
+    total_pages: int,
+    *,
+    current_url: str | None = None,
+) -> InlineKeyboardMarkup:
     """Build keyboard for digest pagination."""
     builder = InlineKeyboardBuilder()
+    if current_url:
+        builder.add(InlineKeyboardButton(text="Open URL", url=current_url))
     if page > 0:
         builder.add(
             InlineKeyboardButton(

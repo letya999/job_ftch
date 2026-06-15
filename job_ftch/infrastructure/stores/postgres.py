@@ -32,6 +32,7 @@ class PostgreSQLStore(SQLStoreAdapter):
     """
     _SQL_KV_DELETE = "DELETE FROM jf_kv WHERE key = $1"
     _SQL_SET_ADD = "INSERT INTO jf_set (key, member) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+    _SQL_SET_CLEAR = "DELETE FROM jf_set WHERE key = $1"
     _SQL_SET_CONTAINS = "SELECT 1 FROM jf_set WHERE key = $1 AND member = $2"
     _SQL_SET_MEMBERS = "SELECT member FROM jf_set WHERE key = $1"
 

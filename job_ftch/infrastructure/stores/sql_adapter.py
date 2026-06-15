@@ -26,6 +26,7 @@ class SQLStoreAdapter(abc.ABC):
     _SQL_KV_UPSERT: str
     _SQL_KV_DELETE: str
     _SQL_SET_ADD: str
+    _SQL_SET_CLEAR: str
     _SQL_SET_CONTAINS: str
     _SQL_SET_MEMBERS: str
 
@@ -64,6 +65,9 @@ class SQLStoreAdapter(abc.ABC):
 
     async def delete(self, key: str) -> None:
         await self._execute(self._SQL_KV_DELETE, (key,))
+
+    async def clear_set(self, key: str) -> None:
+        await self._execute(self._SQL_SET_CLEAR, (key,))
 
     async def set_add(self, key: str, member: str) -> None:
         await self._execute(self._SQL_SET_ADD, (key, member))

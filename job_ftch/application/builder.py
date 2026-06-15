@@ -304,7 +304,7 @@ def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = No
             "tenant_id": tenant_id,
             "tenant_display_name": tenant.display_name,
             "source_backend": tenant.source_backend,
-            "sink_backend": tenant.output.backend or tenant.sink_backend,
+            "sink_backend": tenant.output.backend or tenant.sink_backend or "json_file",
             "store_backend": tenant.store_backend,
             "job_group_store_backend": tenant.job_group_store_backend,
             "llm_backend": tenant.llm_backend,
@@ -339,7 +339,7 @@ def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = No
                 if tenant.job_store_path is not None
                 else None
             ),
-            "store_dsn": tenant.store_dsn,
+            "store_dsn": tenant.store_dsn if tenant.store_dsn is not None else base.get("store_dsn"),
             "store_pool_min": tenant.store_pool_min,
             "store_pool_max": tenant.store_pool_max,
             "store_fallback_on_error": tenant.store_fallback_on_error,

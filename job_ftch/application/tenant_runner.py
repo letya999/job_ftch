@@ -26,6 +26,7 @@ from job_ftch.application.builder import (
 )
 from job_ftch.application.pipeline import RunSummary, SourceRunStats
 from job_ftch.application.registry import (
+    create_embedding_provider,
     create_job_backend,
     create_job_group_store,
     create_llm,
@@ -113,6 +114,10 @@ def _candidate_profile_key(user_id: str, profile_id: str) -> str:
 
 def _active_candidate_profile_key(user_id: str) -> str:
     return f"candidate_profile_active:{user_id}"
+
+
+def _active_candidate_profiles_key(user_id: str) -> str:
+    return f"candidate_profile_active_ids:{user_id}"
 
 
 def _update_source_health_payload(
@@ -271,6 +276,22 @@ class TenantStore:
         await connector.set_add(self._key("dedup_keys"), record.key)
         await connector.set_add(self._key(f"dedup_keys:{record.kind.value}"), record.key)
         await connector.set(self._key(f"dedup_record:{record.key}"), record.model_dump_json())
+
+    async def clear_dedup_state(self) -> int:
+        """Clear all processed markers and dedup keys for this tenant. Returns count of deleted dedup records."""
+        connector = cast("StoreConnector", self._store)
+        # Clear the processed-item set
+        await connector.clear_set(self._key("processed"))
+        # List dedup keys before clearing
+        dedup_members = await connector.set_members(self._key("dedup_keys"))
+        # Delete individual dedup record KV entries
+        for member in dedup_members:
+            await connector.delete(self._key(f"dedup_record:{member}"))
+        # Clear all dedup set indices
+        await connector.clear_set(self._key("dedup_keys"))
+        for kind in ("url", "fingerprint", "content"):
+            await connector.clear_set(self._key(f"dedup_keys:{kind}"))
+        return len(dedup_members)
 
     async def list_dedup_keys(self, kind: str | None = None) -> tuple[Any, ...]:
         connector = cast("StoreConnector", self._store)
@@ -449,6 +470,7 @@ class TenantStore:
             self._key(f"candidate_profile_ids:{record.user_id}"),
             record.profile_id,
         )
+        await connector.set_add(self._key("candidate_profile_user_ids"), record.user_id)
 
     async def list_candidate_profiles(self, user_id: str) -> list[ManagedCandidateProfile]:
         connector = cast("StoreConnector", self._store)
@@ -468,12 +490,59 @@ class TenantStore:
         profile_id: str,
     ) -> None:
         connector = cast("StoreConnector", self._store)
+        current_primary = await self.get_active_candidate_profile_id(user_id)
+        if current_primary and current_primary != profile_id:
+            await connector.set_add(self._key(_active_candidate_profiles_key(user_id)), current_primary)
         await connector.set(self._key(_active_candidate_profile_key(user_id)), profile_id)
+        await connector.set_add(self._key(_active_candidate_profiles_key(user_id)), profile_id)
 
     async def get_active_candidate_profile_id(self, user_id: str) -> str | None:
         connector = cast("StoreConnector", self._store)
         raw = await connector.get(self._key(_active_candidate_profile_key(user_id)))
         return None if raw is None else str(raw)
+
+    async def get_active_candidate_profile_ids(self, user_id: str) -> tuple[str, ...]:
+        connector = cast("StoreConnector", self._store)
+        active_ids = sorted(
+            await connector.set_members(self._key(_active_candidate_profiles_key(user_id)))
+        )
+        primary = await self.get_active_candidate_profile_id(user_id)
+        ordered = [item for item in ([primary] if primary else []) + active_ids if item]
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in ordered:
+            if item in seen:
+                continue
+            seen.add(item)
+            result.append(item)
+        return tuple(result)
+
+    async def unset_active_candidate_profile(self, user_id: str, profile_id: str) -> None:
+        connector = cast("StoreConnector", self._store)
+        active_ids = await self.get_active_candidate_profile_ids(user_id)
+        remaining = [item for item in active_ids if item != profile_id]
+        await connector.delete(self._key(_active_candidate_profiles_key(user_id)))
+        for item in remaining:
+            await connector.set_add(self._key(_active_candidate_profiles_key(user_id)), item)
+        primary = await self.get_active_candidate_profile_id(user_id)
+        if primary == profile_id:
+            if remaining:
+                await connector.set(self._key(_active_candidate_profile_key(user_id)), remaining[0])
+            else:
+                await connector.delete(self._key(_active_candidate_profile_key(user_id)))
+
+    async def list_candidate_profile_users(self) -> tuple[str, ...]:
+        connector = cast("StoreConnector", self._store)
+        return tuple(sorted(await connector.set_members(self._key("candidate_profile_user_ids"))))
+
+    async def list_all_active_candidate_profiles(self) -> list[ManagedCandidateProfile]:
+        records: list[ManagedCandidateProfile] = []
+        for user_id in await self.list_candidate_profile_users():
+            for profile_id in await self.get_active_candidate_profile_ids(user_id):
+                record = await self.get_candidate_profile(user_id, profile_id)
+                if record is not None:
+                    records.append(record)
+        return records
 
     async def get_run_summary(self, run_id: str) -> RunSummary | None:
         connector = cast("StoreConnector", self._store)
@@ -522,9 +591,11 @@ class TenantRuntime:
     auth_provider: AuthProvider
     store: TenantStore
     builder: PipelineBuilder
+    llm_provider: LLMProvider
     job_group_store: JobGroupStore
     search_backend: SearchBackend
     job_backend: JobPersistenceBackend
+    embedding_provider: object | None = None
     metrics_exporter: MetricsExporter | None = None
     base_sources: tuple[SourceSpec, ...] = field(default_factory=tuple)
     runtime_sources: dict[str, RuntimeSourceRecord] = field(default_factory=dict)
@@ -566,6 +637,12 @@ class TenantRunner:
             tenant_store = TenantStore(tenant.tenant_id, base_store)
             job_group_store = cast("JobGroupStore", create_job_group_store(tenant_settings))
             llm = cast("LLMProvider", create_llm(tenant_settings))
+            embedding_provider = None
+            if tenant_settings.embedding_provider:
+                try:
+                    embedding_provider = create_embedding_provider(tenant_settings)
+                except Exception:
+                    embedding_provider = None
             catalog = load_profile_catalog(tenant_settings)
             sanitize_node, nodes = build_nodes(
                 tenant_settings,
@@ -602,9 +679,11 @@ class TenantRunner:
                 auth_provider=auth,
                 store=tenant_store,
                 builder=builder,
+                llm_provider=llm,
                 job_group_store=job_group_store,
                 search_backend=cast("SearchBackend", create_search_backend(tenant_settings)),
                 job_backend=cast("JobPersistenceBackend", create_job_backend(tenant_settings)),
+                embedding_provider=embedding_provider,
                 metrics_exporter=metrics_exporter,
                 base_sources=tuple(tenant.sources),
             )
@@ -688,6 +767,63 @@ class TenantRunner:
         # Force reload
         runtime.sources_loaded = False
         await self._ensure_runtime_sources_loaded(runtime)
+
+    async def _build_runtime_catalog(self, runtime: TenantRuntime) -> Any:
+        from job_ftch.domain import ProfileCatalog
+
+        base_catalog = load_profile_catalog(runtime.settings)
+        active_records = await runtime.store.list_all_active_candidate_profiles()
+        if not active_records:
+            return base_catalog
+        extra_profiles = tuple(
+            search_profile
+            for record in active_records
+            for search_profile in record.profile.search_profiles
+        )
+        if extra_profiles:
+            # Use ONLY user profiles when present; do not dilute with the broad
+            # default catalog (which lets DevOps/1C/Data Analyst pass the prefilter).
+            return ProfileCatalog(
+                catalog_name=f"{base_catalog.catalog_name}+user",
+                profiles=extra_profiles,
+            )
+        return base_catalog
+
+    def _build_runtime_builder(
+        self,
+        runtime: TenantRuntime,
+        *,
+        effective_sources: list[SourceSpec],
+        catalog: Any,
+    ) -> PipelineBuilder:
+        sanitize_node, nodes = build_nodes(
+            runtime.settings,
+            runtime.store,
+            runtime.llm_provider,
+            runtime.job_group_store,
+            catalog=catalog,
+        )
+        output_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
+        rejected_counted, rejected_sink = build_rejected_sink(runtime.settings)
+        builder = PipelineBuilder()
+        builder.sources(effective_sources)
+        builder.auth(runtime.auth_provider)
+        builder.store(runtime.store)
+        builder.stage(sanitize_node)
+        for node in nodes:
+            builder.stage(node)
+        builder.sink(output_sink)
+        builder.with_quarantine_sink(build_quarantine_sink(runtime.settings))
+        builder.with_rejected_sink(rejected_sink, counted=rejected_counted)
+        builder.set_default_max_items(runtime.settings.pipeline_max_items_per_run)
+        builder.set_summary_context(
+            review_sink=review_sink,
+            posting_sink=posting_sink,
+            job_group_store=runtime.job_group_store,
+            profile_name=catalog.catalog_name,
+            output_path=runtime.settings.output_path,
+        )
+        return builder
 
     def _apply_runtime_sources(self, runtime: TenantRuntime) -> None:
         effective_sources = _merge_effective_sources(
@@ -852,8 +988,12 @@ class TenantRunner:
             await asyncio.sleep(jitter)
 
         async with _tenant_run_lock(runtime.settings, tenant_id):
-            builder = runtime.builder.clone()
-            builder.sources(effective_sources)
+            catalog = await self._build_runtime_catalog(runtime)
+            builder = self._build_runtime_builder(
+                runtime,
+                effective_sources=effective_sources,
+                catalog=catalog,
+            )
             summary = await builder.run_async(max_items=max_items)
 
         summary.tenant_id = tenant_id
@@ -1013,14 +1153,14 @@ class TenantRunner:
     ) -> list[dict[str, Any]]:
         runtime = self.get_runtime(tenant_id)
         records = await runtime.store.list_candidate_profiles(user_id)
-        active_profile_id = await runtime.store.get_active_candidate_profile_id(user_id)
+        active_profile_ids = set(await runtime.store.get_active_candidate_profile_ids(user_id))
         payloads: list[dict[str, Any]] = []
         for record in records:
             payloads.append(
                 {
                     "user_id": record.user_id,
                     "profile_id": record.profile_id,
-                    "active": record.profile_id == active_profile_id,
+                    "active": record.profile_id in active_profile_ids,
                     "profile": record.profile.model_dump(mode="json"),
                     "created_at": record.created_at.isoformat(),
                     "updated_at": record.updated_at.isoformat(),
@@ -1047,22 +1187,42 @@ class TenantRunner:
         msg = f"Failed to activate candidate profile: {profile_id}"
         raise RuntimeError(msg)
 
-    async def _resolve_candidate_profile(
+    async def unset_active_candidate_profile(
+        self,
+        tenant_id: str,
+        user_id: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        runtime = self.get_runtime(tenant_id)
+        await runtime.store.unset_active_candidate_profile(user_id, profile_id)
+        profiles = await self.list_candidate_profiles(tenant_id, user_id)
+        for profile in profiles:
+            if profile["profile_id"] == profile_id:
+                return profile
+        msg = f"Failed to deactivate candidate profile: {profile_id}"
+        raise RuntimeError(msg)
+
+    async def _resolve_candidate_profiles(
         self,
         tenant_id: str,
         *,
         user_id: str | None = None,
         profile_id: str | None = None,
-    ) -> ManagedCandidateProfile | None:
+    ) -> list[ManagedCandidateProfile]:
         runtime = self.get_runtime(tenant_id)
         if user_id is None:
-            return None
-        resolved_profile_id = profile_id or await runtime.store.get_active_candidate_profile_id(
-            user_id
+            return []
+        resolved_profile_ids = (
+            (profile_id,)
+            if profile_id is not None
+            else await runtime.store.get_active_candidate_profile_ids(user_id)
         )
-        if resolved_profile_id is None:
-            return None
-        return await runtime.store.get_candidate_profile(user_id, resolved_profile_id)
+        records: list[ManagedCandidateProfile] = []
+        for resolved_profile_id in resolved_profile_ids:
+            record = await runtime.store.get_candidate_profile(user_id, resolved_profile_id)
+            if record is not None:
+                records.append(record)
+        return records
 
     async def _rerank_groups_for_profile(
         self,
@@ -1072,18 +1232,27 @@ class TenantRunner:
         user_id: str | None = None,
         profile_id: str | None = None,
     ) -> list[JobGroup]:
-        record = await self._resolve_candidate_profile(
+        records = await self._resolve_candidate_profiles(
             tenant_id,
             user_id=user_id,
             profile_id=profile_id,
         )
-        if record is None:
+        if not records:
             return groups
 
-        from job_ftch.application.profile_inputs import build_profile_catalog
+        from job_ftch.domain import ProfileCatalog
         from job_ftch.nodes.match_scoring import MultiProfileMatchNode
 
-        node = MultiProfileMatchNode(build_profile_catalog(record.profile))
+        node = MultiProfileMatchNode(
+            ProfileCatalog(
+                catalog_name=f"user:{user_id or 'anonymous'}",
+                profiles=tuple(
+                    search_profile
+                    for record in records
+                    for search_profile in record.profile.search_profiles
+                ),
+            )
+        )
         scored: list[tuple[float, JobGroup]] = []
         for group in groups:
             job = await node.process(group.canonical_job)
@@ -1181,15 +1350,31 @@ class TenantRunner:
         limit: int = 10,
         user_id: str | None = None,
         profile_id: str | None = None,
+        min_score: float | None = None,
     ) -> list[JobRecord]:
-        groups = await self.get_runtime(tenant_id).job_group_store.list_groups(limit=limit)
+        # Rerank a large pool BEFORE truncating, so the top `limit` are the best
+        # matches across the whole catalog (not just the most recently updated).
+        runtime = self.get_runtime(tenant_id)
+        total = await runtime.job_group_store.count()
+        pool = min(total or limit, max(limit * 10, 200))
+        groups = await runtime.job_group_store.list_groups(limit=pool)
         ranked = await self._rerank_groups_for_profile(
             groups,
             tenant_id=tenant_id,
             user_id=user_id,
             profile_id=profile_id,
         )
-        return [group.canonical_job for group in ranked]
+        jobs = [group.canonical_job for group in ranked]
+        if min_score is not None and any(job.best_score is not None for job in jobs):
+            jobs = [job for job in jobs if (job.best_score or 0.0) >= min_score]
+        return jobs[:limit]
+
+    def default_tenant_id(self) -> str:
+        ids = self.tenant_ids()
+        if not ids:
+            msg = "No tenants configured"
+            raise RuntimeError(msg)
+        return ids[0]
 
     async def list_runs(
         self,
@@ -1237,6 +1422,11 @@ class TenantRunner:
         runtime.disabled_source_ids.clear()
         runtime.sources_loaded = False
         self._apply_runtime_sources(runtime)
+
+    async def clear_dedup(self, tenant_id: str) -> int:
+        """Clear dedup and processed-item state for a tenant. Returns number of deleted dedup records."""
+        runtime = self.get_runtime(tenant_id)
+        return await runtime.store.clear_dedup_state()
 
     async def close(self) -> None:
         closed: set[int] = set()

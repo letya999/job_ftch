@@ -124,7 +124,7 @@ async def test_match_scoring_negative_vector_penalizes(make_job_record):
         metadata={"embedding_vector": (1.0, 0.0, 0.0)}, post_type=PostType.JOB_POSTING
     )
     processed = await node.process(job)
-    assert processed.profile_scores[0].neg_vector_penalty == 0.5
+    assert processed.profile_scores[0].neg_vector_penalty == 0.6
 
 
 @pytest.mark.anyio
@@ -143,8 +143,8 @@ async def test_match_scoring_risk_signals_reduce_final_score(minimal_catalog, ma
 
 @pytest.mark.anyio
 async def test_match_scoring_best_profile_selected(make_job_record):
-    p1 = SearchProfile(profile_id="low", target_roles=("Analyst",), relevance_threshold=0.1)
-    p2 = SearchProfile(profile_id="high", target_roles=("Engineer",), relevance_threshold=0.1)
+    p1 = SearchProfile(profile_id="low", target_roles=("Designer",), relevance_threshold=0.1)
+    p2 = SearchProfile(profile_id="high", target_roles=("Software",), relevance_threshold=0.1)
     catalog = ProfileCatalog(profiles=[p1, p2])
     node = MultiProfileMatchNode(catalog)
     job = make_job_record(title="Software Engineer", post_type=PostType.JOB_POSTING)
@@ -152,13 +152,46 @@ async def test_match_scoring_best_profile_selected(make_job_record):
     assert processed.best_profile_id == "high"
 
 
+@pytest.mark.anyio
+async def test_match_scoring_engineer_stopword_no_cross_match(make_job_record):
+    # DevOps Engineer should NOT match AI Engineer just because of "engineer"
+    p = SearchProfile(profile_id="p", target_roles=("AI Engineer",), relevance_threshold=0.1)
+    catalog = ProfileCatalog(profiles=[p])
+    node = MultiProfileMatchNode(catalog)
+    
+    # "Engineer" is a stop-word, so only "DevOps" vs "AI" matters.
+    job = make_job_record(title="DevOps Engineer", post_type=PostType.JOB_POSTING)
+    processed = await node.process(job)
+    # Title score should be 0 because discriminating token "DevOps" not in "AI Engineer"
+    assert processed.profile_scores[0].title_score == 0.0
+
+
+@pytest.mark.anyio
+async def test_match_scoring_no_vacancy_bonus(make_job_record):
+    p = SearchProfile(profile_id="p", target_roles=("ML",), relevance_threshold=0.1)
+    catalog = ProfileCatalog(profiles=[p])
+    node = MultiProfileMatchNode(catalog)
+    
+    # Both should have same final score regardless of post_type bonus removal
+    job_posting = make_job_record(title="ML", post_type=PostType.JOB_POSTING)
+    job_other = make_job_record(title="ML", post_type=PostType.UNKNOWN)
+    
+    res_posting = await node.process(job_posting)
+    res_other = await node.process(job_other)
+    
+    assert res_posting.profile_scores[0].vacancy_type_score == 1.0
+    assert res_other.profile_scores[0].vacancy_type_score == 0.0
+    # Final scores should be identical because bonus is removed
+    assert res_posting.profile_scores[0].final_score == res_other.profile_scores[0].final_score
+
+
 def test_string_overlap_exact_substring():
     assert _string_overlap_score("Python Developer", ("Python",)) == 1.0
     assert _string_overlap_score("Python Developer", ("Java",)) == 0.0
     assert _string_overlap_score("Software Engineer", ("Software Engineer",)) == 1.0  # exact match
-    assert _string_overlap_score("ML Engineer", ("Engineer",)) == 1.0  # exact substring
+    assert _string_overlap_score("DevOps Engineer", ("AI Engineer",)) == 0.0  # "AI" (discriminating) not in "DevOps Engineer"
     assert (
-        _string_overlap_score("Python Developer", ("Java Developer",)) > 0.0
+        _string_overlap_score("Python Developer", ("Python specialist",)) > 0.0
     )  # partial token overlap
 
 

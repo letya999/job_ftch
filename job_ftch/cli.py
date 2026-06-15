@@ -5,12 +5,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from typing import TYPE_CHECKING
 
 import structlog
-
-if TYPE_CHECKING:
-    from adapters.telegram_bot.bot import HttpTelegramBotClient, TelegramBotService
 
 from job_ftch.application.builder import (
     run_pipeline_from_settings,
@@ -398,27 +394,35 @@ async def _handle_runs(settings: Settings, args: argparse.Namespace) -> None:
 
 
 async def _run_bot_with_scheduler(
-    service: TelegramBotService,
-    client: HttpTelegramBotClient,
     runner: TenantRunner,
+    config: object,
     interval_seconds: int,
+    embedding_provider: object | None = None,
+    reranker: object | None = None,
     stop_event: asyncio.Event | None = None,
 ) -> None:
-    """Run bot polling and tenant pipeline scheduler concurrently."""
-    # Background warmup: load model before first user request
-    embedding_provider = getattr(service, "_embedding_provider", None)
+    """Run aiogram long-polling and the tenant pipeline scheduler concurrently."""
+    import contextlib
+
+    from adapters.telegram_bot.main import build_bot, build_dispatcher, configure_bot
+
+    bot = build_bot(config)  # type: ignore[arg-type]
+    await configure_bot(bot, config)  # type: ignore[arg-type]
+    dispatcher = build_dispatcher(
+        runner=runner,
+        config=config,  # type: ignore[arg-type]
+        embedding_provider=embedding_provider,  # type: ignore[arg-type]
+        reranker=reranker,  # type: ignore[arg-type]
+    )
+
+    # Background warmup: load the embedding model before the first user request.
     if embedding_provider is not None:
 
         async def _warmup() -> None:
-            import contextlib
-
             with contextlib.suppress(Exception):
-                # Type ignore because it's a dynamic protocol/object
-                await embedding_provider.embed(["warmup"])
+                await embedding_provider.embed(["warmup"])  # type: ignore[attr-defined]
 
         asyncio.create_task(_warmup())
-
-    from adapters.telegram_bot.bot import run_polling_loop
 
     async def _scheduler_loop() -> None:
         while stop_event is None or not stop_event.is_set():
@@ -429,19 +433,18 @@ async def _run_bot_with_scheduler(
             except Exception as exc:
                 logger.error("scheduled_run_failed", error=str(exc))
 
-    await asyncio.gather(
-        run_polling_loop(service=service, client=client, stop_event=stop_event),
-        _scheduler_loop(),
-    )
+    try:
+        await asyncio.gather(
+            dispatcher.start_polling(bot),
+            _scheduler_loop(),
+        )
+    finally:
+        await bot.session.close()
 
 
 def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
     try:
-        from adapters.telegram_bot.bot import (
-            HttpTelegramBotClient,
-            TelegramBotService,
-            load_bot_config,
-        )
+        from adapters.telegram_bot.config import load_bot_config
         from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
     except ImportError:
         print("Install job-ftch[bot] to use the Telegram bot.")
@@ -456,7 +459,7 @@ def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
     bot_config = load_bot_config(auth)
 
     embedding_provider = None
-    if settings.embedding_provider:
+    if settings.embedding_enabled:
         from job_ftch.application.registry import create_embedding_provider
 
         embedding_provider = create_embedding_provider(settings)
@@ -472,37 +475,27 @@ def _run_telegram_bot(settings: Settings, args: argparse.Namespace) -> None:
             import uvicorn
 
             from adapters.telegram_bot.api import create_app
-            from adapters.telegram_bot.bot import (
-                HttpTelegramBotClient,
-                TelegramBotService,
-            )
         except ImportError:
             print("Install job-ftch[api] to use webhook mode.")
             raise SystemExit(1) from None
 
         app = create_app(
             configs_dir=settings.configs_dir,
+            base_settings=settings,
             runner=runner,
             embedding_provider=embedding_provider,
             reranker=reranker,
         )
         uvicorn.run(app, host=args.host, port=args.port)
     else:
-        client = HttpTelegramBotClient(bot_config.token)
-        service = TelegramBotService(
-            runner=runner,
-            sender=client,
-            config=bot_config,
-            embedding_provider=embedding_provider,
-            reranker=reranker,
-        )
         interval = settings.schedule_interval_seconds or (4 * 3600)
         asyncio.run(
             _run_bot_with_scheduler(
-                service=service,
-                client=client,
                 runner=runner,
+                config=bot_config,
                 interval_seconds=interval,
+                embedding_provider=embedding_provider,
+                reranker=reranker,
             )
         )
 

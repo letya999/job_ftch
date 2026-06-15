@@ -461,7 +461,6 @@ C4Component
 git clone https://github.com/<OWNER>/job_ftch
 cd job_ftch
 uv sync
-cp .env.example .env
 ```
 
 Run with fixture data (no credentials required):
@@ -475,10 +474,14 @@ uv run python app.py \
 
 ### Run the Telegram bot (Docker)
 
-1. Fill `TELEGRAM_BOT_TOKEN`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, and `OPENAI_API_KEY` in `.env`.
-2. Launch the monolith MVP (core + bot in one container):
+1. Fill runtime values in `.env.dev` and `adapters/telegram_bot/.env.dev`.
+2. Launch the monolith MVP (core + bot in one container) with `Postgres + Qdrant`:
 ```bash
-docker compose up -d
+docker compose up -d --build
+```
+3. Follow bot logs:
+```bash
+docker compose logs -f bot
 ```
 See `adapters/telegram_bot/` for details.
 

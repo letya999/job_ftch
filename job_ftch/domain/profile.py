@@ -96,6 +96,11 @@ class SearchProfile(BaseModel):
             object.__setattr__(self, field_name, normalized)
         return self
 
+    @property
+    def languages_of_interest(self) -> tuple[LanguageCode, ...]:
+        """Backward-compatible alias for older tests/adapters."""
+        return self.allowed_languages
+
 
 class ProfileCatalog(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
