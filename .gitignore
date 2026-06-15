@@ -81,7 +81,6 @@ fixtures/debug/
 .pytest.out
 
 # Docker
-docker-compose.yml
 docker-compose.override.yml
 
 # Extra caches/envs

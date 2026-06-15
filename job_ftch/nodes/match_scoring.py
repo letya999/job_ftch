@@ -153,6 +153,14 @@ class MultiProfileMatchNode:
                 elif max_neg_sim > 0.7:
                     neg_vector_penalty = 0.2
 
+        # Fallback: if no positive-example centroid, use the cross-lingual role-anchor
+        # similarity computed by EmbeddingPrefilterNode. This lets Russian-but-relevant
+        # posts rank up and off-target posts (e.g. QA when seeking AI) rank down.
+        if vector_score == 0.0:
+            role_match = item.metadata.get("embedding_role_match")
+            if isinstance(role_match, (int, float)):
+                vector_score = max(0.0, min(1.0, float(role_match)))
+
         risk_penalty = min(1.0, 0.15 * len(item.risk_signals))
         vacancy_type_score = 1.0 if item.post_type.value == "job_posting" else 0.0
 
@@ -166,6 +174,7 @@ class MultiProfileMatchNode:
             + profile.weights.salary * salary_score
             + profile.weights.culture * culture_score
             + profile.weights.vector * vector_score
+            + 0.05 * vacancy_type_score
         )
         final_score = max(
             0.0,
@@ -186,7 +195,8 @@ class MultiProfileMatchNode:
 
         explanation = (
             f"title={title_score:.2f} semantic={semantic_role_score:.2f} skills={skills_score:.2f} "
-            f"domain={domain_score:.2f} vector={vector_score:.2f} neg_p={neg_vector_penalty:.2f}"
+            f"domain={domain_score:.2f} vector={vector_score:.2f} vacancy={vacancy_type_score:.0f} "
+            f"neg_p={neg_vector_penalty:.2f}"
         )
         return ProfileMatchScore(
             profile_id=profile.profile_id,

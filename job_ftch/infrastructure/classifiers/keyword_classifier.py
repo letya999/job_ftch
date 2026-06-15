@@ -5,6 +5,44 @@ import re
 from job_ftch.application.contracts import ClassificationResult
 from job_ftch.domain import FilterProfile
 
+_ANNOUNCEMENT_PATTERNS = [
+    re.compile(p, re.IGNORECASE)
+    for p in [
+        r"\bдайджест\b",
+        r"\bподборк",
+        r"\bобзор\b",
+        r"\bстрим\b",
+        r"\bпрямой\s+эфир\b",
+        r"\bзапись\s+(?:стрим|эфир|вебинар)",
+        r"\bтрансляц",
+        r"\bонлайн.конференц",
+        r"\bанонс\b",
+        r"\bанонсируем\b",
+        r"\bвебинар\b",
+        r"\bконференц",
+        r"\bдискусси",
+        r"\bпанельная\b",
+        r"\bпанель\b",
+        r"\bворкшоп\b",
+        r"\bсаммит\b",
+        r"\bмитап\b",
+        r"\bdigest\b",
+        r"\bpodcast\b",
+        r"\bstream\b",
+        r"\bbroadcast\b",
+        r"\bworkshop\b",
+        r"\bsummit\b",
+        r"\bpanel\s+discussion\b",
+        r"\bwebinar\b",
+        r"\bделимся\b",
+        r"\bрасскажем\b",
+        r"\bрассказываем\b",
+        r"\bприходи\b",
+        r"\bприсоединяйся\b",
+        r"\bнаши\s+(?:результаты|успехи|новости)\b",
+    ]
+]
+
 
 class KeywordClassifierProvider:
     model_id = "keyword_v1"
@@ -18,9 +56,16 @@ class KeywordClassifierProvider:
         for pattern in self._profile.spam_signal_patterns:
             if re.search(pattern, lowered):
                 return ClassificationResult("spam", 0.95, self.model_id)
+
+        # Check announcement patterns (fast, no LLM)
+        for ann_pattern in _ANNOUNCEMENT_PATTERNS:
+            if ann_pattern.search(lowered):
+                return ClassificationResult("announcement", 0.88, self.model_id)
+
         # Check candidate patterns (substring)
         if any(p.casefold() in lowered for p in self._profile.candidate_signal_patterns):
             return ClassificationResult("candidate_seeking", 0.90, self.model_id)
+
         return ClassificationResult("unknown", 0.5, self.model_id)
 
     async def classify_batch(self, texts: list[str]) -> list[ClassificationResult]:

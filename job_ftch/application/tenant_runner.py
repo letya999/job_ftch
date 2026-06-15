@@ -1428,6 +1428,16 @@ class TenantRunner:
         runtime = self.get_runtime(tenant_id)
         return await runtime.store.clear_dedup_state()
 
+    async def clear_all(self, tenant_id: str) -> tuple[int, int]:
+        """Clear dedup state AND job groups. Returns (dedup_deleted, groups_deleted)."""
+        runtime = self.get_runtime(tenant_id)
+        dedup = await runtime.store.clear_dedup_state()
+        groups = 0
+        clear_fn = getattr(runtime.job_group_store, "clear", None)
+        if callable(clear_fn):
+            groups = await clear_fn()
+        return dedup, groups
+
     async def close(self) -> None:
         closed: set[int] = set()
         for runtime in self._runtimes.values():

@@ -14,6 +14,7 @@ from job_ftch.domain import (
     JobDraft,
     JobExtractionStatus,
     JobReviewReason,
+    JobValidationRejectionReason,
     LanguageCode,
     PostType,
     ProvenanceTrail,
@@ -50,6 +51,16 @@ class ExtractedJobFields(BaseModel):
         ge=0.0,
         le=1.0,
         description="0.0 = not an AI/ML role. 1.0 = clearly AI/ML role.",
+    )
+    search_relevance: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "How well this posting matches the candidate's target roles listed in "
+            "brackets at the top of the user message. 1.0 = directly one of those roles; "
+            "0.0 = clearly a different role. 0.5 if no roles are provided."
+        ),
     )
     language: LanguageCode = LanguageCode.UNKNOWN
     role_family: str | None = None
@@ -137,10 +148,28 @@ def _fallback_url(item: RawItem) -> AnyHttpUrl | None:
 
 
 class ExtractionNode:
-    def __init__(self, llm: LLMProvider) -> None:
+    def __init__(
+        self,
+        llm: LLMProvider,
+        *,
+        max_calls: int | None = None,
+        target_roles: tuple[str, ...] = (),
+        min_search_relevance: float = 0.0,
+    ) -> None:
         self._llm = llm
+        self._max_calls = max_calls
+        self._target_roles = target_roles
+        self._min_search_relevance = min_search_relevance
+        self._call_count = 0
 
     async def process(self, item: RawItem) -> JobDraft | None:
+        if self._max_calls is not None and self._call_count >= self._max_calls:
+            raise RawItemDropped(
+                reason=ExtractionRejectionReason.LLM_BUDGET_EXCEEDED,
+                details=f"LLM call budget of {self._max_calls} reached for this run.",
+                item=item,
+            )
+        self._call_count += 1
         extracted, degraded = await self._extract_fields(item)
         title = extracted.title or _fallback_title(item)
         company = extracted.company or _fallback_company(item)
@@ -160,6 +189,20 @@ class ExtractionNode:
                 details="Extraction did not produce enough structured job signal.",
                 item=item,
             )
+        if (
+            self._min_search_relevance > 0.0
+            and not degraded
+            and extracted.post_type is PostType.JOB_POSTING
+            and extracted.search_relevance < self._min_search_relevance
+        ):
+            raise RawItemDropped(
+                reason=JobValidationRejectionReason.JOB_OUT_OF_SCOPE,
+                details=(
+                    f"LLM search_relevance={extracted.search_relevance:.2f} below "
+                    f"min={self._min_search_relevance:.2f} for target roles."
+                ),
+                item=item,
+            )
         review_reasons: list[str] = []
         extraction_status = (
             JobExtractionStatus.PARTIAL if degraded else JobExtractionStatus.COMPLETE
@@ -176,6 +219,7 @@ class ExtractionNode:
             review_reasons.insert(0, JobReviewReason.PARTIAL_EXTRACTION.value)
         metadata = dict(item.metadata)
         metadata["extraction_backend"] = self._llm.__class__.__name__
+        metadata["llm_search_relevance"] = extracted.search_relevance
         extraction_steps = [f"llm:{self._llm.__class__.__name__}"]
         if degraded:
             extraction_steps.append("fallback:degraded_extraction")
@@ -240,8 +284,12 @@ class ExtractionNode:
         )
 
     async def _extract_fields(self, item: RawItem) -> tuple[ExtractedJobFields, bool]:
+        text = item.text
+        if self._target_roles:
+            roles = ", ".join(self._target_roles)
+            text = f"[Candidate target roles: {roles}]\n\n{item.text}"
         try:
-            return await self._llm.extract(item.text, ExtractedJobFields), False
+            return await self._llm.extract(text, ExtractedJobFields), False
         except Exception:
             return ExtractedJobFields(), True
 

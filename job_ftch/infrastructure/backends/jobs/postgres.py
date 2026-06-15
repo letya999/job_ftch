@@ -388,6 +388,15 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             val = await conn.fetchval("SELECT COUNT(*) FROM jf_job_groups")
             return val or 0
 
+    async def clear(self) -> int:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            count = await conn.fetchval("SELECT COUNT(*) FROM jf_job_groups")
+            await conn.execute("DELETE FROM jf_job_group_urls")
+            await conn.execute("DELETE FROM jf_job_group_fingerprints")
+            await conn.execute("DELETE FROM jf_job_groups")
+            return int(count or 0)
+
     async def search(self, query: str, limit: int = 20) -> list[JobGroup]:
         q = query.strip()
         if not q:

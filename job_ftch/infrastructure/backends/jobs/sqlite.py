@@ -441,6 +441,23 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             row = await cur.fetchone()
         return row[0] if row else 0
 
+    async def clear(self) -> int:
+        async with self._lock:
+            conn = await self._get_conn()
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                async with conn.execute("SELECT COUNT(*) FROM jf_job_groups") as cur:
+                    row = await cur.fetchone()
+                    count = row[0] if row else 0
+                await conn.execute("DELETE FROM jf_job_group_urls")
+                await conn.execute("DELETE FROM jf_job_group_fingerprints")
+                await conn.execute("DELETE FROM jf_job_groups")
+                await conn.commit()
+                return int(count)
+            except Exception:
+                await conn.rollback()
+                raise
+
     async def search(self, query: str, limit: int = 20) -> list[JobGroup]:
         norm_query = normalize_fts5_query(query)
         conn = await self._get_conn()

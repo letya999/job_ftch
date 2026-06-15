@@ -49,3 +49,32 @@ class SentenceTransformersProvider(EmbeddingProvider):
 
             # Convert numpy array to list of lists
             return cast("list[list[float]]", embeddings.tolist())
+
+
+class LocalSentenceTransformersProvider(EmbeddingProvider):
+    """Embedding provider for local use (no Settings/registry dependency)."""
+
+    def __init__(self, model_name: str) -> None:
+        if SentenceTransformer is None:
+            raise ImportError(
+                "sentence-transformers is required. Install with: pip install sentence-transformers"
+            )
+        self._model = SentenceTransformer(model_name)
+        self._lock = asyncio.Lock()
+
+    @property
+    def dimensions(self) -> int:
+        return int(self._model.get_sentence_embedding_dimension() or 0)
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        async with self._lock:
+            loop = asyncio.get_running_loop()
+            embeddings = await loop.run_in_executor(
+                None, lambda: self._model.encode(texts, convert_to_numpy=True)
+            )
+            return cast("list[list[float]]", embeddings.tolist())
+
+    async def embed_query(self, texts: list[str]) -> list[list[float]]:
+        return await self.embed(texts)
