@@ -16,13 +16,13 @@ pytest.importorskip("aiogram")
 
 from adapters.telegram_bot.config import TelegramBotConfig
 from adapters.telegram_bot.main import build_bot, build_dispatcher
-from adapters.telegram_bot.handlers import base, admin, profiles, search_digest, upload
+from adapters.telegram_bot.handlers import base, pipeline, sources
 
 
 @pytest.fixture(autouse=True)
 def _reset_routers() -> None:
     """Reset parent_router for all global routers to allow re-attachment in tests."""
-    for router in [base.router, admin.router, profiles.router, search_digest.router, upload.router]:
+    for router in [base.router, pipeline.router, sources.router]:
         router._parent_router = None
 
 
@@ -45,7 +45,7 @@ def test_build_dispatcher_registers_all_routers() -> None:
     dispatcher = build_dispatcher(runner=runner, config=_config())
 
     router_names = {router.name for router in dispatcher.sub_routers}
-    assert {"base", "admin", "profiles", "search_digest", "upload"} <= router_names
+    assert {"base", "pipeline", "sources"} <= router_names
 
 
 def test_build_dispatcher_passes_optional_dependencies() -> None:

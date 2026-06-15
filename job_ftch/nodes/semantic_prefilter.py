@@ -19,6 +19,17 @@ _DESC_SKIP_WORDS = frozenset({
     "in", "on", "at", "to", "of", "a", "an", "is", "it",
 })
 
+_CYRILLIC_RE = re.compile(r'[А-Яа-яЁё]')
+_LATIN_RE = re.compile(r'[A-Za-z]')
+
+
+def _cyrillic_ratio(text: str) -> float:
+    """Return fraction of letter characters that are Cyrillic."""
+    cyrillic = len(_CYRILLIC_RE.findall(text))
+    latin = len(_LATIN_RE.findall(text))
+    total = cyrillic + latin
+    return cyrillic / total if total > 0 else 0.0
+
 
 def _tokens(text: str) -> set[str]:
     return {token.casefold() for token in _TOKEN_RE.findall(text)}
@@ -49,6 +60,12 @@ class SemanticPrefilterNode:
         self._uncertain_ratio = uncertain_ratio
 
     async def process(self, item: RawItem) -> RawItem | None:
+        # Lower the drop threshold for Russian text: profile keywords are English so
+        # token overlap against Russian posts is systematically underestimated.
+        ratio = self._uncertain_ratio
+        if _cyrillic_ratio(item.text) > 0.4:
+            ratio = min(self._uncertain_ratio, 0.5)
+
         tokens = _tokens(item.text)
         scores: list[tuple[str, float]] = []
         for profile in self._catalog.profiles:
@@ -59,7 +76,7 @@ class SemanticPrefilterNode:
             scores, key=lambda pair: pair[1], default=("default", 0.0)
         )
         threshold = max(profile.relevance_threshold for profile in self._catalog.profiles)
-        if best_score < threshold * self._uncertain_ratio:
+        if best_score < threshold * ratio:
             raise RawItemDropped(
                 reason=TriageRejectionReason.TELEGRAM_LOW_SIGNAL,
                 details=(

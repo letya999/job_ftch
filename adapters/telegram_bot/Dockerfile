@@ -10,7 +10,10 @@ COPY --chown=appuser:appuser . /app
 # Bot adapter (aiogram + telethon + resume parsing) + library infra:
 # Postgres store, OpenAI LLM/embeddings, Qdrant vector backend, RSS feeds,
 # and career-site scrapers (jmespath).
-RUN pip install --no-cache-dir ".[bot,postgres,openai,qdrant,feeds,site_scrapers,stealth]"
+RUN pip install --no-cache-dir ".[bot,postgres,openai,qdrant,feeds,site_scrapers,stealth,embeddings]"
+
+# Pre-download multilingual embedding model for EmbeddingPrefilterNode
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('TechWolf/JobBERT-v3')"
 
 # Ensure the application tree is writable for runtime-created artifacts
 RUN chown -R appuser:appuser /app && mkdir -p /app/.runtime

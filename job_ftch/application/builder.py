@@ -446,15 +446,56 @@ def build_nodes(
         HardFilterNode(catalog),
         DedupNode(store),
         SemanticPrefilterNode(catalog),
-        ExtractionNode(llm),
-        ExtractionValidationNode(),
-        TitleCompanyNormalizationNode(normalizer),
-        SkillNormalizationNode(normalizer),
-        LocationWorkModeNormalizationNode(),
-        CompensationParsingNode(),
-        JobLifecycleNode(),
-        JobAggregationNode(job_group_store, attach_group_id=True),
     ]
+
+    if settings.embedding_prefilter_enabled:
+        try:
+            from job_ftch.infrastructure.embeddings.sentence_transformers_provider import (
+                LocalSentenceTransformersProvider,
+            )
+            from job_ftch.nodes.embedding_prefilter import EmbeddingPrefilterNode
+
+            _prefilter_provider = LocalSentenceTransformersProvider(
+                settings.embedding_prefilter_model
+            )
+            nodes.append(EmbeddingPrefilterNode(catalog, _prefilter_provider))
+            structlog.get_logger("job_ftch.builder").info(
+                "embedding_prefilter_enabled",
+                model=settings.embedding_prefilter_model,
+            )
+        except ImportError:
+            structlog.get_logger("job_ftch.builder").warning(
+                "embedding_prefilter_skipped",
+                reason="sentence-transformers not installed",
+            )
+
+    _seen_roles: set[str] = set()
+    _target_roles: list[str] = []
+    for _profile in catalog.profiles:
+        for _role in _profile.target_roles:
+            _key = _role.casefold().strip()
+            if _key and _key not in _seen_roles:
+                _seen_roles.add(_key)
+                _target_roles.append(_role)
+    _target_roles_tuple = tuple(_target_roles[:60])  # cap prompt size
+
+    nodes.extend(
+        [
+            ExtractionNode(
+                llm,
+                max_calls=settings.pipeline_max_llm_calls_per_run,
+                target_roles=_target_roles_tuple,
+                min_search_relevance=settings.extraction_min_search_relevance,
+            ),
+            ExtractionValidationNode(),
+            TitleCompanyNormalizationNode(normalizer),
+            SkillNormalizationNode(normalizer),
+            LocationWorkModeNormalizationNode(),
+            CompensationParsingNode(),
+            JobLifecycleNode(),
+            JobAggregationNode(job_group_store, attach_group_id=True),
+        ]
+    )
 
     if settings.language_detection_enabled:
         from job_ftch.infrastructure.language.detector import LinguaLanguageDetector

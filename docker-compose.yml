@@ -1,0 +1,55 @@
+# Dev stack — code is mounted, no rebuild needed for source changes.
+# Usage:
+#   docker compose up -d          # start all
+#   docker compose restart bot    # pick up code changes instantly
+#   docker compose build bot      # only needed after pyproject.toml changes
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: adapters/telegram_bot/Dockerfile.dev
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+      - adapters/telegram_bot/.env.dev
+    environment:
+      JOB_FTCH_STORE_DSN: postgresql://job_user:job_password@postgres:5432/job_ftch
+      JOB_FTCH_QDRANT_URL: http://qdrant:6333
+      JOB_FTCH_CONFIGS_DIR: /app/adapters/telegram_bot/config/tenants
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    volumes:
+      - .:/app                  # live code mount — changes take effect on restart
+      - bot_cache:/app/.cache   # isolate pip/playwright cache from host
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: job_user
+      POSTGRES_PASSWORD: job_password
+      POSTGRES_DB: job_ftch
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U job_user -d job_ftch"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  pgdata:
+  qdrant_data:
+  bot_cache:

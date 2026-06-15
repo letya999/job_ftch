@@ -1,97 +1,201 @@
-# Technical Debt & Backlog
+# Technical Debt Registry
 
-This document is the single registry for architectural improvements, future features, and known technical debt for `job_ftch`. Items are organized by area with priority tags.
+Items deferred from active development. Review when relevant scope opens.
 
-## 1. Core Architectural & Lifecycle
+---
 
-### 1.1 Unified RuntimeAdapter Protocol (Item 29) [Priority: v1.x]
-**Problem:** Runtime adapters (FastAPI, MCP, Telegram Bot) lack a formal lifecycle contract.
-**Backlog:**
-- Define `RuntimeAdapter` Protocol: `startup(builder)`, `stop(timeout)`, `health()`.
-- Implement `AdapterHost` to coordinate multiple adapters in a single process.
-- Refactor existing adapters to implement this protocol.
+## TD-001: Machine-readable job posting contract
 
-### 1.2 PydanticAI Migration [Priority: v1.x] (DONE: Instructor)
-**Status:** `ExtractionNode` already uses `instructor` for robust schema-based extraction.
-**Backlog:**
-- Evaluate migration to `PydanticAI` for more complex agentic extraction flows and better dependency injection.
+Define a formal schema for what constitutes a confirmed `job_posting`:
+- hiring_intent_present (boolean, from keywords)
+- role_identified (boolean)
+- employer_identifiable (boolean)
+- apply_path_exists (boolean, URL or email or t.me link)
 
-### 1.3 Deep Data Lineage Hardening [Priority: v1.x]
-**Status:** `JobLineage` is currently built on-demand.
-**Backlog:**
-- Implement a dedicated `LineageStore` to persist stage-by-stage transformations.
-- Store "snapshots" of raw content and LLM prompt/response pairs for debugging.
+Use this as the gating contract for output, not just `post_type == job_posting`.
 
-## 2. Ingestion & Sources
+**Priority:** High — prevents non-job content from leaking into output
+**Effort:** Medium (1-2 days)
+**Blocks:** TD-002
 
-### 2.1 Realtime Push Ingestion [Priority: post-MVP]
-**Backlog:**
-- Implement `WebhookSource` and `WebSocketSource` for low-latency updates.
-- Support `EventListenerMode` in the scheduler for persistent connections.
+---
 
-### 2.2 Realtime Telegram (Telethon) [Priority: v1.x]
-**Backlog:**
-- Transition from polling to `TelegramRealtimeSource` using Telethon's event bus for high-volume channels.
+## TD-002: Golden dataset + eval harness
 
-### 2.3 Self-Healing Scrapers [Priority: Community]
-**Backlog:**
-- LLM-based repair for `CareerSiteSource` when CSS selectors fail due to site redesign.
-- Autonomous `FingerprintingNode` to detect ATS type (Greenhouse, Lever) automatically.
+Collect and annotate:
+- 50 confirmed real vacancies (positive)
+- 50 non-vacancies from Telegram channels (announcements, digests, events)
+- 20 edge cases (referral posts, "we're hiring" without detail, project-seeking-dev)
+- 10 dead URLs
+- 10 Telegram career channels
+- 10 career site pages
 
-### 2.4 Autonomous Source Discovery [Priority: Community]
-**Backlog:**
-- Implement `SourceDiscoverer` to find new Telegram channels/sites based on user profile keywords.
+Run eval after every pipeline change to track:
+- classification_precision, classification_recall
+- false_positive_rate (non-job sent to user)
+- llm_calls_per_100_items
+- valid_url_rate
 
-## 3. Intelligence & Semantic
+**Priority:** High — only way to catch regressions without manual checking
+**Effort:** High (2-3 days for dataset, 1 day for harness)
+**Depends on:** TD-001
 
-### 3.1 ProfileArchitect & Autonomous Onboarding [Priority: v1.x]
-**Backlog:**
-- Automatically extract `FilterProfile` from user resumes.
-- Implement mandatory onboarding flow to ensure every run has a valid profile.
+---
 
-### 3.2 Vector Active Learning [Priority: post-MVP]
-**Backlog:**
-- Move from static profiles to dynamic vector ensembles based on user feedback (Like/Dislike).
-- Use "positive/negative" centroids to tune relevance scoring in `SemanticPrefilterNode`.
+## TD-003: Separate triage layer with TriageDecision
 
-### 3.3 Skill Knowledge Graph [Priority: post-MVP]
-**Backlog:**
-- Build a graph of skill relationships (e.g., "PyTorch -> Deep Learning") for semantic query expansion.
+Replace the current implicit classification flow with an explicit `TriageDecision` dataclass:
 
-## 4. Reliability, Privacy & Security
+```python
+class TriageDecision:
+    content_type: Literal["job_posting", "announcement", "digest", "event", "article", "candidate", "spam", "unknown"]
+    confidence: float
+    reject_reason: str | None
+    should_call_llm: bool
+    evidence: list[str]
+```
 
-### 4.1 Pre-flight Health Checks [Priority: v1.x]
-**Backlog:**
-- Add `ping()` to `Source` protocol to skip dead sites before the fetch phase.
-- Implement heuristic availability checks (HEAD requests).
+Move all fast classification (keyword, regex, source-kind rules) into one `TriageNode`
+that produces this decision. Downstream nodes consume it instead of re-doing classification.
 
-### 4.2 PII-Sandbox (Privacy-by-Design) [Priority: post-MVP]
-**Backlog:**
-- Mask PII (names, phones, emails) in a sandbox node before sending data to cloud LLM providers.
-- Implement local de-masking at the storage layer.
+**Priority:** Medium
+**Effort:** High (architectural refactor)
 
-### 4.3 Prompt Guard [Priority: v1.x]
-**Backlog:**
-- Detect and block prompt-injection attempts in raw job descriptions.
+---
 
-## 5. Analytics & UX
+## TD-004: Source adapter contract
 
-### 5.1 Market Intelligence Module [Priority: post-MVP]
-**Backlog:**
-- Aggregate salary trends and skill demand across the entire `JobGroup` store.
-- Implement `job_ftch analyze` CLI command.
+Different source types need different pipeline assumptions:
+- `career_site`: always a job posting; validate URL; extract structured fields
+- `telegram_channel`: mixed content; strict triage; cheap classifier first
+- `telegram_group/comment`: very noisy; highest triage bar
+- `rss`: usually structured; minimal LLM needed
 
-### 5.2 Response Assistant (Ice-breakers) [Priority: post-MVP]
-**Backlog:**
-- Generate personalized "Ice-breaker" messages based on the match between a job and a user profile.
+Define `SourceAdapter.infer_content_type()` and `SourceAdapter.source_confidence()`
+so the pipeline can self-configure per source kind.
 
-## 6. Cleanup & Maintenance
+**Priority:** Medium
+**Effort:** High
 
-### 6.1 Token-Saving Pre-normalization (Item 27) [DONE]
-**Status:** Covered by `SanitizeNode` and input-hygiene filters.
-**Backlog:**
-- Further optimize `RegexSanitizer` to strip non-informative content (emojis, tracking links) before extraction to save tokens.
+---
 
-### 6.2 Hybrid Persistence Overlay [Priority: v1.x]
-**Backlog:**
-- Implement `FileBackedStoreOverlay` to sync `InMemoryStore` changes to disk for local CLI use.
+## TD-005: DB schema normalization
+
+Currently `jf_job_groups.raw_json` is the source of truth for all job fields.
+Expression indexes and JSON path queries work, but won't scale past ~50k groups.
+
+Recommended: extract key columns from raw_json to real table columns:
+- `post_type TEXT`
+- `source_kind TEXT`
+- `best_score FLOAT`
+- `quality_score FLOAT`
+- `title TEXT`
+- `company TEXT`
+- `canonical_url TEXT`
+- `updated_at TIMESTAMPTZ` (already exists)
+
+Keep `raw_json` as debug payload only.
+
+**Priority:** Low now, High at 10k+ groups
+**Effort:** High (migration, model changes, query updates)
+
+---
+
+## TD-006: Source health scoring
+
+Track per-source metrics in `jf_source_health` table:
+- `job_posting_rate`: fraction of fetched items that became real jobs
+- `duplicate_rate`
+- `dead_url_rate`
+- `llm_cost_per_valid_job`
+- `last_success_at`
+
+Expose as `/sources health` bot command. Use to auto-adjust triage strictness.
+
+**Priority:** Low
+**Effort:** Medium
+
+---
+
+## TD-007: Quarantine / /review command
+
+Add a third item state between "drop" and "emit": `quarantine`.
+
+Uncertain items (low-confidence post_type, valid URL but bad extraction) go to
+`jf_quarantine_items` table instead of being silently dropped.
+
+Add `/review` bot command to page through quarantined items and mark as
+positive/negative example with one tap.
+
+**Priority:** Medium — useful for improving profile from real edge cases
+**Effort:** Medium (1 new table, 1 new bot command, FSM for review flow)
+
+---
+
+## TD-008: Feedback buttons on vacancy cards
+
+Add inline keyboard to each sent vacancy card:
+- ✅ Подходит
+- ❌ Не вакансия
+- ❌ Не мой профиль
+- 🔗 Мёртвая ссылка
+
+Save to `jf_user_feedback(job_id, user_id, feedback_type, sent_at)`.
+Use feedback automatically as `/positive` / `/negative` signals.
+
+**Priority:** High (user value, closes the feedback loop)
+**Effort:** Medium (2 days: table, callback handlers, profile update integration)
+
+---
+
+## TD-009: Explainability / /debug_last_run
+
+After each /run, store a debug summary per item:
+- why_sent: post_type, profile_score, matched_skills, url_status
+- why_dropped: content_type, evidence tokens, drop_reason
+
+Expose via `/debug` command that shows last 5 dropped + last 5 sent with reasons.
+
+**Priority:** Low
+**Effort:** Medium
+
+---
+
+## TD-010: Admin backfill/reclassify commands
+
+CLI commands for maintaining data quality over time:
+- `job-ftch admin reclassify --where post_type is null`
+- `job-ftch admin purge-non-jobs`
+- `job-ftch admin rebuild-groups`
+- `job-ftch admin recompute-scores --profile user_x`
+
+**Priority:** Low
+**Effort:** Low (1 day)
+
+---
+
+## TD-011: Concurrency hardening (advanced)
+
+Current: per-user run lock (TTL-based), upload lock.
+Missing:
+- Optimistic locking for profile save (lost update race on concurrent /positive)
+- Idempotency key for uploaded documents (same PDF twice = 1 example, not 2)
+- Callback versioning (old inline buttons referencing deleted FSM state)
+
+**Priority:** Medium (will surface when concurrent users increase)
+**Effort:** Medium
+
+---
+
+## TD-012: Known good / strict mode flag
+
+`STRICT_MODE=true` environment flag that overrides:
+- `BOT_SEND_LIMIT_PER_RUN=5`
+- `BOT_MIN_QUALITY_SCORE=0.5`
+- `PIPELINE_MAX_LLM_CALLS=15`
+- `ALLOW_UNKNOWN_POST_TYPE=false`
+
+Use when classifier is unstable (e.g. after adding new sources).
+
+**Priority:** Low
+**Effort:** Low (1 hour)

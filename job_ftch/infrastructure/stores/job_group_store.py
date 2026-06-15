@@ -110,3 +110,11 @@ class InMemoryJobGroupStore:
 
     async def count(self) -> int:
         return len(self._groups)
+
+    async def clear(self) -> int:
+        n = len(self._groups)
+        self._groups.clear()
+        self._url_index.clear()
+        self._fingerprint_index.clear()
+        self._blocking_index.clear()
+        return n

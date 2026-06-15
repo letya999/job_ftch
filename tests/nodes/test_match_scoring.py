@@ -114,6 +114,21 @@ async def test_match_scoring_vector_cosine_used_when_available(make_job_record):
 
 
 @pytest.mark.anyio
+async def test_match_scoring_role_anchor_fallback(make_job_record):
+    # If no profile centroid, use metadata embedding_role_match
+    profile = SearchProfile(
+        profile_id="p", embedding_vector=None, relevance_threshold=0.1
+    )
+    catalog = ProfileCatalog(profiles=[profile])
+    node = MultiProfileMatchNode(catalog)
+    job = make_job_record(
+        metadata={"embedding_role_match": 0.85}, post_type=PostType.JOB_POSTING
+    )
+    processed = await node.process(job)
+    assert processed.profile_scores[0].vector_score == 0.85
+
+
+@pytest.mark.anyio
 async def test_match_scoring_negative_vector_penalizes(make_job_record):
     profile = SearchProfile(
         profile_id="p", negative_embedding_vectors=((1.0, 0.0, 0.0),), relevance_threshold=0.1
@@ -167,22 +182,25 @@ async def test_match_scoring_engineer_stopword_no_cross_match(make_job_record):
 
 
 @pytest.mark.anyio
-async def test_match_scoring_no_vacancy_bonus(make_job_record):
+async def test_match_scoring_vacancy_bonus(make_job_record):
     p = SearchProfile(profile_id="p", target_roles=("ML",), relevance_threshold=0.1)
     catalog = ProfileCatalog(profiles=[p])
     node = MultiProfileMatchNode(catalog)
-    
-    # Both should have same final score regardless of post_type bonus removal
+
+    # Job posting should have a slight bonus (+0.05) over other types
     job_posting = make_job_record(title="ML", post_type=PostType.JOB_POSTING)
     job_other = make_job_record(title="ML", post_type=PostType.UNKNOWN)
-    
+
     res_posting = await node.process(job_posting)
     res_other = await node.process(job_other)
-    
+
     assert res_posting.profile_scores[0].vacancy_type_score == 1.0
     assert res_other.profile_scores[0].vacancy_type_score == 0.0
-    # Final scores should be identical because bonus is removed
-    assert res_posting.profile_scores[0].final_score == res_other.profile_scores[0].final_score
+    # Final score for job_posting should be 0.05 higher
+    assert (
+        round(res_posting.profile_scores[0].final_score - res_other.profile_scores[0].final_score, 2)
+        == 0.05
+    )
 
 
 def test_string_overlap_exact_substring():

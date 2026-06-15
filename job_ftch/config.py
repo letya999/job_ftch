@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     review_max_quality_score: float = Field(default=0.65, ge=0.0, le=1.0)
     posting_min_quality_score: float = Field(default=0.8, ge=0.0, le=1.0)
     routing_accept_threshold: float = Field(default=0.85, ge=0.0, le=1.0)
+    bot_send_limit_per_run: int = Field(default=15, ge=1, le=50)
+    bot_min_quality_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    bot_min_relevance_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    extraction_min_search_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
+    pipeline_max_llm_calls_per_run: int | None = Field(default=None)
     routing_review_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     routing_quality_override_threshold: float = Field(default=0.6, ge=0.0, le=1.0)
     telegram_api_id: int | None = None
@@ -115,6 +120,8 @@ class Settings(BaseSettings):
     job_store_path: Path | None = None
     search_language: str = "simple"
     embedding_enabled: bool = False
+    embedding_prefilter_enabled: bool = False
+    embedding_prefilter_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
     language_detection_enabled: bool = False
     translation_enabled: bool = False
     translation_target_language: str = "ru"

@@ -9,7 +9,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand
 
-from adapters.telegram_bot.handlers import admin, base, profiles, search_digest, upload
+from adapters.telegram_bot.handlers import base, examples, pipeline, sources
 from adapters.telegram_bot.middlewares.auth import AuthMiddleware
 from adapters.telegram_bot.middlewares.di import DIMiddleware
 from adapters.telegram_bot.middlewares.throttling import ThrottlingMiddleware
@@ -22,38 +22,21 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 
-def _build_bot_commands(config: TelegramBotConfig) -> list[BotCommand]:
-    commands = [
-        BotCommand(command="start", description="Show the welcome message"),
-        BotCommand(command="help", description="Show available commands"),
-        BotCommand(command="status", description="Show latest pipeline status"),
-        BotCommand(command="sources", description="List configured sources"),
-        BotCommand(command="search", description="Search jobs in the catalog"),
-        BotCommand(command="digest", description="Browse jobs one by one"),
-        BotCommand(command="profiles", description="Your search profile and example counts"),
-        BotCommand(command="list_examples", description="List your positive/negative resume examples"),
-        BotCommand(command="delete_example", description="Delete one stored example by type and index"),
-        BotCommand(command="mode", description="Set upload mode (positive/negative resume)"),
+def _build_bot_commands() -> list[BotCommand]:
+    return [
+        BotCommand(command="start", description="Главное меню / Статус"),
+        BotCommand(command="positive", description="Добавить подходящее резюме"),
+        BotCommand(command="negative", description="Добавить НЕ подходящее резюме"),
+        BotCommand(command="examples", description="Список моих примеров"),
+        BotCommand(command="sources", description="Список источников (URL)"),
+        BotCommand(command="run", description="Запустить поиск сейчас"),
+        BotCommand(command="clear", description="Очистить историю — следующий запуск увидит всё заново"),
     ]
-    if config.admin_user_ids:
-        commands.extend(
-            [
-                BotCommand(command="run", description="Run the pipeline now"),
-                BotCommand(command="reset", description="Reset runtime state"),
-                BotCommand(command="reset_dedup", description="Clear dedup records (dev)"),
-                BotCommand(command="addsource", description="Add one source"),
-                BotCommand(command="addsources", description="Bulk add sources"),
-                BotCommand(command="disablesource", description="Disable a source"),
-                BotCommand(command="setposting", description="Configure posting backend"),
-                BotCommand(command="setnotify", description="Configure notification mode"),
-            ]
-        )
-    return commands
 
 
-async def configure_bot(bot: Bot, config: TelegramBotConfig) -> None:
+async def configure_bot(bot: Bot, config: TelegramBotConfig | None = None) -> None:
     """Apply Bot API configuration needed at startup."""
-    commands = _build_bot_commands(config)
+    commands = _build_bot_commands()
     await bot.set_my_commands(commands)
     logger.info(
         "telegram_bot_commands_registered",
@@ -93,10 +76,9 @@ def build_dispatcher(
 
     # Register routers
     dp.include_router(base.router)
-    dp.include_router(admin.router)
-    dp.include_router(profiles.router)
-    dp.include_router(search_digest.router)
-    dp.include_router(upload.router)
+    dp.include_router(examples.router)
+    dp.include_router(sources.router)
+    dp.include_router(pipeline.router)
 
     return dp
 
@@ -119,6 +101,6 @@ async def start_polling(
 
     logger.info("telegram_bot_polling_started")
     try:
-        await dp.start_polling(bot)
+        await dp.start_polling(bot, drop_pending_updates=True)
     finally:
         await bot.session.close()

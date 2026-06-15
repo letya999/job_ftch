@@ -8,6 +8,7 @@ from enum import StrEnum
 class ExtractionRejectionReason(StrEnum):
     EXTRACTION_EMPTY = "extraction_empty"
     EXTRACTION_FAILED = "extraction_failed"
+    LLM_BUDGET_EXCEEDED = "llm_budget_exceeded"
 
 
 class JobReviewReason(StrEnum):

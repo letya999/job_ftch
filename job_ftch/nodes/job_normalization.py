@@ -25,19 +25,36 @@ _SALARY_RE = re.compile(
     r"(?:\s*(?:-|to|–)\s*(?P<max>\d[\d\s]{2,}))?",
     re.IGNORECASE,
 )
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+def _strip_html(value: str) -> str:
+    text = _TAG_RE.sub(" ", value)
+    text = (
+        text.replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", '"')
+    )
+    return _WS_RE.sub(" ", text).strip()
 
 
 def _clean_title(value: str | None) -> str | None:
     if value is None:
         return None
-    cleaned = _PREFIX_RE.sub("", value.strip())
+    cleaned = _PREFIX_RE.sub("", _strip_html(value).strip())
     return cleaned or None
 
 
 def _clean_company(value: str | None) -> str | None:
     if value is None:
         return None
-    cleaned = value.strip(" -|,")
+    cleaned = _strip_html(value).strip(" -|,")
+    # Reject prose/garbage: a real company name is short and not a sentence.
+    if len(cleaned) > 60 or cleaned.count(" ") >= 6:
+        return None
     return cleaned or None
 
 
@@ -98,6 +115,11 @@ class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
         if company != item.company_name_raw:
             normalization_steps.append("company:cleaned")
 
+        description = item.description_raw or ""
+        if "<" in description or "&" in description:
+            description = _strip_html(description)
+            normalization_steps.append("description:html_stripped")
+
         record = draft_to_record(item)
         provenance = record.provenance.model_copy(
             update={
@@ -116,6 +138,7 @@ class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
                 "company_canonical": company,
                 "company_name_raw": company,
                 "company_name_normalized": company,
+                "description": description or record.description,
                 "role_family": role_family,
                 "seniority": seniority,
                 "provenance": provenance,

@@ -23,19 +23,36 @@ Prefer factual values copied or normalized from the text.
 Do not invent company, location, compensation, seniority, or skills.
 
 Classify post_type:
-- job_posting: employer or company is hiring
-- candidate_seeking: person is looking for work
-- announcement: meetup, webinar, event, course, digest, news
-- spam: scam, gambling, unrelated promotion
+- job_posting: employer or recruiter is actively hiring for a specific named role
+- candidate_seeking: a person is looking for work (#resume, "open to work", "ищу работу")
+- announcement: meetup, webinar, conference, stream, digest, newsletter, podcast, course,
+  event invite, roundup, news article, discussion thread, panel, product launch, tool release
+- spam: scam, gambling, MLM, unrelated promotion
 
-Rate ai_relevance:
-- 0.0: clearly not an AI/ML/data role
-- 0.3: tangentially related
-- 0.5: platform/data/infra work adjacent to AI
-- 0.7: strong AI relevance
-- 1.0: core AI/ML/NLP/CV/LLM role
+When in doubt between job_posting and announcement:
+- No specific role being filled -> announcement
+- Text is about an event or broadcast happening -> announcement
+- Promotes a product, tool, or company news without hiring -> announcement
+- Contains "вакансия", "hiring", "#job", "open position", specific salary range -> job_posting
+
+Rate ai_relevance (relevance to AI/ML/data domain, 0.0 to 1.0):
+- 0.0: completely non-technical (legal, HR, sales, operations, marketing)
+- 0.3: tangentially technical (QA, project management, business analysis)
+- 0.5: general software engineering without domain specification
+- 0.7: data, analytics, platform, infrastructure, or ML-adjacent engineering
+- 1.0: core AI/ML/NLP/CV/LLM/data science role
+
+Rate search_relevance (0.0 to 1.0): how well this posting matches the candidate's target
+roles, which are listed in square brackets at the very top of the user message.
+- 1.0: the role IS one of the listed target roles (allow cross-language / synonym matches,
+  e.g. "ML-инженер" matches "ML Engineer")
+- 0.5: adjacent or partially overlapping role, or no target roles were provided
+- 0.0: clearly a different profession than any listed role (e.g. QA/manual testing when the
+  candidate seeks AI/ML/engineering roles)
+Judge by the actual role, not by shared generic words like "engineer" or "automation".
 
 Extract normalized technical skills in English lowercase when possible.
+For Russian job postings, translate role names and skill names to English.
 Separate responsibilities, must-have requirements, and nice-to-have requirements.
 Infer language as ru or en when reasonably clear from the text."""
 
