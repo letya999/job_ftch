@@ -1,0 +1,32 @@
+# Tenant config consumed by the Telegram bot via TenantRunner.
+# Infra secrets/connection details (OpenAI key/model, Qdrant URL, Postgres DSN)
+# are inherited from the environment (.env.dev); only backend selection and
+# sources live here so the file stays portable across local and container runs.
+tenant_id: ai_jobs
+display_name: AI Jobs RU/KZ
+
+source_backend: telegram_channel
+sources:
+  - type: telegram_channel
+    entity: neuraldeep
+    source_name: neuraldeep
+    limit: 50
+  - type: telegram_channel
+    entity: ai_grably
+    source_name: ai_grably
+    limit: 50
+
+# Library backends: Postgres store + OpenAI LLM + Qdrant vector embeddings.
+llm_backend: openai
+store_backend: postgres
+job_group_store_backend: postgres
+job_backend: postgres
+search_backend: hybrid
+search_language: russian
+
+embedding_enabled: true
+embedding_provider: openai
+vector_backend: qdrant
+
+notify_mode: digest
+notify_batch_size: 10

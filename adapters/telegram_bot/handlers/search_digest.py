@@ -58,7 +58,7 @@ async def cmd_digest(
 
     # Store ordered job IDs in FSM
     digest_hash = hashlib.md5(f"digest_{user_id_str}_{time.time()}".encode()).hexdigest()[:8]
-    job_ids = [j.item_id for j in jobs]
+    job_ids = [j.job_id for j in jobs]
     await state.update_data(
         {f"digest_jobs_{digest_hash}": job_ids, f"tenant_{digest_hash}": digest_tenant_id}
     )

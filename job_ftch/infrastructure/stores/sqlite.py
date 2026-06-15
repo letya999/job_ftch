@@ -29,6 +29,7 @@ class SQLiteStore(SQLStoreAdapter):
     """
     _SQL_KV_DELETE = "DELETE FROM jf_kv WHERE key = ?"
     _SQL_SET_ADD = "INSERT OR IGNORE INTO jf_set (key, member) VALUES (?, ?)"
+    _SQL_SET_CLEAR = "DELETE FROM jf_set WHERE key = ?"
     _SQL_SET_CONTAINS = "SELECT 1 FROM jf_set WHERE key = ? AND member = ?"
     _SQL_SET_MEMBERS = "SELECT member FROM jf_set WHERE key = ?"
 

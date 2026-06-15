@@ -15,40 +15,68 @@ if TYPE_CHECKING:
 
 router = Router(name="base")
 
+_COMMON_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("start", "Show the welcome message"),
+    ("help", "Show available commands"),
+    ("status", "Show latest pipeline status"),
+    ("sources", "List configured sources"),
+    ("search", "Search jobs in the catalog"),
+    ("digest", "Browse jobs one by one"),
+    ("profiles", "Your search profile and example counts"),
+    ("list_examples", "List your positive/negative resume examples"),
+    ("delete_example", "Delete one stored example by type and index"),
+    ("mode", "Set upload mode (positive/negative resume)"),
+)
+
+_ADMIN_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("run", "Run the pipeline now"),
+    ("reset", "Reset runtime state"),
+    ("reset_dedup", "Clear dedup records (dev)"),
+    ("addsource", "Add one source"),
+    ("addsources", "Bulk add sources"),
+    ("disablesource", "Disable a source"),
+    ("setposting", "Configure posting backend"),
+    ("setnotify", "Configure notification mode"),
+)
+
+
+def render_help_text(config: TelegramBotConfig) -> str:
+    """Render a compact help message for the current user role."""
+    lines = ["Available commands:", ""]
+    lines.extend(f"/{name} - {description}" for name, description in _COMMON_COMMANDS)
+    if config.admin_user_ids:
+        lines.append("")
+        lines.append("Admin commands:")
+        lines.extend(f"/{name} - {description}" for name, description in _ADMIN_COMMANDS)
+    return "\n".join(lines)
+
 
 @router.message(Command("start"))
-async def cmd_start(message: Message, runner: TenantRunner) -> None:
+async def cmd_start(message: Message) -> None:
     """Handle /start command."""
-    tenant_ids = runner.tenant_ids()
     await message.answer(
-        "Welcome! Available tenants: " + ", ".join(tenant_ids),
+        "Welcome! Upload example resumes with /mode, then use /run and /digest "
+        "to find matching jobs.\n\nSee /help for all commands.",
     )
 
 
-@router.message(Command("tenants"))
-async def cmd_tenants(message: Message, runner: TenantRunner) -> None:
-    """Handle /tenants command."""
-    tenants = await runner.list_tenants()
-    if not tenants:
-        await message.answer("No tenants found.")
-        return
-    text = "\n".join(f"- {item.tenant_id}: {item.display_name}" for item in tenants)
-    await message.answer(text)
+@router.message(Command("help"))
+async def cmd_help(message: Message, config: TelegramBotConfig) -> None:
+    """Handle /help command."""
+    await message.answer(render_help_text(config))
 
 
 @router.message(Command("status"))
 async def cmd_status(message: Message, runner: TenantRunner) -> None:
     """Handle /status command."""
-    args = message.text.split()[1:] if message.text else []
-    tenant_ids = runner.tenant_ids()
-    status_tenant_id = args[0] if args else (tenant_ids[0] if tenant_ids else "default")
+    status_tenant_id = runner.default_tenant_id()
 
     summary = await runner.get_status(status_tenant_id)
     reply = (
         "No runs yet."
         if summary is None
         else (
-            f"{status_tenant_id}: emitted={summary.emitted}, failed={summary.failed}, "
+            f"emitted={summary.emitted}, failed={summary.failed}, "
             f"quarantined={summary.quarantined}"
         )
     )
@@ -60,9 +88,7 @@ async def cmd_sources(
     message: Message, runner: TenantRunner, config: TelegramBotConfig
 ) -> None:
     """Handle /sources command."""
-    args = message.text.split()[1:] if message.text else []
-    tenant_ids = runner.tenant_ids()
-    sources_tenant_id = args[0] if args else (tenant_ids[0] if tenant_ids else "default")
+    sources_tenant_id = runner.default_tenant_id()
 
     payloads = await runner.list_sources(sources_tenant_id)
     if not payloads:

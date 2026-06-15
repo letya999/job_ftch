@@ -124,6 +124,22 @@ async def cmd_setnotify(message: Message, runner: TenantRunner) -> None:
         await message.answer(str(exc))
 
 
+@router.message(Command("reset_dedup"))
+async def cmd_reset_dedup(message: Message, runner: TenantRunner) -> None:
+    """Handle /reset_dedup command."""
+    args = message.text.split()[1:] if message.text else []
+    tenant_ids = args if args else runner.tenant_ids()
+
+    total = 0
+    for tid in tenant_ids:
+        count = await runner.clear_dedup(tid)
+        total += count
+
+    await message.answer(
+        f"Dedup cleared for {len(tenant_ids)} tenant(s). {total} records removed."
+    )
+
+
 @router.message(Command("addsources"))
 async def cmd_addsources(message: Message, runner: TenantRunner) -> None:
     """Handle /addsources command."""

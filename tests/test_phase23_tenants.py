@@ -376,7 +376,10 @@ async def test_tenant_runner_persists_candidate_profiles_and_reranks_latest_jobs
         profile = build_candidate_profile_from_payload(
             user_id="1",
             profile_id="ml",
-            payload={"summary": "machine learning engineer"},
+            payload={
+                "summary": "machine learning engineer",
+                "target_roles": ["ml engineer", "machine learning engineer"],
+            },
         )
         saved = await runner.save_candidate_profile(
             "ai_jobs",

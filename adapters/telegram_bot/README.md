@@ -12,29 +12,31 @@ referenced by the `bot` service in the repo-root [docker-compose.yml](../../dock
 
 ## Configuration
 
-Set via environment (see repo-root [.env.example](../../.env.example)):
+Set via the repo-root `.env.dev` and adapter-specific `adapters/telegram_bot/.env.dev`:
 
 | Variable | Purpose |
 |---|---|
 | `JOB_FTCH_TELEGRAM_API_ID` / `JOB_FTCH_TELEGRAM_API_HASH` | Telegram MTProto credentials (https://my.telegram.org) |
 | `JOB_FTCH_CONFIGS_DIR` | Tenant configs directory (default `config/tenants`) |
-| `JOB_FTCH_STORE_BACKEND` | `sqlite` (default) / `postgres` |
-| `JOB_FTCH_STORE_DSN` | DSN when using postgres |
+| `JOB_FTCH_STORE_BACKEND` | `postgres` for the Docker runtime |
+| `JOB_FTCH_STORE_DSN` | DSN used by the library store/job/search backends |
+| `JOB_FTCH_QDRANT_URL` | Qdrant endpoint for vector search |
+| `JOB_FTCH_OPENAI_API_KEY` | OpenAI key for extraction and embeddings |
 
 Bot token and any LLM keys are resolved through `EnvAuthProvider`.
 
 ## Run locally
 
 ```bash
-uv sync --extra telegram --extra sqlite --extra openai --extra feeds
-JOB_FTCH_CONFIGS_DIR=config/tenants uv run job_ftch telegram-bot
+docker compose up -d --build
+docker compose logs -f bot
 ```
 
 ## Run with Docker
 
 ```bash
 docker build -f adapters/telegram_bot/Dockerfile -t job-ftch-bot .
-docker run --env-file .env job-ftch-bot
+docker run --env-file .env.dev --env-file adapters/telegram_bot/.env.dev job-ftch-bot
 ```
 
 ## Deploy

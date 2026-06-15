@@ -18,7 +18,7 @@ _TENANT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 class OutputSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    backend: str = "json_file"
+    backend: str | None = None
     path: Path | None = None
     table: str | None = None
     format: str | None = None
@@ -79,7 +79,7 @@ class TenantConfig(BaseModel):
         )
     )
     source_backend: str = "local_fixture"
-    sink_backend: str = "json_file"
+    sink_backend: str | None = None
     store_backend: str = "postgres"
     job_group_store_backend: str = "sqlite"
     llm_backend: str = "heuristic"

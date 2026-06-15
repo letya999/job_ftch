@@ -1772,6 +1772,7 @@ all = [
     { name = "playwright-stealth" },
     { name = "pypdf" },
     { name = "python-docx" },
+    { name = "pyyaml" },
     { name = "qdrant-client" },
     { name = "sentence-transformers" },
     { name = "sentencepiece" },
@@ -1782,6 +1783,17 @@ all = [
 ]
 api = [
     { name = "fastapi" },
+    { name = "uvicorn" },
+]
+bot = [
+    { name = "aiogram" },
+    { name = "aiosqlite" },
+    { name = "fastapi" },
+    { name = "pdfminer-six" },
+    { name = "pypdf" },
+    { name = "python-docx" },
+    { name = "pyyaml" },
+    { name = "telethon" },
     { name = "uvicorn" },
 ]
 browser = [
@@ -1882,10 +1894,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiogram", marker = "extra == 'bot'", specifier = ">=3.7" },
     { name = "aiogram", marker = "extra == 'telegram'", specifier = ">=3.7" },
     { name = "aiohttp", marker = "extra == 'all'", specifier = ">=3.9.0" },
     { name = "aiohttp", marker = "extra == 'realtime'", specifier = ">=3.9.0" },
     { name = "aiosqlite", marker = "extra == 'all'", specifier = ">=0.20" },
+    { name = "aiosqlite", marker = "extra == 'bot'", specifier = ">=0.20" },
     { name = "aiosqlite", marker = "extra == 'sqlite'", specifier = ">=0.20" },
     { name = "asyncpg", marker = "extra == 'all'", specifier = ">=0.31.0" },
     { name = "asyncpg", marker = "extra == 'pgvector'", specifier = ">=0.31.0" },
@@ -1900,6 +1914,7 @@ requires-dist = [
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.115" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115" },
+    { name = "fastapi", marker = "extra == 'bot'", specifier = ">=0.115" },
     { name = "fastembed", marker = "extra == 'all'", specifier = ">=0.3" },
     { name = "fastembed", marker = "extra == 'fastembed'", specifier = ">=0.3" },
     { name = "fastembed", marker = "extra == 'reranker'", specifier = ">=0.3" },
@@ -1923,6 +1938,7 @@ requires-dist = [
     { name = "opentelemetry-api", specifier = ">=1.25" },
     { name = "opentelemetry-sdk", specifier = ">=1.25" },
     { name = "pdfminer-six", marker = "extra == 'all'", specifier = ">=20231228" },
+    { name = "pdfminer-six", marker = "extra == 'bot'", specifier = ">=20231228" },
     { name = "pdfminer-six", marker = "extra == 'resume'", specifier = ">=20231228" },
     { name = "pgvector", marker = "extra == 'all'", specifier = ">=0.3" },
     { name = "pgvector", marker = "extra == 'pgvector'", specifier = ">=0.3" },
@@ -1934,9 +1950,13 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.3" },
     { name = "pypdf", marker = "extra == 'all'", specifier = ">=4.0" },
+    { name = "pypdf", marker = "extra == 'bot'", specifier = ">=4.0" },
     { name = "pypdf", marker = "extra == 'resume'", specifier = ">=4.0" },
     { name = "python-docx", marker = "extra == 'all'", specifier = ">=1.1" },
+    { name = "python-docx", marker = "extra == 'bot'", specifier = ">=1.1" },
     { name = "python-docx", marker = "extra == 'resume'", specifier = ">=1.1" },
+    { name = "pyyaml", marker = "extra == 'all'", specifier = ">=6.0" },
+    { name = "pyyaml", marker = "extra == 'bot'", specifier = ">=6.0" },
     { name = "qdrant-client", marker = "extra == 'all'", specifier = ">=1.18.0" },
     { name = "qdrant-client", marker = "extra == 'qdrant'", specifier = ">=1.18.0" },
     { name = "rapidfuzz", specifier = ">=3.9" },
@@ -1948,15 +1968,17 @@ requires-dist = [
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "structlog", specifier = ">=24.2" },
     { name = "telethon", marker = "extra == 'all'", specifier = ">=1.36" },
+    { name = "telethon", marker = "extra == 'bot'", specifier = ">=1.36" },
     { name = "telethon", marker = "extra == 'telegram'", specifier = ">=1.36" },
     { name = "torch", marker = "extra == 'all'", specifier = ">=2.3" },
     { name = "torch", marker = "extra == 'embeddings'", specifier = ">=2.3" },
     { name = "uvicorn", marker = "extra == 'all'", specifier = ">=0.30" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.30" },
+    { name = "uvicorn", marker = "extra == 'bot'", specifier = ">=0.30" },
     { name = "websockets", marker = "extra == 'all'", specifier = ">=12.0" },
     { name = "websockets", marker = "extra == 'realtime'", specifier = ">=12.0" },
 ]
-provides-extras = ["browser", "stealth", "openai", "telegram", "dagster", "faststream", "api", "mcp", "metrics", "fastembed", "sqlite", "postgres", "embeddings", "qdrant", "pgvector", "ollama", "feeds", "site-scrapers", "realtime", "resume", "language", "translation", "reranker", "all"]
+provides-extras = ["browser", "stealth", "openai", "telegram", "dagster", "faststream", "api", "mcp", "bot", "metrics", "fastembed", "sqlite", "postgres", "embeddings", "qdrant", "pgvector", "ollama", "feeds", "site-scrapers", "realtime", "resume", "language", "translation", "reranker", "all"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -16,9 +16,10 @@ async def check_url_reachable(url: str, *, timeout: float = 10.0) -> tuple[bool,
                 resp = await client.head(url)
             except Exception:
                 resp = await client.get(url)
-            if resp.status_code < 400:
-                return True, ""
-            return False, f"HTTP {resp.status_code}"
+            # Many career sites intentionally return anti-bot or rate-limit responses
+            # to generic probes while still being valid sources in the pipeline.
+            ok = resp.status_code < 400
+            return ok, "" if ok else f"HTTP {resp.status_code}"
     except Exception as exc:
         return False, str(exc)
 

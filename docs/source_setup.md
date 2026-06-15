@@ -9,9 +9,11 @@ Use env-only source selection for quick local runs, not as the main installation
 
 Runtime prerequisites:
 
-1. Copy `.env.example` to `.env`.
-2. Fill `JOB_FTCH_TELEGRAM_API_ID`, `JOB_FTCH_TELEGRAM_API_HASH`, and `JOB_FTCH_TELEGRAM_SESSION_PATH`.
-3. Start with public entities first (`ai_jobs`, `@ai_jobs`) before moving to private or invite-only targets.
+1. Fill repo-root `.env.dev`.
+2. Fill bot-specific `adapters/telegram_bot/.env.dev`.
+3. Ensure `JOB_FTCH_TELEGRAM_API_ID`, `JOB_FTCH_TELEGRAM_API_HASH`, and `JOB_FTCH_TELEGRAM_SESSION_PATH` are set for the reader session.
+4. Ensure `JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN` is set for the bot runtime.
+5. Start with public entities first (`ai_jobs`, `@ai_jobs`) before moving to private or invite-only targets.
 
 Declarative examples:
 

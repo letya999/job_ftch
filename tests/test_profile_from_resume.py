@@ -27,7 +27,7 @@ def test_heuristic_extraction():
 
     assert "ru" in profile.search_profiles[0].languages_of_interest
     assert "en" in profile.search_profiles[0].languages_of_interest
-    assert profile.search_profiles[0].relevance_threshold == 0.3
+    assert profile.search_profiles[0].relevance_threshold == 0.35
     assert profile.resume.raw_text == text[:5000].strip()
 
 

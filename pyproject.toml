@@ -36,6 +36,17 @@ dagster = ["dagster>=1.8"]
 faststream = ["faststream>=0.5"]
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
 mcp = ["fastmcp>=2.4"]
+bot = [
+    "aiogram>=3.7",
+    "telethon>=1.36",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "aiosqlite>=0.20",
+    "pypdf>=4.0",
+    "python-docx>=1.1",
+    "pdfminer.six>=20231228",
+    "PyYAML>=6.0",
+]
 metrics = ["prometheus-client>=0.20"]
 fastembed = ["fastembed>=0.3"]
 sqlite = ["aiosqlite>=0.20"]
@@ -84,6 +95,7 @@ all = [
     "lingua-language-detector>=2.0",
     "ctranslate2>=4.0",
     "sentencepiece>=0.1.99",
+    "PyYAML>=6.0",
 ]
 
 [project.scripts]

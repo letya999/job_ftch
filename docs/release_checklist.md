@@ -20,7 +20,7 @@
 3. Confirm source retry and timeout settings are present in the release env file.
 
 ## Documentation
-1. `.env.example`, `.env.dev.example`, and `.env.prod.example` are current.
+1. `.env.dev.example`, `adapters/telegram_bot/.env.dev.example`, and `adapters/telegram_bot/.env.prod.example` are current.
 2. `README.md` runnable flow matches the shipped CLI.
 3. `docs/source_setup.md` and `docs/troubleshooting.md` cover operator basics.
 

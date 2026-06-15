@@ -548,6 +548,7 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.auth.file_auth",
                 "job_ftch.infrastructure.auth.vault_auth",
                 "job_ftch.sinks.json_file",
+                "job_ftch.sinks.null_sink",
                 "job_ftch.sinks.telegram_posting",
                 "job_ftch.infrastructure.backends.jobs.sqlite",
                 "job_ftch.infrastructure.backends.jobs.postgres",

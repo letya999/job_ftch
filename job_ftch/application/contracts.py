@@ -140,6 +140,9 @@ class StoreConnector(Protocol):
     async def set_contains(self, key: str, member: str) -> bool:
         """Return True if member is in the named set."""
 
+    async def clear_set(self, key: str) -> None:
+        """Remove all members of the named set."""
+
     async def set_members(self, key: str) -> frozenset[str]:
         """Return all members of the named set."""
 

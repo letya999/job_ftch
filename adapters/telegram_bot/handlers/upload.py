@@ -14,9 +14,9 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from adapters.telegram_bot.fsm.states import UploadMode
 from job_ftch.application.profile_inputs import (
-    add_example_to_profile,
-    build_profile_from_resume_text,
+    build_profile_from_resume_text_async,
     embed_profile_examples,
+    merge_resume_profile,
 )
 from job_ftch.infrastructure.document_parser import parse_document
 
@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from aiogram import Bot
     from aiogram.fsm.context import FSMContext
 
-    from job_ftch.application.contracts import EmbeddingProvider
     from job_ftch.application.tenant_runner import TenantRunner
 
 logger = structlog.get_logger(__name__)
@@ -33,41 +32,50 @@ router = Router(name="upload")
 
 
 class ModeCallback(CallbackData, prefix="mode"):
-    """Callback data for mode selection."""
-
     mode: str
 
 
 def build_mode_keyboard() -> InlineKeyboardBuilder:
-    """Build keyboard for mode selection."""
     builder = InlineKeyboardBuilder()
     builder.add(
         InlineKeyboardButton(
-            text="Positive Resume", callback_data=ModeCallback(mode=UploadMode.POSITIVE_RESUME).pack()
+            text="Positive Resume",
+            callback_data=ModeCallback(mode=UploadMode.POSITIVE_RESUME).pack(),
         )
     )
     builder.add(
         InlineKeyboardButton(
-            text="Negative Resume", callback_data=ModeCallback(mode=UploadMode.NEGATIVE_RESUME).pack()
-        )
-    )
-    builder.add(
-        InlineKeyboardButton(
-            text="Positive Job", callback_data=ModeCallback(mode=UploadMode.POSITIVE_JOB).pack()
-        )
-    )
-    builder.add(
-        InlineKeyboardButton(
-            text="Negative Job", callback_data=ModeCallback(mode=UploadMode.NEGATIVE_JOB).pack()
+            text="Negative Resume",
+            callback_data=ModeCallback(mode=UploadMode.NEGATIVE_RESUME).pack(),
         )
     )
     builder.adjust(2)
     return builder
 
 
+def _profile_id(user_id: str) -> str:
+    return f"user_{user_id}"
+
+
+def _profile_summary(managed_profile) -> str:  # type: ignore[no-untyped-def]
+    """Return a short human-readable summary of profile state."""
+    if not managed_profile.profile.search_profiles:
+        return ""
+    sp = managed_profile.profile.search_profiles[0]
+    pos = len(sp.positive_example_texts)
+    neg = len(sp.negative_example_texts)
+    roles = list(sp.target_roles)[:3]
+    skills = [s.canonical_name for s in sp.required_skills][:5]
+    lines = [f"Positive examples: {pos}  |  Negative: {neg}"]
+    if roles:
+        lines.append(f"Roles: {', '.join(roles)}")
+    if skills:
+        lines.append(f"Skills: {', '.join(skills)}")
+    return "\n".join(lines)
+
+
 @router.message(Command("mode"))
 async def cmd_mode(message: Message, state: FSMContext) -> None:
-    """Handle /mode command."""
     data = await state.get_data()
     current_mode = data.get("upload_mode", UploadMode.POSITIVE_RESUME)
     await message.answer(
@@ -78,7 +86,6 @@ async def cmd_mode(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(ModeCallback.filter())
 async def set_mode(callback: CallbackQuery, callback_data: ModeCallback, state: FSMContext) -> None:
-    """Handle mode selection callback."""
     if not isinstance(callback.message, Message):
         return
     await state.update_data(upload_mode=callback_data.mode)
@@ -92,9 +99,7 @@ async def handle_document(
     bot: Bot,
     runner: TenantRunner,
     state: FSMContext,
-    embedding_provider: EmbeddingProvider | None = None,
 ) -> None:
-    """Handle document upload."""
     document = message.document
     if not document:
         return
@@ -102,17 +107,16 @@ async def handle_document(
     data = await state.get_data()
     mode = data.get("upload_mode", UploadMode.POSITIVE_RESUME)
     user_id_str = str(message.from_user.id if message.from_user else 0)
+    profile_id = _profile_id(user_id_str)
 
     status_msg = await message.answer(f"Processing your {mode.replace('_', ' ')}...")
 
     try:
-        # Download file
         file = await bot.get_file(document.file_id)
         if not file.file_path:
             await status_msg.edit_text("Error: Could not get file path.")
             return
 
-        # aiogram 3.x way to download file
         content_io = BytesIO()
         await bot.download_file(file.file_path, content_io)
         content = content_io.getvalue()
@@ -122,76 +126,40 @@ async def handle_document(
             await status_msg.edit_text("Could not extract text from the file.")
             return
 
-        # Default to first tenant if multiple
         tenant_ids = runner.tenant_ids()
         tenant_id = tenant_ids[0] if tenant_ids else "default"
+        runtime = runner.get_runtime(tenant_id)
+        llm_provider = runtime.llm_provider
+        embedding_provider = runtime.embedding_provider
 
-        if mode == UploadMode.POSITIVE_RESUME:
-            managed_profile = build_profile_from_resume_text(text, user_id=user_id_str)
-            if embedding_provider:
-                managed_profile = await embed_profile_examples(
-                    managed_profile, embedding_provider
-                )
-            await runner.save_candidate_profile(tenant_id, managed_profile)
-            await runner.set_active_candidate_profile(
-                tenant_id, user_id_str, managed_profile.profile_id
-            )
-            await status_msg.edit_text(
-                f"Profile created from your resume. Active: {managed_profile.profile_id}",
-            )
-        elif mode == UploadMode.NEGATIVE_RESUME:
-            profiles = await runner.list_candidate_profiles(tenant_id, user_id_str)
-            active_profile_payload = next((p for p in profiles if p["active"]), None)
+        is_negative = mode == UploadMode.NEGATIVE_RESUME
 
-            if active_profile_payload:
-                existing_profile = await runner.get_candidate_profile(
-                    tenant_id, user_id_str, active_profile_payload["profile_id"]
-                )
-                if existing_profile:
-                    updated_profile = add_example_to_profile(
-                        existing_profile, text, kind="negative_resume"
-                    )
-                    if embedding_provider:
-                        updated_profile = await embed_profile_examples(
-                            updated_profile, embedding_provider
-                        )
-                    await runner.save_candidate_profile(tenant_id, updated_profile)
-                    await status_msg.edit_text("Negative resume example added to your active profile.")
-                else:
-                    await status_msg.edit_text("Error: Could not load your active profile.")
-            else:
-                managed_profile = build_profile_from_resume_text(text, user_id=user_id_str)
-                updated_profile = add_example_to_profile(
-                    managed_profile, text, kind="negative_resume"
-                )
-                await runner.save_candidate_profile(tenant_id, updated_profile)
-                await runner.set_active_candidate_profile(
-                    tenant_id, user_id_str, updated_profile.profile_id
-                )
-                await status_msg.edit_text(
-                    f"New profile created with negative resume example. Active: {updated_profile.profile_id}",
-                )
-        elif mode in (UploadMode.POSITIVE_JOB, UploadMode.NEGATIVE_JOB):
-            profiles = await runner.list_candidate_profiles(tenant_id, user_id_str)
-            active_profile_payload = next((p for p in profiles if p["active"]), None)
+        # LLM-extract the uploaded PDF
+        extracted = await build_profile_from_resume_text_async(
+            text,
+            user_id=user_id_str,
+            profile_id=profile_id,
+            llm_provider=llm_provider,
+        )
 
-            if not active_profile_payload:
-                await status_msg.edit_text("Error: You must have an active profile to add job examples.")
-                return
+        # Load existing single-user profile (or start fresh)
+        existing = await runner.get_candidate_profile(tenant_id, user_id_str, profile_id)
 
-            active_profile = await runner.get_candidate_profile(
-                tenant_id, user_id_str, active_profile_payload["profile_id"]
-            )
-            if active_profile:
-                updated_profile = add_example_to_profile(active_profile, text, kind=mode)
-                if embedding_provider:
-                    updated_profile = await embed_profile_examples(
-                        updated_profile, embedding_provider
-                    )
-                await runner.save_candidate_profile(tenant_id, updated_profile)
-                await status_msg.edit_text(f"Job example added as {mode.replace('_', ' ')} to your profile.")
-            else:
-                await status_msg.edit_text("Error: Could not load your active profile.")
+        if existing is not None:
+            managed = merge_resume_profile(existing, extracted, is_negative=is_negative)
+        else:
+            # First upload: merge with itself to seed positive_example_texts / negative_example_texts
+            managed = merge_resume_profile(extracted, extracted, is_negative=is_negative)
+
+        if embedding_provider:
+            managed = await embed_profile_examples(managed, embedding_provider)
+
+        await runner.save_candidate_profile(tenant_id, managed)
+        await runner.set_active_candidate_profile(tenant_id, user_id_str, profile_id)
+
+        action = "Negative example added" if is_negative else "Positive resume added"
+        summary = _profile_summary(managed)
+        await status_msg.edit_text(f"{action}.\n\n{summary}")
 
     except Exception as exc:
         logger.error("upload_failed", mode=mode, error=str(exc), exc_info=True)

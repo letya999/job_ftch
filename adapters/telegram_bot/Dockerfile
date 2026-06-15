@@ -7,19 +7,20 @@ RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser
 WORKDIR /app
 COPY --chown=appuser:appuser . /app
 
-# Core + Telegram source + SQLite store + OpenAI extraction + RSS feeds.
-RUN pip install --no-cache-dir ".[telegram,sqlite,openai,feeds]"
+# Bot adapter (aiogram + telethon + resume parsing) + library infra:
+# Postgres store, OpenAI LLM/embeddings, Qdrant vector backend, RSS feeds,
+# and career-site scrapers (jmespath).
+RUN pip install --no-cache-dir ".[bot,postgres,openai,qdrant,feeds,site_scrapers,stealth]"
 
-# Ensure runtime directory is writable
-RUN mkdir -p /app/.runtime && chown -R appuser:appuser /app/.runtime
+# Ensure the application tree is writable for runtime-created artifacts
+RUN chown -R appuser:appuser /app && mkdir -p /app/.runtime
 
 USER appuser
 
 # The repo-root adapters/ package is not part of the job_ftch wheel,
-# so expose the project root on the import path.
+# so expose the project root on the import path. Storage/LLM/vector backends
+# are selected at runtime via .env.dev (JOB_FTCH_STORE_BACKEND, etc.).
 ENV PYTHONPATH=/app \
-    JOB_FTCH_STORE_BACKEND=sqlite \
-    JOB_FTCH_JOB_BACKEND=sqlite \
-    JOB_FTCH_CONFIGS_DIR=/app/config/tenants
+    JOB_FTCH_CONFIGS_DIR=/app/adapters/telegram_bot/config/tenants
 
 CMD ["job_ftch", "telegram-bot"]

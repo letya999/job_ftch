@@ -11,6 +11,14 @@ from job_ftch.domain.profile import ProfileCatalog, SearchProfile  # noqa: TC001
 
 _TOKEN_RE = re.compile(r"[A-Za-zА-Яа-я0-9+#-]+")
 
+# Common stop-words that carry no signal in a profile description context.
+_DESC_SKIP_WORDS = frozenset({
+    "and", "or", "the", "for", "with", "from", "into", "across",
+    "their", "that", "this", "also", "are", "its", "our", "your",
+    "who", "how", "what", "when", "will", "have", "been", "about",
+    "in", "on", "at", "to", "of", "a", "an", "is", "it",
+})
+
 
 def _tokens(text: str) -> set[str]:
     return {token.casefold() for token in _TOKEN_RE.findall(text)}
@@ -77,11 +85,23 @@ class SemanticPrefilterNode:
         hard_score = _overlap_score(tokens, profile.hard_requirements)
         soft_score = _overlap_score(tokens, profile.soft_preferences)
         anti_score = _overlap_score(tokens, profile.anti_preferences)
+
+        # Fallback: if profile has no soft_preferences, use required_skills names
+        if not profile.soft_preferences and profile.required_skills:
+            skill_names = tuple(s.canonical_name for s in profile.required_skills)
+            soft_score = _overlap_score(tokens, skill_names)
+
         profile_desc_bonus = 0.0
-        if profile.profile_description and any(
-            token in lowered_text for token in profile.profile_description.casefold().split()
-        ):
-            profile_desc_bonus = 0.15
+        if profile.profile_description:
+            desc_tokens = [
+                tok
+                for raw in profile.profile_description.casefold().split()
+                for tok in [raw.strip(".,;:!?()\"""")]
+                if len(tok) >= 2 and tok not in _DESC_SKIP_WORDS
+            ]
+            if any(tok in lowered_text for tok in desc_tokens if tok):
+                profile_desc_bonus = 0.15
+
         score = (
             profile.weights.title * title_score
             + profile.weights.domain * domain_score

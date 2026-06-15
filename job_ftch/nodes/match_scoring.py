@@ -29,6 +29,16 @@ _SENIORITY_ORDER = {
 
 _TOKEN_RE = re.compile(r"[A-Za-zА-Яа-я0-9+#-]+")
 
+# Generic role-qualifier tokens that appear in almost every title and carry
+# zero discriminating signal between roles (e.g. "DevOps Engineer" vs "AI Engineer"
+# share "engineer" but the meaningful difference is "DevOps" vs "AI").
+_ROLE_STOP_WORDS = frozenset({
+    "engineer", "developer", "manager", "specialist", "analyst",
+    "lead", "senior", "junior", "head", "chief", "officer",
+    "architect", "consultant", "expert", "professional", "associate",
+    "intern", "staff", "principal",
+})
+
 
 def _string_overlap_score(value: str | None, options: tuple[str, ...]) -> float:
     if value is None or not options:
@@ -45,7 +55,11 @@ def _string_overlap_score(value: str | None, options: tuple[str, ...]) -> float:
         option_tokens = [token.casefold() for token in _TOKEN_RE.findall(option)]
         if not option_tokens or not value_tokens:
             continue
-        overlap = sum(1 for token in option_tokens if token in value_tokens) / len(option_tokens)
+        # Use only role-discriminating tokens for partial overlap scoring.
+        # Fall back to all tokens when the option consists entirely of stop-words.
+        discriminating = [t for t in option_tokens if t not in _ROLE_STOP_WORDS]
+        tokens_to_check = discriminating if discriminating else option_tokens
+        overlap = sum(1 for t in tokens_to_check if t in value_tokens) / len(tokens_to_check)
         best = max(best, overlap)
     return round(best, 2)
 
@@ -108,7 +122,6 @@ class MultiProfileMatchNode:
         semantic_role_score = max(
             title_score,
             _string_overlap_score(item.role_family, profile.target_roles),
-            _string_overlap_score(role_text, profile.target_roles + profile.target_domains),
         )
         explicit_skills = item.skills_explicit + item.skills_inferred
         hard_skill_score = _skill_overlap(explicit_skills, profile.required_skills)
@@ -136,7 +149,7 @@ class MultiProfileMatchNode:
                 # If very similar to any negative example, penalize
                 max_neg_sim = max(sims) if sims else 0.0
                 if max_neg_sim > 0.8:
-                    neg_vector_penalty = 0.5
+                    neg_vector_penalty = 0.6
                 elif max_neg_sim > 0.7:
                     neg_vector_penalty = 0.2
 
@@ -158,7 +171,7 @@ class MultiProfileMatchNode:
             0.0,
             min(
                 1.0,
-                round(weighted + 0.1 * vacancy_type_score - risk_penalty - neg_vector_penalty, 2),
+                round(weighted - risk_penalty - neg_vector_penalty, 2),
             ),
         )
 

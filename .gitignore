@@ -21,6 +21,8 @@ tmp-*/
 .env
 .env.dev
 .env.prod
+adapters/telegram_bot/.env.dev
+adapters/telegram_bot/.env.prod
 !.env.*.example
 
 # IDE
