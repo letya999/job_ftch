@@ -33,6 +33,7 @@ _COMPANY_METADATA_KEYS = ("company", "company_name", "employer", "organization",
 _URL_METADATA_KEYS = ("job_url", "canonical_url", "apply_url", "origin_url")
 _LOCATION_METADATA_KEYS = ("location", "city", "region")
 _URL_ADAPTER = TypeAdapter(AnyHttpUrl)
+_GENERIC_CAREER_SOURCE_NAMES = frozenset({"dom", "api_sniffer", "rss", "feed", "monitor"})
 
 
 class ExtractedJobFields(BaseModel):
@@ -60,6 +61,16 @@ class ExtractedJobFields(BaseModel):
             "How well this posting matches the candidate's target roles listed in "
             "brackets at the top of the user message. 1.0 = directly one of those roles; "
             "0.0 = clearly a different role. 0.5 if no roles are provided."
+        ),
+    )
+    hiring_intent: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Probability that this is a concrete job opening (hiring intent). "
+            "1.0 = clearly a specific vacancy; 0.1 = general news, digest or "
+            "hiring-unrelated announcement."
         ),
     )
     language: LanguageCode = LanguageCode.UNKNOWN
@@ -115,6 +126,8 @@ def _fallback_company(item: RawItem) -> str | None:
     if company is not None:
         return company
     if item.source_kind is SourceKind.CAREER_SITE:
+        if item.source_name.casefold() in _GENERIC_CAREER_SOURCE_NAMES:
+            return None
         return item.source_name
     return None
 
@@ -155,11 +168,13 @@ class ExtractionNode:
         max_calls: int | None = None,
         target_roles: tuple[str, ...] = (),
         min_search_relevance: float = 0.0,
+        min_hiring_intent: float = 0.0,
     ) -> None:
         self._llm = llm
         self._max_calls = max_calls
         self._target_roles = target_roles
         self._min_search_relevance = min_search_relevance
+        self._min_hiring_intent = min_hiring_intent
         self._call_count = 0
 
     async def process(self, item: RawItem) -> JobDraft | None:
@@ -203,6 +218,21 @@ class ExtractionNode:
                 ),
                 item=item,
             )
+        if (
+            self._min_hiring_intent > 0.0
+            and not degraded
+            and extracted.post_type is PostType.JOB_POSTING
+            and extracted.hiring_intent < self._min_hiring_intent
+        ):
+            raise RawItemDropped(
+                reason=JobValidationRejectionReason.IRRELEVANT_CONTENT,
+                details=(
+                    f"LLM hiring_intent={extracted.hiring_intent:.2f} below "
+                    f"min={self._min_hiring_intent:.2f}. "
+                    "Detected news/digest/non-hiring announcement."
+                ),
+                item=item,
+            )
         review_reasons: list[str] = []
         extraction_status = (
             JobExtractionStatus.PARTIAL if degraded else JobExtractionStatus.COMPLETE
@@ -220,6 +250,7 @@ class ExtractionNode:
         metadata = dict(item.metadata)
         metadata["extraction_backend"] = self._llm.__class__.__name__
         metadata["llm_search_relevance"] = extracted.search_relevance
+        metadata["hiring_intent"] = extracted.hiring_intent
         extraction_steps = [f"llm:{self._llm.__class__.__name__}"]
         if degraded:
             extraction_steps.append("fallback:degraded_extraction")
@@ -252,6 +283,7 @@ class ExtractionNode:
             metadata=metadata,
             post_type=extracted.post_type,
             ai_relevance=extracted.ai_relevance,
+            hiring_intent=extracted.hiring_intent,
             language=extracted.language,
             role_family=extracted.role_family,
             role_track=extracted.role_track,

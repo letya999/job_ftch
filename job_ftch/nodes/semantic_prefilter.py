@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterable  # noqa: TC003
 
 from job_ftch.application.drops import RawItemDropped
-from job_ftch.domain import RawItem, TriageRejectionReason
+from job_ftch.domain import RawItem, SourceKind, TriageRejectionReason
 from job_ftch.domain.profile import ProfileCatalog, SearchProfile  # noqa: TC001
 
 _TOKEN_RE = re.compile(r"[A-Za-zА-Яа-я0-9+#-]+")
@@ -60,6 +60,12 @@ class SemanticPrefilterNode:
         self._uncertain_ratio = uncertain_ratio
 
     async def process(self, item: RawItem) -> RawItem | None:
+        # Career-site sources are already narrowed by source-level discovery and URL
+        # selection. Applying Telegram-style keyword overlap here regresses recall for
+        # valid vacancies like hh/tbank/yandex pages whose titles omit AI markers.
+        if item.source_kind is SourceKind.CAREER_SITE:
+            return item
+
         # Lower the drop threshold for Russian text: profile keywords are English so
         # token overlap against Russian posts is systematically underestimated.
         ratio = self._uncertain_ratio
@@ -76,12 +82,21 @@ class SemanticPrefilterNode:
             scores, key=lambda pair: pair[1], default=("default", 0.0)
         )
         threshold = max(profile.relevance_threshold for profile in self._catalog.profiles)
-        if best_score < threshold * ratio:
+
+        # OR-logic: the JobBERT embedding prefilter (runs upstream) may have rescued a
+        # cross-lingual / low-token-overlap item. Honour the stronger of the two signals.
+        embedding_match = item.metadata.get("embedding_role_match")
+        effective_score = best_score
+        if isinstance(embedding_match, (int, float)):
+            effective_score = max(best_score, float(embedding_match))
+
+        if effective_score < threshold * ratio:
             raise RawItemDropped(
-                reason=TriageRejectionReason.TELEGRAM_LOW_SIGNAL,
+                reason=TriageRejectionReason.LOW_RELEVANCE_PREFILTER,
                 details=(
                     "Semantic prefilter found no sufficiently strong profile match. "
-                    f"best_profile={best_profile_id!r} best_score={best_score:.2f}"
+                    f"best_profile={best_profile_id!r} best_score={best_score:.2f} "
+                    f"embedding={embedding_match if embedding_match is not None else 'n/a'}"
                 ),
                 item=item,
             )
