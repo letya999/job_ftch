@@ -11,6 +11,7 @@ async def test_build_source_spec_from_http_input_returns_career_site() -> None:
 
     assert spec.type == "career_site"
     assert spec.source_name == "example_com_jobs"
+    assert spec.monitor_config == {}
 
 
 @pytest.mark.asyncio
