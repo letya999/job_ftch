@@ -699,4 +699,4 @@ async def test_seam_30_semantic_prefilter_drops_low_signal_before_extraction(
 
     with pytest.raises(RawItemDropped) as exc:
         await node.process(item)
-    assert exc.value.reason == TriageRejectionReason.TELEGRAM_LOW_SIGNAL
+    assert exc.value.reason == TriageRejectionReason.LOW_RELEVANCE_PREFILTER

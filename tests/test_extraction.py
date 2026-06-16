@@ -70,6 +70,24 @@ async def test_heuristic_llm_provider_extracts_work_mode_and_title() -> None:
 
 
 @pytest.mark.asyncio
+async def test_extraction_node_does_not_use_generic_career_monitor_name_as_company() -> None:
+    item = RawItem.model_validate(
+        {
+            "source_kind": SourceKind.CAREER_SITE,
+            "source_name": "dom",
+            "external_id": "3",
+            "url": "https://example.com/jobs/3",
+            "text": "Senior ML Engineer\nRemote\nBuild evaluation systems",
+        }
+    )
+
+    draft = await ExtractionNode(ExplodingLLMProvider()).process(item)
+
+    assert draft is not None
+    assert draft.company_name_raw is None
+
+
+@pytest.mark.asyncio
 async def test_gold_samples_regression_fixture() -> None:
     _REPO_ROOT = Path(__file__).resolve().parents[1]
     fixture_path = _REPO_ROOT / "fixtures" / "extraction" / "gold_samples.jsonl"

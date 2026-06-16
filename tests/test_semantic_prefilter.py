@@ -42,7 +42,25 @@ async def test_semantic_prefilter_drops_clear_noise() -> None:
     with pytest.raises(RawItemDropped) as exc_info:
         await node.process(item)
 
-    assert exc_info.value.reason == TriageRejectionReason.TELEGRAM_LOW_SIGNAL
+    assert exc_info.value.reason == TriageRejectionReason.LOW_RELEVANCE_PREFILTER
+
+
+@pytest.mark.asyncio
+async def test_semantic_prefilter_bypasses_career_site_items() -> None:
+    node = SemanticPrefilterNode(ProfileCatalog.default())
+    item = RawItem.model_validate(
+        {
+            "source_kind": SourceKind.CAREER_SITE,
+            "source_name": "dom",
+            "external_id": "fixture-career-001",
+            "url": "https://example.com/careers/job-1",
+            "text": "Senior Frontend Developer",
+        }
+    )
+
+    enriched = await node.process(item)
+
+    assert enriched is item
 
 
 @pytest.mark.asyncio
