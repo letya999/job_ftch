@@ -14,6 +14,7 @@ from job_ftch.domain.source_spec import (
     TelegramChannelSpec,
     TelegramGroupSpec,
 )
+from job_ftch.infrastructure.sources.site_defaults import apply_runtime_defaults
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import AuthProvider
@@ -132,11 +133,13 @@ async def build_source_spec_from_input(
         "http",
         "https",
     }:
-        site_spec = CareerSiteSpec(
+        site_spec = apply_runtime_defaults(
+            CareerSiteSpec(
             type="career_site",
             url=stripped,
             limit=limit,
             monitor="auto",
+        )
         )
         return site_spec.model_copy(update={"source_name": source_spec_name(site_spec)})
 

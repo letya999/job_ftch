@@ -19,6 +19,7 @@ from job_ftch.domain.site_models import (
     ScrapedPostingPayload,
 )
 from job_ftch.infrastructure.sources.career_site import client_for_config
+from job_ftch.infrastructure.sources.site_defaults import apply_runtime_defaults
 from job_ftch.infrastructure.sources.site_utils import (
     apply_url_filter,
     apply_url_transform,
@@ -47,7 +48,7 @@ class CareerSiteSource(Source["RawItem"]):
         auth: AuthProvider,
         store: Any = None,
     ) -> None:
-        self.spec = spec
+        self.spec = apply_runtime_defaults(spec)
         self.http = http_client
         self.auth = auth
         self.store = store
