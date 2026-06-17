@@ -112,3 +112,30 @@ class ProfileCatalog(BaseModel):
     def normalize(self) -> ProfileCatalog:
         object.__setattr__(self, "catalog_name", self.catalog_name.strip() or "default")
         return self
+
+    @classmethod
+    def default(cls) -> ProfileCatalog:
+        """Return the standard AI-roles catalog used when no profile path is configured."""
+        return cls(
+            catalog_name="default",
+            profiles=(
+                SearchProfile(
+                    profile_id="ai_roles",
+                    name="AI Roles",
+                    target_roles=(
+                        "ai engineer",
+                        "ml engineer",
+                        "llm engineer",
+                        "mlops engineer",
+                        "data scientist",
+                        "nlp engineer",
+                        "computer vision engineer",
+                        "ai product manager",
+                    ),
+                    target_domains=("ai", "machine learning", "data science"),
+                    soft_preferences=("python", "pytorch", "transformers", "rag"),
+                    anti_preferences=("sales", "marketing", "recruiter", "hr"),
+                    relevance_threshold=0.3,
+                ),
+            ),
+        )

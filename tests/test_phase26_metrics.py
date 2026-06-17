@@ -53,7 +53,7 @@ def _write_fixture(path) -> None:
         source_kind=SourceKind.DEBUG,
         source_name="fixture",
         external_id="1",
-        text="Senior ML Engineer\nRemote\nCompany: OpenAI\nSalary: USD 100000 - 150000",
+        text="Senior ML Engineer (AI)\nRemote\nCompany: OpenAI\nSalary: USD 100000 - 150000\npython, pytorch, llm",
         metadata={"company": "OpenAI", "title": "Senior ML Engineer"},
     )
     path.write_text(json.dumps([item.model_dump(mode="json")]), encoding="utf-8")

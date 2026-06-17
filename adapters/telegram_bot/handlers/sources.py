@@ -169,3 +169,19 @@ async def callback_clear_sources(callback: CallbackQuery, runner: "TenantRunner"
         await msg.edit_text(
             "Источников нет. Нажми + чтобы добавить.", reply_markup=builder.as_markup()
         )
+
+
+def create_router() -> Router:
+    r = Router(name="sources")
+    r.message.register(cmd_sources, Command("sources"))
+    r.callback_query.register(callback_add_sources, SourceAction.filter(F.action == "add"))
+    r.message.register(
+        handle_sources_text, AddingSources.waiting, F.text, ~F.text.startswith("/")
+    )
+    r.callback_query.register(
+        callback_run_from_sources, SourceAction.filter(F.action == "run")
+    )
+    r.callback_query.register(
+        callback_clear_sources, SourceAction.filter(F.action == "clear")
+    )
+    return r

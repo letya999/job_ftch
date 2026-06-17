@@ -3,13 +3,25 @@ from __future__ import annotations
 import pytest
 
 from job_ftch.application.drops import RawItemDropped
-from job_ftch.domain import ProfileCatalog, RawItem, SourceKind, TriageRejectionReason
+from job_ftch.domain import ProfileCatalog, RawItem, SearchProfile, SourceKind, TriageRejectionReason
 from job_ftch.nodes.semantic_prefilter import SemanticPrefilterNode
+
+
+_AI_PROFILE = SearchProfile(
+    profile_id="ai_roles",
+    target_roles=("ai engineer", "ml engineer", "data scientist"),
+    target_domains=("ai", "machine learning"),
+    relevance_threshold=0.3,
+)
+
+
+def _make_catalog() -> ProfileCatalog:
+    return ProfileCatalog(profiles=(_AI_PROFILE,))
 
 
 @pytest.mark.asyncio
 async def test_semantic_prefilter_keeps_obvious_ai_role() -> None:
-    node = SemanticPrefilterNode(ProfileCatalog.default())
+    node = SemanticPrefilterNode(_make_catalog())
     item = RawItem.model_validate(
         {
             "source_kind": SourceKind.DEBUG,
@@ -28,7 +40,7 @@ async def test_semantic_prefilter_keeps_obvious_ai_role() -> None:
 
 @pytest.mark.asyncio
 async def test_semantic_prefilter_drops_clear_noise() -> None:
-    node = SemanticPrefilterNode(ProfileCatalog.default())
+    node = SemanticPrefilterNode(_make_catalog())
     item = RawItem.model_validate(
         {
             "source_kind": SourceKind.DEBUG,
@@ -47,7 +59,7 @@ async def test_semantic_prefilter_drops_clear_noise() -> None:
 
 @pytest.mark.asyncio
 async def test_semantic_prefilter_bypasses_career_site_items() -> None:
-    node = SemanticPrefilterNode(ProfileCatalog.default())
+    node = SemanticPrefilterNode(_make_catalog())
     item = RawItem.model_validate(
         {
             "source_kind": SourceKind.CAREER_SITE,

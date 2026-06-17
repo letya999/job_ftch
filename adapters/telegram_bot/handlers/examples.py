@@ -461,3 +461,33 @@ async def callback_del_confirm(callback: CallbackQuery, runner: "TenantRunner") 
 @router.callback_query(F.data == "ignore")
 async def callback_ignore(callback: CallbackQuery) -> None:
     await callback.answer()
+
+
+def create_router() -> Router:
+    r = Router(name="examples")
+    r.message.register(cmd_positive, Command("positive"))
+    r.message.register(cmd_negative, Command("negative"))
+    r.message.register(cmd_done, Command("done"), StateFilter(AddingExamples))
+    r.message.register(handle_document_example, StateFilter(AddingExamples), F.document)
+    r.message.register(
+        handle_text_example, StateFilter(AddingExamples), F.text, ~F.text.startswith("/")
+    )
+    r.message.register(cmd_examples, Command("examples"))
+    r.callback_query.register(
+        callback_show_examples, ExampleNav.filter(F.action == "show_pos")
+    )
+    r.callback_query.register(
+        callback_show_examples, ExampleNav.filter(F.action == "show_neg")
+    )
+    r.callback_query.register(
+        callback_nav_examples,
+        ExampleNav.filter(F.action.in_(["prev_pos", "next_pos", "prev_neg", "next_neg"])),
+    )
+    r.callback_query.register(
+        callback_del_one, ExampleNav.filter(F.action.in_(["del_one_pos", "del_one_neg"]))
+    )
+    r.callback_query.register(callback_back, ExampleNav.filter(F.action == "back_to_menu"))
+    r.callback_query.register(callback_del_all, ExampleNav.filter(F.action == "del_all"))
+    r.callback_query.register(callback_del_confirm, ExampleNav.filter(F.action == "del_confirm"))
+    r.callback_query.register(callback_ignore, F.data == "ignore")
+    return r

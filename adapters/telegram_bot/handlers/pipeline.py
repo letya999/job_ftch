@@ -254,3 +254,10 @@ async def cmd_clear(message: Message, runner: "TenantRunner", bot: Bot) -> None:
     except Exception as e:
         logger.exception("clear_all_failed", error=str(e))
         await message.answer(f"❌ Ошибка очистки: {e}")
+
+
+def create_router() -> Router:
+    r = Router(name="pipeline")
+    r.message.register(cmd_run, Command("run"))
+    r.message.register(cmd_clear, Command("clear"))
+    return r

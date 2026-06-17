@@ -427,7 +427,7 @@ def build_classifier(_settings: Settings, _catalog: ProfileCatalog) -> Classifie
 
 def load_profile_catalog(settings: Settings) -> ProfileCatalog:
     if settings.filter_profile_path is None:
-        return ProfileCatalog(catalog_name="empty", profiles=[])
+        return ProfileCatalog.default()
     return load_catalog_from_path(settings.filter_profile_path)
 
 
