@@ -36,6 +36,7 @@ Async pipeline: Telegram channels/groups/comments + career sites → structured 
 | Want to add | Where |
 |-------------|-------|
 | New data source | Prefer declarative `CareerSiteConfig`; otherwise add a single self-registered file with `@register_source`, or a third-party entry-point plugin |
+| New site parser | `infrastructure/sources/site_parsers/` — implement `SiteParser` Protocol |
 | New processing step | `nodes/` — implement `Stage` / `ProcessingNode` Protocol. Same-type nodes: implement `ProcessingNode[T]`. Type-changing nodes (e.g. extraction/normalization): implement `Stage[In, Out]` directly. |
 | New output | `sinks/` — implement `Sink` Protocol and self-register if it is a backend |
 | New storage backend | `infrastructure/stores/` — implement `Store` Protocol |
