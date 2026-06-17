@@ -38,6 +38,7 @@ async def fingerprint(url: str, client: httpx.AsyncClient | None = None) -> Site
         # We create a new client here because the passed-in client might be a wrapper
         # that doesn't support the 'timeout' or 'follow_redirects' kwargs properly.
         from job_ftch.config import get_settings
+
         async with httpx.AsyncClient(
             follow_redirects=True,
             timeout=httpx.Timeout(get_settings().fingerprinter_timeout_seconds),

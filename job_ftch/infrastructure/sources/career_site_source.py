@@ -97,7 +97,24 @@ class CareerSiteSource(Source["RawItem"]):
     async def fetch(self) -> AsyncIterator[RawItem | QuarantinedRawItem]:
         from urllib.parse import urlparse
 
+        from job_ftch.application.registry import resolve_site_parser
+
         domain = urlparse(self.spec.url).netloc
+
+        # 0. Try a site-specific parser first for known tricky sites (e.g. Yandex).
+        site_parser = resolve_site_parser(self.spec.url)
+        if site_parser is not None:
+            try:
+                async for item in site_parser.parse(self.spec, self.http):
+                    yield item
+                return
+            except Exception as exc:
+                logger.warning(
+                    "site_parser_failed_falling_back",
+                    url=self.spec.url,
+                    error=str(exc),
+                )
+
         cached_strategy = None
         if self.store and (
             not self.spec.bypass
@@ -246,7 +263,7 @@ class CareerSiteSource(Source["RawItem"]):
                         current_monitor_name, monitor_config
                     )
 
-                    limit = self.spec.detail_limit or self.spec.limit
+                    limit = self._effective_limit()
                     for count, url in enumerate(urls_to_scrape):
                         if count >= limit:
                             self.stats["truncated"] = True
@@ -294,6 +311,12 @@ class CareerSiteSource(Source["RawItem"]):
                 return  # Successfully finished with one monitor
 
         logger.info("career_site_fetch_exhausted_all_monitors", **self.stats)
+
+    def _effective_limit(self) -> int:
+        from job_ftch.config import get_settings
+
+        settings = get_settings()
+        return self.spec.detail_limit or self.spec.limit or settings.career_site_default_limit
 
     def _resolve_scraper_chain(
         self, monitor_name: str, monitor_config: dict[str, Any]

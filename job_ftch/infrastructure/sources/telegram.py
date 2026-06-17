@@ -6,10 +6,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
+import structlog
+
 from job_ftch.application.registry import register_source, register_source_spec
 from job_ftch.domain import RawItem, SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
-import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -374,9 +375,13 @@ class TelegramCommentSource:
 
 
 def _get_proxy_config(settings: Settings) -> dict[str, Any] | None:
-    if not settings.telegram_proxy_type or not settings.telegram_proxy_host or not settings.telegram_proxy_port:
+    if (
+        not settings.telegram_proxy_type
+        or not settings.telegram_proxy_host
+        or not settings.telegram_proxy_port
+    ):
         return None
-    
+
     proxy_dict = {
         "proxy_type": settings.telegram_proxy_type.lower(),
         "addr": settings.telegram_proxy_host,
@@ -419,7 +424,8 @@ def _build_telegram_channel_source(settings: Settings) -> TelegramChannelSource:
         _build_telegram_client(settings),
         settings.telegram_entity or "",
         limit=settings.telegram_message_limit,
-        wait_time=settings.telegram_history_wait_time_seconds,
+        min_jitter=settings.telegram_jitter_min_seconds,
+        max_jitter=settings.telegram_jitter_max_seconds,
         own_client=True,
     )
 
@@ -430,7 +436,8 @@ def _build_telegram_group_source(settings: Settings) -> TelegramGroupSource:
         _build_telegram_client(settings),
         settings.telegram_entity or "",
         limit=settings.telegram_message_limit,
-        wait_time=settings.telegram_history_wait_time_seconds,
+        min_jitter=settings.telegram_jitter_min_seconds,
+        max_jitter=settings.telegram_jitter_max_seconds,
         own_client=True,
     )
 
@@ -501,7 +508,7 @@ def _build_telegram_channel_source_v2(
     return TelegramChannelSource(
         _build_client_v2(spec.auth_source_id, auth),
         spec.entity,
-        limit=spec.limit,
+        limit=spec.limit or settings.telegram_channel_default_limit,
         min_jitter=settings.telegram_jitter_min_seconds,
         max_jitter=settings.telegram_jitter_max_seconds,
         own_client=True,
@@ -520,7 +527,7 @@ def _build_telegram_group_source_v2(
     return TelegramGroupSource(
         _build_client_v2(spec.auth_source_id, auth),
         spec.entity,
-        limit=spec.limit,
+        limit=spec.limit or settings.telegram_group_default_limit,
         min_jitter=settings.telegram_jitter_min_seconds,
         max_jitter=settings.telegram_jitter_max_seconds,
         own_client=True,
@@ -539,8 +546,9 @@ def _build_telegram_comments_source_v2(
     return TelegramCommentSource(
         _build_client_v2(spec.auth_source_id, auth),
         spec.entity,
-        post_limit=spec.post_limit,
-        comment_limit_per_post=spec.comment_limit_per_post,
+        post_limit=spec.post_limit or settings.telegram_comment_default_limit,
+        comment_limit_per_post=spec.comment_limit_per_post
+        or settings.telegram_comment_limit_per_post,
         min_jitter=settings.telegram_jitter_min_seconds,
         max_jitter=settings.telegram_jitter_max_seconds,
         own_client=True,

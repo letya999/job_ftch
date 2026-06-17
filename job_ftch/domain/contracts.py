@@ -77,6 +77,7 @@ def draft_to_record(draft: JobDraft) -> JobRecord:
         metadata=draft.metadata,
         post_type=draft.post_type,
         ai_relevance=draft.ai_relevance,
+        hiring_intent=draft.hiring_intent,
         language=draft.language,
         languages_detected=draft.languages_detected,
         title_raw=draft.title_raw,

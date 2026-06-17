@@ -18,7 +18,8 @@ def test_app_processes_multisource_fixture_end_to_end(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
-            "app.py",
+            "-m",
+            "job_ftch",
             "--source-path",
             "fixtures/e2e/multisource_positive.jsonl",
             "--output-path",
@@ -61,7 +62,8 @@ def test_app_quarantines_multisource_negative_fixture_end_to_end(tmp_path: Path)
     result = subprocess.run(
         [
             sys.executable,
-            "app.py",
+            "-m",
+            "job_ftch",
             "--source-path",
             "fixtures/e2e/multisource_negative.jsonl",
             "--output-path",

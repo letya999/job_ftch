@@ -125,6 +125,7 @@ async def open_page(
     context: BrowserContext = await browser.new_context(**context_kwargs)
 
     from job_ftch.config import get_settings
+
     context.set_default_timeout(config.get("timeout", get_settings().browser_default_timeout_ms))
 
     if config.get("cookies"):
@@ -154,6 +155,8 @@ async def _open_persistent_page(
     Opens a page using launch_persistent_context for better stealth.
     """
     import tempfile
+
+    from job_ftch.config import get_settings
 
     user_data_dir = tempfile.mkdtemp(prefix="pw_profile_")
     headless = config.get("headless", True)
@@ -224,6 +227,7 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     wait = config.get("wait", DEFAULT_WAIT)
     wait_fallback = config.get("wait_fallback", DEFAULT_WAIT_FALLBACK)
     from job_ftch.config import get_settings
+
     settings = get_settings()
     timeout = config.get("timeout", settings.browser_default_timeout_ms)
     challenge_retries = config.get("challenge_retries", settings.browser_challenge_retries)
@@ -354,3 +358,27 @@ async def safe_content(page: Page) -> str:
                 continue
             raise
     return await page.content()  # Fallback
+
+
+async def scroll_to_bottom(
+    page: Page,
+    *,
+    max_scrolls: int = 50,
+    scroll_pause_seconds: float = 0.5,
+    pixel_step: int = 2000,
+) -> None:
+    """
+    Scroll down the page until no new height is gained or max_scrolls is reached.
+    Useful for infinite-scroll / lazy-loading lists.
+    """
+    last_height = 0
+    for _ in range(max_scrolls):
+        current_height = await page.evaluate("() => document.body.scrollHeight")
+        if current_height == last_height:
+            break
+        last_height = current_height
+        await page.evaluate(f"() => window.scrollBy(0, {pixel_step})")
+        await asyncio.sleep(scroll_pause_seconds)
+    # One final wait to let any late renders settle.
+    await asyncio.sleep(scroll_pause_seconds)
+    await page.evaluate("() => window.scrollTo(0, 0)")

@@ -20,7 +20,7 @@ class BaseSourceSpec(BaseModel):
 class TelegramChannelSpec(BaseSourceSpec):
     type: Literal["telegram_channel"] = "telegram_channel"
     entity: str = Field(min_length=1)
-    limit: int = Field(default=100, gt=0)
+    limit: int | None = Field(default=None, gt=0)
     auth_source_id: str | None = None
     source_name: str | None = None  # override display name
 
@@ -28,7 +28,7 @@ class TelegramChannelSpec(BaseSourceSpec):
 class TelegramGroupSpec(BaseSourceSpec):
     type: Literal["telegram_group"] = "telegram_group"
     entity: str = Field(min_length=1)
-    limit: int = Field(default=100, gt=0)
+    limit: int | None = Field(default=None, gt=0)
     auth_source_id: str | None = None
     source_name: str | None = None
 
@@ -36,8 +36,8 @@ class TelegramGroupSpec(BaseSourceSpec):
 class TelegramCommentsSpec(BaseSourceSpec):
     type: Literal["telegram_comments"] = "telegram_comments"
     entity: str = Field(min_length=1)
-    post_limit: int = Field(default=20, gt=0)
-    comment_limit_per_post: int = Field(default=50, gt=0)
+    post_limit: int | None = Field(default=None, gt=0)
+    comment_limit_per_post: int | None = Field(default=None, gt=0)
     auth_source_id: str | None = None
     source_name: str | None = None
 
@@ -46,14 +46,14 @@ class DeclarativeHtmlSpec(BaseSourceSpec):
     type: Literal["declarative_html"] = "declarative_html"
     url: str = Field(min_length=1)
     parser_kind: str = "auto"  # "auto", "greenhouse", or any registered parser kind
-    limit: int = Field(default=100, gt=0)
+    limit: int | None = Field(default=None, gt=0)
     source_name: str | None = None
 
 
 class CareerSiteSpec(BaseSourceSpec):
     type: Literal["career_site"] = "career_site"
     url: str = Field(min_length=1)
-    limit: int = Field(default=100, gt=0)
+    limit: int | None = Field(default=None, gt=0)
     source_name: str | None = None
     monitor: str | None = "auto"  # registered monitor name, or "auto" for auto-detect
     monitor_config: dict[str, Any] = Field(default_factory=dict)  # passed to monitor

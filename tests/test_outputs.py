@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from app import run_pipeline
+from job_ftch.application.builder import run_pipeline_from_settings as run_pipeline
 from job_ftch.application.pipeline import Pipeline
 from job_ftch.config import Settings
 from job_ftch.domain import Job, RawItem, SourceKind, WorkMode

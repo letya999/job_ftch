@@ -51,6 +51,12 @@ roles, which are listed in square brackets at the very top of the user message.
   candidate seeks AI/ML/engineering roles)
 Judge by the actual role, not by shared generic words like "engineer" or "automation".
 
+Rate hiring_intent (0.0 to 1.0): probability that this is a concrete job opening.
+- 1.0: clearly a specific vacancy with title, requirements and how to apply.
+- 0.5: looks like a job but missing details or mixed with news.
+- 0.1: general news, digest, broadcast announcement, product launch, tool release.
+Non-hiring announcements MUST have low hiring_intent.
+
 Extract normalized technical skills in English lowercase when possible.
 For Russian job postings, translate role names and skill names to English.
 Separate responsibilities, must-have requirements, and nice-to-have requirements.

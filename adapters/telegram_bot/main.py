@@ -30,7 +30,9 @@ def _build_bot_commands() -> list[BotCommand]:
         BotCommand(command="examples", description="Список моих примеров"),
         BotCommand(command="sources", description="Список источников (URL)"),
         BotCommand(command="run", description="Запустить поиск сейчас"),
-        BotCommand(command="clear", description="Очистить историю — следующий запуск увидит всё заново"),
+        BotCommand(
+            command="clear", description="Очистить историю — следующий запуск увидит всё заново"
+        ),
     ]
 
 

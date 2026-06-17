@@ -32,6 +32,7 @@ from job_ftch.application.registry import (
     create_llm,
     create_search_backend,
     create_store,
+    create_vector_backend,
 )
 from job_ftch.application.watermark import IncrementalCursor
 from job_ftch.config import get_settings
@@ -49,6 +50,7 @@ from job_ftch.domain import (
     source_spec_locator,
     source_spec_name,
 )
+from job_ftch.nodes.snapshot_filter import SnapshotFilterNode
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -62,6 +64,7 @@ if TYPE_CHECKING:
         SearchBackend,
         Store,
         StoreConnector,
+        VectorBackend,
     )
     from job_ftch.config import Settings
     from job_ftch.domain.source_spec import SourceSpec
@@ -259,6 +262,32 @@ class TenantStore:
             return f"{self._tenant_id}:{source_kind}:{source_name}:{key}"
         return prefix
 
+    def _snapshot_key(self, source_id: str) -> str:
+        return self._key(f"snapshot:{source_id}:latest")
+
+    async def load_source_snapshot(self, source_id: str) -> dict[str, str]:
+        """Return stable_id -> content_hash mapping from the latest snapshot."""
+        connector = cast("StoreConnector", self._store)
+        raw = await connector.get(self._snapshot_key(source_id))
+        if not raw:
+            return {}
+        try:
+            import json
+
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                return {str(k): str(v) for k, v in data.items()}
+        except Exception:
+            pass
+        return {}
+
+    async def save_source_snapshot(self, source_id: str, snapshot: dict[str, str]) -> None:
+        """Persist the latest snapshot mapping for a source."""
+        connector = cast("StoreConnector", self._store)
+        import json
+
+        await connector.set(self._snapshot_key(source_id), json.dumps(snapshot, sort_keys=True))
+
     async def has_processed(self, item_id: str) -> bool:
         connector = cast("StoreConnector", self._store)
         return bool(await connector.set_contains(self._key("processed"), item_id))
@@ -428,6 +457,13 @@ class TenantStore:
                 records.append(record)
         return records
 
+    async def clear_runtime_sources(self) -> None:
+        connector = cast("StoreConnector", self._store)
+        source_ids = await connector.set_members(self._key("runtime_source_ids"))
+        await connector.clear_set(self._key("runtime_source_ids"))
+        for source_id in source_ids:
+            await connector.delete(self._key(_runtime_source_key(source_id)))
+
     async def set_source_disabled(self, source_id: str, disabled: bool) -> None:
         connector = cast("StoreConnector", self._store)
         key = self._key(_source_disabled_key(source_id))
@@ -492,7 +528,9 @@ class TenantStore:
         connector = cast("StoreConnector", self._store)
         current_primary = await self.get_active_candidate_profile_id(user_id)
         if current_primary and current_primary != profile_id:
-            await connector.set_add(self._key(_active_candidate_profiles_key(user_id)), current_primary)
+            await connector.set_add(
+                self._key(_active_candidate_profiles_key(user_id)), current_primary
+            )
         await connector.set(self._key(_active_candidate_profile_key(user_id)), profile_id)
         await connector.set_add(self._key(_active_candidate_profiles_key(user_id)), profile_id)
 
@@ -595,6 +633,7 @@ class TenantRuntime:
     job_group_store: JobGroupStore
     search_backend: SearchBackend
     job_backend: JobPersistenceBackend
+    vector_backend: object | None = None
     embedding_provider: object | None = None
     metrics_exporter: MetricsExporter | None = None
     base_sources: tuple[SourceSpec, ...] = field(default_factory=tuple)
@@ -683,6 +722,9 @@ class TenantRunner:
                 job_group_store=job_group_store,
                 search_backend=cast("SearchBackend", create_search_backend(tenant_settings)),
                 job_backend=cast("JobPersistenceBackend", create_job_backend(tenant_settings)),
+                vector_backend=cast("VectorBackend", create_vector_backend(tenant_settings))
+                if tenant_settings.embedding_enabled and tenant_settings.vector_backend
+                else None,
                 embedding_provider=embedding_provider,
                 metrics_exporter=metrics_exporter,
                 base_sources=tuple(tenant.sources),
@@ -771,31 +813,27 @@ class TenantRunner:
     async def _build_runtime_catalog(self, runtime: TenantRuntime) -> Any:
         from job_ftch.domain import ProfileCatalog
 
-        base_catalog = load_profile_catalog(runtime.settings)
         active_records = await runtime.store.list_all_active_candidate_profiles()
-        if not active_records:
-            return base_catalog
-        extra_profiles = tuple(
+        user_profiles = tuple(
             search_profile
             for record in active_records
             for search_profile in record.profile.search_profiles
         )
-        if extra_profiles:
-            # Use ONLY user profiles when present; do not dilute with the broad
-            # default catalog (which lets DevOps/1C/Data Analyst pass the prefilter).
+        if user_profiles:
             return ProfileCatalog(
-                catalog_name=f"{base_catalog.catalog_name}+user",
-                profiles=extra_profiles,
+                catalog_name="user",
+                profiles=user_profiles,
             )
-        return base_catalog
+        # No user profile data; fall back to an explicit file profile if configured.
+        return load_profile_catalog(runtime.settings)
 
-    def _build_runtime_builder(
+    async def _build_runtime_builder(
         self,
         runtime: TenantRuntime,
         *,
         effective_sources: list[SourceSpec],
         catalog: Any,
-    ) -> PipelineBuilder:
+    ) -> tuple[PipelineBuilder, SnapshotFilterNode]:
         sanitize_node, nodes = build_nodes(
             runtime.settings,
             runtime.store,
@@ -805,11 +843,21 @@ class TenantRunner:
         )
         output_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
         rejected_counted, rejected_sink = build_rejected_sink(runtime.settings)
+
+        # Load previous snapshots for all sources so we can drop unchanged items.
+        snapshot_by_source: dict[str, dict[str, str]] = {}
+        for spec in effective_sources:
+            sid = source_spec_identifier(spec)
+            snapshot_by_source[sid] = await runtime.store.load_source_snapshot(sid)
+
+        snapshot_filter = SnapshotFilterNode(runtime.store, snapshot_by_source)
+
         builder = PipelineBuilder()
         builder.sources(effective_sources)
         builder.auth(runtime.auth_provider)
         builder.store(runtime.store)
         builder.stage(sanitize_node)
+        builder.stage(snapshot_filter)
         for node in nodes:
             builder.stage(node)
         builder.sink(output_sink)
@@ -823,7 +871,7 @@ class TenantRunner:
             profile_name=catalog.catalog_name,
             output_path=runtime.settings.output_path,
         )
-        return builder
+        return builder, snapshot_filter
 
     def _apply_runtime_sources(self, runtime: TenantRuntime) -> None:
         effective_sources = _merge_effective_sources(
@@ -909,6 +957,21 @@ class TenantRunner:
         msg = f"Failed to disable source: {source_id}"
         raise RuntimeError(msg)
 
+    async def clear_sources(self, tenant_id: str) -> None:
+        """Clear all runtime sources and disable base config sources."""
+        runtime = self.get_runtime(tenant_id)
+        await self._ensure_runtime_sources_loaded(runtime)
+
+        await runtime.store.clear_runtime_sources()
+        runtime.runtime_sources.clear()
+
+        for spec in runtime.base_sources:
+            source_id = source_spec_identifier(spec)
+            await runtime.store.set_source_disabled(source_id, True)
+            runtime.disabled_source_ids.add(source_id)
+
+        self._apply_runtime_sources(runtime)
+
     async def run_tenant(self, tenant_id: str, *, max_items: int | None = None) -> RunSummary:
         runtime = self.get_runtime(tenant_id)
         await self._ensure_runtime_sources_loaded(runtime)
@@ -989,12 +1052,13 @@ class TenantRunner:
 
         async with _tenant_run_lock(runtime.settings, tenant_id):
             catalog = await self._build_runtime_catalog(runtime)
-            builder = self._build_runtime_builder(
+            builder, snapshot_filter = await self._build_runtime_builder(
                 runtime,
                 effective_sources=effective_sources,
                 catalog=catalog,
             )
             summary = await builder.run_async(max_items=max_items)
+            await snapshot_filter.save()
 
         summary.tenant_id = tenant_id
         await runtime.store.set_run_state(
@@ -1263,6 +1327,22 @@ class TenantRunner:
         scored.sort(key=lambda item: item[0], reverse=True)
         return [group for _, group in scored]
 
+    async def has_candidate_profile_data(
+        self,
+        tenant_id: str,
+        user_id: str,
+    ) -> bool:
+        """Return True if the user has at least one active candidate profile."""
+        runtime = self.get_runtime(tenant_id)
+        active_ids = await runtime.store.get_active_candidate_profile_ids(user_id)
+        if not active_ids:
+            return False
+        for profile_id in active_ids:
+            record = await runtime.store.get_candidate_profile(user_id, profile_id)
+            if record is not None and record.profile.search_profiles:
+                return True
+        return False
+
     async def search_jobs(
         self,
         query: str,
@@ -1428,15 +1508,23 @@ class TenantRunner:
         runtime = self.get_runtime(tenant_id)
         return await runtime.store.clear_dedup_state()
 
-    async def clear_all(self, tenant_id: str) -> tuple[int, int]:
-        """Clear dedup state AND job groups. Returns (dedup_deleted, groups_deleted)."""
+    async def clear_all(self, tenant_id: str) -> tuple[int, int, int]:
+        """Clear dedup state, job groups AND vector store. Returns (dedup, groups, vectors)."""
         runtime = self.get_runtime(tenant_id)
         dedup = await runtime.store.clear_dedup_state()
         groups = 0
-        clear_fn = getattr(runtime.job_group_store, "clear", None)
-        if callable(clear_fn):
-            groups = await clear_fn()
-        return dedup, groups
+        clear_groups = getattr(runtime.job_group_store, "clear", None)
+        if callable(clear_groups):
+            groups = await clear_groups()
+        vectors = 0
+        vb = getattr(runtime, "vector_backend", None)
+        clear_vectors = getattr(vb, "clear", None)
+        if callable(clear_vectors):
+            try:
+                vectors = await clear_vectors()
+            except Exception as exc:  # vector store is best-effort, don't fail the whole clear
+                structlog.get_logger(__name__).warning("vector_clear_failed", error=str(exc))
+        return dedup, groups, vectors
 
     async def close(self) -> None:
         closed: set[int] = set()
@@ -1446,7 +1534,10 @@ class TenantRunner:
                 runtime.search_backend,
                 runtime.job_backend,
                 runtime.job_group_store,
+                runtime.vector_backend,
             ):
+                if obj is None:
+                    continue
                 ident = id(obj)
                 if ident in closed:
                     continue

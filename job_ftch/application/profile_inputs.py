@@ -204,8 +204,12 @@ def build_candidate_profile_from_payload(
         required_skills=_skills(required_skills),
         preferred_skills=_skills(preferred_skills),
         soft_preferences=soft_pref_names,
-        anti_preferences=anti_preferences or (
-            "1c", "recruiter", "sap", "accounting",
+        anti_preferences=anti_preferences
+        or (
+            "1c",
+            "recruiter",
+            "sap",
+            "accounting",
         ),
         preferred_regions=preferred_regions,
         preferred_countries=preferred_countries,
@@ -281,7 +285,9 @@ async def build_profile_from_resume_text_async(
             "summary": summary,
             "target_roles": extracted.target_roles,
             "required_skills": _merge_strings(extracted.required_skills, extracted.keywords),
-            "preferred_skills": _merge_strings(extracted.preferred_skills, extracted.required_skills),
+            "preferred_skills": _merge_strings(
+                extracted.preferred_skills, extracted.required_skills
+            ),
             "target_domains": extracted.target_domains,
             "anti_preferences": extracted.anti_preferences,
             "preferred_regions": extracted.preferred_regions,
@@ -416,7 +422,8 @@ def merge_resume_profile(
     else:
         updated_sp = current_sp.model_copy(
             update={
-                "profile_description": current_sp.profile_description or extracted_sp.profile_description,
+                "profile_description": current_sp.profile_description
+                or extracted_sp.profile_description,
                 "target_roles": _merge_strings(current_sp.target_roles, extracted_sp.target_roles),
                 "target_domains": _merge_strings(
                     current_sp.target_domains, extracted_sp.target_domains
@@ -451,7 +458,8 @@ def merge_resume_profile(
 
     updated_profiles = (updated_sp,) + existing.profile.search_profiles[1:]
     updated_resume = CandidateResumeSnapshot(
-        raw_text=(existing.profile.resume.raw_text if existing.profile.resume else None) or resume_text,
+        raw_text=(existing.profile.resume.raw_text if existing.profile.resume else None)
+        or resume_text,
         summary=summary,
         skills=_merge_skills(
             existing.profile.resume.skills if existing.profile.resume else (),

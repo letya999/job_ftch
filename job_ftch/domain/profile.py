@@ -106,43 +106,9 @@ class ProfileCatalog(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     catalog_name: str = "default"
-    profiles: tuple[SearchProfile, ...] = Field(default_factory=lambda: (SearchProfile(),))
+    profiles: tuple[SearchProfile, ...] = Field(default_factory=tuple)
 
     @model_validator(mode="after")
     def normalize(self) -> ProfileCatalog:
-        if not self.profiles:
-            raise ValueError("ProfileCatalog must contain at least one profile.")
         object.__setattr__(self, "catalog_name", self.catalog_name.strip() or "default")
         return self
-
-    @classmethod
-    def default(cls) -> ProfileCatalog:
-        return cls(
-            catalog_name="default",
-            profiles=(
-                SearchProfile(
-                    profile_id="ai_roles",
-                    name="AI Roles",
-                    profile_description=(
-                        "AI and ML engineering roles across LLM, NLP, computer vision, "
-                        "data science, MLOps, AI product, and platform work."
-                    ),
-                    target_roles=(
-                        "ai engineer",
-                        "ml engineer",
-                        "llm engineer",
-                        "mlops engineer",
-                        "data scientist",
-                        "nlp engineer",
-                        "computer vision engineer",
-                        "ai product manager",
-                    ),
-                    target_domains=("ai", "machine learning", "data science"),
-                    hard_requirements=(),
-                    soft_preferences=("python", "pytorch", "transformers", "rag"),
-                    anti_preferences=("sales", "marketing", "recruiter", "hr"),
-                    allowed_languages=(LanguageCode.RU, LanguageCode.EN, LanguageCode.UNKNOWN),
-                    relevance_threshold=0.45,
-                ),
-            ),
-        )

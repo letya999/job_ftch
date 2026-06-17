@@ -52,16 +52,25 @@ def _safe_href(url: str | None) -> str | None:
     url_str = str(url).strip()
     if any(url_str.startswith(scheme) for scheme in _SAFE_SCHEMES):
         # Escape only the chars that break the HTML attribute: & " < >
-        return url_str.replace("&", "&amp;").replace('"', "%22").replace("<", "%3C").replace(">", "%3E")
+        return (
+            url_str.replace("&", "&amp;")
+            .replace('"', "%22")
+            .replace("<", "%3C")
+            .replace(">", "%3E")
+        )
     return None
 
 
 def format_vacancy_card(job: Job | JobRecord) -> str:
     title = escape(job.title or "Без названия")[:_MAX_TITLE]
-    
+
     source_name = getattr(job, "source_name", None)
     company_raw = job.company
-    company = "—" if _is_fake_company(company_raw, source_name) else escape(company_raw or "—")[:_MAX_COMPANY]
+    company = (
+        "—"
+        if _is_fake_company(company_raw, source_name)
+        else escape(company_raw or "—")[:_MAX_COMPANY]
+    )
 
     wm = str(job.work_mode).lower() if job.work_mode else ""
     if any(x in wm for x in ["remote", "дистанционно", "удаленка", "remotely"]):

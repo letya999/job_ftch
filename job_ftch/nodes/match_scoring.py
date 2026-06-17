@@ -32,12 +32,29 @@ _TOKEN_RE = re.compile(r"[A-Za-zА-Яа-я0-9+#-]+")
 # Generic role-qualifier tokens that appear in almost every title and carry
 # zero discriminating signal between roles (e.g. "DevOps Engineer" vs "AI Engineer"
 # share "engineer" but the meaningful difference is "DevOps" vs "AI").
-_ROLE_STOP_WORDS = frozenset({
-    "engineer", "developer", "manager", "specialist", "analyst",
-    "lead", "senior", "junior", "head", "chief", "officer",
-    "architect", "consultant", "expert", "professional", "associate",
-    "intern", "staff", "principal",
-})
+_ROLE_STOP_WORDS = frozenset(
+    {
+        "engineer",
+        "developer",
+        "manager",
+        "specialist",
+        "analyst",
+        "lead",
+        "senior",
+        "junior",
+        "head",
+        "chief",
+        "officer",
+        "architect",
+        "consultant",
+        "expert",
+        "professional",
+        "associate",
+        "intern",
+        "staff",
+        "principal",
+    }
+)
 
 
 def _string_overlap_score(value: str | None, options: tuple[str, ...]) -> float:

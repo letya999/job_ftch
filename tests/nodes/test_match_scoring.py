@@ -18,9 +18,12 @@ from job_ftch.nodes.match_scoring import (
 
 @pytest.mark.anyio
 async def test_match_scoring_empty_catalog_returns_none_scores(make_job_record):
-    # ProfileCatalog model_validator prevents empty profiles tuple
-    with pytest.raises(ValueError, match="ProfileCatalog must contain at least one profile"):
-        ProfileCatalog(profiles=())
+    # Empty catalog is now allowed; MultiProfileMatchNode should handle gracefully
+    catalog = ProfileCatalog(profiles=())
+    node = MultiProfileMatchNode(catalog)
+    job = make_job_record(title="ML Engineer", post_type=PostType.JOB_POSTING)
+    processed = await node.process(job)
+    assert processed.profile_scores == ()
 
 
 @pytest.mark.anyio
@@ -116,14 +119,10 @@ async def test_match_scoring_vector_cosine_used_when_available(make_job_record):
 @pytest.mark.anyio
 async def test_match_scoring_role_anchor_fallback(make_job_record):
     # If no profile centroid, use metadata embedding_role_match
-    profile = SearchProfile(
-        profile_id="p", embedding_vector=None, relevance_threshold=0.1
-    )
+    profile = SearchProfile(profile_id="p", embedding_vector=None, relevance_threshold=0.1)
     catalog = ProfileCatalog(profiles=[profile])
     node = MultiProfileMatchNode(catalog)
-    job = make_job_record(
-        metadata={"embedding_role_match": 0.85}, post_type=PostType.JOB_POSTING
-    )
+    job = make_job_record(metadata={"embedding_role_match": 0.85}, post_type=PostType.JOB_POSTING)
     processed = await node.process(job)
     assert processed.profile_scores[0].vector_score == 0.85
 
@@ -173,7 +172,7 @@ async def test_match_scoring_engineer_stopword_no_cross_match(make_job_record):
     p = SearchProfile(profile_id="p", target_roles=("AI Engineer",), relevance_threshold=0.1)
     catalog = ProfileCatalog(profiles=[p])
     node = MultiProfileMatchNode(catalog)
-    
+
     # "Engineer" is a stop-word, so only "DevOps" vs "AI" matters.
     job = make_job_record(title="DevOps Engineer", post_type=PostType.JOB_POSTING)
     processed = await node.process(job)
@@ -198,7 +197,9 @@ async def test_match_scoring_vacancy_bonus(make_job_record):
     assert res_other.profile_scores[0].vacancy_type_score == 0.0
     # Final score for job_posting should be 0.05 higher
     assert (
-        round(res_posting.profile_scores[0].final_score - res_other.profile_scores[0].final_score, 2)
+        round(
+            res_posting.profile_scores[0].final_score - res_other.profile_scores[0].final_score, 2
+        )
         == 0.05
     )
 
@@ -207,7 +208,9 @@ def test_string_overlap_exact_substring():
     assert _string_overlap_score("Python Developer", ("Python",)) == 1.0
     assert _string_overlap_score("Python Developer", ("Java",)) == 0.0
     assert _string_overlap_score("Software Engineer", ("Software Engineer",)) == 1.0  # exact match
-    assert _string_overlap_score("DevOps Engineer", ("AI Engineer",)) == 0.0  # "AI" (discriminating) not in "DevOps Engineer"
+    assert (
+        _string_overlap_score("DevOps Engineer", ("AI Engineer",)) == 0.0
+    )  # "AI" (discriminating) not in "DevOps Engineer"
     assert (
         _string_overlap_score("Python Developer", ("Python specialist",)) > 0.0
     )  # partial token overlap

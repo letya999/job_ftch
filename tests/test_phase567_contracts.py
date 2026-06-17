@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-import app as app_module
-from app import build_output_sinks
+from job_ftch.application import builder as app_module
+from job_ftch.application.builder import build_output_sinks
 from job_ftch.application.drops import RawItemDropped
 from job_ftch.config import Settings
 from job_ftch.domain import (

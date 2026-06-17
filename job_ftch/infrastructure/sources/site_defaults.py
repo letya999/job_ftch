@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
-from job_ftch.domain.source_spec import CareerSiteSpec
+if TYPE_CHECKING:
+    from job_ftch.domain.source_spec import CareerSiteSpec
 
 
 def _defaults_for_url(url: str) -> tuple[dict[str, Any], str | dict[str, Any] | None]:

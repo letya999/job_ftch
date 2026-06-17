@@ -1,0 +1,40 @@
+sources:
+  - type: career_site
+    url: "https://career.habr.com/"
+    source_name: "habr_career"
+  - type: career_site
+    url: "https://hh.ru/"
+    source_name: "hh_ru"
+  - type: career_site
+    url: "https://ozon.tech/vacancies/"
+    source_name: "ozon_tech"
+  - type: career_site
+    url: "https://www.tbank.ru/career/"
+    source_name: "tbank_career"
+  - type: career_site
+    url: "https://yandex.ru/jobs"
+    source_name: "yandex_jobs"
+
+  - type: telegram_channel
+    entity: "agi_and_rl"
+  - type: telegram_channel
+    entity: "ai_grably"
+  - type: telegram_channel
+    entity: "elkornacio"
+  - type: telegram_channel
+    entity: "ethichlid"
+  - type: telegram_channel
+    entity: "kdoronin_blog"
+  - type: telegram_channel
+    entity: "neuraldeep"
+
+  - type: telegram_group
+    entity: "aostrikov_agents_chat"
+  - type: telegram_group
+    entity: "data_secrets_chat"
+  - type: telegram_group
+    entity: "natural_language_processing"
+  - type: telegram_group
+    entity: "neuraldeepchat"
+  - type: telegram_group
+    entity: "vibe_coding_community"

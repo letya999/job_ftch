@@ -268,4 +268,3 @@ def create_app(
         return [group.model_dump(mode="json") for group in groups]
 
     return app
-

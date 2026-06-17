@@ -71,20 +71,46 @@ async def _url_is_alive(url: str | None) -> bool:
     if _host_resolves_to_blocked_ip(parsed.hostname):
         return False
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.head(
+        async with (
+            aiohttp.ClientSession() as session,
+            session.head(
                 url_str,
                 timeout=aiohttp.ClientTimeout(total=3),
                 allow_redirects=False,
-            ) as resp:
-                # 2xx/3xx = reachable; 3xx is treated as alive without following the hop.
-                return resp.status < 400
+            ) as resp,
+        ):
+            # 2xx/3xx = reachable; 3xx is treated as alive without following the hop.
+            return resp.status < 400
     except Exception:
         return False
 
 
-async def run_pipeline_for_chat(message: Message, runner: "TenantRunner", bot: Bot, user_id_override: int | None = None) -> None:
+async def run_pipeline_for_chat(
+    message: Message, runner: "TenantRunner", bot: Bot, user_id_override: int | None = None
+) -> None:
     tenant_id = runner.default_tenant_id()
+    resolved_uid = (
+        user_id_override
+        if user_id_override is not None
+        else (message.from_user.id if message.from_user else None)
+    )
+    user_id = str(resolved_uid) if resolved_uid is not None else "0"
+
+    # Require user-provided profile examples before running the pipeline.
+    try:
+        has_profile = await runner.has_candidate_profile_data(tenant_id, user_id)
+    except Exception:
+        has_profile = False
+    if not has_profile:
+        await message.answer(
+            "❌ Профиль не настроен. Чтобы я понял, какие вакансии вам подходят, загрузите:\n\n"
+            "1. 📄 Резюме — /resume\n"
+            "2. ✅ Похожие вакансии — /positive\n"
+            "3. ❌ Неподходящие вакансии — /negative\n\n"
+            "После этого запустите /run заново."
+        )
+        return
+
     t0 = time.monotonic()
     status_msg = await message.answer("🚀 Запускаю пайплайн...\nЭто может занять 1–3 минуты.")
 
@@ -99,7 +125,6 @@ async def run_pipeline_for_chat(message: Message, runner: "TenantRunner", bot: B
 
     # Pull stats from RunSummary
     fetched = getattr(run_result, "fetched", 0)
-    triaged = getattr(run_result, "triaged", 0)
     extracted = getattr(run_result, "extracted", 0)
     duplicates = getattr(run_result, "duplicates", 0)
     dropped = getattr(run_result, "dropped", 0)
@@ -121,8 +146,11 @@ async def run_pipeline_for_chat(message: Message, runner: "TenantRunner", bot: B
 
     # Add drop reason highlights if notable
     notable_reasons = {
-        k: v for k, v in drop_reasons.items()
-        if v > 0 and k in ("telegram_low_signal", "job_out_of_scope", "irrelevant_content", "duplicate_content")
+        k: v
+        for k, v in drop_reasons.items()
+        if v > 0
+        and k
+        in ("telegram_low_signal", "job_out_of_scope", "irrelevant_content", "duplicate_content")
     }
     if notable_reasons:
         reasons_str = ", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in notable_reasons.items())
@@ -139,20 +167,16 @@ async def run_pipeline_for_chat(message: Message, runner: "TenantRunner", bot: B
             f"✅ Готово  {footer}\n\n{funnel_text}\n\n"
             "Ничего не найдено.\n\n"
             "Попробуй:\n• Добавить больше примеров /positive\n• Расширить источники /sources",
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
         return
 
     await status_msg.edit_text(
-        f"✅ Готово  {footer}\n\n{funnel_text}\n\nОтправляю вакансии 👇",
-        parse_mode="HTML"
+        f"✅ Готово  {footer}\n\n{funnel_text}\n\nОтправляю вакансии 👇", parse_mode="HTML"
     )
 
     # Fetch and send jobs
     try:
-        resolved_uid = user_id_override if user_id_override is not None else (message.from_user.id if message.from_user else None)
-        user_id = str(resolved_uid) if resolved_uid is not None else "0"
-        
         # Get limits from runner settings (with fallback for compatibility)
         _settings = getattr(runner, "settings", None)
         send_limit = getattr(_settings, "bot_send_limit_per_run", 15)
@@ -160,16 +184,12 @@ async def run_pipeline_for_chat(message: Message, runner: "TenantRunner", bot: B
         min_relevance = getattr(_settings, "bot_min_relevance_score", 0.0)
 
         jobs_raw = await runner.latest_jobs(
-            tenant_id, 
-            limit=send_limit * 4, 
-            user_id=user_id, 
-            min_score=min_relevance
+            tenant_id, limit=send_limit * 4, user_id=user_id, min_score=min_relevance
         )
 
         valid_jobs = []
         for j in jobs_raw:
             pt = j.post_type
-            sk = str(j.source_kind)
             quality = j.quality_score if j.quality_score is not None else 1.0
             best = j.best_score if j.best_score is not None else 0.0
 
@@ -188,7 +208,9 @@ async def run_pipeline_for_chat(message: Message, runner: "TenantRunner", bot: B
         jobs = valid_jobs[:send_limit]
 
         if not jobs:
-            await message.answer("Нет подходящих вакансий. Попробуй /clear и /run заново, или добавь больше примеров /positive")
+            await message.answer(
+                "Нет подходящих вакансий. Попробуй /clear и /run заново, или добавь больше примеров /positive"
+            )
             return
 
         sent_count = 0
@@ -202,8 +224,7 @@ async def run_pipeline_for_chat(message: Message, runner: "TenantRunner", bot: B
             await asyncio.sleep(0.3)
 
         await status_msg.edit_text(
-            f"✅ Готово  {footer}\n\n{funnel_text}\n\n✉️ Отправлено: {sent_count}",
-            parse_mode="HTML"
+            f"✅ Готово  {footer}\n\n{funnel_text}\n\n✉️ Отправлено: {sent_count}", parse_mode="HTML"
         )
     except Exception as e:
         logger.exception("failed_to_send_jobs", error=str(e))
@@ -219,11 +240,17 @@ async def cmd_run(message: Message, runner: "TenantRunner", bot: Bot) -> None:
 async def cmd_clear(message: Message, runner: "TenantRunner", bot: Bot) -> None:
     tenant_id = runner.default_tenant_id()
     try:
-        dedup, groups = await runner.clear_all(tenant_id)
-        await message.answer(
-            f"🗑 Очищено: дедуп {dedup}, групп вакансий {groups}.\n"
-            "База полностью сброшена. Следующий /run увидит всё заново."
-        )
+        # returns 3-tuple now: (dedup, groups, vectors)
+        result = await runner.clear_all(tenant_id)
+        dedup, groups = result[0], result[1]
+        vectors = result[2] if len(result) > 2 else 0
+
+        msg = f"🗑 Очищено: дедуп {dedup}, групп {groups}"
+        if vectors > 0:
+            msg += f", векторов {vectors}"
+        msg += ".\nБаза полностью сброшена. Следующий /run увидит всё заново."
+
+        await message.answer(msg)
     except Exception as e:
         logger.exception("clear_all_failed", error=str(e))
         await message.answer(f"❌ Ошибка очистки: {e}")

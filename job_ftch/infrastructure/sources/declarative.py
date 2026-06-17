@@ -263,14 +263,16 @@ def _build_declarative_html_source_v2(
     store: Any = None,
 ) -> DeclarativeCareerSiteSource:
     del auth, store
+    from job_ftch.config import get_settings
     from job_ftch.infrastructure.sources.career_site import build_default_http_client
 
+    settings = get_settings()
     client = build_default_http_client()
     config = CareerSiteConfig.from_spec(spec)
     return DeclarativeCareerSiteSource(
         client,
         spec.url,
         config,
-        limit=spec.limit,
+        limit=spec.limit or settings.career_site_default_limit,
         own_client=True,
     )

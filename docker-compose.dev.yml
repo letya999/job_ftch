@@ -1,8 +1,8 @@
 # Dev stack — code is mounted, no rebuild needed for source changes.
 # Usage:
-#   docker compose up -d          # start all
-#   docker compose restart bot    # pick up code changes instantly
-#   docker compose build bot      # only needed after pyproject.toml changes
+#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml restart bot
+#   docker compose -f docker-compose.dev.yml build bot
 services:
   bot:
     build:
@@ -22,8 +22,9 @@ services:
       qdrant:
         condition: service_started
     volumes:
-      - .:/app                  # live code mount — changes take effect on restart
-      - bot_cache:/app/.cache   # isolate pip/playwright cache from host
+      - .:/app                          # live code mount — changes take effect on restart
+      - bot_cache:/app/.cache           # isolate pip/playwright cache from host
+      - hf_cache:/root/.cache/huggingface  # persistent model cache across rebuilds
 
   postgres:
     image: postgres:16-alpine
@@ -53,3 +54,4 @@ volumes:
   pgdata:
   qdrant_data:
   bot_cache:
+  hf_cache:

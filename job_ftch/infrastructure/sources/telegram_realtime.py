@@ -54,8 +54,10 @@ class TelegramRealtimeSource:
 
         creds = self.auth.resolve(self.spec.auth_source_id or "telegram")
         from pathlib import Path
+
         from job_ftch.config import get_settings
         from job_ftch.infrastructure.sources.telegram import _get_proxy_config
+
         settings = get_settings()
 
         # Fallback to Settings-style env vars when AuthProvider returns nothing

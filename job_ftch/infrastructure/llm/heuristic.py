@@ -144,14 +144,17 @@ class HeuristicLLMProvider:
                 "min_amount": _normalize_amount(match.group("min")),
                 "max_amount": _normalize_amount(match.group("max")),
             }
+        post_type = _detect_post_type(text)
+        hiring_intent = 1.0 if post_type is PostType.JOB_POSTING else 0.1
         payload = {
             "title": title,
             "description": text.strip(),
             "location": location,
             "work_mode": _detect_work_mode(text),
             "compensation": compensation,
-            "post_type": _detect_post_type(text),
+            "post_type": post_type,
             "ai_relevance": _detect_ai_relevance(text),
+            "hiring_intent": hiring_intent,
             "language": _detect_language(text),
             "seniority": _detect_seniority(text),
             "employment_type": _detect_employment_type(text),

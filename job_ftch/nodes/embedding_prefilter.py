@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from job_ftch.application.drops import RawItemDropped
-from job_ftch.domain import TriageRejectionReason
 from job_ftch.nodes.match_scoring import _cosine_sim
 
 if TYPE_CHECKING:
@@ -87,12 +85,6 @@ class EmbeddingPrefilterNode:
                     best_sim = sim
                     best_profile = profile_id
 
-        keyword_score = float(item.metadata.get("semantic_prefilter_best_score", "1.0") or "1.0")
-        threshold = max(
-            (p.relevance_threshold for p in self._catalog.profiles), default=0.4
-        )
-        keyword_passed = keyword_score >= threshold * 0.75
-
         metadata = {
             **item.metadata,
             "embedding_role_match": round(best_sim, 4),
@@ -100,20 +92,12 @@ class EmbeddingPrefilterNode:
         }
 
         if best_sim >= self._pass_threshold:
-            return item.model_copy(
-                update={"metadata": {**metadata, "embedding_prefilter_decision": "pass"}}
-            )
-
-        if best_sim < self._drop_threshold and not keyword_passed:
-            raise RawItemDropped(
-                reason=TriageRejectionReason.TELEGRAM_LOW_SIGNAL,
-                details=(
-                    f"Embedding role-anchor prefilter: max_sim={best_sim:.3f} "
-                    f"keyword_passed={keyword_passed}"
-                ),
-                item=item,
-            )
+            decision = "pass"
+        elif best_sim < self._drop_threshold:
+            decision = "low_signal"
+        else:
+            decision = "uncertain"
 
         return item.model_copy(
-            update={"metadata": {**metadata, "embedding_prefilter_decision": "uncertain"}}
+            update={"metadata": {**metadata, "embedding_prefilter_decision": decision}}
         )
