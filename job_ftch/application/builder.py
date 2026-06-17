@@ -339,7 +339,9 @@ def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = No
                 if tenant.job_store_path is not None
                 else None
             ),
-            "store_dsn": tenant.store_dsn if tenant.store_dsn is not None else base.get("store_dsn"),
+            "store_dsn": tenant.store_dsn
+            if tenant.store_dsn is not None
+            else base.get("store_dsn"),
             "store_pool_min": tenant.store_pool_min,
             "store_pool_max": tenant.store_pool_max,
             "store_fallback_on_error": tenant.store_fallback_on_error,
@@ -425,7 +427,7 @@ def build_classifier(_settings: Settings, _catalog: ProfileCatalog) -> Classifie
 
 def load_profile_catalog(settings: Settings) -> ProfileCatalog:
     if settings.filter_profile_path is None:
-        return ProfileCatalog.default()
+        return ProfileCatalog(catalog_name="empty", profiles=[])
     return load_catalog_from_path(settings.filter_profile_path)
 
 
@@ -445,7 +447,6 @@ def build_nodes(
         PostTypeClassificationNode(classifier=classifier),
         HardFilterNode(catalog),
         DedupNode(store),
-        SemanticPrefilterNode(catalog),
     ]
 
     if settings.embedding_prefilter_enabled:
@@ -469,6 +470,10 @@ def build_nodes(
                 reason="sentence-transformers not installed",
             )
 
+    # Semantic prefilter runs AFTER embedding so it can honour the cross-lingual signal
+    # (OR-logic: keep if EITHER token-overlap OR embedding role-anchor is strong).
+    nodes.append(SemanticPrefilterNode(catalog))
+
     _seen_roles: set[str] = set()
     _target_roles: list[str] = []
     for _profile in catalog.profiles:
@@ -486,6 +491,7 @@ def build_nodes(
                 max_calls=settings.pipeline_max_llm_calls_per_run,
                 target_roles=_target_roles_tuple,
                 min_search_relevance=settings.extraction_min_search_relevance,
+                min_hiring_intent=settings.extraction_min_hiring_intent,
             ),
             ExtractionValidationNode(),
             TitleCompanyNormalizationNode(normalizer),

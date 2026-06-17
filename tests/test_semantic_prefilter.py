@@ -68,10 +68,10 @@ async def test_semantic_prefilter_skill_fallback(minimal_profile, make_raw_item)
     # Profile with required_skills but empty soft_preferences
     profile = minimal_profile.model_copy(update={"soft_preferences": ()})
     node = SemanticPrefilterNode(ProfileCatalog(profiles=[profile]))
-    
+
     # Text contains "python" (required skill canonical name)
     item = make_raw_item(text="Looking for a specialist in python")
-    
+
     # Should pass prefilter because it falls back to required_skills for soft_score
     # Increase threshold ratio to ensure it passes
     node._uncertain_ratio = 0.5
@@ -81,10 +81,12 @@ async def test_semantic_prefilter_skill_fallback(minimal_profile, make_raw_item)
 
 
 @pytest.mark.asyncio
-async def test_semantic_prefilter_description_bonus_threshold(minimal_profile, make_raw_item) -> None:
-    profile = minimal_profile.model_copy(update={
-        "profile_description": "specialist in building large language models and agents"
-    })
+async def test_semantic_prefilter_description_bonus_threshold(
+    minimal_profile, make_raw_item
+) -> None:
+    profile = minimal_profile.model_copy(
+        update={"profile_description": "specialist in building large language models and agents"}
+    )
     node = SemanticPrefilterNode(ProfileCatalog(profiles=[profile]))
     node._uncertain_ratio = 0.0  # bypass drop logic for score comparison
 

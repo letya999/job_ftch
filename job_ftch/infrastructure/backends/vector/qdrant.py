@@ -74,5 +74,19 @@ class QdrantVectorBackend(VectorBackend):
         )
         return [cast("str", hit.payload["job_id"]) for hit in result.points if hit.payload]
 
+    async def clear(self) -> int:
+        try:
+            count_result = await self.client.count(collection_name=self.collection_name)
+            total = int(getattr(count_result, "count", 0) or 0)
+        except Exception:
+            total = 0
+        # Delete every point but preserve the collection schema.
+        await self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=rest.FilterSelector(filter=rest.Filter()),
+        )
+        self.logger.info("qdrant_cleared", collection=self.collection_name, deleted=total)
+        return total
+
     async def close(self) -> None:
         await self.client.close()

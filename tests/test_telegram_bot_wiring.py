@@ -15,8 +15,8 @@ import pytest
 pytest.importorskip("aiogram")
 
 from adapters.telegram_bot.config import TelegramBotConfig
-from adapters.telegram_bot.main import build_bot, build_dispatcher
 from adapters.telegram_bot.handlers import base, pipeline, sources
+from adapters.telegram_bot.main import build_bot, build_dispatcher
 
 
 @pytest.fixture(autouse=True)

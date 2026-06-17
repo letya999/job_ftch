@@ -21,9 +21,6 @@ def test_settings_allow_blank_optional_telegram_credentials_for_non_telegram_bac
     assert settings.telegram_entity is None
 
 
-
-
-
 def test_quarantine_settings_switch_output_targets() -> None:
     settings = Settings.model_validate(
         {
@@ -61,9 +58,6 @@ def test_review_and_rejected_settings_switch_output_targets() -> None:
     assert review.output_jsonl is True
     assert rejected.output_path == settings.rejected_output_path
     assert rejected.output_jsonl is True
-
-
-
 
 
 def test_postgres_backend_requires_dsn() -> None:

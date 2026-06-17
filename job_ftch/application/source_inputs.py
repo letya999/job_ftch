@@ -135,11 +135,11 @@ async def build_source_spec_from_input(
     }:
         site_spec = apply_runtime_defaults(
             CareerSiteSpec(
-            type="career_site",
-            url=stripped,
-            limit=limit,
-            monitor="auto",
-        )
+                type="career_site",
+                url=stripped,
+                limit=limit,
+                monitor="auto",
+            )
         )
         return site_spec.model_copy(update={"source_name": source_spec_name(site_spec)})
 

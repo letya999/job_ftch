@@ -61,8 +61,7 @@ async def test_career_site_source_uses_tbank_root_defaults_for_one_level_expansi
     client = FakeHttpClient(
         {
             "https://www.tbank.ru/career/": (
-                '<a href="/career/it/">IT jobs</a>'
-                '<a href="/career/blog/">Blog</a>'
+                '<a href="/career/it/">IT jobs</a><a href="/career/blog/">Blog</a>'
             ),
             "https://www.tbank.ru/career/it/": (
                 '<a href="/career/it/vacancy/ml-engineer/">ML Engineer</a>'

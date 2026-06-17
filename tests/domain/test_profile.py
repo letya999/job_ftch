@@ -23,10 +23,10 @@ def test_search_profile_weights_sum_check():
 
 
 @pytest.mark.unit
-def test_profile_catalog_single_profile_default():
-    catalog = ProfileCatalog.default()
-    assert len(catalog.profiles) == 1
-    assert catalog.profiles[0].profile_id == "ai_roles"
+def test_profile_catalog_empty_default():
+    catalog = ProfileCatalog()
+    assert len(catalog.profiles) == 0
+    assert catalog.catalog_name == "default"
 
 
 @pytest.mark.unit

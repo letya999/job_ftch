@@ -29,6 +29,7 @@ class ThrottlingMiddleware(BaseMiddleware):
     ) -> Any:
         # Only throttle messages
         from aiogram.types import Message
+
         if not isinstance(event, Message):
             return await handler(event, data)
 

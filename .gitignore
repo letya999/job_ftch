@@ -52,6 +52,8 @@ build/
 # Temp/output
 jobs.json
 jobs_*.json
+diag_*.txt
+e2e_diag_*.txt
 artifacts/
 output/
 .runtime/
@@ -79,6 +81,7 @@ fixtures/debug/
 
 # Agent test-run output (quiet pytest redirect)
 .pytest.out
+.pytest_*.out
 
 # Docker
 docker-compose.override.yml

@@ -1,6 +1,8 @@
 import pytest
+
+from job_ftch.domain import JobRecord, SourceKind
 from job_ftch.infrastructure.stores.job_group_store import InMemoryJobGroupStore
-from job_ftch.domain import JobRecord, SourceKind, WorkMode, Seniority
+
 
 @pytest.mark.asyncio
 async def test_in_memory_store_clear():
@@ -13,12 +15,12 @@ async def test_in_memory_store_clear():
         source_kind=SourceKind.TELEGRAM_CHANNEL,
         source_name="tg",
         description="desc",
-        canonical_url="http://google.com/job1"
+        canonical_url="http://google.com/job1",
     )
-    
+
     await store.create(job)
     assert await store.count() == 1
-    
+
     count = await store.clear()
     assert count == 1
     assert await store.count() == 0

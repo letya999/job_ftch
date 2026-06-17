@@ -158,7 +158,8 @@ def test_app_runs_local_pipeline_command(tmp_path: Path) -> None:
     result = subprocess.run(
         [
             sys.executable,
-            "app.py",
+            "-m",
+            "job_ftch",
             "--source-path",
             "fixtures/debug/raw_items.json",
             "--output-path",

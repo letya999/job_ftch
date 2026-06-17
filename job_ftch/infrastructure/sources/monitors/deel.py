@@ -109,8 +109,11 @@ def _parse_job(posting: dict[str, Any], slug: str) -> DiscoveredPostingPayload |
 
 async def _fetch_settings(slug: str, client: httpx.AsyncClient) -> dict[str, Any] | None:
     from job_ftch.config import get_settings
+
     try:
-        resp = await client.get(_SETTINGS.format(slug=slug), timeout=get_settings().monitor_timeout_seconds)
+        resp = await client.get(
+            _SETTINGS.format(slug=slug), timeout=get_settings().monitor_timeout_seconds
+        )
         if resp.status_code != 200:
             return None
         data = resp.json()
@@ -161,6 +164,7 @@ async def discover(
 
     url = _POSTINGS.format(org_id=org_id, board_id=board_id)
     from job_ftch.config import get_settings
+
     resp = await client.get(url, timeout=get_settings().monitor_timeout_seconds)
     resp.raise_for_status()
     data = resp.json()

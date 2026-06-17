@@ -252,6 +252,8 @@ class VectorBackend(Protocol):
         filter: dict[str, Any] | None = None,
     ) -> list[str]: ...
 
+    async def clear(self) -> int: ...
+
 
 @runtime_checkable
 class IngestMode(Protocol):

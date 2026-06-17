@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from typing import Annotated
-from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _VALID_LOG_LEVELS = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}
 
@@ -82,11 +79,18 @@ class Settings(BaseSettings):
     telegram_connection_retries: int = Field(default=3, ge=0, le=20)
     telegram_retry_delay_seconds: float = Field(default=1.0, ge=0.0, le=60.0)
     telegram_flood_sleep_threshold_seconds: int = Field(default=60, ge=0, le=86400)
+    telegram_history_wait_time_seconds: float = Field(default=0.0, ge=0.0)
+    telegram_channel_default_limit: int = Field(default=50, gt=0)
+    telegram_group_default_limit: int = Field(default=50, gt=0)
+    telegram_comment_default_limit: int = Field(default=20, gt=0)
     openai_api_key: str | None = None
-    openai_model: str = "gpt-4.1-mini"
+    openai_model: str = "gpt-5.4-nano"
     openai_base_url: str | None = None
     openai_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     openai_max_retries: int = Field(default=2, ge=0, le=10)
+    career_site_url: str | None = None
+    career_site_default_limit: int = Field(default=50, gt=0)
+    career_site_default_detail_limit: int | None = Field(default=None, ge=1)
     career_site_timeout_seconds: float = Field(default=15.0, gt=0.0, le=300.0)
     career_site_connect_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     career_site_max_retries: int = Field(default=2, ge=0, le=10)
@@ -122,6 +126,7 @@ class Settings(BaseSettings):
     embedding_enabled: bool = False
     embedding_prefilter_enabled: bool = False
     embedding_prefilter_model: str = "paraphrase-multilingual-MiniLM-L12-v2"
+    extraction_min_hiring_intent: float = Field(default=0.0, ge=0.0, le=1.0)
     language_detection_enabled: bool = False
     translation_enabled: bool = False
     translation_target_language: str = "ru"
@@ -218,6 +223,7 @@ class Settings(BaseSettings):
         "telegram_proxy_host",
         "telegram_proxy_username",
         "telegram_proxy_password",
+        "career_site_url",
     )
     @classmethod
     def strip_optional_strings(cls, value: str | None) -> str | None:
@@ -229,7 +235,9 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_telegram_jitter(self) -> Settings:
         if self.telegram_jitter_min_seconds > self.telegram_jitter_max_seconds:
-            raise ValueError("telegram_jitter_min_seconds cannot be greater than telegram_jitter_max_seconds.")
+            raise ValueError(
+                "telegram_jitter_min_seconds cannot be greater than telegram_jitter_max_seconds."
+            )
         return self
 
     @model_validator(mode="after")

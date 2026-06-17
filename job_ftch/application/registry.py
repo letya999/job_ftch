@@ -75,6 +75,7 @@ _store_factories: dict[str, StoreFactory] = {}
 _job_group_store_factories: dict[str, StoreFactory] = {}
 _llm_factories: dict[str, LLMFactory] = {}
 _parser_factories: list[tuple[str, ParserMatcher, ParserFactory]] = []
+_site_parser_factories: list[tuple[str, str, Callable[..., Any]]] = []
 
 _MONITOR_REGISTRY: list[MonitorEntry] = []
 _SCRAPER_REGISTRY: dict[str, ScraperEntry] = {}
@@ -535,6 +536,7 @@ def load_extensions() -> None:
                 "job_ftch.infrastructure.sources.telegram",
                 "job_ftch.infrastructure.sources.career_site",
                 "job_ftch.infrastructure.sources.career_site_source",
+                "job_ftch.infrastructure.sources.site_parsers",
                 "job_ftch.infrastructure.sources.declarative",
                 "job_ftch.infrastructure.stores.in_memory",
                 "job_ftch.infrastructure.stores.sqlite",
@@ -783,6 +785,45 @@ def resolve_career_site_parser(*, url: str, html: str) -> CareerSiteParser:
             return cast("CareerSiteParser", factory())
     msg = f"Unsupported career site layout for URL: {url}"
     raise ValueError(msg)
+
+
+def register_site_parser(
+    name: str,
+    *,
+    domain_pattern: str,
+    version: str = "0.0.0",
+    requires_extras: tuple[str, ...] = (),
+) -> Callable[[FAny], FAny]:
+    normalized = name.strip()
+
+    def decorator(factory: FAny) -> FAny:
+        _site_parser_factories.append((normalized, domain_pattern, factory))
+        _default_registry.register(
+            PluginDescriptor(
+                name=normalized,
+                kind=PluginKind.PARSER,
+                factory=factory,
+                version=version,
+                requires_extras=requires_extras,
+            ),
+            overwrite=True,
+        )
+        return factory
+
+    return decorator
+
+
+def resolve_site_parser(url: str) -> Any | None:
+    import re
+
+    # Import built-in site parsers to trigger @register_site_parser decorators.
+    from job_ftch.infrastructure.sources import site_parsers  # noqa: F401
+
+    load_extensions()
+    for _, pattern, factory in _site_parser_factories:
+        if re.search(pattern, url, re.IGNORECASE):
+            return factory()
+    return None
 
 
 def create_auth_provider(name: str | None, settings: Settings) -> AuthProvider:

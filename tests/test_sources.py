@@ -87,7 +87,7 @@ class FakeTelegramClient:
         if offset_id:
             try:
                 idx = next(i for i, msg in enumerate(items) if msg.id == offset_id)
-                sliced = items[idx + 1:idx + 1 + limit]
+                sliced = items[idx + 1 : idx + 1 + limit]
             except StopIteration:
                 sliced = []
         else:
@@ -174,7 +174,9 @@ async def test_telegram_channel_source_maps_real_world_fixture() -> None:
         [_parse_message(message) for message in payload["messages"]],
     )
 
-    items = await _collect(TelegramChannelSource(client, "TelegramTips", limit=10, min_jitter=1.5, max_jitter=1.5))
+    items = await _collect(
+        TelegramChannelSource(client, "TelegramTips", limit=10, min_jitter=1.5, max_jitter=1.5)
+    )
 
     assert len(items) == 1
     assert items[0].source_kind is SourceKind.TELEGRAM_CHANNEL

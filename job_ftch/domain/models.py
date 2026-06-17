@@ -289,6 +289,7 @@ class JobDraft(BaseModel):
     compensation: CompensationRange | None = None
     post_type: PostType = PostType.UNKNOWN
     ai_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
+    hiring_intent: float | None = Field(default=None, ge=0.0, le=1.0)
     role_family: str | None = None
     role_track: str | None = None
     role_specialization: str | None = None
@@ -575,6 +576,7 @@ class JobRecord(Job):
     company_name_normalized: str | None = None
     best_profile_id: str | None = None
     best_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    hiring_intent: float | None = Field(default=None, ge=0.0, le=1.0)
     routing_decision: MatchDecision | None = None
     extraction_completeness: float | None = Field(default=None, ge=0.0, le=1.0)
     risk_score: float | None = Field(default=None, ge=0.0, le=1.0)

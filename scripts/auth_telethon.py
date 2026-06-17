@@ -5,6 +5,7 @@ Run this once to create .runtime/telegram-dev.session before starting Docker.
 Usage:
     python scripts/auth_telethon.py
 """
+
 import asyncio
 import os
 import sys

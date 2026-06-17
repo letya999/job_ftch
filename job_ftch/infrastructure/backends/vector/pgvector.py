@@ -187,3 +187,19 @@ class PgVectorBackend(VectorBackend):
                 rows = await conn.fetch(query, vector_str, limit)
 
         return [row["job_id"] for row in rows]
+
+    async def clear(self) -> int:
+        if not self._schema_initialized:
+            if self._dimensions:
+                await self._init_schema(self._dimensions)
+            else:
+                return 0
+
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT count(*) FROM jf_job_vectors;")
+            total = int(row[0]) if row else 0
+            await conn.execute("DELETE FROM jf_job_vectors;")
+
+        self._logger.info("pgvector_cleared", deleted=total)
+        return total

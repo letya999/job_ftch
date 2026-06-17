@@ -199,3 +199,19 @@ Use when classifier is unstable (e.g. after adding new sources).
 
 **Priority:** Low
 **Effort:** Low (1 hour)
+
+---
+
+## TD-013: Source snapshot table + incremental diff
+
+Current snapshot diff is stored in the KV store (`snapshot:{tenant}:{source}:latest`).
+The `jf_source_snapshots` table migration exists but is not yet used by the code.
+
+Next steps:
+1. Migrate `SnapshotFilterNode` and `TenantStore` snapshot methods to use `jf_source_snapshots`.
+2. Add `Store` protocol methods for snapshots so in-memory/sqlite/postgres implement them natively.
+3. Support historical diff queries ("what changed since yesterday").
+
+**Priority:** Medium
+**Effort:** Medium (1 day)
+
