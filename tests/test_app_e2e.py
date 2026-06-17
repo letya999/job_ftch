@@ -44,12 +44,12 @@ def test_app_processes_multisource_fixture_end_to_end(tmp_path: Path) -> None:
     emitted_payload = json.loads(output_path.read_text(encoding="utf-8"))
     emitted = emitted_payload["items"]
 
-    assert len(emitted) == 5
+    assert len(emitted) == 6
     assert emitted_payload["schema_version"] == "job_ftch.job.v1"
     assert Counter(item["source_kind"] for item in emitted) == {
         "telegram_channel": 2,
         "telegram_group": 2,
-        "career_site": 1,
+        "career_site": 2,
     }
     assert all(item["description"] for item in emitted)
     assert all(item["relevance_score"] > 0 for item in emitted)
@@ -89,7 +89,8 @@ def test_app_quarantines_multisource_negative_fixture_end_to_end(tmp_path: Path)
 
     output_payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert output_payload["schema_version"] == "job_ftch.job.v1"
-    assert output_payload["items"] == []
+    assert len(output_payload["items"]) == 1
+    assert output_payload["items"][0]["source_name"] == "Unknown Careers"
     assert len(quarantine_records) == 5
     assert Counter(record["payload"]["reason"] for record in quarantine_records) == {
         "disallowed_url_host": 1,

@@ -136,3 +136,16 @@ async def cmd_status(message: Message, runner: "TenantRunner") -> None:
             f"❌ Ошибок: {summary.failed}\n"
             f"⚠️ В карантине: {summary.quarantined}"
         )
+
+
+def create_router() -> Router:
+    r = Router(name="base")
+    r.message.register(cmd_start, Command("start"))
+    r.callback_query.register(cb_add_pos, StartMenu.filter(F.action == "add_positive"))
+    r.callback_query.register(cb_add_neg, StartMenu.filter(F.action == "add_negative"))
+    r.callback_query.register(cb_show_ex, StartMenu.filter(F.action == "show_examples"))
+    r.callback_query.register(cb_show_src, StartMenu.filter(F.action == "show_sources"))
+    r.callback_query.register(cb_run, StartMenu.filter(F.action == "run"))
+    r.message.register(cmd_help, Command("help"))
+    r.message.register(cmd_status, Command("status"))
+    return r

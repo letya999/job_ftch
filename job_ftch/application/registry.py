@@ -816,10 +816,7 @@ def register_site_parser(
 def resolve_site_parser(url: str) -> Any | None:
     import re
 
-    # Import built-in site parsers to trigger @register_site_parser decorators.
-    from job_ftch.infrastructure.sources import site_parsers  # noqa: F401
-
-    load_extensions()
+    load_extensions()  # triggers site_parsers registration via load_extensions
     for _, pattern, factory in _site_parser_factories:
         if re.search(pattern, url, re.IGNORECASE):
             return factory()

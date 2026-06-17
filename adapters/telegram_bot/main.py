@@ -76,11 +76,11 @@ def build_dispatcher(
     # 3. Throttling middleware (only for messages)
     dp.message.middleware(ThrottlingMiddleware())
 
-    # Register routers
-    dp.include_router(base.router)
-    dp.include_router(examples.router)
-    dp.include_router(sources.router)
-    dp.include_router(pipeline.router)
+    # Register routers (fresh instances each call to avoid "Router is already attached")
+    dp.include_router(base.create_router())
+    dp.include_router(examples.create_router())
+    dp.include_router(sources.create_router())
+    dp.include_router(pipeline.create_router())
 
     return dp
 
