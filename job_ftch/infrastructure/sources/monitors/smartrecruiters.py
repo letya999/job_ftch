@@ -37,7 +37,7 @@ _IGNORE_TOKENS = frozenset({"api", "v1", "js", "css", "assets", "postings", "com
 
 def _has_smartrecruiters_signal(url: str, html: str | None) -> bool:
     host = (urlparse(url).hostname or "").lower()
-    if "smartrecruiters.com" in host:
+    if host == "smartrecruiters.com" or host.endswith(".smartrecruiters.com"):
         return True
     if not html:
         return False
@@ -46,10 +46,17 @@ def _has_smartrecruiters_signal(url: str, html: str | None) -> bool:
 
 
 def _token_from_url(board_url: str) -> str | None:
-    for pattern in _PAGE_PATTERNS:
-        match = pattern.search(board_url)
-        if match:
-            token = match.group(1)
+    parsed = urlparse(board_url)
+    host = (parsed.hostname or "").lower()
+    path = parsed.path.lstrip("/")
+    if host in {"jobs.smartrecruiters.com", "careers.smartrecruiters.com"}:
+        token = path.split("/", 1)[0]
+        if token and token not in _IGNORE_TOKENS:
+            return token
+    if host == "api.smartrecruiters.com":
+        parts = [part for part in path.split("/") if part]
+        if len(parts) >= 3 and parts[:2] == ["v1", "companies"]:
+            token = parts[2]
             if token not in _IGNORE_TOKENS:
                 return token
     return None
