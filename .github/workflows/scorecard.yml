@@ -5,7 +5,7 @@ on:
   schedule:
     - cron: '30 3 * * 1'
   push:
-    branches: [dev, main]
+    branches: [main]
 
 jobs:
   scorecard:
