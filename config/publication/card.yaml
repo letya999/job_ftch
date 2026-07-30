@@ -78,3 +78,13 @@ profiles:
   control_bot:
     capabilities: [html, inline_keyboard]
     feedback: true
+
+pacing:
+  window_seconds: 14400       # 4 hours
+  target_per_window: 12
+  burst_min: 2
+  burst_max: 4
+  gap_min_seconds: 120        # 2 min
+  gap_max_seconds: 1500       # 25 min
+  spread_fraction: 0.6
+  msg_throttle_seconds: 3.5
