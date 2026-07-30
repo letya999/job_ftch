@@ -1,3 +1,8 @@
+---
+title: "004 - Pipeline Node Contracts and Stats Shape"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 004 - Pipeline Node Contracts and Stats Shape
 
 **Status**: ACCEPTED

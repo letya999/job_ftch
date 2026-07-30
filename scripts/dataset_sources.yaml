@@ -1,0 +1,441 @@
+sources:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TG CHANNELS — primary job boards (verified: post actual vacancies)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # ML/DS jobs incl. LLM-agents, 200-400K RU + EUR — ~20K subs
+  - type: telegram_channel
+    entity: datasciencejobs
+    limit: 100
+    source_name: tg_datasciencejobs
+
+  # Senior AI Engineer (agentic/LLM), AI Impl Specialist, MLOps — ~15K subs
+  - type: telegram_channel
+    entity: remote_ai_jobs
+    limit: 100
+    source_name: tg_remote_ai_jobs
+
+  # LLM/AI architect, ML Eng, AI Automation, CV — KZ+worldwide — 10.6K subs
+  - type: telegram_channel
+    entity: ml_jobs_kz
+    limit: 100
+    source_name: tg_ml_jobs_kz
+
+  # LLM Engineer, NLP, MLOps, Head of AI — Senior/Lead, $4K-8K+400K RU — 286 subs
+  - type: telegram_channel
+    entity: llm_jobs
+    limit: 100
+    source_name: tg_llm_jobs
+
+  # AI, vibe coding, agents, n8n automation — 6,083 subs
+  - type: telegram_channel
+    entity: vakansii_chatgpt
+    limit: 100
+    source_name: tg_vakansii_chatgpt
+
+  # DS/ML/AI vacancies: Avito, Wildberries, Tochka — 6,918 subs
+  - type: telegram_channel
+    entity: data_secrets_career
+    limit: 100
+    source_name: tg_data_secrets_career
+
+  # Python + ML/DS, aggregates from hh.ru+habr — 391 subs
+  - type: telegram_channel
+    entity: python_jobs_ru
+    limit: 100
+    source_name: tg_python_jobs_ru
+
+  # Official Avito corporate TG — DS/RAG/LLM stream vacancies — 59K subs
+  - type: telegram_channel
+    entity: avito_career
+    limit: 50
+    source_name: tg_avito_career
+
+  # Applied-AI vacancies: AI engineers, automation, n8n — focus channel
+  - type: telegram_channel
+    entity: Vakansii_rabotasd
+    limit: 150
+    source_name: tg_vakansii_rabotasd
+
+  # Fokina jobs: AI/tech vacancies aggregator
+  - type: telegram_channel
+    entity: fokina_jobs
+    limit: 150
+    source_name: tg_fokina_jobs
+
+  # ODS jobs: ML/DS/AI vacancies (Open Data Science community)
+  - type: telegram_channel
+    entity: odsjobs
+    limit: 150
+    source_name: tg_odsjobs
+
+  # AI Rabota: AI-focused job channel
+  - type: telegram_channel
+    entity: ai_rabota
+    limit: 150
+    source_name: tg_ai_rabota
+
+  # Not Boring DS Jobs: curated DS/AI vacancies
+  - type: telegram_channel
+    entity: not_boring_ds_jobs
+    limit: 150
+    source_name: tg_not_boring_ds_jobs
+
+  # Zerocode Jobs: no-code/AI automation vacancies
+  - type: telegram_channel
+    entity: zerocode_jobs
+    limit: 150
+    source_name: tg_zerocode_jobs
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TG CHANNELS — AI/tech content + periodic job postings
+  # Valuable for dataset diversity: mixes jobs with announcements/news (noise)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # AI engineering + prod practices; posts LLM/infra vacancies — 15.3K subs
+  - type: telegram_channel
+    entity: neuraldeep
+    limit: 50
+    source_name: tg_neuraldeep
+
+  # AI-first dev, startups, posts vacancies (AI agent dev) — 14.9K subs
+  - type: telegram_channel
+    entity: elkornacio
+    limit: 50
+    source_name: tg_elkornacio
+
+  # DSML.KZ community news, redirects jobs to @ml_jobs_kz — 4.6K subs
+  - type: telegram_channel
+    entity: dsmlkz_news
+    limit: 50
+    source_name: tg_dsmlkz_news
+
+  # AI vacancies (vibe-coding theme, same author as vakansii_chatgpt)
+  - type: telegram_channel
+    entity: mari_vakansii
+    limit: 50
+    source_name: tg_mari_vakansii
+
+  # AGI + RL research, occasional openings
+  - type: telegram_channel
+    entity: agi_and_rl
+    limit: 50
+    source_name: tg_agi_and_rl
+
+  # AI/LLM developer content
+  - type: telegram_channel
+    entity: AI4Dev
+    limit: 50
+    source_name: tg_ai4dev
+
+  # Open Source AI projects, occasional hiring posts
+  - type: telegram_channel
+    entity: opensourceai
+    limit: 50
+    source_name: tg_opensourceai
+
+  # LLM4Dev - LLM for developers content
+  - type: telegram_channel
+    entity: llm4dev
+    limit: 50
+    source_name: tg_llm4dev
+
+  # Data secrets community channel
+  - type: telegram_channel
+    entity: data_secrets
+    limit: 50
+    source_name: tg_data_secrets
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TG GROUPS — community chats (valuable for negative examples: non-job posts)
+  # These capture discussion/news/announcements that train the PostType classifier
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # Vibe-coding community chat
+  - type: telegram_group
+    entity: vibe_coding_community
+    limit: 100
+    source_name: tg_grp_vibe_coding
+
+  # No Flame No Game — product dev community
+  - type: telegram_group
+    entity: noflamenogame
+    limit: 50
+    source_name: tg_grp_noflamenogame
+
+  # Die or Die — tech builders community
+  - type: telegram_group
+    entity: deordie_chat
+    limit: 50
+    source_name: tg_grp_deordie_chat
+
+  # DSML Kazakhstan community group
+  - type: telegram_group
+    entity: dsml_kz
+    limit: 100
+    source_name: tg_grp_dsml_kz
+
+  # MLOps community chat
+  - type: telegram_group
+    entity: mlopschat
+    limit: 50
+    source_name: tg_grp_mlopschat
+
+  # LangChain Russia chat
+  - type: telegram_group
+    entity: langchain_russia
+    limit: 50
+    source_name: tg_grp_langchain_russia
+
+  # LLM RU chat — Russian LLM practitioners
+  - type: telegram_group
+    entity: llm_ru_chat
+    limit: 100
+    source_name: tg_grp_llm_ru_chat
+
+  # GenAI RU — generative AI community
+  - type: telegram_group
+    entity: genai_ru
+    limit: 100
+    source_name: tg_grp_genai_ru
+
+  # Data engineers community
+  - type: telegram_group
+    entity: data_engineers_ru
+    limit: 50
+    source_name: tg_grp_data_engineers_ru
+
+  # Data Science RU chat
+  - type: telegram_group
+    entity: datascience_ru_chat
+    limit: 50
+    source_name: tg_grp_datascience_ru_chat
+
+  # AI Engineers RU community
+  - type: telegram_group
+    entity: ai_engineers_ru
+    limit: 50
+    source_name: tg_grp_ai_engineers_ru
+
+  # AI Product Managers RU
+  - type: telegram_group
+    entity: ai_pm_ru
+    limit: 50
+    source_name: tg_grp_ai_pm_ru
+
+  # Neural Deep community chat
+  - type: telegram_group
+    entity: neuraldeepchat
+    limit: 50
+    source_name: tg_grp_neuraldeepchat
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # CAREER SITES — aggregators (Russia)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - type: career_site
+    url: "https://career.habr.com/vacancies?q=machine+learning"
+    source_name: habr_ml
+    monitor: dom
+    monitor_config:
+      url_filter: "career\\.habr\\.com/vacancies/\\d{5,}"
+    limit: 50
+
+  - type: career_site
+    url: "https://career.habr.com/vacancies/data_scientist"
+    source_name: habr_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "career\\.habr\\.com/vacancies/\\d{5,}"
+    limit: 50
+
+  - type: career_site
+    url: "https://career.habr.com/vacancies?q=LLM"
+    source_name: habr_llm
+    monitor: dom
+    monitor_config:
+      url_filter: "career\\.habr\\.com/vacancies/\\d{5,}"
+    limit: 50
+
+  - type: career_site
+    url: "https://hh.ru/search/vacancy?text=machine+learning+engineer"
+    source_name: hh_mle
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.ru/vacancy/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: "https://hh.ru/search/vacancy?text=LLM+engineer"
+    source_name: hh_llm
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.ru/vacancy/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: "https://hh.ru/search/vacancy?text=data+scientist"
+    source_name: hh_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.ru/vacancy/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: "https://hh.ru/search/vacancy?text=AI+engineer"
+    source_name: hh_ai_eng
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.ru/vacancy/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: "https://hh.ru/search/vacancy?text=MLOps"
+    source_name: hh_mlops
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.ru/vacancy/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: https://getmatch.ru/vacancies/data-scientist-machine-learning
+    source_name: getmatch_ds
+    monitor: auto
+    limit: 50
+
+  - type: career_site
+    url: https://geekjob.ru/vacancies
+    source_name: geekjob
+    monitor: dom
+    monitor_config:
+      url_filter: "geekjob\\.ru/vacancy/[a-f0-9]+"
+      skip_ssl: true
+    scraper_config:
+      skip_ssl: true
+    limit: 50
+
+  - type: career_site
+    url: https://hirify.me/jobs-in-russia
+    source_name: hirify_russia
+    monitor: dom
+    monitor_config:
+      url_filter: "hirify\\.me/jobs?/\\d+"
+    limit: 50
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # CAREER SITES — aggregators (Kazakhstan)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - type: career_site
+    url: https://hh.kz/vacancies/data-scientist
+    source_name: hhkz_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.kz/vacancy/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: https://hh.kz/vacancies/machine-learning-engineer
+    source_name: hhkz_mle
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.kz/vacancy/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: "https://qyzmet.kz/%D0%B2%D0%B0%D0%BA%D0%B0%D0%BD%D1%81%D0%B8%D0%B8/Data-scientist"
+    source_name: qyzmet_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "qyzmet\\.kz/jobdesc\\?id=\\d+"
+    limit: 50
+
+  - type: career_site
+    url: https://kazahstan.gorodrabot.kz/data_scientist
+    source_name: gorodrabot_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "gorodrabot\\.kz/advert/\\d+"
+    limit: 50
+
+  - type: career_site
+    url: https://kolesa.group/career/job
+    source_name: kolesa_career
+    monitor: dom
+    monitor_config:
+      url_filter: "kolesa\\.group/career/job/[a-z0-9-]+-\\d+"
+    limit: 50
+
+  - type: career_site
+    url: https://people.beeline.kz/
+    source_name: beeline_kz
+    monitor: api_sniffer
+    monitor_config:
+      persistent_context: true
+      channel: chrome
+      settle_seconds: 5
+    limit: 50
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # CAREER SITES — corporate (verified AI/ML roles)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  - type: career_site
+    url: "https://www.tbank.ru/career/vacancies/it/?tcareer_it_profession=ml"
+    source_name: tbank_ml
+    monitor: dom
+    monitor_config:
+      url_filter: "tbank\\.ru/career/it/vacancy/[a-z0-9_\\-/]+"
+    limit: 50
+
+  - type: career_site
+    url: https://career.avito.com/vacancies/
+    source_name: avito_career
+    monitor: dom
+    monitor_config:
+      url_filter: "career\\.avito\\.com/vacancies/[^/]+/\\d+/?$"
+    limit: 50
+
+  - type: career_site
+    url: https://team.vk.company/vacancies/
+    source_name: vk_careers
+    monitor: dom
+    monitor_config:
+      url_filter: "team\\.vk\\.company/vacancy/\\d+/?$"
+    limit: 50
+
+  - type: career_site
+    url: "https://yandex.ru/jobs/vacancies?text=AI"
+    source_name: yandex_ai
+    monitor: auto
+    bypass: auto
+    limit: 50
+
+  - type: career_site
+    url: https://ozon.tech/vacancies/
+    source_name: ozon_tech
+    monitor: dom
+    monitor_config:
+      render: true
+      channel: chrome
+      settle_seconds: 6
+      url_filter: "ozon\\.tech/vacancies/[a-f0-9\\-]+-[a-z0-9-]+/?$"
+    limit: 50
+
+  # Sber via hh.ru (rabota.sber.ru is SPA/geo-blocked)
+  - type: career_site
+    url: "https://hh.ru/search/vacancy?text=machine+learning&employer_id=3529"
+    source_name: hh_sber_ml
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.ru/vacancy/\\d+"
+    limit: 30
+
+  # X5 Tech via hh.ru (66 active AI/ML vacs confirmed)
+  - type: career_site
+    url: "https://hh.ru/search/vacancy?text=data+scientist&employer_id=1386"
+    source_name: hh_x5_ds
+    monitor: dom
+    monitor_config:
+      url_filter: "hh\\.ru/vacancy/\\d+"
+    limit: 30

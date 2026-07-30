@@ -1,3 +1,8 @@
+---
+title: "011 — SourceSpec + AuthProvider separation"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 011 — SourceSpec + AuthProvider separation
 
 **Status**: ACCEPTED

@@ -1,49 +1,73 @@
-# Tech Stack
+<!-- Memory Metadata
+Last updated: 2026-06-17
+Last commit: f9fc8b8 fix(classifier): remove false-positive announcement tokens
+Scope: .serena/memories/tech_stack.md
+Area: CORE
+-->
 
-- Language/runtime: Python 3.12+, asyncio.
-- Package/env manager: `uv`. Always run tests as `uv run pytest`, not `python -m pytest` (system Python lacks dev deps).
-- Build backend: `hatchling`. Wheel includes only `job_ftch` package. Root `adapters/` requires PYTHONPATH=/app.
-- Config: `pydantic-settings`, `.env` via `config.py`.
-- Core deps declared in `pyproject.toml`:
-  `pydantic`, `pydantic-settings`, `httpx`, `selectolax`, `rapidfuzz`, `openai`, `instructor`,
-  `opentelemetry-api`, `opentelemetry-sdk`, `structlog`, `defusedxml`, `slowapi`.
-- Optional/Feature deps (declared in pyproject optional groups):
-  `aiosqlite`, `asyncpg`, `qdrant-client`, `pgvector`, `sentence-transformers`, `torch`.
-  `feedparser` in `[feeds]` group - required for RSSFeedSource. NOT in core deps.
-  `playwright` optional for BrowserSource (checked at import time, raises ImportError if missing).
-  `pypdf`, `python-docx`, `pdfminer.six` in `[resume]` group - document parsing for bot uploads.
-  `aiogram>=3.7` in `[telegram]` group - required for adapters/telegram_bot/. Tests guard with pytest.importorskip("aiogram").
-- NLP retrieval quality deps (all opt-in, added in MVP batch B/C):
-  `[language]`: `lingua-language-detector>=2.0` — 72+ language detection including KZ; loads ~500MB models.
-    Enabled via `LANGUAGE_DETECTION_ENABLED=true`.
-  `[translation]`: `ctranslate2`, `sentencepiece`, `huggingface_hub` — CPU-fast RU/EN translation
-    via Helsinki-NLP opus-mt. KZ not supported (supports() returns False, TranslationNode skips).
-    Models in `infrastructure/language/translator.py`. HuggingFace SHAs pinned in `_MODEL_REVISIONS`:
-      opus-mt-ru-en: fbd6dc73284f95536648512cc21d57f19191961a
-      opus-mt-en-ru: bb09c99d180016eac6819df3dae68edb1690fdee
-    Enabled via `TRANSLATION_ENABLED=true`.
-  Reranker: `jinaai/jina-reranker-v2-base-multilingual` via `fastembed` dep. Enabled via `RERANKER_ENABLED=true`.
-- Structlog: configured in `application/logging.py`. `_mask_sensitive` processor runs before JSONRenderer,
-  masks fields: api_key, token, secret, password, dsn, auth_hash → "***".
-- fastembed critical note: `intfloat/multilingual-e5-small` requires `"query: "` prefix for queries
-  and `"passage: "` prefix for passages. `FastEmbedProvider.embed_query()` / `embed_passage()` handle this.
-- Storage & Search:
-  SQLite (FTS5) for local persistence/search.
-  PostgreSQL (tsvector) for production persistence/search.
-  Qdrant for vector storage.
-  OpenAI / Ollama / SentenceTransformers for embeddings.
-- Qdrant client API: use `query_points()` not deprecated `search()`.
-  Returns object with `.points` attribute.
-  `hashlib.md5(data, usedforsecurity=False)` required for bandit B324.
-- Dev tooling: `ruff`, `mypy` (strict), `pytest`+`pytest-asyncio`+`syrupy`, `bandit`.
-  bandit: 0 HIGH findings as of MVP commit. B615 (HF model download) suppressed with `# nosec B615`.
-  S104 (0.0.0.0 bind in cli.py/webhook.py) - accepted for Docker.
-- Packaging layout is flat package directories, not `src/`.
-- Ranking: RRF (Reciprocal Rank Fusion) for merging FTS and Vector results.
-- Auth providers: `EnvAuthProvider` (reads `JOB_FTCH_AUTH_{SOURCE_ID}_{KEY}` env vars),
-  `FileAuthProvider` (lazy YAML load from secrets file).
-- Scheduler: `application/scheduler.py` - asyncio event loop, SIGINT/SIGTERM, `--daemon` flag, PID file.
-- `SourceSpecFactory = Callable[[Any, AuthProvider], object]` - 2-arg protocol.
-  Classes with 3-arg `__init__` (spec, auth, store) must use module-level factory functions.
-- Deploy: `docker-compose.yml` starts bot+SQLite by default. Scale with `--profile postgres`/`vector`.
-  `docs/deploy.md` covers DigitalOcean droplet provisioning.
+# job_ftch — Tech Stack
+
+## Language & Runtime
+- Python 3.12+ (strict), `requires-python = ">=3.12"`
+- Build: hatchling (`pyproject.toml`), package manager: `uv`
+
+## Core Dependencies (always installed)
+- pydantic ≥2.7 (domain models, validation)
+- pydantic-settings ≥2.3 (config)
+- httpx ≥0.27 (async HTTP)
+- selectolax ≥0.3 (HTML parsing, lxml-based)
+- rapidfuzz ≥3.9 (fuzzy dedup)
+- opentelemetry-api + opentelemetry-sdk ≥1.25 (tracing)
+- structlog ≥24.2 (structured logging)
+- defusedxml ≥0.7.1 (XML security)
+- slowapi ≥0.1.9 (rate limiting)
+
+## Optional Dependency Groups (extras)
+- `[browser]`: playwright ≥1.45
+- `[stealth]`: playwright-stealth, curl-cffi
+- `[openai]`: openai ≥1.30, instructor ≥1.4
+- `[telegram]`: telethon ≥1.36, aiogram ≥3.7
+- `[dagster]`: dagster ≥1.8
+- `[faststream]`: faststream ≥0.5
+- `[api]`: fastapi ≥0.115, uvicorn ≥0.30
+- `[mcp]`: fastmcp ≥2.4
+- `[bot]`: aiogram, telethon, fastapi, uvicorn, aiosqlite, pypdf, python-docx, pdfminer.six, PyYAML
+- `[metrics]`: prometheus-client ≥0.20
+- `[fastembed]`: fastembed ≥0.3
+- `[sqlite]`: aiosqlite ≥0.20
+- `[postgres]`: asyncpg ≥0.31.0
+- `[embeddings]`: sentence-transformers ≥3.0, torch ≥2.3
+- `[qdrant]`: qdrant-client ≥1.18.0
+- `[pgvector]`: asyncpg, pgvector ≥0.3
+- `[ollama]`: httpx
+- `[feeds]`: feedparser ≥6.0
+- `[site_scrapers]`: jmespath ≥1.0, feedparser ≥6.0
+- `[realtime]`: aiohttp ≥3.9, websockets ≥12.0
+- `[resume]`: pypdf, python-docx, pdfminer.six
+- `[language]`: lingua-language-detector ≥2.0
+- `[translation]`: ctranslate2 ≥4.0, sentencepiece ≥0.1.99
+- `[reranker]`: fastembed ≥0.3
+
+## Dev Dependencies
+- ruff ≥0.4 (lint + format)
+- mypy ≥1.10 (strict type checking, `ignore_missing_imports = true`)
+- pytest ≥8.2, pytest-asyncio ≥0.23, pytest-cov ≥5.0
+- pytest-benchmark ≥4.0, hypothesis ≥6.100, syrupy ≥4.0
+- bandit ≥1.7 (security lint)
+- pre-commit ≥3.7
+
+## Testing
+- pytest with `asyncio_mode = "auto"`
+- Markers: unit, integration, slow, llm, e2e, network, telegram, superjob
+- Tests under `tests/`, organized by domain/app/infra/nodes/e2e
+- Phase-numbered: `test_phaseN_*.py`
+
+## Config
+- YAML source configs in `config/`
+- `.env.dev` / `.env.prod` for secrets (gitignored); selected via `JOB_FTCH_ENV` (dev default)
+- `pydantic-settings` Settings class in `job_ftch/config.py`
+
+## Known Technical Debt (Pipeline Orchestration)
+- **Linear pipeline, no parallelism**: Independent nodes (e.g. `PostTypeClassificationNode` and `DedupNode`) run sequentially. At current volumes (~200 items/run) not a bottleneck, but limits throughput at scale.
+- **`model_copy()` per node**: Pydantic `model_copy(update=...)` allocates a new object at every node. With ~20 nodes, each item is copied ~20 times. Noticeable at thousands of items per run.
+- **`get_settings()` in `Pipeline.run()`**: Global state dependency inside the orchestrator. Settings is accessed via `get_settings()` singleton instead of being injected via DI. Complicates multi-tenant isolation within a single process.

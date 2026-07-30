@@ -1,0 +1,187 @@
+schema_version: production-pipeline-recipe/v1
+updated: '2026-07-29'
+name: ai_jobs_mvp_precision_recipe
+tenant_id: ai_jobs
+profile_owner_user_id: '480637186'
+
+runtime:
+  runtime: prod
+  tenant_config: job_ftch/adapters/telegram_bot/config/tenants/ai_jobs.yaml
+  configs_dir: job_ftch/adapters/telegram_bot/config/tenants
+  graph_path: config/pipelines/evidence_v2_compact_prefilter.yaml
+  graph_hash: 0d73de0663d220da62e37d9a41159542547d167f9f096088f7ae85ec587e44fb  # pragma: allowlist secret -- immutable graph content hash
+  openai_model: gpt-5.4-nano
+  relevance_llm_model: gpt-4.1-mini
+  store_backend: postgres
+  job_group_store_backend: postgres
+  job_backend: postgres
+  search_backend: hybrid
+  embedding_enabled: false
+  bgem3_enabled: false
+  relevance_backend: keywords
+  tracing_enabled: true
+  openobserve_enabled: true
+
+profile_shots:
+  total: 40
+  positive_resume: 10
+  negative_resume: 10
+  positive_jobs: 10
+  negative_jobs: 10
+  source: active tenant profile user:480637186
+
+oss_reproduction:
+  description: Open-source reproduction entrypoints; use fixtures instead of private live tenant state.
+  test_user_fixture: fixtures/bootstrap/test_user.json
+  test_user_telegram_id: 100000001
+  test_user_tenant_id: ai_jobs
+  tenant_fixture: fixtures/bootstrap/tenant_ai_jobs.yaml
+  tenant_fixture_source_count: 22
+  sources_fixture: fixtures/sources/ai_jobs.json
+  controlled_dataset: fixtures/dataset/eval_dataset_fixed140_locked_v1.jsonl
+  prefilter_training_dataset: fixtures/dataset/eval_dataset.jsonl
+  graph_path: config/pipelines/evidence_v2_compact_prefilter.yaml
+  runtime_base: config/runtime.yaml
+  runtime_prod: config/runtime.prod.yaml
+  required_runtime_settings:
+    openai_model: gpt-5.4-nano
+    relevance_llm_model: gpt-4.1-mini
+    pipeline_graph_path: config/pipelines/evidence_v2_compact_prefilter.yaml
+    pipeline_graph_expected_hash: 0d73de0663d220da62e37d9a41159542547d167f9f096088f7ae85ec587e44fb  # pragma: allowlist secret -- immutable graph content hash
+    source_preparation_concurrency: 1
+    source_preparation_concurrency_adaptive: false
+    embedding_enabled: false
+    bgem3_enabled: false
+    relevance_backend: keywords
+
+prefilter:
+  node_id: tfidf_logreg_prefilter
+  artifact_path: fixtures/prefilter/tfidf_logreg_v1.json
+  artifact_sha256: 7ec817c8595b455675ae8088623facc4119d0300ca4b042aadae297a7a086e7a  # pragma: allowlist secret -- model artifact content hash
+  model_version: tfidf-logreg-v1
+  schema_version: 1
+  threshold: 0.20
+  training_dataset: fixtures/dataset/eval_dataset.jsonl
+  training_dataset_sha256: 13151b7d7f2c5d2194d8adb849a931a5d50e0adf945519d44155b7aa0c804085  # pragma: allowlist secret -- dataset content hash
+  training_rows: 1685
+  training_positive: 216
+  excluded_ids: 400
+
+controlled_eval:
+  description: Controlled postgres eval over canonical sample; reset is mandatory.
+  command: >-
+    uv run python scripts/eval/run_pipeline_eval.py --runtime prod --profile-source tenant
+    --tenant-config job_ftch/adapters/telegram_bot/config/tenants/ai_jobs.yaml
+    --tenant-id ai_jobs --state-mode production --reset-before-run
+    --graph config/pipelines/evidence_v2_compact_prefilter.yaml --sample 400 --seed 42
+    --out artifacts/release/controlled_postgres_eval_400_YYYYMMDD.json
+  dataset_path: fixtures/dataset/eval_dataset_fixed140_locked_v1.jsonl
+  dataset_hash_kind: job_ftch.application.dataset_hashing.dataset_hash
+  dataset_sha256: 0c3f9eeecf382af038196fcd6482d58f9907040ac178fd9fd50a8bbbc23c98fa  # pragma: allowlist secret -- dataset content hash
+  sample_size: 400
+  seed: 42
+  expected_candidates: 486
+  comparison_key: 996a6833a6e90daa  # pragma: allowlist secret -- comparison identity hash
+  recipe_id: c111d182ec9afa62  # pragma: allowlist secret -- recipe identity hash
+  ontology_hash: ab4ff2d173c713a455daf7d9aacd7f72ee381a29a56debcb58520bd03dcb280d  # pragma: allowlist secret -- ontology content hash
+  ontology_counts:
+    skills: 94
+    roles: 13
+    positive_keywords: 56
+    negative_keywords: 26
+    anti_patterns: 18
+  metrics:
+    precision: 0.8461538461538461
+    recall: 0.8148148148148148
+    f1: 0.830188679245283
+  metric_floors:
+    precision: 0.8
+    recall: 0.7
+    f1: 0.75
+  llm:
+    calls: 104
+    cost_usd: 0.07746839999999999
+    cost_is_complete: true
+
+live_run:
+  description: Telegram /run equivalent over 22 live sources; metrics are manual labels over terminal decision set only.
+  command: >-
+    uv run python scripts/run_bot_ingest.py --tenant ai_jobs --runtime prod
+    --configs-dir job_ftch/adapters/telegram_bot/config/tenants
+    --report-path artifacts/release/prod_run_live_22_clean_YYYYMMDD.json
+  local_postgres_note: source preparation is intentionally serialized in prod/dev runtime to avoid host-to-docker asyncpg connect timeouts on local Postgres.
+  sources_fixture: fixtures/sources/ai_jobs.json
+  sources_fixture_sha256: 518e5917a6d2a2df1b667ce6648ab3d842131c621eb6d291775882350f36a29c  # pragma: allowlist secret -- sources fixture content hash
+  source_count: 22
+  source_ids:
+    - career_site:avito_careers
+    - career_site:geekjob_ru
+    - career_site:habr_career_ds
+    - career_site:habr_career_llm
+    - career_site:habr_career_ml
+    - career_site:hh_kz_ml
+    - career_site:hh_ru_ai_eng
+    - career_site:hh_ru_llm
+    - career_site:hh_ru_ml
+    - career_site:hh_ru_mlops
+    - career_site:hirify_me
+    - career_site:kolesa_group
+    - career_site:rabota_sber_ru
+    - career_site:superjob_ru_ml
+    - career_site:tbank_it
+    - career_site:vk_careers
+    - career_site:yandex_jobs_ml
+    - telegram_channel:forproducts
+    - telegram_channel:gleb_pro_ai
+    - telegram_channel:ml_jobs_kz
+    - telegram_channel:remote_ai_jobs
+    - telegram_group:ai_engineers_guild
+  tracked_artifact: config/recipes/live_run_terminal_artifact.json
+  summary_counts:
+    fetched: 758
+    sanitized: 763
+    triaged: 31
+    extracted: 31
+    review: 20
+    rejected: 1
+    emitted: 10
+    dropped: 733
+    deferred: 3
+    source_partial: true
+  source_failures:
+    - career_site:tbank_it
+    - career_site:yandex_jobs_ml
+  manual_label_scope: terminal decision set only; ACCEPT + REVIEW + REJECT, excludes prefilter/dedup/sanitize drops.
+  manual_counts:
+    TP: 10
+    TN: 17
+    FP: 0
+    FN: 4
+  metrics:
+    precision: 1.0
+    recall: 0.7142857142857143
+    f1: 0.8333333333333333
+  metric_floors:
+    precision: 1.0
+    recall: 0.71
+    f1: 0.83
+  latency:
+    wall_seconds: 162.666407
+    llm_latency_ms: 190605
+  llm:
+    usage_requests: 48
+    relevance_calls: 34
+    relevance_cache_hits: 0
+    tokens_in: 116731
+    cached_tokens_in: 14336
+    tokens_out: 17152
+    cost_usd: 0.054975509999999984
+    cost_is_complete: true
+
+regression_checks:
+  - uv run pytest tests/eval/test_champion_recipe.py tests/eval/test_production_recipe.py -q
+  - uv run python scripts/check_config_layers.py
+  - uv run python scripts/check_docs_generated.py
+  - uv run python scripts/check_module_boundaries.py
+  - uv run python scripts/run_ci_checks.py release-contract
+  - uv run python scripts/run_ingest_batch.py --input fixtures/sources/career_sites_cis_303.yaml --out-json .runtime/runs/ingest_batch_303_direct_urls.json --resume --timeout 120 --hard-cancel-grace 15 --max-items 1 --concurrency 10 --gate --min-success-rate 0.65

@@ -1,0 +1,14 @@
+extends: experiment_h17_compact_aggregator.yaml
+name: experiment_h18_compact_guarded_aggregator
+version: "1.0.0"
+metadata:
+  purpose: compact_prompt_with_schema_tolerance_and_llm_evidence_guard
+  experiment: {id: H18, control: asis_legacy_best}
+nodes:
+  - id: decision_aggregator
+    params:
+      accept_profile_score: 0.60
+      review_profile_score: 0.35
+      accept_llm_confidence: 0.55
+      allow_missing_llm_rescue: false
+      allow_reject_rescue: false

@@ -1,3 +1,8 @@
+---
+title: "007 - Extension Registry And Plugin Discovery"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 007 - Extension Registry And Plugin Discovery
 
 **Status**: ACCEPTED

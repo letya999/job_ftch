@@ -119,7 +119,10 @@ async def test_risk_scoring_promotes_explicit_contract_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_ai_role_relevance_drops_out_of_scope_jobs() -> None:
-    node = AIRoleRelevanceNode()
+    from job_ftch.domain import FilterProfile
+
+    profile = FilterProfile(negative_relevance_keywords=["office manager"])
+    node = AIRoleRelevanceNode(profile=profile)
 
     with pytest.raises(RawItemDropped, match="non-target role pattern"):
         await node.process(

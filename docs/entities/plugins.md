@@ -1,3 +1,8 @@
+---
+title: "Система плагинов (Plugins)"
+description: "**Слой**: application"
+updated: 2026-07-24
+---
 # Система плагинов (Plugins)
 
 **Слой**: application
@@ -7,9 +12,9 @@
 
 Система плагинов позволяет расширять функциональность ядра `job_ftch` без
 изменения его исходного кода.
-Плагин — это зарегистрированная реализация одного
-из базовых протоколов (`Source`, `Stage`, `Sink`, `Store`, `LLMProvider`,
-`BypassStrategy`).
+Плагин — это зарегистрированная реализация или extension hook. Это способ
+подключения, а не отдельная архитектурная роль: port adapters, monitors,
+scrapers, parsers и assessment adapters могут подключаться plugin-style.
 
 ## Основные сущности
 
@@ -30,6 +35,7 @@
 *   `MONITOR` — монитор карьер-сайта.
 *   `SCRAPER` — скрапер страниц вакансий.
 *   `PARSER` — парсер HTML-структуры.
+*   `SOURCE_ASSESSMENT` — pre-ingest source assessment adapter.
 
 ### PluginState (Enum)
 Состояния жизненного цикла плагина:
@@ -53,8 +59,9 @@
 
 ## Куда идёт после
 
-Экземпляры плагинов создаются фабриками внутри `PipelineBuilder` в момент
-сборки конкретного пайплайна.
+Экземпляры плагинов создаются в соответствующем composition path. Sources,
+sinks и nodes обычно создаются при сборке pipeline; assessment adapters
+используются раньше, во время runtime source onboarding.
 
 ## Пример (Custom Source Plugin)
 
@@ -74,9 +81,13 @@ def create_my_source(settings):
 Декораторы по видам плагина:
 `@register_source`, `@register_sink`, `@register_store`, `@register_bypass`,
 `@register_llm`, `@register_embedding_provider`, `@register_vector_backend`,
-`@register_job_backend`, `@register_search_backend`, `@register_auth_provider`.
+`@register_job_backend`, `@register_search_backend`, `@register_auth_provider`,
+`register_source_assessment_adapter`.
 
 ## Связанные сущности
+
+- [Adapters and plugins](adapters_and_plugins.md)
+- [Source Assessment Adapter](source_assessment_adapter.md)
 
 *   `PipelineBuilder` — использует реестр для сборки пайплайна.
 *   `RuntimeAdapter` — может добавлять свои плагины в реестр при старте.

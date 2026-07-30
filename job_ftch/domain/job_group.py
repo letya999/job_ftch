@@ -35,6 +35,7 @@ class JobGroup(BaseModel):
     blocking_key: str | None = None
     merge_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     lifecycle_status: str = "active"
+    content_versions: tuple[str, ...] = ()
 
 
 def compute_group_id(job: JobRecord) -> str:
@@ -70,6 +71,23 @@ def compute_identity_fingerprint(job: JobRecord) -> str:
     ]
     fingerprint_raw = "|".join(parts)
     return sha256(fingerprint_raw.encode("utf-8")).hexdigest()
+
+
+def compute_content_version(job: JobRecord) -> str:
+    """Hash material vacancy content independently from locator identity."""
+    compensation = job.compensation.model_dump(mode="json") if job.compensation else None
+    payload = {
+        "title": job.title_normalized or job.title,
+        "company": job.company_canonical or job.company,
+        "location": job.location,
+        "employment": job.employment_type.value,
+        "status": job.status.value,
+        "description": job.description,
+        "compensation": compensation,
+    }
+    import json
+
+    return sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
 def merge_jobs(jobs: list[JobRecord]) -> JobRecord:
@@ -247,6 +265,7 @@ def create_job_group(job: JobRecord) -> JobGroup:
         last_seen_at=now,
         blocking_key=blocking_key,
         merge_confidence=1.0,
+        content_versions=(compute_content_version(job),),
     )
 
 
@@ -280,12 +299,12 @@ def merge_job_into_group(
             break
 
     if attr_idx >= 0:
-        old_attr = new_attributions[attr_idx]
+        new_attr = new_attributions[attr_idx]
         new_attributions[attr_idx] = SourceAttribution(
-            source_kind=old_attr.source_kind,
-            source_name=old_attr.source_name,
-            url=job.canonical_url or old_attr.url,
-            first_seen_at=old_attr.first_seen_at,
+            source_kind=new_attr.source_kind,
+            source_name=new_attr.source_name,
+            url=job.canonical_url or new_attr.url,
+            first_seen_at=new_attr.first_seen_at,
             last_seen_at=now,
         )
     else:
@@ -313,6 +332,9 @@ def merge_job_into_group(
         blocking_key=group.blocking_key or compute_blocking_key(canonical_job),
         merge_confidence=final_confidence,
         lifecycle_status=group.lifecycle_status,
+        content_versions=tuple(
+            dict.fromkeys((*group.content_versions, compute_content_version(job)))
+        ),
     )
 
 
@@ -340,4 +362,7 @@ def remove_job_from_group(group: JobGroup, job_id: str) -> JobGroup | None:
         source_count=len(new_jobs),
         first_seen_at=group.first_seen_at,
         last_seen_at=group.last_seen_at,
+        # Content versions are an observation history.  Removing one current
+        # source record must not erase a version that was previously seen.
+        content_versions=group.content_versions,
     )

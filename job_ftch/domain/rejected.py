@@ -28,4 +28,5 @@ class RejectedItem(BaseModel):
     stable_id: str | None = None
     raw_item_id: str | None = None
     recorded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    trace: dict[str, Any] = Field(default_factory=dict)
     snapshot: dict[str, Any] = Field(default_factory=dict)

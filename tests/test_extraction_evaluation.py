@@ -17,7 +17,10 @@ async def test_extraction_evaluation_harness_reports_gold_fixture_matches() -> N
         _REPO_ROOT / "fixtures" / "extraction" / "gold_samples.jsonl",
     )
 
-    assert report["samples"] == 2
-    assert report["expected_fields"] == 4
-    assert report["matched_fields"] >= 3
+    # Per ADR-032: gold_samples.jsonl now has 50+ samples (was 2).
+    assert report["samples"] >= 50
+    assert report["expected_fields"] >= 100
+    assert report["matched_fields"] >= 80
     assert report["field_match_rate"] >= 0.75
+    assert "per_field_match_rate" in report
+    assert "llm_calls_per_100_items" in report

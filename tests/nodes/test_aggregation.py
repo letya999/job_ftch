@@ -1,11 +1,14 @@
 """Comprehensive unit and integration tests for Phase 14 — Cross-source job aggregation."""
 
+import asyncio
+
 import pytest
 from pydantic import AnyHttpUrl
 
 from job_ftch.application.identity import JobIdentityMatcher
 from job_ftch.domain import (
     JobRecord,
+    MatchDecision,
     SourceKind,
     WorkMode,
 )
@@ -22,9 +25,23 @@ def _record(**overrides: object) -> JobRecord:
         "title": "A",
         "company": "B",
         "description": "desc",
+        "routing_decision": MatchDecision.ACCEPT,
     }
     payload.update(overrides)
     return JobRecord.model_validate(payload)
+
+
+@pytest.mark.anyio
+async def test_concurrent_identical_records_create_one_group() -> None:
+    store = InMemoryJobGroupStore()
+    node = JobAggregationNode(store, attach_group_id=True)
+    first = _record(raw_item_id="concurrent-1", canonical_url="https://example.com/jobs/1")
+    second = _record(raw_item_id="concurrent-2", canonical_url="https://example.com/jobs/1")
+
+    results = await asyncio.gather(node.process(first), node.process(second))
+
+    assert len(await store.list_groups()) == 1
+    assert {result.group_id for result in results} == {results[0].group_id}
 
 
 # --- Unit Tests: compute_identity_fingerprint ---
@@ -174,7 +191,7 @@ def test_merge_jobs_empty() -> None:
 # --- Unit Tests: JobIdentityMatcher ---
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_matcher_url_exact() -> None:
     store = InMemoryJobGroupStore()
     matcher = JobIdentityMatcher(store)
@@ -208,7 +225,7 @@ async def test_matcher_url_exact() -> None:
 # --- Integration Tests: InMemoryJobGroupStore ---
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_store_merge_existing_source() -> None:
     """Merge job from the same source updates the job in the group instead of appending."""
     store = InMemoryJobGroupStore()
@@ -236,7 +253,7 @@ async def test_store_merge_existing_source() -> None:
     assert updated_group.canonical_job.description == "Desc 2"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_store_merge_new_source() -> None:
     """Merge job from a different source appends to the group."""
     store = InMemoryJobGroupStore()
@@ -268,6 +285,51 @@ async def test_store_merge_new_source() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rejected_record_does_not_create_canonical_group(make_job_record):
+    from job_ftch.domain import MatchDecision
+
+    job = make_job_record(routing_decision=MatchDecision.REJECT)
+    result = await JobAggregationNode(InMemoryJobGroupStore(), attach_group_id=True).process(job)
+
+    assert result.group_id is None
+
+
+@pytest.mark.asyncio
+async def test_review_record_does_not_create_canonical_group(make_job_record):
+    from job_ftch.domain import MatchDecision
+
+    job = make_job_record(routing_decision=MatchDecision.REVIEW)
+    store = InMemoryJobGroupStore()
+    result = await JobAggregationNode(store, attach_group_id=True).process(job)
+
+    assert result.group_id is None
+    assert await store.count() == 0
+
+
+@pytest.mark.asyncio
+async def test_changed_salary_creates_new_content_version() -> None:
+    from job_ftch.domain import CompensationRange, create_job_group, merge_job_into_group
+
+    first = _record(
+        raw_item_id="1",
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="acme",
+        title="Engineer",
+        company="Acme",
+        description="Build systems",
+        canonical_url=AnyHttpUrl("https://example.com/jobs/1"),
+        compensation=CompensationRange(currency="USD", min_amount=100_000),
+    )
+    changed = first.model_copy(
+        update={"compensation": CompensationRange(currency="USD", min_amount=120_000)}
+    )
+
+    group = merge_job_into_group(create_job_group(first), changed)
+
+    assert len(group.content_versions) == 2
+
+
+@pytest.mark.anyio
 async def test_node_fuzzy_match() -> None:
     """Verify fuzzy title matching works when enabled."""
     store = InMemoryJobGroupStore()
@@ -296,7 +358,7 @@ async def test_node_fuzzy_match() -> None:
     assert await store.count() == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_node_fuzzy_match_disabled() -> None:
     """Verify fuzzy title matching is skipped when disabled."""
     store = InMemoryJobGroupStore()
@@ -325,7 +387,7 @@ async def test_node_fuzzy_match_disabled() -> None:
     assert await store.count() == 2
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_node_fuzzy_threshold() -> None:
     """Verify jobs below the fuzzy threshold are not merged."""
     store = InMemoryJobGroupStore()
@@ -355,7 +417,7 @@ async def test_node_fuzzy_threshold() -> None:
     assert await store.count() == 2
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_node_passes_job_through() -> None:
     """Verify that JobAggregationNode returns the job unmodified."""
     store = InMemoryJobGroupStore()
@@ -374,7 +436,7 @@ async def test_node_passes_job_through() -> None:
     assert returned_job is job
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_stats_tracking_comprehensive() -> None:
     """Verify complete stats tracking across multiple merges and creates."""
     store = InMemoryJobGroupStore()

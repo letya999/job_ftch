@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
 from job_ftch.domain.site_models import (
     DiscoveredPostingPayload,
     MonitorResult,
@@ -142,7 +142,11 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
         return None
 
     html = await fetch_page_text(url, client)
-    if html and (".recruitee.com" in html or "window.recruitee" in html):
+    if html and re.search(r"\b(?:https?://)?[a-z0-9-]+\.recruitee\.com\b", html, re.I):
+        api_base = _api_base_from_url(url)
+        if api_base:
+            return {"api_base": api_base}
+    if html and "window.recruitee" in html:
         api_base = _api_base_from_url(url)
         if api_base:
             return {"api_base": api_base}
@@ -150,4 +154,22 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     return None
 
 
-register_monitor("recruitee", discover, cost=10, rich=True, can_handle=can_handle)
+register_monitor(
+    "recruitee",
+    discover,
+    cost=10,
+    rich=True,
+    can_handle=can_handle,
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "recruitee",
+        url_patterns=(r"[\w-]+\.recruitee\.com/?$",),
+        has_publication_time=True,
+        has_stable_id=True,
+        can_detect_freshness_without_snapshot=True,
+        can_filter_since_yesterday=True,
+        item_level_dates=True,
+        requires_full_snapshot=False,
+        rationale="Recruitee offers API returns stable IDs and published_at timestamps.",
+    ),
+)

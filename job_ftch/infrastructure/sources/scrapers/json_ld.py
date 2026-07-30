@@ -1,15 +1,24 @@
-"""JSON-LD scraper ported from jobseek."""
+"""JSON-LD scraper ported from jobseek.
+
+Primary path: stdlib HTMLParser extracts application/ld+json blocks and looks
+for a JobPosting schema object. Fast and robust against broken JSON inside
+<script> tags via _escape_control_chars_in_strings.
+
+Secondary path (extruct fallback): when the stdlib path finds no JobPosting,
+extruct scans the page for Microdata and OpenGraph structured data. Requires
+the [extraction] extra. Skipped silently when the extra is absent.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import json
-import random
+import re
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Any, cast
 
 from job_ftch.application.registry import register_scraper
 from job_ftch.domain.site_models import ScrapedPostingPayload
+from job_ftch.infrastructure.sources.http_retry import fetch_with_retry
 from job_ftch.infrastructure.sources.monitors.shared import normalize_salary_unit
 
 if TYPE_CHECKING:
@@ -18,6 +27,24 @@ if TYPE_CHECKING:
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+
+_ARTICLE_OPEN_GRAPH_RE = re.compile(
+    r"<meta\b[^>]+(?:property|name)=[\"']og:type[\"'][^>]+content=[\"']article[\"']"
+    r"|<meta\b[^>]+content=[\"']article[\"'][^>]+(?:property|name)=[\"']og:type[\"']",
+    re.IGNORECASE,
+)
+
+
+def _declares_article(html: str) -> bool:
+    """Return whether metadata explicitly identifies this document as an article.
+
+    OpenGraph title/description is useful only as an unstructured last resort.
+    It must not turn a blog post into a vacancy merely because it has rich SEO
+    metadata. Structured ``JobPosting`` is handled before this fallback.
+    """
+    return bool(_ARTICLE_OPEN_GRAPH_RE.search(html))
+
 
 _CTRL_REPLACEMENTS = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
 
@@ -203,7 +230,13 @@ def _parse_posting(posting: dict[str, Any]) -> ScrapedPostingPayload:
     )
 
 
-def parse_html(html: str) -> ScrapedPostingPayload | None:
+def parse_html(html: str, *, url: str = "") -> ScrapedPostingPayload | None:
+    """Extract a JobPosting from HTML.
+
+    Tries the stdlib JSON-LD fast path first. Falls back to extruct Microdata
+    and OpenGraph when JSON-LD finds nothing. The extruct path requires the
+    [extraction] extra and is silently skipped when absent.
+    """
     extractor = _JsonLdExtractor()
     extractor.feed(html)
 
@@ -211,7 +244,76 @@ def parse_html(html: str) -> ScrapedPostingPayload | None:
         posting = _find_job_posting(block)
         if posting:
             return _parse_posting(posting)
+
+    return _extruct_fallback(html, url)
+
+
+def _extruct_fallback(html: str, url: str) -> ScrapedPostingPayload | None:
+    """Try Microdata / OpenGraph via extruct when JSON-LD finds no JobPosting.
+
+    Requires the [extraction] extra (extruct>=0.16). Returns None when the
+    extra is absent or no structured JobPosting data is found.
+    """
+    try:
+        import extruct
+    except ImportError:
+        return None
+
+    try:
+        data = extruct.extract(
+            html,
+            base_url=url,
+            syntaxes=["microdata", "opengraph"],
+            uniform=True,
+        )
+    except Exception as exc:
+        logger.debug("jsonld.extruct_error", url=url, error=str(exc))
+        return None
+
+    # Microdata: look for a JobPosting item type
+    for item in data.get("microdata", []):
+        type_val = item.get("@type", "")
+        if isinstance(type_val, str) and "JobPosting" in type_val:
+            # ``extruct(..., uniform=True)`` returns flattened properties in
+            # current releases, while newer releases nest them under
+            # ``properties``. Support both representations.
+            props = item.get("properties")
+            if not isinstance(props, dict):
+                props = {key: value for key, value in item.items() if not key.startswith("@")}
+            normalized = _normalize_keys({"@type": type_val, **props})
+            payload = _parse_posting(normalized)
+            if payload.title or payload.description:
+                logger.debug("jsonld.extruct_microdata_hit", url=url)
+                return payload
+
+    # OpenGraph is a very weak signal.  An explicit article type is stronger
+    # evidence that this is editorial content, so never emit it as a vacancy.
+    if _declares_article(html):
+        return None
+
+    og = data.get("opengraph", [])
+    og_map: dict[str, Any] = {}
+    for block in og if isinstance(og, list) else [og]:
+        og_map.update(block)
+    title = og_map.get("og:title") or og_map.get("title")
+    description = og_map.get("og:description") or og_map.get("description")
+    if title and description and len(str(description)) >= 120:
+        logger.debug("jsonld.extruct_opengraph_hit", url=url)
+        return ScrapedPostingPayload(title=str(title), description=str(description))
+
     return None
+
+
+async def _fetch_html(url: str, http: httpx.AsyncClient) -> str:
+    """GET the page via the shared retry helper."""
+    resp = await fetch_with_retry(http, url)
+    # A single cold-session 401/403 retry can accept a clearance cookie set by
+    # the first response. More retries would hide a real challenge from the
+    # adaptive route policy and are intentionally forbidden.
+    if resp.status_code in {401, 403}:
+        resp = await fetch_with_retry(http, url, max_attempts=1)
+    resp.raise_for_status()
+    return str(resp.text)
 
 
 async def scrape(
@@ -220,16 +322,12 @@ async def scrape(
     try:
         html = config.get("prefetched_html")
         if not isinstance(html, str):
-            resp = await http.get(url, follow_redirects=True)
-            if resp.status_code == 403:
-                await asyncio.sleep(0.5 + random.random())
-                resp = await http.get(url, follow_redirects=True)
-            resp.raise_for_status()
-            html = resp.text
-    except Exception:
+            html = await _fetch_html(url, http)
+    except Exception as exc:
+        logger.warning("jsonld.scrape.fetch_failed", url=url, error=str(exc))
         return None
 
-    return parse_html(html)
+    return parse_html(html, url=url)
 
 
 def can_handle(htmls: list[str]) -> dict[str, Any] | None:

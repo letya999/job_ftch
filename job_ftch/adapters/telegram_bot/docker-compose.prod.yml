@@ -1,0 +1,90 @@
+# Production stack for the Telegram adapter.
+# Build order:
+#   docker build -f docker/runtime/Dockerfile.prod -t job-ftch-runtime:prod ../../..
+#   docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml up -d --build
+services:
+  bot:
+    image: job-ftch-telegram-bot:prod
+    build:
+      context: ../../..
+      dockerfile: job_ftch/adapters/telegram_bot/Dockerfile.prod
+      args:
+        BASE_IMAGE: job-ftch-runtime:prod
+    init: true
+    # Current browser-backed sources still rely on ptrace inside the containerized
+    # Xvfb/browser stack. Revisit only after release-image browser smoke passes.
+    cap_add:
+      - SYS_PTRACE
+    restart: unless-stopped
+    env_file:
+      - ../../../.env.prod
+      - ./.env.prod
+    environment:
+      JOB_FTCH_ENV: prod
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml
+      JOB_FTCH_STORE_DSN: postgresql://${POSTGRES_USER:-job_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-job_ftch}
+      JOB_FTCH_QDRANT_URL: http://qdrant:6333
+      JOB_FTCH_CONFIGS_DIR: /app/job_ftch/adapters/telegram_bot/config/tenants
+      JOB_FTCH_LANGFUSE_HOST: http://host.docker.internal:3001
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      HF_HUB_VERBOSITY: error
+      TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    healthcheck:
+      # The scheduler refreshes this marker each loop. A stale marker means the
+      # bot may still answer commands while scheduled publishing is dead.
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import os, time; p='/tmp/job_ftch_bot_ready';
+          raise SystemExit(0 if os.path.exists(p) and time.time() - os.path.getmtime(p) < 180 else 1)"
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 180s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    volumes:
+      - bot_runtime:/app/.runtime
+      - bot_cache:/opt/job-ftch-home/.cache
+      - hf_cache:/opt/job-ftch-home/.cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: "1gb"
+    mem_limit: 3g
+    cpus: 1.5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-job_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-job_ftch}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    mem_limit: 1g
+    cpus: 0.5
+
+  qdrant:
+    image: qdrant/qdrant:v1.18.2
+    volumes:
+      - qdrant_data:/qdrant/storage
+    mem_limit: 1g
+    cpus: 0.5
+
+volumes:
+  pgdata:
+  qdrant_data:
+  bot_runtime:
+  bot_cache:
+  hf_cache:

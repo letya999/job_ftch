@@ -1,0 +1,17 @@
+rules:
+  - id: agent-reads-env-file
+    message: Agent/tool code reads .env directly. Use settings loader and never print secrets.
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: open(".env", ...)
+      - pattern: Path(".env").read_text(...)
+      - pattern: Path(".env").read_bytes(...)
+
+  - id: agent-prints-environment
+    message: Code prints environment variables; may leak secrets.
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: print(os.environ)
+      - pattern: pprint(os.environ)

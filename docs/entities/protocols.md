@@ -1,63 +1,103 @@
-# Базовые протоколы (Interfaces)
+---
+title: "Базовые протоколы"
+description: "**Слой**: `application`"
+updated: 2026-07-24
+---
+# Базовые протоколы
 
-**Слой**: application
+**Слой**: `application`
 **Файл**: `job_ftch/application/contracts.py`
 
-Большинство интерфейсов в системе реализованы через `typing.Protocol` с
-декоратором `@runtime_checkable`.
-Это позволяет использовать утиную типизацию
-вместе с проверкой типов во время выполнения (`isinstance`).
+В `job_ftch` большинство интеграционных точек оформлены через
+`typing.Protocol + @runtime_checkable`.
 
 ## 1. Source[T]
-Интерфейс источника данных.
-*   `fetch() -> AsyncIterator[T | QuarantinedRawItem]` — основной метод для
-    получения элементов.
-*   **Реализации**: `TelegramSource`, `ScraperSource`, `RestAPISource`.
-*   **Применение**: Начальное звено пайплайна.
-
-## 2. Stage[In, Out]
-Интерфейс узла обработки (ноды).
-*   `process(item: In) -> Out | None` — обрабатывает элемент.
-Возвращает
-    трансформированный элемент или `None` для прерывания цепочки (дропа).
-*   **Реализации**: `ExtractionNode`, `DedupNode`, `RiskScoringNode`.
-*   **Применение**: Промежуточные звенья пайплайна.
-
-## 3. Sink[T]
-Интерфейс вывода данных.
-*   `emit(item: T) -> None` — отправляет финальный результат во внешнюю систему.
-*   **Реализации**: `TelegramPostingSink`, `JsonFileSink`.
-*   **Применение**: Финальное звено пайплайна.
-
-## 4. Store
-Интерфейс хранилища состояния пайплайна.
-*   `has_processed(id) / mark_processed(id)` — отслеживание обработанных айтемов.
-*   `has_dedup_key / remember_dedup_key` — хранение ключей дедупликации.
-*   `get_run_state / set_run_state` — хранение курсоров и смещений.
-*   **Реализации**: `SQLiteStore`, `PostgreSQLStore`, `InMemoryStore`.
-
-## 5. LLMProvider
-Интерфейс для работы с языковыми моделями.
-*   `extract(text, schema) -> T` — извлекает структурированные данные по схеме.
-*   **Реализации**: `OpenAIProvider`.
-*   **Применение**: Используется в `ExtractionNode`.
-
-## 6. AuthProvider
-Интерфейс разрешения учётных данных.
-*   `resolve(source_id) -> dict` — возвращает словарь с секретами (токены, API
-    keys) для конкретного источника.
-*   **Реализации**: `EnvAuthProvider`, `FileAuthProvider`, `VaultAuthProvider`.
-*   **Применение**: Используется при инициализации `Source`.
-
-## Пример реализации своего Stage
 
 ```python
-from job_ftch.application.contracts import Stage
-from job_ftch.domain.models import JobDraft
-
-class MyCustomFilter(Stage[JobDraft, JobDraft]):
-    async def process(self, item: JobDraft) -> JobDraft | None:
-        if "BadWord" in item.description_raw:
-            return None  # Drop item
-        return item
+def fetch(self) -> AsyncIterator[T | QuarantinedRawItem]
 ```
+
+Source поставляет валидные входящие элементы или quarantine payloads.
+
+## 2. Stage[In, Out]
+
+```python
+async def process(self, item: In) -> Out | None
+```
+
+Stage может:
+
+- пропустить item дальше
+- трансформировать item в другой тип
+- вернуть `None` и тем самым дропнуть item
+
+Это единственный нормальный механизм type-changing внутри core.
+
+## 3. Sink[T]
+
+```python
+async def emit(self, item: T) -> None
+```
+
+Sink получает финальный item и пишет его наружу.
+
+Дополнительный протокол `FlushableSink` поддерживает:
+
+```python
+async def flush(self) -> None
+```
+
+## 4. Store
+
+`Store` отвечает не за job catalog, а за operational state пайплайна:
+
+- processed items
+- dedup keys
+- duplicate records
+- arbitrary run state
+- cached source strategies
+- per-source snapshots
+
+Именно через этот порт работают `DedupNode`, snapshot filtering и run state.
+
+## 5. AuthProvider
+
+```python
+def resolve(self, source_id: str) -> dict[str, str]
+```
+
+Разделяет `SourceSpec` и секреты.
+
+## 6. LLMProvider
+
+```python
+async def extract(self, text: str, schema: type[T]) -> T
+async def classify(self, prompt: str, schema: type[Any]) -> Any
+async def present(self, job_payload: str, schema: type[Any]) -> Any
+async def generate_text(...)
+```
+
+Один порт покрывает три текущие LLM-точки:
+
+- extraction
+- borderline relevance classification
+- presentable text generation
+
+## Другие порты
+
+В том же модуле описаны:
+
+- `JobPersistenceBackend`
+- `SearchBackend`
+- `EmbeddingProvider`
+- `VectorBackend`
+- `IngestMode`
+- `BypassStrategy`
+- `TranslatorPort`
+- `LanguageDetectorPort`
+
+## Практическое правило
+
+Если вы добавляете новую возможность, сначала проверьте, не укладывается ли она
+в существующий port. Новый протокол имеет смысл только тогда, когда нужен новый
+устойчивый boundary, а не просто ещё один helper.

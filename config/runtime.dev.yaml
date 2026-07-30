@@ -1,0 +1,41 @@
+# Development overrides for config/runtime.yaml.
+#
+# Keep this file light. Override only when dev should intentionally differ from
+# the shared runtime baseline.
+output_jsonl: false
+search_language: russian
+
+pipeline_max_items_per_run:
+telemetry_service_name: job_ftch
+telemetry_console_exporter: false
+tracing_enabled: true
+tracing_capture_payloads: false
+openobserve_enabled: true
+
+# Terminal policy uses typed evidence; the new broad LLM judge band is not
+# part of the runtime graph.
+
+processed_item_ttl_hours: 24
+
+embedding_enabled: false
+# Keep the development path cheap and deterministic. Embeddings belong to the
+# synchronous post-accept enrichment, not the terminal decision path.
+bgem3_enabled: false
+relevance_backend: keywords
+
+# Production and eval execute the same typed graph.  Development keeps the
+# identical decision path while delivery remains disabled in the adapter.
+pipeline_graph_path: config/pipelines/evidence_v2_compact_prefilter.yaml
+pipeline_graph_expected_hash: 0d73de0663d220da62e37d9a41159542547d167f9f096088f7ae85ec587e44fb  # pragma: allowlist secret -- immutable graph content hash
+pipeline_max_llm_calls_per_run: 125
+source_preparation_concurrency: 1
+source_preparation_concurrency_adaptive: false
+source_fetch_concurrency: 4
+source_fetch_concurrency_adaptive: false
+pipeline_item_concurrency: 3
+pipeline_item_concurrency_adaptive: false
+source_soft_deadline_seconds: 60.0
+source_hard_deadline_seconds: 180.0
+
+openai_model: gpt-4.1-nano
+relevance_llm_model: gpt-4.1-mini

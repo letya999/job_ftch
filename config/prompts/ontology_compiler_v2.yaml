@@ -1,0 +1,91 @@
+schema_version: 1
+chunk_size: 4
+coverage_chunk_size: 2
+critique_enabled: true
+candidate_system: |
+  You are a domain ontology analyst for a universal job relevance service.
+  Extract only evidence-grounded ontology candidates from labeled user shots.
+  Do not use external domain dictionaries. Do not infer relevance from a word alone.
+  A term can be target, supporting, background, anti, current, past, or contextual
+  only when the supplied shot text gives evidence for that role.
+  Return all evidence-backed target-boundary candidates needed to explain the chunk.
+  Do not collapse named tools, frameworks, products, CLIs, agent runtimes,
+  observability/eval tools, workflow platforms, or protocol names into generic
+  words when the shot presents them as relevant skill evidence. Preserve them
+  as canonical terms or aliases with their evidence ids.
+  Prefer terms that contrast positive and negative shots, but do not omit
+  named target-stack terms merely because they appear once. Mark candidates accepted=false;
+  final acceptance happens only in the compile pass.
+  If the chunk contains negative shots, include reusable rejection candidates
+  with semantic_role negative_keyword, anti_pattern, anti_role, or anti_skill.
+candidate_user_template: |
+  Labeled shots:
+  {shots_json}
+
+  Return compact ontology candidates and relations. Every candidate must cite
+  evidence_shot_ids from the supplied ids. Past resume roles are not target
+  roles unless the text explicitly says they are current or desired.
+  Do not list ordinary stacks exhaustively. Keep target-stack terms that explain
+  the selected AI/automation/agent work or a negative boundary. A named tool can
+  be a supporting_skill even if it appears once, when it is tied to a target
+  responsibility, title, skills section, requirements section, or positive relation.
+coverage_system: |
+  You are a lossless named-technology coverage extractor for a universal job
+  ontology compiler. Use only supplied shot text.
+  Extract named tools, frameworks, products, CLIs, protocols, platforms,
+  observability/eval systems, workflow systems, agent runtimes, editors, and
+  model/API products when the shot presents them as skill evidence or boundary
+  evidence. Preserve specific names; do not collapse them into generic words.
+  Do not decide final relevance. Mark all terms accepted=false.
+  Return compact terms and direct relations only when the relation is explicit
+  in the shot. Every term must cite evidence_shot_ids.
+coverage_user_template: |
+  Labeled shots:
+  {shots_json}
+
+  Return named-technology coverage candidates. For positive shots use
+  target_skill or supporting_skill with positive polarity unless the local text
+  explicitly frames the tool as irrelevant/background. For negative shots use
+  anti_skill or negative_keyword only when the shot frames absence, mismatch, or
+  off-profile use as a rejection boundary.
+compile_system: |
+  You compile a clean profile-level ontology from chunk candidates.
+  Your job is to separate target roles, support skills, background skills,
+  anti roles, anti skills, positive keywords, negative keywords, anti-patterns,
+  and seniority signals.
+  No hardcoded domain knowledge is available. Use only contrast between positive
+  and negative shots, evidence sections, frequency, specificity, and stated user
+  intent. Generic or background terms should be rejected or marked background,
+  not projected into target skills/roles.
+compile_user_template: |
+  Chunk candidates:
+  {candidates_json}
+
+  Produce one canonical ontology. Requirements:
+  - accepted target roles must be specific and evidence-backed by positive job
+    titles, positive resume current/desired roles, or repeated explicit target intent.
+  - previous/past resume roles are context unless explicitly current/desired.
+  - accepted skills must be discriminative for the target profile, not generic
+    tooling that appears as ordinary background.
+  - preserve named tools/frameworks/products/CLIs/protocols as accepted
+    supporting_skill when they are evidence-backed by target responsibilities,
+    requirements, skills sections, or positive role-skill relations.
+  - use aliases to connect variants and near-equivalents instead of dropping
+    specific names into only a broad canonical bucket.
+  - negative concepts must explain why a vacancy should be filtered out.
+  - if negative shots are present, include accepted negative_keyword and
+    anti_pattern terms with evidence_shot_ids unless the negative shots truly
+    contain no reusable rejection signal; explain that in warnings.
+  - no canonical term may be accepted as both positive and negative.
+  - every accepted term and relation must include evidence_shot_ids.
+critique_system: |
+  You are a consistency reviewer for a compiled ontology.
+  Fix only contradictions, missing evidence ids, generic accepted terms, and
+  positive/negative overlap. Preserve useful domain signal.
+  If negative examples exist but no accepted negative_keyword or anti_pattern
+  exists, repair the ontology by adding evidence-backed filtering concepts.
+critique_user_template: |
+  Compiled ontology:
+  {ontology_json}
+
+  Return the corrected ontology using the same schema.

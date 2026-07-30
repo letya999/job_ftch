@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from job_ftch.application.registry import register_job_group_store
@@ -89,6 +90,17 @@ class InMemoryJobGroupStore:
 
         return updated_group
 
+    async def replace_member(self, group_id: str, job: JobRecord) -> JobGroup:
+        """Persist post-accept enrichment without counting an identity merge."""
+        group = self._groups.get(group_id)
+        if not group:
+            raise ValueError(f"Group {group_id} not found.")
+        updated_group = merge_job_into_group(group, job, merge_confidence=group.merge_confidence)
+        self._groups[group_id] = updated_group
+        if updated_group.canonical_job.canonical_url:
+            self._url_index[str(updated_group.canonical_job.canonical_url)] = group_id
+        return updated_group
+
     async def find_by_url(self, canonical_url: str) -> JobGroup | None:
         group_id = self._url_index.get(canonical_url)
         if group_id:
@@ -105,11 +117,29 @@ class InMemoryJobGroupStore:
         group_ids = self._blocking_index.get(key, [])
         return [self._groups[gid] for gid in group_ids[:limit] if gid in self._groups]
 
-    async def list_groups(self, limit: int = 100) -> list[JobGroup]:
-        return list(self._groups.values())[:limit]
+    async def list_groups(self, limit: int = 100, since: datetime | None = None) -> list[JobGroup]:
+        groups = list(self._groups.values())
+        if since is not None:
+            cutoff = since if since.tzinfo is not None else since.replace(tzinfo=UTC)
+            groups = [
+                group
+                for group in groups
+                if group.canonical_job.fetched_at is None
+                or (
+                    (
+                        group.canonical_job.fetched_at
+                        if group.canonical_job.fetched_at.tzinfo is not None
+                        else group.canonical_job.fetched_at.replace(tzinfo=UTC)
+                    )
+                    >= cutoff
+                )
+            ]
+        return groups[:limit]
 
-    async def count(self) -> int:
-        return len(self._groups)
+    async def count(self, since: datetime | None = None) -> int:
+        if since is None:
+            return len(self._groups)
+        return len(await self.list_groups(limit=len(self._groups), since=since))
 
     async def clear(self) -> int:
         n = len(self._groups)

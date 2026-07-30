@@ -39,7 +39,9 @@ def test_config_loads(monkeypatch: MonkeyPatch) -> None:
     for key in tuple(os.environ):
         if key.startswith("JOB_FTCH_"):
             monkeypatch.delenv(key, raising=False)
-    s = Settings(_env_file=None, store_backend="memory")
+    # Default llm_backend is now "openai" (ADR-029). For this smoke test
+    # we explicitly use heuristic so we don't require an API key.
+    s = Settings(_env_file=None, store_backend="memory", llm_backend="heuristic")  # type: ignore[call-arg]
     assert s.store_backend == "memory"
     assert s.source_backend == "local_fixture"
     assert s.sink_backend == "json_file"

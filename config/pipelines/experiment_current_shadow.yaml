@@ -1,0 +1,8 @@
+extends: current_compat.yaml
+name: experiment_current_shadow
+version: "1.0.0"
+metadata:
+  purpose: paired_runtime_smoke
+  experiment: {variable: node:snapshot.authority}
+nodes:
+  - {id: snapshot, authority: shadow}

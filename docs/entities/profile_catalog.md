@@ -1,54 +1,43 @@
+---
+title: "ProfileCatalog"
+description: "**Слой**: `domain`"
+updated: 2026-07-24
+---
 # ProfileCatalog
 
-**Слой**: domain
+**Слой**: `domain`
 **Файл**: `job_ftch/domain/profile.py`
-**Протокол / Базовый класс**: `pydantic.BaseModel`
 
 ## Что это
 
-`ProfileCatalog` — это коллекция всех активных `SearchProfile`, которая
-передаётся в пайплайн для эффективного матчинга вакансий.
-Вместо того чтобы
-прогонять пайплайн отдельно для каждого пользователя, система сравнивает
-вакансию со всем каталогом сразу.
+`ProfileCatalog` — плоский каталог `SearchProfile`, который передаётся в nodes
+и scorer paths.
 
-## Поля
+## Текущая модель
 
-| Поле | Тип | Описание |
-| :--- | :--- | :--- |
-| `profiles` | `list[SearchProfile]` | Список всех профилей, включенных в каталог. |
-| `tenant_id` | `str \| None` | (Опционально) ID тенанта, к которому относятся профили. |
+| Поле | Тип |
+|---|---|
+| `catalog_name` | `str` |
+| `profiles` | `tuple[SearchProfile, ...]` |
 
-## Когда создаётся / откуда берётся
+Каталог не хранит пользователя целиком; он хранит именно те search-профили,
+которые должны участвовать в матчинге.
 
-Создаётся в `PipelineBuilder` или `TenantRunner` путём загрузки всех активных
-профилей из базы данных перед запуском обработки.
+## Где используется
 
-## Куда идёт после
+- `HardFilterNode`
+- `SemanticPrefilterNode`
+- `MultiProfileMatchNode`
+- prompt/relevance building logic
+- runtime ontology merge path
 
-Используется в `MultiProfileMatchNode` (этап пайплайна).
-Узел вычисляет скор
-совпадения вакансии с каждым профилем из каталога и выбирает лучший результат.
+## Практический смысл
 
-## Что с ней нельзя делать / инварианты
+`ProfileCatalog` — это удобный read model для pipeline, а не пользовательская
+DTO-модель для ввода.
 
-1.  Каталог должен быть "плоским" списком профилей для упрощения итерации.
-2.  ID профилей внутри каталога должны быть уникальными.
+## Связанные документы
 
-## Связанные сущности
-
-*   `SearchProfile` — основная единица данных в каталоге.
-*   `MultiProfileMatchNode` — основной потребитель каталога в приложении.
-
-## Пример
-
-```python
-from job_ftch.domain.profile import ProfileCatalog, SearchProfile
-
-catalog = ProfileCatalog(
-    profiles=[
-        SearchProfile(name="DevOps", roles=["DevOps Engineer"]),
-        SearchProfile(name="QA", roles=["QA Automation"])
-    ]
-)
-```
+- [CandidateProfile](candidate_profile.md)
+- [JobDraft](job_draft.md)
+- [JobRecord](job_record.md)

@@ -1,7 +1,12 @@
+---
+title: "ADR 019: Embeddings and Vector Storage Boundary"
+description: "ACCEPTED"
+updated: 2026-07-24
+---
 # ADR 019: Embeddings and Vector Storage Boundary
 
 ## Status
-Accepted
+ACCEPTED
 
 ## Context
 With the introduction of semantic search, we need to generate and store high-dimensional vectors (embeddings) for job listings. However, coupling these vectors tightly to the domain entities would bloat the `Job` model and make it dependent on specific ML/infrastructure details.

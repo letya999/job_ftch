@@ -1,0 +1,9 @@
+name: full_compat
+version: "1.0.0"
+metadata: {purpose: inventory_contract_only, production_default: false}
+nodes:
+  - {id: sanitize, node: sanitize, effect: gate}
+  - {id: all_evidence, node: post_type, execution: parallel, effect: observe, after: [sanitize]}
+  - {id: all_evidence_2, node: garbage_filter, execution: parallel, effect: observe, after: [sanitize]}
+  - {id: evidence, node: evidence_fanout, effect: observe, after: [all_evidence, all_evidence_2]}
+  - {id: decision, node: decision, effect: terminal_decision, after: [evidence]}

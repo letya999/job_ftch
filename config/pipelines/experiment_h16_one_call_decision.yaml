@@ -1,0 +1,26 @@
+name: experiment_h16_one_call_decision
+version: "1.0.0"
+metadata:
+  purpose: one_llm_call_extracts_and_decides_relevance_then_templates_accepts
+  experiment: {id: H16, control: asis_legacy_best}
+  benchmark: {dataset: fixtures/dataset/eval_dataset.jsonl, sample: 400, seed: 42}
+resources: {profile: active_profile, store: active_store, llm: active_llm, shots: active_shots}
+nodes:
+  - {id: sanitize, node: sanitize, effect: gate}
+  - {id: snapshot_filter, node: snapshot_filter, effect: gate, after: [sanitize]}
+  - {id: source_context, node: source_context, effect: observe, after: [snapshot_filter]}
+  - {id: ontology_snapshot, node: ontology_snapshot, effect: observe, after: [source_context]}
+  - {id: candidate_segmentation, node: candidate_segmentation, effect: observe, after: [ontology_snapshot]}
+  - {id: garbage_filter, node: garbage_filter, effect: gate, after: [candidate_segmentation]}
+  - {id: post_type, node: post_type, effect: observe, after: [garbage_filter]}
+  - {id: hard_filter, node: hard_filter, effect: gate, after: [post_type]}
+  - {id: dedup, node: dedup, effect: gate, after: [hard_filter]}
+  - {id: bgem3, node: bgem3_embed, effect: observe, after: [dedup], timeout_ms: 180000, params: {model: BAAI/bge-m3}}
+  - {id: semantic_prefilter, node: semantic_prefilter, effect: gate, after: [bgem3], params: {dense_margin_threshold: 0.05, rescue_logic: any_positive}}
+  - {id: completeness, node: completeness_gate, effect: gate, after: [semantic_prefilter]}
+  - {id: decision_extraction, node: decision_extraction, effect: observe, after: [completeness]}
+  - {id: extraction_validation, node: extraction_validation, effect: gate, after: [decision_extraction]}
+  - {id: normalization, node: job_normalization, effect: observe, after: [extraction_validation]}
+  - {id: legacy_routing, node: legacy_routing, effect: terminal_decision, after: [normalization]}
+  - {id: accept_template_presentation, node: accept_template_presentation, effect: observe, after: [legacy_routing]}
+  - {id: aggregation, node: aggregation, effect: side_effect, after: [accept_template_presentation]}

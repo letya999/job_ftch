@@ -36,7 +36,7 @@ def _is_allowed_domain(target: str) -> bool:
             "job_ftch.infrastructure",
             "job_ftch.nodes",
             "job_ftch.sinks",
-            "adapters",
+            "job_ftch.adapters",
         )
     )
 
@@ -45,17 +45,21 @@ def _is_allowed_application(target: str) -> bool:
     if not target:
         return True
     head = target.split(".")[0]
-    if head in STDLIB or head in {"pydantic", "structlog", "yaml", "opentelemetry"}:
+    if head in STDLIB or head in {"pydantic", "structlog", "yaml"}:
         return True
+    if head in {"httpx", "telethon"} or target.startswith("opentelemetry.sdk"):
+        return False
     return not target.startswith(
-        ("job_ftch.infrastructure", "job_ftch.nodes", "job_ftch.sinks", "adapters")
+        ("job_ftch.infrastructure", "job_ftch.nodes", "job_ftch.sinks", "job_ftch.adapters")
     )
 
 
 def _is_allowed_nodes(target: str) -> bool:
     if not target:
         return True
-    return not (target.startswith("job_ftch.infrastructure") or target.startswith("adapters"))
+    return not (
+        target.startswith("job_ftch.infrastructure") or target.startswith("job_ftch.adapters")
+    )
 
 
 def main() -> int:

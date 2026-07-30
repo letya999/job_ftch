@@ -1,80 +1,80 @@
-# Правила разработки job_ftch
+---
+title: "Правила разработки"
+description: "Короткие рабочие правила для изменений в job_ftch: границы слоёв, зависимости, тесты, документация и release gates."
+updated: 2026-07-28
+---
+# Правила разработки
 
-## Исследование перед реализацией
-- Перед добавлением новой библиотеки — проверьте `docs/tech_stack.md`.
-- Перед важным архитектурным решением — напишите ADR (Architecture Decision Record) в статусе PROPOSED.
-- Ознакомьтесь с `docs/architecture.md` перед написанием кода.
+## Перед изменением
 
-## Проектирование
-- Выбирайте самое простое решение.
-- Используйте TDD: сначала опишите ожидаемое поведение в тесте.
-- Создавайте новые протоколы/интерфейсы только при наличии 2+ реализаций или явной необходимости расширения.
+- Прочитать [architecture](architecture.md), если меняется runtime, pipeline,
+  source stack или boundaries.
+- Прочитать [tech_stack](tech_stack.md), если добавляется зависимость.
+- Прочитать [ADR](adr/README.md), если меняется архитектурное решение.
+- Для production graph свериться с [pipeline_recipe](recipes/pipeline_recipe.md).
 
-## Написание кода
-- Предпочитайте стандартную библиотеку Python внешним зависимостям.
-- Слой `domain/` не должен содержать импортов, кроме `pydantic` и стандартной библиотеки.
-- Функции до 20 строк, файлы до 150 строк (как ориентир).
-- Обязательное использование типизации.
+## Правила слоёв
 
-## Добавление нового source
-1. Сначала проверьте, можно ли выразить источник декларативно через `CareerSiteConfig`.
-2. Если нет, добавьте self-registered адаптер через `@register_source(...)` без правок core dispatch.
-3. Для внешних пакетов используйте entry points `job_ftch.sources`.
-4. Обязательный gate: обновить или добавить contract test в `tests/test_contracts.py`.
+- `domain/`: только stdlib и `pydantic`.
+- `application/`: orchestration/ports/composition; исключения контролирует
+  `scripts/check_module_boundaries.py`.
+- `nodes/`: processing stages; без прямого `infrastructure`/`adapters`.
+- `infrastructure/`: внешние клиенты и реализации портов.
+- `adapters/`: внешние runtime entrypoints.
 
-## Проверки перед коммитом
-1. `uv run ruff check .` — линтинг.
-2. `uv run ruff format --check .` — проверка форматирования.
-3. `uv run mypy .` — проверка типов.
-4. `uv run pytest tests/` — запуск тестов.
-5. `uv run bandit -r job_ftch scripts/check_module_boundaries.py -ll` — проверка безопасности проекта без шума из `.venv`.
+Проверка:
 
-## Запуск тестов под AI-агентом (Claude/Codex/Gemini)
+```powershell
+uv run python scripts/check_module_boundaries.py
+```
 
-Тесты быстрые (~47с весь suite), но `addopts="-v"` из `pyproject.toml` даёт многословный вывод. В агентном цикле правок это сжигает контекстное окно (verbose-цикл доходил до 1.1M токенов против ~13K при тихом прогоне). Правила:
+## Правила pipeline
 
-1. Цикл fix-test: гонять ТОЛЬКО затронутые тесты, тихо:
-   `uv run pytest tests/test_<module>.py -q -o addopts="" --tb=line`
-2. Полный прогон (редко, перед коммитом): писать в файл, читать хвост, не в foreground:
-   `uv run pytest -q -o addopts="" --tb=short > .pytest.out 2>&1; tail -n 20 .pytest.out`
-3. НИКОГДА не гонять весь suite в verbose (`-v`) в foreground повторно.
-4. `-o addopts=""` переопределяет `-v` только для агента; verbose для людей/CI остаётся.
+- `SanitizeNode` всегда первый.
+- `SnapshotFilterNode`, если включён, всегда второй.
+- Type changes только через `Stage[In, Out]`.
+- `EvidenceDecisionNode` — единственный terminal decision owner.
+- Sinks получают `JobRecord`, а не `JobDraft`.
+- Post-accept enrichment не меняет terminal decision.
 
-## Архитектурные решения
-Все нетривиальные решения фиксируются в `docs/adr/` в формате `NNN-slug.md`. Статусы: PROPOSED → ACCEPTED → DEPRECATED.
+## Правила расширения
 
-## Модульные границы (жёсткие правила, без исключений)
+- Новый source/parser/sink/store/backend регистрируется через `register_*` или
+  entry point.
+- Не добавлять host-specific switches в `config.py` или core builder.
+- Credentials не хранятся в YAML; только env/secret manager + `AuthProvider`.
+- Тяжёлые зависимости — только в extras.
 
-| Слой | Разрешённые импорты |
-|---|---|
-| `domain/` | только `pydantic` + stdlib |
-| `application/` | только `domain/` + stdlib + `pydantic` |
-| `nodes/`, `sinks/` | только `domain/` + `application/` |
-| `infrastructure/`, `adapters/` | всё выше + внешние клиенты |
+## Правила документации
 
-Проверка в CI: `grep -r "from infrastructure" domain/ application/ nodes/ sinks/` должен возвращать пустой результат.
+- Каждый Markdown-файл имеет front matter: `title`, `description`, `updated`.
+- После добавления/переезда/удаления docs запускать:
 
-## Пространство имён (БЛОКЕР для релиза)
+```powershell
+uv run python scripts/build_index_docs.py
+uv run python scripts/lint_docs.py
+```
 
-Весь импортируемый код живёт под пакетом `job_ftch`. Верхнеуровневые имена `import nodes`, `import sinks` засоряют пространство имён потребителя и конфликтуют с другими библиотеками. `RM-110` — блокер для любого релиза библиотеки.
+- Generated docs не править руками; использовать generator scripts.
+- Runtime/env изменения отражать в [runtime_and_env](adapters/runtime_and_env.md).
 
-## Расширения (источники, sinks, хранилища)
+## Цикл тестирования
 
-- Новый source, sink, store, parser или target уведомлений приходит через `@register_*(name)` и опциональный entry point — никогда не через правку core dispatch.
-- Фабрики принимают `(SourceSpec, AuthProvider)`, а не монолитный `Settings`.
-- Тяжёлые опциональные зависимости — всегда в extras-группах (`[postgres]`, `[qdrant]`, `[bot]` и т.д.), никогда в `[project.dependencies]`.
+Для локальной итерации:
 
-## Секреты
+```powershell
+uv run pytest tests/test_<module>.py -q -o addopts="" --tb=line
+```
 
-- Секреты (API-ключи, пароли, токены) — только в env или Vault, никогда в YAML-файлах конфигурации или коде.
-- `SourceSpec` не содержит секретов. `AuthProvider` разрешает их в рантайме.
-- `.env.dev` и `.env.prod` в `.gitignore` — никогда не коммитить.
+Перед release использовать [release_checklist](release_checklist.md). Не
+запускать весь suite verbose в foreground в агентном цикле: вывод слишком
+шумный и не даёт лучшей диагностики.
 
 ## Запрещено
-- Секреты (API ключи, пароли) в коде или YAML.
-- Использование `print()` вместо логирования.
-- Бизнес-логика в слое инфраструктуры.
-- I/O операции в слое домена.
-- Импорты инфраструктурных клиентов в `domain/`, `application/`, `nodes/`, `sinks/`.
-- SQLAlchemy или другие ORM в хранилищах (asyncpg напрямую).
-- `any` в типах вне мест, где это документированный компромисс.
+
+- Секреты в коде, YAML, fixtures или docs.
+- Новые core `if/elif` dispatch tables для plugin/backend выбора.
+- SQLAlchemy/ORM в stores.
+- Kafka/Celery/Airflow/LangChain/LangGraph/Scrapy без нового ADR и явной смены
+  tech stack policy.
+- Смешивать source assessment, scraping и relevance decision в одном слое.

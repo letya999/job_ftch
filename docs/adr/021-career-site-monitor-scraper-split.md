@@ -1,7 +1,12 @@
+---
+title: "ADR 021: Career Site Monitor/Scraper Split"
+description: "ACCEPTED"
+updated: 2026-07-24
+---
 # ADR 021: Career Site Monitor/Scraper Split
 
 ## Status
-Proposed
+ACCEPTED
 
 ## Context
 The current `CareerSiteSource` uses a declarative CSS-selector approach (`declarative.py`) to extract job listings and details. While effective for simple, static job boards, it struggles with:

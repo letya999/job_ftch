@@ -1,6 +1,6 @@
 from typing import Any
 
-from job_ftch.application.registry import register_bypass
+from job_ftch.application.registry import BypassCapability, register_bypass
 
 
 class NoopBypass:
@@ -16,6 +16,6 @@ class NoopBypass:
         pass
 
 
-@register_bypass("noop")
+@register_bypass("noop", capability=BypassCapability(cost=0, transport="httpx"))
 def _create_noop() -> NoopBypass:
     return NoopBypass()

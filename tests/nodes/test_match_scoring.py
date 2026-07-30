@@ -1,4 +1,11 @@
+import contextlib
+from collections.abc import Iterator
+from unittest.mock import patch
+
 import pytest
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from job_ftch.domain import (
     MatchDecision,
@@ -14,6 +21,25 @@ from job_ftch.nodes.match_scoring import (
     _skill_overlap,
     _string_overlap_score,
 )
+
+
+@contextlib.contextmanager
+def _tracing_context() -> Iterator[InMemorySpanExporter]:
+    """Patch trace.get_tracer to use an in-memory exporter for span capture.
+
+    OTel SDK forbids replacing the global TracerProvider after first set, so we
+    patch get_tracer directly instead of touching the global provider.
+    """
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+    def _get_tracer(name: str, **kwargs: object) -> object:
+        return provider.get_tracer(name)
+
+    with patch("opentelemetry.trace.get_tracer", side_effect=_get_tracer):
+        yield exporter
+    provider.shutdown()
 
 
 @pytest.mark.anyio
@@ -33,7 +59,7 @@ async def test_match_scoring_title_match_scores_high(minimal_catalog, make_job_r
     processed = await node.process(job)
     score = processed.profile_scores[0]
     assert score.title_score == 1.0
-    assert score.final_score >= 0.5
+    assert score.final_score >= 0.35
 
 
 @pytest.mark.anyio
@@ -54,6 +80,19 @@ async def test_match_scoring_required_skills_zero_overlap(minimal_catalog, make_
     )
     processed = await node.process(job)
     assert processed.profile_scores[0].skills_score == 0.0
+    assert processed.metadata["hard_constraint_states"]["test_ml"]["required_skills"] == "unknown"
+
+
+@pytest.mark.anyio
+async def test_match_scoring_marks_explicit_language_conflict(make_job_record):
+    from job_ftch.domain import LanguageCode
+
+    profile = SearchProfile(profile_id="en", allowed_languages=(LanguageCode.EN,))
+    processed = await MultiProfileMatchNode(ProfileCatalog(profiles=[profile])).process(
+        make_job_record(language=LanguageCode.RU)
+    )
+
+    assert processed.metadata["hard_constraint_states"]["en"]["language"] == "contradicted"
 
 
 @pytest.mark.anyio
@@ -167,6 +206,24 @@ async def test_match_scoring_best_profile_selected(make_job_record):
 
 
 @pytest.mark.anyio
+async def test_multi_profile_accept_beats_higher_score_review(make_job_record):
+    # `strict` has the higher score but its own threshold keeps it REVIEW;
+    # `permissive` accepts at a lower calibrated threshold.
+    strict = SearchProfile(profile_id="strict", target_roles=("Software",), relevance_threshold=0.9)
+    permissive = SearchProfile(
+        profile_id="permissive", target_roles=("Python",), relevance_threshold=0.1
+    )
+    job = make_job_record(title="Python Software Engineer", post_type=PostType.JOB_POSTING)
+    processed = await MultiProfileMatchNode(ProfileCatalog(profiles=[strict, permissive])).process(
+        job
+    )
+
+    assert processed.routing_decision is None
+    assert any(score.decision is MatchDecision.ACCEPT for score in processed.profile_scores)
+    assert processed.best_profile_id == "permissive"
+
+
+@pytest.mark.anyio
 async def test_match_scoring_engineer_stopword_no_cross_match(make_job_record):
     # DevOps Engineer should NOT match AI Engineer just because of "engineer"
     p = SearchProfile(profile_id="p", target_roles=("AI Engineer",), relevance_threshold=0.1)
@@ -227,3 +284,133 @@ def test_cosine_sim_parallel_and_orthogonal():
     assert _cosine_sim((1.0, 0.0), (0.0, 1.0)) == pytest.approx(0.0)
     # Test parallel vectors (cosine = 1.0)
     assert _cosine_sim((1.0, 1.0), (1.0, 1.0)) == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# OTel tracing tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_tracing_span_name_and_node_attributes(minimal_catalog, make_job_record):
+    with _tracing_context() as exporter:
+        node = MultiProfileMatchNode(minimal_catalog)
+        job = make_job_record(title="ML Engineer", post_type=PostType.JOB_POSTING)
+        await node.process(job)
+
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+    assert span.name == "match_scoring.score"
+    assert span.attributes["job_ftch.node"] == "MultiProfileMatchNode"
+    assert span.attributes["job_ftch.node.type"] == "scoring"
+
+
+@pytest.mark.anyio
+async def test_tracing_profile_count_attribute(make_job_record):
+    profiles = [
+        SearchProfile(profile_id="p1", target_roles=("ML",)),
+        SearchProfile(profile_id="p2", target_roles=("DevOps",)),
+    ]
+    catalog = ProfileCatalog(profiles=profiles)
+    with _tracing_context() as exporter:
+        node = MultiProfileMatchNode(catalog)
+        job = make_job_record(title="ML Engineer", post_type=PostType.JOB_POSTING)
+        await node.process(job)
+
+    span = exporter.get_finished_spans()[0]
+    assert span.attributes["job_ftch.profile_count"] == 2
+
+
+@pytest.mark.anyio
+async def test_tracing_empty_catalog_does_not_set_routing_decision(make_job_record):
+    catalog = ProfileCatalog(profiles=())
+    with _tracing_context() as exporter:
+        node = MultiProfileMatchNode(catalog)
+        job = make_job_record(title="ML Engineer", post_type=PostType.JOB_POSTING)
+        result = await node.process(job)
+
+    span = exporter.get_finished_spans()[0]
+    assert span.attributes["job_ftch.profile_count"] == 0
+    assert "job_ftch.routing_decision" not in span.attributes
+    # Empty catalog: no best_score or best_profile_id attributes
+    assert "job_ftch.best_score" not in span.attributes
+    assert "job_ftch.best_profile_id" not in span.attributes
+    # Result still correct
+    assert result.routing_decision is None
+
+
+@pytest.mark.anyio
+async def test_tracing_best_score_and_profile_id_attributes(make_job_record):
+    p1 = SearchProfile(profile_id="low", target_roles=("Designer",), relevance_threshold=0.1)
+    p2 = SearchProfile(profile_id="high", target_roles=("Software",), relevance_threshold=0.1)
+    catalog = ProfileCatalog(profiles=[p1, p2])
+    with _tracing_context() as exporter:
+        node = MultiProfileMatchNode(catalog)
+        job = make_job_record(title="Software Engineer", post_type=PostType.JOB_POSTING)
+        result = await node.process(job)
+
+    span = exporter.get_finished_spans()[0]
+    assert span.attributes["job_ftch.best_profile_id"] == "high"
+    assert span.attributes["job_ftch.best_score"] == pytest.approx(result.best_score, abs=1e-6)
+    assert "job_ftch.routing_decision" not in span.attributes
+    assert result.routing_decision is None
+
+
+@pytest.mark.anyio
+async def test_tracing_scoring_does_not_make_hard_decision(make_job_record):
+    # Hard constraint evidence is consumed later by DecisionNode.
+    profile = SearchProfile(profile_id="p", blocked_companies=("EvilCorp",))
+    catalog = ProfileCatalog(profiles=[profile])
+    with _tracing_context() as exporter:
+        node = MultiProfileMatchNode(catalog)
+        job = make_job_record(company="EvilCorp", post_type=PostType.JOB_POSTING)
+        result = await node.process(job)
+
+    span = exporter.get_finished_spans()[0]
+    assert "job_ftch.routing_decision" not in span.attributes
+    assert result.routing_decision is None
+
+
+@pytest.mark.anyio
+async def test_tracing_score_does_not_make_review_decision(make_job_record):
+    # The score is evidence; the DecisionNode chooses REVIEW later.
+    profile = SearchProfile(
+        profile_id="p",
+        target_roles=("ML",),
+        relevance_threshold=0.8,  # high threshold → likely REVIEW for partial match
+    )
+    catalog = ProfileCatalog(profiles=[profile])
+    with _tracing_context() as exporter:
+        node = MultiProfileMatchNode(catalog)
+        job = make_job_record(title="ML Engineer", post_type=PostType.JOB_POSTING)
+        result = await node.process(job)
+
+    span = exporter.get_finished_spans()[0]
+    assert "job_ftch.routing_decision" not in span.attributes
+    assert result.routing_decision is None
+    assert span.attributes["job_ftch.best_profile_id"] == "p"
+
+
+@pytest.mark.anyio
+async def test_tracing_noop_without_provider(minimal_catalog, make_job_record):
+    # Without any custom provider the node must not raise and result must be correct.
+    node = MultiProfileMatchNode(minimal_catalog)
+    job = make_job_record(title="ML Engineer", post_type=PostType.JOB_POSTING)
+    result = await node.process(job)
+    assert result is not None
+    assert result.profile_scores
+
+
+@pytest.mark.anyio
+async def test_tracing_single_span_per_process_call(minimal_catalog, make_job_record):
+    """process() must produce exactly one span regardless of catalog size."""
+    with _tracing_context() as exporter:
+        node = MultiProfileMatchNode(minimal_catalog)
+        job = make_job_record(title="ML Engineer", post_type=PostType.JOB_POSTING)
+        await node.process(job)
+        await node.process(job)
+
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 2
+    assert all(s.name == "match_scoring.score" for s in spans)

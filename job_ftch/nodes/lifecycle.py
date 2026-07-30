@@ -27,11 +27,14 @@ class JobLifecycleNode:
 
     async def process(self, item: JobRecord) -> JobRecord:
         status = self._infer_status(item)
+        freshness_state = self._freshness_state(item, status)
+        metadata = {**item.metadata, "freshness_evidence_state": freshness_state}
         if status in {None, item.status}:
-            return item
+            return item.model_copy(update={"metadata": metadata})
         return item.model_copy(
             update={
                 "status": status,
+                "metadata": metadata,
                 "provenance": ProvenanceTrail(
                     extraction=item.provenance.extraction,
                     normalization=item.provenance.normalization
@@ -66,6 +69,17 @@ class JobLifecycleNode:
         if any(marker in haystack for marker in _CLOSED_MARKERS):
             return JobStatus.FILLED
         return None
+
+    @staticmethod
+    def _freshness_state(item: JobRecord, inferred: JobStatus | None) -> str:
+        """Classify the evidence available to freshness policy, not relevance."""
+        if inferred in {JobStatus.OPEN, JobStatus.FILLED}:
+            return "explicit_status"
+        if item.posted_at is not None or item.fetched_at is not None:
+            return "observed_at"
+        if item.canonical_url is not None or item.source_url is not None:
+            return "locator_only"
+        return "missing"
 
     @staticmethod
     def _normalize(value: object) -> str | None:

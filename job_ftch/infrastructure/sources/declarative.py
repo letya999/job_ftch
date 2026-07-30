@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlsplit
 
 from pydantic import BaseModel, Field
 from selectolax.lexbor import LexborHTMLParser
 
-from job_ftch.application.registry import register_parser, register_source_spec
+from job_ftch.application.registry import register_source_spec
 from job_ftch.domain import RawItem, SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 
@@ -29,13 +30,18 @@ def _source_name_from_url(url: str) -> str:
 class CareerSiteConfig(BaseModel):
     kind: str
     board_selector: str | None = None
-    row_selector: str
-    link_selector: str
+    row_selector: str | None = None
+    link_selector: str | None = None
     title_selector: str | None = None
     location_selector: str | None = None
     section_selector: str | None = None
     team_selector: str | None = None
     href_contains: str | None = None
+    wait_for_selector: str | None = None
+    api_endpoint: str | None = None
+    json_items_path: str | None = None
+    json_title_path: str | None = None
+    json_link_path: str | None = None
     metadata_defaults: dict[str, object] = Field(default_factory=dict)
 
     @classmethod
@@ -66,15 +72,23 @@ class CareerSiteConfig(BaseModel):
 
     @classmethod
     def from_spec(cls, spec: DeclarativeHtmlSpec) -> CareerSiteConfig:
-        url_lower = spec.url.lower()
-        if spec.parser_kind == "greenhouse" or (
-            spec.parser_kind == "auto" and "greenhouse.io" in url_lower
-        ):
+        # Explicit parser_kind wins.
+        if spec.parser_kind == "greenhouse":
             return cls.greenhouse()
-        if spec.parser_kind == "alfabank" or (
-            spec.parser_kind == "auto" and "alfabank.ru" in url_lower
-        ):
+        if spec.parser_kind == "alfabank":
             return cls.alfabank()
+
+        # "auto" consults the site_parser registry (per ADR-033) for a hint.
+        if spec.parser_kind == "auto":
+            from job_ftch.application.registry import resolve_site_parser
+
+            parser = resolve_site_parser(spec.url)
+            if parser is not None:
+                hint = parser.parser_kind(spec.url) if hasattr(parser, "parser_kind") else None
+                if hint == "greenhouse":
+                    return cls.greenhouse()
+                if hint == "alfabank":
+                    return cls.alfabank()
 
         return cls(
             kind="generic",
@@ -96,7 +110,9 @@ class DeclarativeCareerSiteParser:
         html: str,
         limit: int,
     ) -> list[RawItem]:
-        del client
+        if self._config.api_endpoint and self._config.json_items_path:
+            return await self._parse_api(client=client, url=url, limit=limit)
+
         parser = LexborHTMLParser(html)
         source_name = self._extract_source_name(parser, url)
         container = (
@@ -107,44 +123,92 @@ class DeclarativeCareerSiteParser:
         current_section: str | None = None
         current_team: str | None = None
 
-        for node in scope.css(self._config.row_selector):
-            tag_name = node.tag
-            if self._config.section_selector and tag_name == "h3":
-                current_section = _clean_text(node.text(separator=" ", strip=True))
-                current_team = None
-                continue
-            if self._config.team_selector and tag_name == "h4":
-                current_team = _clean_text(node.text(separator=" ", strip=True))
-                continue
-            item = self._build_item(
-                board_url=url,
-                source_name=source_name,
-                row=node,
-                section=current_section,
-                team=current_team,
-            )
-            if item is None:
-                continue
-            items.append(item)
-            if len(items) >= limit:
-                return items
+        if self._config.row_selector is not None:
+            for node in scope.css(self._config.row_selector):
+                tag_name = node.tag
+                if self._config.section_selector and tag_name == "h3":
+                    current_section = _clean_text(node.text(separator=" ", strip=True))
+                    current_team = None
+                    continue
+                if self._config.team_selector and tag_name == "h4":
+                    current_team = _clean_text(node.text(separator=" ", strip=True))
+                    continue
+                item = self._build_item(
+                    board_url=url,
+                    source_name=source_name,
+                    row=node,
+                    section=current_section,
+                    team=current_team,
+                )
+                if item is None:
+                    continue
+                items.append(item)
+                if len(items) >= limit:
+                    return items
 
         if items:
             return items
 
-        for node in scope.css(self._config.link_selector):
-            item = self._build_item(
-                board_url=url,
-                source_name=source_name,
-                row=node,
-                section=None,
-                team=None,
+        if self._config.link_selector is not None:
+            for node in scope.css(self._config.link_selector):
+                item = self._build_item(
+                    board_url=url,
+                    source_name=source_name,
+                    row=node,
+                    section=None,
+                    team=None,
+                )
+                if item is None:
+                    continue
+                items.append(item)
+                if len(items) >= limit:
+                    break
+        return items
+
+    async def _parse_api(self, *, client: Any, url: str, limit: int) -> list[RawItem]:
+        import jmespath
+
+        response = await client.get(self._config.api_endpoint)
+        try:
+            data = response.json()
+        except json.JSONDecodeError:
+            return []
+
+        items_data = jmespath.search(self._config.json_items_path, data)
+        if not items_data or not isinstance(items_data, list):
+            return []
+
+        items = []
+        for item_data in items_data:
+            title = (
+                jmespath.search(self._config.json_title_path, item_data)
+                if self._config.json_title_path
+                else ""
             )
-            if item is None:
+            link = (
+                jmespath.search(self._config.json_link_path, item_data)
+                if self._config.json_link_path
+                else ""
+            )
+
+            if not title and not link:
                 continue
+
+            href = str(link) if link else ""
+            full_url = urljoin(url, href) if href else url
+
+            item = build_raw_item(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=_source_name_from_url(url),
+                external_id=None,
+                url=full_url,
+                text=json.dumps(item_data, ensure_ascii=False),
+                metadata={"title": str(title) if title else None} | self._config.metadata_defaults,
+            )
             items.append(item)
             if len(items) >= limit:
                 break
+
         return items
 
     def _build_item(
@@ -231,9 +295,10 @@ class DeclarativeCareerSiteSource:
         limit: int = 100,
         own_client: bool = False,
     ) -> None:
-        from job_ftch.infrastructure.sources.career_site import CareerSiteSource
+        from job_ftch.infrastructure.sources.career_site_source import CareerSiteSource
 
-        self._delegate = CareerSiteSource(
+        career_site_source_cls: Any = CareerSiteSource
+        self._delegate = career_site_source_cls(
             client,
             site_url,
             limit=limit,
@@ -244,16 +309,6 @@ class DeclarativeCareerSiteSource:
     async def fetch(self):  # type: ignore[no-untyped-def]
         async for item in self._delegate.fetch():
             yield item
-
-
-def _is_greenhouse(url: str, html: str) -> bool:
-    del html
-    return "greenhouse.io" in url.lower()
-
-
-@register_parser("greenhouse", matcher=_is_greenhouse)
-def _build_greenhouse_parser() -> DeclarativeCareerSiteParser:
-    return DeclarativeCareerSiteParser(CareerSiteConfig.greenhouse())
 
 
 @register_source_spec("declarative_html")

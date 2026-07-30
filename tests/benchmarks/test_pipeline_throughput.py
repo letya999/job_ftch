@@ -9,7 +9,7 @@ from job_ftch.nodes import SanitizeNode
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_sanitize_node_throughput() -> None:
     """Baseline: SanitizeNode should process items quickly (e.g., >1000 items/sec)."""
     import time
@@ -30,10 +30,7 @@ async def test_sanitize_node_throughput() -> None:
 
     start = time.perf_counter()
     for item in items:
-        try:
-            await node.process(item)
-        except Exception:
-            pass
+        assert await node.process(item) is not None
     duration = time.perf_counter() - start
 
     # 100 items should be processed in well under 1 second.

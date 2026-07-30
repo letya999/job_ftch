@@ -51,7 +51,7 @@ class TenantConfig(BaseModel):
 
     tenant_id: str = Field(min_length=1, max_length=63)
     display_name: str = Field(min_length=1)
-    sources: list[SourceSpec] = Field(min_length=1)
+    sources: list[SourceSpec] = Field(default_factory=list)
     output: OutputSpec = Field(
         default_factory=lambda: OutputSpec(path=Path("artifacts/{tenant_id}/jobs.json"))
     )
@@ -79,17 +79,23 @@ class TenantConfig(BaseModel):
         )
     )
     source_backend: str = "local_fixture"
+    # Backend selection defaults to None so that "the tenant did not say" stays
+    # distinguishable from "the tenant asked for the default"; a non-None value
+    # here outranks env and runtime YAML, so it must be an explicit choice.
     sink_backend: str | None = None
-    store_backend: str = "postgres"
-    job_group_store_backend: str = "sqlite"
-    llm_backend: str = "heuristic"
-    posting_backend: str = "none"
+    store_backend: str | None = None
+    job_group_store_backend: str | None = None
+    posting_backend: str | None = None
     notify_mode: str = "instant"
     notify_batch_size: int = 10
     dry_run: bool = False
-    metrics_enabled: bool = False
-    metrics_port: int = 9090
-    pipeline_max_items_per_run: int = 200
+    pipeline_max_items_per_run: int | None = Field(default=None, gt=0)
+    source_fetch_concurrency: int | None = None
+    source_fetch_concurrency_adaptive: bool | None = None
+    source_preparation_concurrency: int | None = None
+    source_preparation_concurrency_adaptive: bool | None = None
+    pipeline_item_concurrency: int | None = None
+    pipeline_item_concurrency_adaptive: bool | None = None
     pipeline_max_text_length: int = 20_000
     review_max_quality_score: float = 0.65
     posting_min_quality_score: float = 0.8
@@ -98,19 +104,28 @@ class TenantConfig(BaseModel):
     routing_quality_override_threshold: float = 0.6
     store_path: Path = Path(".runtime/{tenant_id}/job_ftch.db")
     job_store_path: Path | None = None
-    store_dsn: str | None = None
     store_pool_min: int = 2
     store_pool_max: int = 10
     store_fallback_on_error: bool = True
     memory_max_keys: int = 50_000
     memory_max_set_members: int = 50_000
     job_backend: str = "sqlite"
-    search_backend: str = "sqlite"
+    search_backend: str | None = None
     vector_backend: str | None = None
-    embedding_enabled: bool = False
     language_detection_enabled: bool = False
-    embedding_provider: str = "openai"
     search_language: str = "simple"
+
+    # Deprecated: model and LLM selection is runtime-YAML policy, not tenant
+    # identity. These keys are still parsed so existing tenant files load, but
+    # they are ignored unless allow_tenant_model_override is set explicitly.
+    llm_backend: str | None = None
+    openai_model: str | None = None
+    relevance_llm_model: str | None = None
+    embedding_enabled: bool | None = None
+    embedding_provider: str | None = None
+    embedding_model: str | None = None
+    embedding_dimensions: int | None = None
+    allow_tenant_model_override: bool = False
 
     @field_validator("tenant_id")
     @classmethod
@@ -134,6 +149,9 @@ class TenantConfig(BaseModel):
         "search_backend",
         "vector_backend",
         "embedding_provider",
+        "embedding_model",
+        "openai_model",
+        "relevance_llm_model",
         "search_language",
         mode="before",
     )

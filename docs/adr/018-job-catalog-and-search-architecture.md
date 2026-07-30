@@ -1,7 +1,12 @@
+---
+title: "ADR 018: Job Catalog and Search Architecture"
+description: "ACCEPTED"
+updated: 2026-07-24
+---
 # ADR 018: Job Catalog and Search Architecture
 
 ## Status
-Accepted
+ACCEPTED
 
 ## Context
 As the system evolves to persist and search through aggregated job listings, we need a unified approach to storing and retrieving `Job` and `JobGroup` entities, while ensuring the search mechanism is robust and consistent. We need both SQLite (for local/embedded use) and PostgreSQL (for production/scale) as backends.

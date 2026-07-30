@@ -1,3 +1,10 @@
+<!-- Memory Metadata
+Last updated: 2026-06-17
+Last commit: f9fc8b8 fix(classifier): remove false-positive announcement tokens
+Scope: application/pipeline.py, application/contracts.py
+Area: PIPELINE
+-->
+
 # Pipeline Contracts And Stats
 
 Updated after Phase 3 follow-up cleanup on 2026-06-06.

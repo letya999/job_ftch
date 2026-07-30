@@ -7,7 +7,7 @@ from typing import TypeVar
 
 import pytest
 
-from job_ftch.domain import JobDraft, JobExtractionStatus, RawItem, SourceKind, WorkMode
+from job_ftch.domain import JobDraft, JobExtractionStatus, PostType, RawItem, SourceKind, WorkMode
 from job_ftch.infrastructure.llm.heuristic import HeuristicLLMProvider
 from job_ftch.nodes.extraction import ExtractionNode
 
@@ -33,7 +33,12 @@ async def test_extraction_node_emits_partial_draft_when_llm_fails() -> None:
             "text": "Senior AI Product Engineer\nRemote Europe\nBuild agent tooling",
             "created_at": created_at,
             "fetched_at": fetched_at,
-            "metadata": {"job_url": "https://job-boards.greenhouse.io/clickhouse/jobs/1"},
+            # Real company comes from source metadata (set by API monitors), never
+            # from the source_name slug.
+            "metadata": {
+                "job_url": "https://job-boards.greenhouse.io/clickhouse/jobs/1",
+                "company": "ClickHouse",
+            },
         }
     )
 
@@ -85,6 +90,42 @@ async def test_extraction_node_does_not_use_generic_career_monitor_name_as_compa
 
     assert draft is not None
     assert draft.company_name_raw is None
+
+
+@pytest.mark.asyncio
+async def test_heuristic_triage_mode_preserves_typed_boundary_without_llm() -> None:
+    item = RawItem(
+        source_kind=SourceKind.TELEGRAM_CHANNEL,
+        source_name="jobs",
+        external_id="heuristic-1",
+        url="https://example.com/jobs/heuristic-1",
+        text="LLM Engineer\nBuild and evaluate production RAG services remotely.",
+        metadata={
+            "company": "Acme",
+            "preclassified_post_type": PostType.JOB_POSTING.value,
+        },
+    )
+    node = ExtractionNode(ExplodingLLMProvider())
+    node.configure_graph_params({"extraction_mode": "structured_or_heuristic"})
+
+    draft = await node.process(item)
+
+    assert draft is not None
+    assert draft.title_raw == "LLM Engineer"
+    assert draft.company_name_raw == "Acme"
+    assert draft.work_mode is WorkMode.REMOTE
+    assert draft.extraction_status is JobExtractionStatus.PARTIAL
+    assert draft.post_type is PostType.JOB_POSTING
+    assert draft.metadata["extraction_backend"] == "heuristic_triage"
+    assert "budget_deferred" not in draft.review_reasons
+    assert draft.provenance.extraction == ("heuristic:triage",)
+
+
+def test_extraction_node_rejects_unknown_graph_mode() -> None:
+    node = ExtractionNode(ExplodingLLMProvider())
+
+    with pytest.raises(ValueError, match="unsupported extraction_mode"):
+        node.configure_graph_params({"extraction_mode": "magic"})
 
 
 @pytest.mark.asyncio

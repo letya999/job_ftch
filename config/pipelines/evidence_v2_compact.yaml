@@ -1,0 +1,16 @@
+extends: evidence_v2.yaml
+name: precision_first_v2_compact
+version: "2.2.0"
+metadata:
+  purpose: compact_responsibility_evidence_cost_precision_experiment
+  production_default: false
+  graph_schema: v2
+  benchmark:
+    dataset: fixtures/dataset/eval_dataset_fixed140_seed42_v2.jsonl
+    sample: 140
+    seed: 42
+nodes:
+  - id: relevance_judge
+    params:
+      call_policy: force_all
+      classification_mode: compact_evidence

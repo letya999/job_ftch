@@ -1,3 +1,8 @@
+---
+title: "plugin_template — Plugin SDK Examples"
+description: "Index of all template types with when to use each one."
+updated: 2026-07-24
+---
 # plugin_template — Plugin SDK Examples
 
 Index of all template types with when to use each one.

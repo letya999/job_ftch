@@ -1,4 +1,4 @@
-"""Browser-driven source. Requires [browser] extras (playwright)."""
+"""Browser-driven source. Requires [browser] extras (patchright)."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class BrowserSource:
         self.auth = auth
         self.source_name = spec.source_name or str(spec.url)
         try:
-            import playwright  # noqa: F401
+            import patchright  # noqa: F401
 
             self._available = True
         except ImportError:
@@ -29,8 +29,7 @@ class BrowserSource:
     async def fetch(self) -> AsyncIterator[RawItem | QuarantinedRawItem]:
         if not self._available:
             raise ImportError(
-                "playwright is required for browser sources. "
-                "Install with: uv add playwright --optional browser"
+                "patchright is required for browser sources. Install with: pip install patchright"
             )
         raise NotImplementedError("BrowserSource requires a registered parser plugin.")
         yield  # make this an async generator

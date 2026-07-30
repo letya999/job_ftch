@@ -1,0 +1,23 @@
+extends: evidence_v2_compact_postaccept.yaml
+name: precision_first_v2_bgem3_qdrant
+version: "1.0.0"
+metadata:
+  purpose: production_like_v2_relevance_with_live_bgem3_qdrant_shots
+  production_default: false
+  graph_schema: v2
+  benchmark:
+    dataset: fixtures/dataset/eval_dataset.jsonl
+    sample: 400
+    tenant_id: ai_jobs
+    user_id: "480637186"
+  runtime:
+    models: {extraction: gpt-4.1-nano, relevance: gpt-4.1-mini}
+    shots: {backend: qdrant, source: user_db_only, collection: profile_shots_bgem3_mvp_v3}
+nodes:
+  - id: bgem3
+    node: bgem3_embed
+    effect: observe
+    after: [dedup]
+    params: {model: BAAI/bge-m3, max_chars: 4096}
+  - id: semantic
+    after: [bgem3]

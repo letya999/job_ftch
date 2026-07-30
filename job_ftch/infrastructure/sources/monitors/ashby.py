@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
 from job_ftch.domain.site_models import (
     DiscoveredPostingPayload,
     MonitorResult,
@@ -18,7 +18,6 @@ from job_ftch.infrastructure.sources.monitors.shared import (
     fetch_page_text,
     normalize_job_location_type,
     normalize_salary_unit,
-    slugs_from_url,
     truncated_rich_result,
 )
 
@@ -177,6 +176,9 @@ async def discover(
         if parsed:
             jobs.append(parsed)
 
+    if not jobs:
+        return MonitorResult(metadata_updates={"confirmed_empty": True})
+
     if len(jobs) > MAX_JOBS:
         logger.warning("ashby.truncated", url=url, total=len(jobs), cap=MAX_JOBS)
         return truncated_rich_result(jobs)
@@ -209,12 +211,28 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
                         result["jobs"] = count
                     return result
 
-    for slug in slugs_from_url(url):
-        count = await _fetch_job_count(slug, client)
-        if count is not None:
-            return {"token": slug, "jobs": count}
-
     return None
 
 
-register_monitor("ashby", discover, cost=10, rich=True, can_handle=can_handle)
+register_monitor(
+    "ashby",
+    discover,
+    cost=10,
+    rich=True,
+    can_handle=can_handle,
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "ashby",
+        url_patterns=(
+            r"api\.ashbyhq\.com/posting-api/job-board/[\w-]+",
+            r"jobs\.ashbyhq\.com/[\w-]+",
+        ),
+        has_publication_time=True,
+        has_stable_id=True,
+        can_detect_freshness_without_snapshot=True,
+        can_filter_since_yesterday=True,
+        item_level_dates=True,
+        requires_full_snapshot=False,
+        rationale="Ashby board API returns stable job IDs and publishedAt timestamps.",
+    ),
+)

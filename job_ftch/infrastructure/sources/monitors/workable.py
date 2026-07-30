@@ -8,18 +8,16 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
+from job_ftch.domain.site_models import MonitorResult
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     fetch_page_text,
-    slugs_from_url,
     truncated_url_result,
 )
 
 if TYPE_CHECKING:
     import httpx
-
-    from job_ftch.domain.site_models import MonitorResult
 
 logger = structlog.get_logger("job_ftch.monitors.workable")
 
@@ -96,6 +94,8 @@ async def discover(
         raise ValueError(f"Cannot derive Workable slug from {board_url!r}")
 
     urls, truncated = await _api_list(slug, client)
+    if not urls:
+        return MonitorResult(metadata_updates={"confirmed_empty": True})
     if truncated:
         return truncated_url_result(urls)
     return urls
@@ -139,12 +139,20 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
                         result["jobs"] = count
                     return result
 
-    for slug in slugs_from_url(url):
-        count = await _fetch_job_count(slug, client)
-        if count is not None:
-            return {"token": slug, "jobs": count}
-
     return None
 
 
-register_monitor("workable", discover, cost=10, rich=False, can_handle=can_handle)
+register_monitor(
+    "workable",
+    discover,
+    cost=10,
+    rich=False,
+    can_handle=can_handle,
+    scraper_chain=("workable", "json-ld", "maintext"),
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "workable",
+        url_patterns=(r"apply\.workable\.com/[\w-]+",),
+        has_stable_id=True,
+    ),
+)

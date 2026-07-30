@@ -78,13 +78,18 @@ async def test_triage_drops_low_signal_items_with_stable_reasons(tmp_path: Path)
 
 @pytest.mark.asyncio
 async def test_pipeline_reports_stage_conversion_by_source_kind(tmp_path: Path) -> None:
+    from job_ftch.domain import FilterProfile
+
+    profile = FilterProfile(
+        positive_relevance_keywords=["ai", "ml", "llm", "engineer", "machine learning"]
+    )
     fixture = Path("fixtures/e2e/multisource_positive.jsonl")
     pipeline = Pipeline(
         source=LocalFixtureSource(fixture),
         sanitize_node=SanitizeNode(
             allowed_career_site_hosts=("job-boards.greenhouse.io", "www.bcc.kz", "bcc.kz")
         ),
-        nodes=[HeuristicTriageNode()],
+        nodes=[HeuristicTriageNode(profile=profile)],
         sink=JsonFileSink(tmp_path / "out.json"),
         store=InMemoryStore(),
         quarantine_sink=JsonFileSink(tmp_path / "quarantine.jsonl", jsonl=True),

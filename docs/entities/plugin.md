@@ -1,19 +1,23 @@
+---
+title: "Plugin (Плагин и реестр плагинов)"
+description: "Plugin (плагин) — это механизм регистрации и discovery"
+updated: 2026-07-24
+---
 # Plugin (Плагин и реестр плагинов)
 
 ## Что это такое
 
-Plugin (плагин) — это механизм расширения ядра системы.
-Почти всё в архитектуре проекта является плагином: источники
-данных, узлы обработки, провайдеры языковых моделей, базы
-данных. 
+Plugin (плагин) — это механизм регистрации и discovery
+реализаций. Это не отдельная архитектурная роль.
 
-Плагин реализует один из базовых Protocol-ов (интерфейсов)
-системы и регистрируется в центральном реестре.
+Объект может быть port adapter, monitor, scraper, parser или
+assessment adapter по ответственности и одновременно
+подключаться plugin-style через registry/entry points.
 Сама система (ядро) не знает ни о каких конкретных
 реализациях (например, она не знает, что такое Telegram API
 или PostgreSQL).
-Ядро работает исключительно через абстракции, а плагины
-"подключаются" во время запуска.
+Ядро работает через абстракции, а registry подключает
+конкретные реализации во время запуска.
 
 ## Зачем это нужно и ПОЧЕМУ так устроено
 
@@ -28,10 +32,17 @@ python-пакетах (third-party plugins).
 Вы устанавливаете ядро, а потом устанавливаете только те
 плагины, которые вам нужны, избегая лишних зависимостей.
 
-Важно четко различать Plugin и RuntimeAdapter:
-- **Plugin** реализует интерфейс (Protocol), который *вызывается ядром*. Он ничего не знает о внешнем мире (FastAPI, Dagster).
+Важно четко различать Plugin и adapter taxonomy:
+- **Plugin** — способ подключения реализации.
 
-- **RuntimeAdapter** — это оболочка, которая берет готовое ядро и *встраивает его* во внешний мир. Адаптер не регистрируется в реестре.
+- **Port adapter** — реализация одного application port, например `Source`,
+  `Store`, `Sink`, `LLMProvider`.
+
+- **Runtime adapter** — внешний вход в систему: Telegram bot, MCP, FastAPI,
+  FastStream, Dagster.
+
+- **Assessment adapter** — pre-ingest оценка `SourceSpec` и назначение ingest
+  strategy.
 
 ## Как это работает изнутри
 
@@ -50,6 +61,7 @@ JOB_BACKEND    # Хранилище вакансий (JobPersistenceBackend Prot
 SEARCH_BACKEND # Полнотекстовый поиск (SearchBackend Protocol)
 AUTH           # Провайдер credentials (AuthProvider Protocol)
 MONITOR        # Монитор карьер-сайта SCRAPER        # HTML скрапер PARSER         # Парсер структуры страницы RERANKER       # Reranking для поиска
+SOURCE_ASSESSMENT # Pre-ingest source assessment adapter
 ```
 
 ### Жизненный цикл плагина (PluginState)
@@ -154,6 +166,8 @@ for entry in sources:
 
 ## Связи с другими сущностями
 
-- [Runtime Adapters](runtime_adapters.md) — адаптеры не регистрируются в реестре, они используют ядро и его плагины.
+- [Adapters and plugins](adapters_and_plugins.md) — canonical taxonomy для
+  port adapters, runtime adapters, assessment adapters и plugin mechanism.
 
-- Все остальные сущности (Source, Sink, Store) являются плагинами определенного `PluginKind`.
+- [Runtime Adapters](runtime_adapters.md) — runtime adapters используют ядро и
+  plugin-connected implementations, но сами не являются `PluginKind`.

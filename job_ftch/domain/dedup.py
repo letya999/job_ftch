@@ -9,6 +9,7 @@ from hashlib import sha256
 from pydantic import BaseModel, ConfigDict, Field
 
 from job_ftch.domain.models import RawItem, SourceKind
+from job_ftch.domain.observation import content_hash_for_raw_item
 
 _TOKEN_RE = re.compile(r"[A-Za-zА-Яа-я0-9+#]+")
 _DEDUP_URL_METADATA_KEYS = ("job_url", "canonical_url", "origin_url", "apply_url")
@@ -27,13 +28,30 @@ def _normalize_text(value: str) -> str:
 
 
 def processed_key_for_raw_item(item: RawItem) -> str:
-    locator = item.external_id or str(item.url or "")
+    """Return the terminal-state key for one immutable content observation.
+
+    A locator identifies where an item was found, not which version of its
+    content was processed.  Including the full envelope hash lets a changed
+    Telegram message or vacancy URL re-enter the pipeline while preserving
+    suppression for an unchanged replay.
+    """
     return _hash_key(
         "raw",
         str(item.source_kind),
         item.source_name.casefold(),
-        locator.casefold(),
+        str(item.stable_id),
+        content_hash_for_raw_item(item),
     )
+
+
+def processed_key_for_url(source_kind: SourceKind, source_name: str, url: str) -> str:
+    """Return a locator-only discovery key, never a terminal processed key.
+
+    Discovery happens before the current detail payload exists, so it cannot
+    safely decide whether that payload is an already processed observation.
+    Retained for callers that need a stable locator key for non-terminal caches.
+    """
+    return _hash_key("raw", str(source_kind), source_name.casefold(), url.casefold())
 
 
 def dedup_url_for_raw_item(item: RawItem) -> str | None:

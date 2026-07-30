@@ -1,3 +1,8 @@
+---
+title: "Sink Plugin Template"
+description: "Template for a custom Sink plugin."
+updated: 2026-07-24
+---
 # Sink Plugin Template
 
 Template for a custom Sink plugin.

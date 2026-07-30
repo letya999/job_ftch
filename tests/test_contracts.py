@@ -25,6 +25,9 @@ from job_ftch.domain import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from job_ftch.domain import ObservationLedgerEntry, OutboxRecord
+    from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
+
 
 class MinimalSource:
     def fetch(self) -> AsyncIterator[RawItem]:
@@ -64,6 +67,33 @@ class MinimalStore:
         self._duplicates: list[DuplicateRecord] = []
         self._state: dict[str, str] = {}
 
+    async def enqueue_outbox(self, record: OutboxRecord) -> OutboxRecord:
+        return record
+
+    async def list_pending_outbox(self, limit: int = 100) -> tuple[OutboxRecord, ...]:
+        del limit
+        return ()
+
+    async def mark_outbox_delivered(self, idempotency_key: str) -> OutboxRecord | None:
+        del idempotency_key
+        return None
+
+    async def acquire_dedup_claim(self, key: str, owner_id: str, *, ttl_seconds: int) -> bool:
+        del key, owner_id, ttl_seconds
+        return True
+
+    async def release_dedup_claim(self, key: str, owner_id: str) -> None:
+        del key, owner_id
+
+    async def record_observation(self, entry: ObservationLedgerEntry) -> ObservationLedgerEntry:
+        return entry
+
+    async def get_observation(
+        self, stable_id: str, content_hash: str, *, tenant_id: str = "default"
+    ) -> ObservationLedgerEntry | None:
+        del stable_id, content_hash, tenant_id
+        return None
+
     async def has_processed(self, item_id: str) -> bool:
         return item_id in self._processed
 
@@ -75,6 +105,9 @@ class MinimalStore:
 
     async def remember_dedup_key(self, record: RememberedDedupKey) -> None:
         self._dedup[record.key] = record
+
+    async def get_dedup_key(self, key: str) -> RememberedDedupKey | None:
+        return self._dedup.get(key)
 
     async def list_dedup_keys(self, kind: str | None = None) -> tuple[RememberedDedupKey, ...]:
         values = tuple(self._dedup.values())
@@ -119,10 +152,87 @@ class MinimalStore:
     async def save_source_strategy(self, domain: str, monitor: str, bypass: str) -> None:
         pass
 
+    # ADR-031: source snapshot methods
+    async def get_last_run_snapshot(
+        self,
+        tenant_id: str,
+        source_id: str,
+    ) -> frozenset[str]:
+        return frozenset()
+
+    async def get_last_run_snapshot_hashes(
+        self,
+        tenant_id: str,
+        source_id: str,
+    ) -> dict[str, str]:
+        del tenant_id, source_id
+        return {}
+
+    async def save_snapshot_rows(
+        self,
+        tenant_id: str,
+        source_id: str,
+        run_id: str,
+        rows: tuple[tuple[str, str, str], ...],
+    ) -> None:
+        return None
+
+    async def purge_old_snapshots(
+        self,
+        tenant_id: str,
+        source_id: str,
+        *,
+        older_than_days: int,
+    ) -> int:
+        return 0
+
+    async def get_source_assessment(
+        self,
+        tenant_id: str,
+        source_id: str,
+    ) -> SourceAssessmentResult | None:
+        return None
+
+    async def save_source_assessment(
+        self,
+        tenant_id: str,
+        result: SourceAssessmentResult,
+    ) -> None:
+        return None
+
+    async def get_source_ingest_state(
+        self,
+        tenant_id: str,
+        source_id: str,
+    ) -> SourceIngestState | None:
+        return None
+
+    async def save_source_ingest_state(
+        self,
+        tenant_id: str,
+        state: SourceIngestState,
+    ) -> None:
+        return None
+
 
 class MinimalLLMProvider:
     async def extract(self, text: str, schema: type[Any]) -> Any:
         return schema(text=text)
+
+    async def classify(self, prompt: str, schema: type[Any]) -> Any:
+        return schema(prompt=prompt)
+
+    async def present(self, job_payload: str, schema: type[Any]) -> Any:
+        return schema(job=job_payload)
+
+    async def generate_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        temperature: float = 0.2,
+    ) -> str:
+        return f"{system_prompt}\n{user_prompt}\n{temperature}"
 
 
 def test_protocol_contracts_runtime_checkable() -> None:

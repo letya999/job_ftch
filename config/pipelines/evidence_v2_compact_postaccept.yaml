@@ -1,0 +1,22 @@
+extends: evidence_v2_compact.yaml
+name: precision_first_v2_compact_postaccept
+version: "2.4.1"
+metadata:
+  purpose: heuristic_triage_compact_relevance_post_accept_full_extraction
+  production_default: true
+  graph_schema: v2
+  benchmark:
+    dataset: fixtures/dataset/eval_dataset_fixed140_seed42_v2.jsonl
+    sample: 140
+    seed: 42
+nodes:
+  - id: extraction
+    params:
+      extraction_mode: structured_or_heuristic
+  # The benchmark samples 500 parent observations, which may segment into more
+  # candidates. Keep force-all evaluation from silently falling back at 500.
+  - id: relevance_judge
+    params:
+      max_per_run: 600
+      max_ambiguity_resolutions: 30
+      max_precision_confirmations: 80

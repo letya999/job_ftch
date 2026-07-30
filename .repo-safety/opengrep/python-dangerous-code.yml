@@ -1,0 +1,29 @@
+rules:
+  - id: python-dangerous-eval
+    message: Avoid eval/exec on dynamic input.
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+
+  - id: python-unsafe-pickle-loads
+    message: Avoid pickle.loads/load on untrusted data.
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+
+  - id: python-subprocess-shell-true
+    message: subprocess with shell=True needs explicit security review.
+    severity: WARNING
+    languages: [python]
+    patterns:
+      - pattern: subprocess.$FUNC(..., shell=True, ...)
+
+  - id: python-requests-verify-false
+    message: TLS verification disabled.
+    severity: ERROR
+    languages: [python]
+    pattern: requests.$FUNC(..., verify=False, ...)

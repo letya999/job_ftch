@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import ipaddress
+import socket
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from job_ftch.config import get_settings
 from job_ftch.domain import (
     JobRecord,
     ProfileCatalog,
@@ -19,7 +22,37 @@ from job_ftch.domain import (
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
+
+
+class UnexpectedNetworkAccess(RuntimeError):
+    """Raised when an offline test attempts an external connection."""
+
+
+def _is_loopback_host(host: object) -> bool:
+    if host is None:
+        return True
+    if isinstance(host, bytes):
+        host = host.decode("ascii", errors="ignore")
+    value = str(host).split("%", 1)[0].lower()
+    if value == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_ip_literal(host: object) -> bool:
+    if not isinstance(host, (str, bytes)):
+        return False
+    if isinstance(host, bytes):
+        host = host.decode("ascii", errors="ignore")
+    try:
+        ipaddress.ip_address(host.split("%", 1)[0])
+    except ValueError:
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +82,37 @@ class CollectSink:
 
     async def emit(self, item: RawItem) -> None:
         self.items.append(item)
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--run-network",
+        action="store_true",
+        default=False,
+        help="run tests requiring real network access",
+    )
+    parser.addoption(
+        "--run-telegram",
+        action="store_true",
+        default=False,
+        help="run tests requiring Telegram credentials",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    run_network = config.getoption("--run-network")
+    run_telegram = config.getoption("--run-telegram")
+    e2e_root = Path(__file__).parent / "e2e"
+    skip_network = pytest.mark.skip(reason="need --run-network option to run")
+    skip_telegram = pytest.mark.skip(reason="need --run-telegram option to run")
+
+    for item in items:
+        if item.path.is_relative_to(e2e_root):
+            item.add_marker(pytest.mark.e2e)
+        if "network" in item.keywords and not run_network:
+            item.add_marker(skip_network)
+        if "telegram" in item.keywords and not run_telegram:
+            item.add_marker(skip_telegram)
 
 
 @pytest.fixture
@@ -143,9 +207,61 @@ def minimal_catalog(minimal_profile: SearchProfile) -> ProfileCatalog:
 
 
 @pytest.fixture(autouse=True)
-def default_test_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensure tests use memory store by default to avoid Postgres DSN requirement."""
+def default_test_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep unit tests independent from the developer's live services."""
     monkeypatch.setenv("JOB_FTCH_STORE_BACKEND", "memory")
+    monkeypatch.setenv("JOB_FTCH_JOB_BACKEND", "sqlite")
+    monkeypatch.setenv("JOB_FTCH_RELEVANCE_SHOT_BACKEND", "memory")
+    monkeypatch.delenv("JOB_FTCH_VECTOR_BACKEND", raising=False)
+    monkeypatch.delenv("JOB_FTCH_QDRANT_URL", raising=False)
+    monkeypatch.delenv("JOB_FTCH_QDRANT_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def block_unmarked_external_network(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fail offline tests at the socket boundary while allowing loopback I/O."""
+    network_enabled = request.node.get_closest_marker("network") and request.config.getoption(
+        "--run-network"
+    )
+    telegram_enabled = request.node.get_closest_marker("telegram") and request.config.getoption(
+        "--run-telegram"
+    )
+    if network_enabled or telegram_enabled:
+        return
+
+    original_getaddrinfo = socket.getaddrinfo
+    original_connect = socket.socket.connect
+    original_connect_ex = socket.socket.connect_ex
+
+    def guarded_getaddrinfo(host: object, *args: Any, **kwargs: Any) -> Any:
+        if _is_loopback_host(host) or _is_ip_literal(host):
+            return original_getaddrinfo(host, *args, **kwargs)
+        raise UnexpectedNetworkAccess(f"external DNS lookup blocked in offline test: {host!r}")
+
+    def guarded_connect(sock: socket.socket, address: Any) -> None:
+        if not isinstance(address, tuple) or _is_loopback_host(address[0]):
+            return original_connect(sock, address)
+        raise UnexpectedNetworkAccess(
+            f"external socket connection blocked in offline test: {address!r}"
+        )
+
+    def guarded_connect_ex(sock: socket.socket, address: Any) -> int:
+        if not isinstance(address, tuple) or _is_loopback_host(address[0]):
+            return original_connect_ex(sock, address)
+        raise UnexpectedNetworkAccess(
+            f"external socket connection blocked in offline test: {address!r}"
+        )
+
+    monkeypatch.setattr(socket, "getaddrinfo", guarded_getaddrinfo)
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
 
 
 @pytest.fixture

@@ -1,19 +1,23 @@
 """
 Plugin contract tests.
 
-Concrete plugin implementations must subclass TestSourcePluginContract /
-TestSinkPluginContract and override the fixtures - pytest will then run
-all contract checks automatically against the new plugin.
+Concrete plugin implementations can subclass TestSourcePluginContract /
+TestSinkPluginContract to share these templates. The executable checks in this
+module intentionally name each concrete implementation under test.
 
 The InMemoryStore tests at the bottom serve as reference implementations.
 """
 
+import json
 from abc import ABC, abstractmethod
 
 import pytest
 
 from job_ftch.application.contracts import PluginMetadata
+from job_ftch.domain import SourceKind
 from job_ftch.domain.models import JobRecord, RawItem
+from job_ftch.infrastructure.sources.local_fixture import LocalFixtureSource
+from job_ftch.sinks.null_sink import NullSink
 
 # ---------------------------------------------------------------------------
 # Abstract contract bases
@@ -60,28 +64,19 @@ class TestSinkPluginContract(ABC):
     async def test_emit_accepts_job_record(self):
         sink = self.make_sink()
         job = self.make_job_record()
-        # Must not raise
-        if hasattr(sink, "emit"):
-            await sink.emit(job)
+        assert hasattr(sink, "emit"), "Sink contract requires emit()"
+        assert await sink.emit(job) is None
 
     @pytest.mark.asyncio
     async def test_flush_is_idempotent(self):
         """Calling flush twice must produce the same observable state."""
         sink = self.make_sink()
         job = self.make_job_record()
-        if hasattr(sink, "emit"):
-            await sink.emit(job)
-        if hasattr(sink, "flush"):
-            await sink.flush()
-            state_after_first = getattr(sink, "_flushed_count", None) or getattr(
-                sink, "_buffer", None
-            )
-            await sink.flush()
-            state_after_second = getattr(sink, "_flushed_count", None) or getattr(
-                sink, "_buffer", None
-            )
-            # Second flush must not change observable state relative to first
-            assert state_after_first == state_after_second or state_after_second is None
+        assert hasattr(sink, "emit"), "Sink contract requires emit()"
+        assert hasattr(sink, "flush"), "Sink contract requires flush()"
+        assert await sink.emit(job) is None
+        assert await sink.flush() is None
+        assert await sink.flush() is None
 
 
 # ---------------------------------------------------------------------------
@@ -134,3 +129,48 @@ class TestPluginMetadata:
         for pt in valid_types:
             m = PluginMetadata(name="p", version="1.0.0", plugin_type=pt, description="d")
             assert m.plugin_type == pt
+
+
+@pytest.mark.asyncio
+async def test_local_fixture_source_satisfies_source_contract(tmp_path) -> None:
+    fixture_path = tmp_path / "items.json"
+    fixture_path.write_text(
+        json.dumps(
+            [
+                {
+                    "source_kind": "debug",
+                    "source_name": "fixture",
+                    "external_id": "item-1",
+                    "text": "A valid fixture item",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    items = [item async for item in LocalFixtureSource(fixture_path).fetch()]
+
+    assert len(items) == 1
+    item = items[0]
+    assert isinstance(item, RawItem)
+    assert item.source_kind is SourceKind.DEBUG
+    assert item.source_name == "fixture"
+    assert item.external_id == "item-1"
+    assert isinstance(item.text, str)
+
+
+@pytest.mark.asyncio
+async def test_null_sink_satisfies_sink_contract() -> None:
+    sink = NullSink()
+    job = JobRecord(
+        raw_item_id="raw-1",
+        source_kind=SourceKind.DEBUG,
+        source_name="contract",
+        description="Contract job",
+    )
+
+    assert hasattr(sink, "emit"), "Sink contract requires emit()"
+    assert hasattr(sink, "flush"), "Sink contract requires flush()"
+    assert await sink.emit(job) is None
+    assert await sink.flush() is None
+    assert await sink.flush() is None

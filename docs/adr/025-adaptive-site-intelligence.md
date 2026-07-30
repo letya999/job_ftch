@@ -1,6 +1,11 @@
+---
+title: "ADR-025: Adaptive Site Intelligence (Site Fingerprinting)"
+description: "* **Status:** ACCEPTED"
+updated: 2026-07-24
+---
 # ADR-025: Adaptive Site Intelligence (Site Fingerprinting)
 
-* **Status:** Accepted
+* **Status:** ACCEPTED
 * **Date:** 2026-06-13
 
 ## Context

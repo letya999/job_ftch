@@ -1,3 +1,10 @@
+<!-- Memory Metadata
+Last updated: 2026-06-17
+Last commit: f9fc8b8 fix(classifier): remove false-positive announcement tokens
+Scope: .serena/memories/
+Area: META
+-->
+
 # Memory Maintenance
 
 ## Discovery Model
@@ -8,8 +15,8 @@
   This memory should contain references to other memories covering major project domains.
   The referenced memories shall, in turn, shall contain references to even more specific memories, and so on.
   The depth of the graph shall depend on the project complexity.
-- Use topics/folders to group related memories in order to make the content structure explicit.
-  Folders can mirror project structure (e.g. modules like frontend/backend) or topics like debugging, architecture, etc.
+- Use topics/fnewers to group related memories in order to make the content structure explicit.
+  Fnewers can mirror project structure (e.g. modules like frontend/backend) or topics like debugging, architecture, etc.
 - Memory references must use a mem: prefix inside backticks, e.g. `mem:frontend/core`.
   The surrounding text should clearly indicate when to read the memory/which content to expect.
   The text should provide more precise guidance than the memory name alone, 
@@ -22,7 +29,7 @@ Dense agent notes, not prose docs. Prefer invariants, terse bullets.
 Avoid obvious context, rationale, and examples unless they prevent likely mistakes. 
 Keep guidance durable and generalizable, not task-local.
 
-## Add/update threshold
+## Add/update threshnew
 
 Add or update memories only with stable, non-obvious project conventions that avoid complex rediscovery in the future.
 Do not add: quick-read facts; generic language/framework knowledge; one-off task notes; volatile line-level details; behavior likely to change soon.

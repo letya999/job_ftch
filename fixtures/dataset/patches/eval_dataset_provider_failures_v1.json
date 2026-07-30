@@ -1,0 +1,1298 @@
+{
+  "original_dataset_hash": "6edff529151d5e23a1a0bf3bd563e86423cbaa78e21cae80553e4f8a67de5f06",
+  "patch_version": "provider-failure-unknown-v1",
+  "entries": [
+    {
+      "stable_id": "8739d0787cd8f0fe409e1035610b6bdd791f601c6a7caba523c0d049a2a19537",
+      "content_hash": "c6793007f4f9e766f9663aa15d49a00ae45615d46b0d65a342a8c7611e4d9ed6",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "9fa3725da3824cd4e271977193313a0a2998a220673a188530e423a99612d2e8",
+      "content_hash": "24e2922df7726516d5003f3f801298da5678f84b81d43f7e544239a7ee46fa04",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "5853644b5fcfe2fd5d25f69582305e0d00f276eb49e74544be12744e12ac62ef",
+      "content_hash": "b3028a45f49125ea51d500bad7773c6d04b539391955e05ff4f21a9b8980592e",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "6270690d6685ca9a9999063b63cae1ce29f5963d8099682d08da1bcf0bda35b2",
+      "content_hash": "4144f3d667cfbc4b3fc4188fdf747e6a082b2d1bdf6f08fbe733de55c5396e7d",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "2abb995d9c534fa5274b23dd515baa714e9ae0e77dfb99e5d96b53ebd9009ed4",
+      "content_hash": "0436ebdfcc01857e173e06bb0e96d83d331ba67235f357540472fa664fd2cda9",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "0debf41a71247d491883c692fad80a74f2cd55483d57cf7e3e813f4b64ded3d9",
+      "content_hash": "e334db9cadea5bff1c142f5b30d1f60c11608dc1fa564888aa160892690186a3",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "9f2872eefa44b215324d879ddd96bf5311b91b0a5ca0349f2f8a3583bb77a4a1",
+      "content_hash": "a00cfbd33b5f4cabdc456af0a5a452c0ee821ba116105c156e05ecfa2cf8adeb",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "99d9fc3b7c4ed4442c827b4be10320d076e8296b9c3ece165419c1430eb5166b",
+      "content_hash": "04c11363fd7a3e20dcf49571e0d353467f8947ce8b4a8567bf494712a9c14c64",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "e36105486c488e8495f368b28a5a3e78955eb9078eff8202509952d753178c7c",
+      "content_hash": "8db81104b2f37c99475b296ca29228a3ab264ad3d8ab98531f1ee50273b0de92",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "d451c02825717e31fcfead848e4613e3eadf9989419148da6bbe81bf7e313fa0",
+      "content_hash": "61d10622534bb4cf52319bdae065d63072cae27748b37d5ac17c39bcc56e1bc8",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "9e24adcf2da78960748b0d066882cefe9b3f542e17cc9ff7a2252e598b77b4b0",
+      "content_hash": "2c1ffd5cb38f1ad8d1ff1914d14dd08fee42b25a406442bbf3a07debf763a1ba",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "f98f1555861a331201ef037ef3233ff2abf4009e094e99a3c05331fcf611a8de",
+      "content_hash": "62ea689139d5fa70582533c0ab649605e397a0708006627822111c87af2b0499",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "b0c70fc6054a8bc27d483ca5f12fb0fd4558b209f2fcce091376e5a647943b31",
+      "content_hash": "c1e690689d8528b1ca5a8ae012f0c39ff26bc4b33e851ad67ecd95b1c23d593f",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "7310ac3c74d94d639929588af983e4b63f1bf9a933f4a74f8de41d65a6dd749a",
+      "content_hash": "9888df3fbfccb9e1e4d3354994feb41ea449483a7841d612c0ae470c5be9b70d",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "6714bc9fb1498439c16ae6ae9344ba3a4bab0f2c0ef11c35a443a807f0c0003b",
+      "content_hash": "1727bdd6954502b1ed714a8e75ece21265d3b51d8e3d46108c7d7a0968ba3738",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "38ce8246b19350f4ed08dafe0ff13c9da67332ada6d620ef917f5e902a2bdfde",
+      "content_hash": "7110bd6738285b4964269cfe7de67c087ae919599b74f77c318ee6612c76bc6d",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "cd75984ed0c3a4addac942fa0ed37ed4e5d2ed0f2aeab7fb9038de2afc9945cd",
+      "content_hash": "cc485d2fa5885f71b455688e220529982e08999b78645895653b4835744b0848",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "10fb3ffec73bdbc81f8c3ae2156d7b9eafea2ee9278b0b9f86a06c5f60d125a7",
+      "content_hash": "b1fe1cc89ce3d471f671df0780f1a554b07850dddf0f0e75ce7ecea78dea0702",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "99b8ab222bb956aa404775c7f44313d58f41c4730a6386de3035acc987598f38",
+      "content_hash": "9d9d4226a59e02a3d13870c846527e54a04214653fc93a7bd7dab0e4ad02adb2",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "d1715cb5e08245d4c5744e0d8e5d65185040efb51063883ea85831bc3fd4b581",
+      "content_hash": "3984f6d527a54ad973ec055bf4019a143f53ac214c48d5308676c4a72434822a",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "4055bdf78dcb9aa657d91c54d671f276dff5163bd6e9a798243358764d077383",
+      "content_hash": "3624af5bb507fb67f7c38dc95237ebc39e4a61d25ff08e5ee55762d6f211c7ac",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "d525846c80abd2561cf78702d7f4cef7142fc99d630cfada2f9b842cdc6fa4c3",
+      "content_hash": "45b8ffbd674ebbdb357313f6661062375c3e72021c4ae7072aa433b3d96aee5d",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "170439df9e98a1e614a36a209451c630288b3960ee17241b36fef56e9fcfd522",
+      "content_hash": "2ed5395b32a04bc0bda3844297117225917a42c3f298e9e1d0bf13368fbe2966",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "d4d83da57f9fb2be8a590db6aa1184f6dde99645257207d450855211369bb4ce",
+      "content_hash": "65d279151e201955c5c813de573beed83c1901aae3e3bcce9d1e7030430cd4b3",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "da63fa21d24fdafdc2164bbd6c5202f4f9220dc963ec4d42a41498fcefa77585",
+      "content_hash": "9d3cb72d35395e0b168e222e4997a1c457e444ad9f1da3ea1870e74081eb31f1",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "f85b4c3e409a17ceb1e4fdb1b34801c34b9dd54445fb889e4479edcb6cc4c658",
+      "content_hash": "1885c0358ef0139dd746997ee250182f108c981e8691af1bf086f76b2eee8dbe",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "43a53700dbe135d7ec702215acf04cd77d1be3f17e092ed8842e72e107b405e4",
+      "content_hash": "38984490f522e7b0dbdc8d06721dc3bcb97e286b1fbaac227c2be8988d115018",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "3f1be68503bf42279d82231fe0a10982562440c21291eba534d8417ca5f04833",
+      "content_hash": "5f79bd0357a829500bae561344fb6dfdf4498cd785ea75eeae81410ded0a066f",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "65cedf811a327e6bb2dd035119d7ec513760f43189f2116c6d9a95ebc25c40fa",
+      "content_hash": "acd660b47eb363d1a13fe960cb966b857b3a4a5d4645155cde5bc9e8092a4ae7",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "f90cf614a2bf6ee2bcf02eddf83d8bf5c48b3f1762834b4d8cd2530bfc77bad5",
+      "content_hash": "0fbd81007b5cb7d5b9bced3b157d74ace54628331efc87024686a7912ae48606",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "2fc11793a96d3f23bfea9cd1813cb3c83f75706fa8c67c866a3579453014097f",
+      "content_hash": "5cca1f134b47575c2f22c7d15989593eac35c4912bbf00ef2752478b0c4f94d2",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "ea71b5fc0766a981dc68aae3bb6eaabce4a7d768f1855951ce439a09ca4bd799",
+      "content_hash": "5e55d92a2a51764e86aeb25d7505bd2bbed6b20ad34ce24f82ca10a1c346d3e9",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "3d5ddf94663b81b6c2b7682b581abc7254151526d26cf196acff8534e1de71f4",
+      "content_hash": "1b95a564bca259ad507cf384646b239376bc5eadb024ce1345e916d876de90b8",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "c6d1265f8a0587c4a2e398354f80be833700df0fec80f56ff740d633a945456e",
+      "content_hash": "3c415e2ca65ea4dc168a174f82e36f59a8569367ea619a23a259fa09bd1e8f49",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "39fcd47cacc87b2838fedafc69a494d1f452921ac5777b785b7effd40c8658b8",
+      "content_hash": "11587a61b753d8f4fff1c614de6b050e263d8ff88503e2e8c60d822317c928af",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "b554a20579de7046bd5b378ae835539114fae8f502b709f571eddc1311a57f53",
+      "content_hash": "b9c9262ebd1ffc24c3ba25141cacd12095d5e437b01b5457bfc0f61bac181af8",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "9da4ecdb7dd2325df20734110d8ae1f1b79915ad640269bac3e3a2658490d7cf",
+      "content_hash": "22ab8a14d610dc536a631edef517587a6057b632dfd4474a0610414c4463e3cf",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "3285f598f648dcf19581e1b3eff9e964cf0b654c579ffdab1d57343717b79497",
+      "content_hash": "1d5f7e271ee67bb57c162292ec438ecabdbf4f68c62e8c0d2354e0add6a170c0",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "58b37d2462445237d3e1144e4d93c45742da942556b8b207f637977dd3cb8a7a",
+      "content_hash": "75b31c4662098789002448934b2bc2a1e4fa749b321f8089d42265b734a40cc2",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "8f3dc0f4c3b0108310bbc17b3b9484c4cd5510a666152960ddc87b0ca0a2dcc3",
+      "content_hash": "ca894ffc8698693ceec22eabd6871d2aca95f0b7526004ce84e4457cdf05bd2f",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "62e96e4ed30a9ac9e3a3afb6d17347d4baaf39a0c108c32ad624666df72ba2c1",
+      "content_hash": "a7d5a1718db3538b15ed9971c628e40e4752688e8890ad701c5464f4b3280b89",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "53adc0e013ef7e12aca0711246bf698772d6012c88313054ea5701237617ceea",
+      "content_hash": "653125b6e799112374cb2d587e0833eecefb93ec7262d2f7f072ef3ac6e563c6",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "a8357418d05a3bcc25c94b8b90bf4f5c0357f75125c9b3f75d65f7d7b204654c",
+      "content_hash": "0a8776406c3d95b222f7edfeeecb6ae86e434659dabb149534e3ea60fae5419a",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "44cc1167fd9bdff8d5dab7b33fcacaa8292b6a3090b98dd0c6eb76736911f014",
+      "content_hash": "85d3c5591689f7c40ed628c051955f6c4b38a4bd00fa64b105c71b94256eb78a",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "d87ee2707b8641d5bd96ab158ad18a0ebebfecf9df8f57dc6356a9149603518c",
+      "content_hash": "cc00e4f913f8d3f31814114f3140efd44e770b664b549196e421b98ea5432b13",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "41526606d9501bc2b20ce2d4ccd25c1b1f340685e333aef4da13ff1df908c437",
+      "content_hash": "a5457df3df4b054e08a41a5aa48a042b1aaf1c71f5878cffc4e17649f13bc5ab",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "695b997f800a271055eae03d2bb3b11725d1c38c5729b53817ff44ffe087347d",
+      "content_hash": "6b3fa1c90d508103ccf5fecb4ef13dd188b0e7e8fce9145cf52d62aeb0fe1f29",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "96aef6f15435f1b98c047ca0cede492e9e84dbdd3579b9035ae1ba5375969819",
+      "content_hash": "5b0b6f8605a18475c604ebea216813226fa351234bae8007e9cedd22bfc52a12",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "31c83436b011294631ddd7647192765f00a7c71bd5e000db447995bbb3aa4c7b",
+      "content_hash": "1f4d690eb1cb5cbf8ed10953b1127c036da17752212834ececf0064943e04239",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "307aac959bdff9f95676e1e56d65c630d360465a23cb650be6e8af94d1699541",
+      "content_hash": "5b0b6f8605a18475c604ebea216813226fa351234bae8007e9cedd22bfc52a12",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "f6ee29861be94680def0e3592bf696d3f5941cfc21561661dd904af3b84f1955",
+      "content_hash": "12a538e6e9e45bc603e1cdb57597abd7b9872c19ea50d6a10de2f8c5c6a958bc",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "650a4b87b0cceaf3e38aa47ebe880735a64a6b202eed532460f625101f5e1250",
+      "content_hash": "499b7eb4039e50b4249e8f6f00472d6be4b1402b05d496f7b51b5ef467baeb27",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "7203a28ec0880ba6b933c9372e93fd76a663df9b03f5f2193f721ae16368b7de",
+      "content_hash": "aea2785d42b83e10a9e8c6ed9c702cf347ebe467d5dd4b6f3e50385bccbb2130",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "4c1112642462271afa29a00528045ed72e336a529081cb3d32b8ef0b45b4e6bc",
+      "content_hash": "1db7e297c901045c3220932540655d179edeb2f3771f9c7bfe4f32fc4a71ef98",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "e1240234b3dbfe001c53f24eb222d9ecff3e1200d67d1cc763f8669bb263bc4a",
+      "content_hash": "3d866716fe0cc5b4990f014104b5b8d74a560ad3163dc0705f71ad51bd0ea9af",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "f64a9daa630bb30a29422d0df5bdfa5d19a252b14b924ff38c1ae80fbefd228b",
+      "content_hash": "0247f0e400b309f5290c34163622a9f40848d35d2da483630af4242b9b7c23ee",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "19586d43729824a299f4376f48d2fb5d770e5dc0b851c1c45d1fc09281d595b6",
+      "content_hash": "57b7fd0ffaa68c9447eb087bd8dbaeb03d3eb52ba3581ef8d902f8efab1ce926",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "85a8fbc19c9fceb2de947d5447f3daa033ab9ef34de49ad35d3f6a8c48773a3e",
+      "content_hash": "82f7cf7c2ac20c1523b74cc76f212d5ce7cb70eecb093c3fec9a34a2e290dd0f",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "37c7c25c26133b045190f39867c42e5eb4bc0154854ea69ba4b81198271c4ba3",
+      "content_hash": "9de5cec16b993d72f3e4cb5ad6a82397c7383a143872d06498bccf828910b1b3",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "6aad1397067919630158f4c5cb405bb4303f241b7ba32f28f7a7209b45e59626",
+      "content_hash": "dd9e296ff7cc3948ed0a493f425fb7c020d1c801dda4c599174ddd4b2b56a332",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "a04f0822707095c6ad9bcb529b6f49b317f2f82ce9bbbf0e18d6504374c83646",
+      "content_hash": "5d487799afdcb8d7737185653ca84669942453f97425b1f27f7ad61c0e6db9ea",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "225b2f2589f647353bd8ff2cf910345e34ea0646c15963147abd0e5652bfb80e",
+      "content_hash": "7ed72d08649e9c81a537de1b98a666e6704654a2a5c62a10041476761b2f907b",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "099246a47722f2c62b163de95704722dee470a773edd74770e016054f1eec941",
+      "content_hash": "03f9d3cc0c8de6bec968af03797b8f62bf3db2ecbb1922237e0075d55e15a969",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "891c2cbd25c4bd1e3fc639a4703c91a12128dcd48e6624610f86df4d1b5c3872",
+      "content_hash": "39f57ec01e1c165ba693aa313396ff3b92b0923c76beae0f4ae526cf739f8d69",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "f073b099151b9ddc356ff1eecc04690ed8c9d0f284d00b67c9476cebb6667cd2",
+      "content_hash": "39f57ec01e1c165ba693aa313396ff3b92b0923c76beae0f4ae526cf739f8d69",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "b2a26bcb94c2e4ca6065056b8e8724625f1ef60683f010549c438d1aa6847b22",
+      "content_hash": "4363443c639ffc54aeb9eb1a768f141d51ef69a9865a6a072fc07b7a4902f850",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "c63e6717ce5207b2bac2620fbc9a548e4d244b2e89003ec219f9c0d823c5a6e5",
+      "content_hash": "a338bf743e63e52d2e2800a896766cdbd7cbfec006aaf13997b915d2a8aae577",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "bf838575417b32940a66e5a1c97d465939d3db6843519c1ec5b7bddfed57a679",
+      "content_hash": "63563af7e648219e9f48b478b8278f5b0595aaa651d84f792c519b730cb1d4af",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "1595b184f09c7d8d9d5bc192de6af1a28650ac8a1828863fc7b40210910dd614",
+      "content_hash": "da5f249d2b10022dd71aa5719281db3fe4fbae9d501d38ea07b031d407f197a7",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "035b1552c49e550cf13c83f33dbd065588c3ecba1b09a0665d645dd3c02cce23",
+      "content_hash": "e6a6445347e5e1b56491281b4120513a03c827691814297d2971cd35a8608d99",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "947a16cdbb1e2c2f74c63d243a9b60d5e1793a02f8661c827c5e3dd1db4ce742",
+      "content_hash": "d02a442be2febdd518a32b98324fa8fa0362283f5ca5821b03f61a62383a98d8",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "4ee88580bae2c464fcab73e541b651bcbb79415835c20d9fea5547a341dbecb3",
+      "content_hash": "9cfd384a5c7884d61baaab1973698ef4dc8576b2e530b49a6015718a2ebfc268",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "ac9c490fea17ab98a92a7020e620f0d6be0677de7441b4c763320ec4e2efb463",
+      "content_hash": "e28b56cde76d53c940c9bd4b8919898d6f488a5adc199df327a24df65f956c0b",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "c9cb7de66a204859400c71bd529171cb8df697bbd6476cb09b881ef7419463e3",
+      "content_hash": "10eb7ece381ade9bae2d5e015a855eb81312441d7dd9cb345489db3bd3c4f771",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "a35be74da5861d9cbede2c54b95e3733a15ae1f222ac76c230f6acd81f11f112",
+      "content_hash": "e3ddfc534d64a64ac12df8b8e33882ad59f73f8f2a59551d9c5c516ca4892309",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "9c6f3627d1452becf3cb9c60f7fc5e3587db58efdc3b4806e45f9071c2218478",
+      "content_hash": "a34dfcc85b64aedbd36ac1221555df5b4f5d14a79955511ddaf2d84e1781da5a",
+      "old": {
+        "is_job": 0,
+        "relevant": 0
+      },
+      "new": {
+        "is_job": "unknown",
+        "relevant": "unknown"
+      },
+      "reason": "Provider failure is unknown evidence, never a negative label.",
+      "status": "deterministic_repair",
+      "repair_kind": "provider_failure_label_unknown",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    }
+  ]
+}

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from opentelemetry import trace
+
 from job_ftch.domain import (
     JobRecord,
     MatchDecision,
@@ -107,21 +109,71 @@ class MultiProfileMatchNode:
         self._catalog = catalog
 
     async def process(self, item: JobRecord) -> JobRecord | None:
-        scores = tuple(self._score_profile(item, profile) for profile in self._catalog.profiles)
-        best_match = max(scores, key=lambda score: score.final_score, default=None)
-        best = best_match.final_score if best_match is not None else 0.0
-        return item.model_copy(
-            update={
-                "profile_scores": scores,
-                "relevance_score": best,
-                "best_profile_id": best_match.profile_id if best_match is not None else None,
-                "best_score": best if best_match is not None else None,
-                "routing_decision": best_match.decision if best_match is not None else None,
-            }
-        )
+        tracer = trace.get_tracer("job_ftch.nodes")
+        with tracer.start_as_current_span("match_scoring.score") as span:
+            span.set_attribute("job_ftch.node", "MultiProfileMatchNode")
+            span.set_attribute("job_ftch.node.type", "scoring")
+            span.set_attribute("job_ftch.profile_count", len(self._catalog.profiles))
 
-    def _score_profile(self, item: JobRecord, profile: SearchProfile) -> ProfileMatchScore:
-        hard_pass = self._passes_hard_constraints(item, profile)
+            if not self._catalog.profiles:
+                result = item.model_copy(
+                    update={
+                        "profile_scores": (),
+                        "relevance_score": 1.0,
+                        "best_profile_id": None,
+                        "best_score": None,
+                    }
+                )
+                return result
+
+            constraint_states = {
+                profile.profile_id: self._hard_constraint_states(item, profile)
+                for profile in self._catalog.profiles
+            }
+            scores = tuple(
+                self._score_profile(
+                    item,
+                    profile,
+                    hard_pass=all(
+                        state != "contradicted"
+                        for state in constraint_states[profile.profile_id].values()
+                    ),
+                )
+                for profile in self._catalog.profiles
+            )
+            # Profiles own their own calibrated thresholds. A lower raw score
+            # can be an ACCEPT for one profile while the global maximum is
+            # merely REVIEW for another; catalog policy is any ACCEPT, then
+            # any REVIEW, then all confidently negative.
+            accepted = [score for score in scores if score.decision is MatchDecision.ACCEPT]
+            reviewable = [score for score in scores if score.decision is MatchDecision.REVIEW]
+            selected = accepted or reviewable or list(scores)
+            best_match = max(selected, key=lambda score: score.final_score, default=None)
+            best = best_match.final_score if best_match is not None else 0.0
+
+            if best_match is not None:
+                span.set_attribute("job_ftch.best_score", best)
+                span.set_attribute("job_ftch.best_profile_id", best_match.profile_id)
+
+            return item.model_copy(
+                update={
+                    "profile_scores": scores,
+                    "relevance_score": best,
+                    "best_profile_id": best_match.profile_id if best_match is not None else None,
+                    "best_score": best if best_match is not None else None,
+                    "metadata": {
+                        **item.metadata,
+                        "multi_profile_policy": "per_profile_v1",
+                        "hard_constraint_states": constraint_states,
+                    },
+                }
+            )
+
+    def _score_profile(
+        self, item: JobRecord, profile: SearchProfile, *, hard_pass: bool | None = None
+    ) -> ProfileMatchScore:
+        if hard_pass is None:
+            hard_pass = self._passes_hard_constraints(item, profile)
         role_text = "\n".join(
             part
             for part in (
@@ -182,8 +234,7 @@ class MultiProfileMatchNode:
         vacancy_type_score = 1.0 if item.post_type.value == "job_posting" else 0.0
 
         weighted = (
-            profile.weights.title * title_score
-            + profile.weights.semantic_role * semantic_role_score
+            profile.weights.semantic_role * semantic_role_score
             + profile.weights.skills * skills_score
             + profile.weights.domain * domain_score
             + profile.weights.seniority * seniority_score
@@ -237,10 +288,34 @@ class MultiProfileMatchNode:
         )
 
     def _passes_hard_constraints(self, item: JobRecord, profile: SearchProfile) -> bool:
-        if profile.allowed_languages and item.language not in profile.allowed_languages:
-            return False
-        if profile.employment_types and item.employment_type not in profile.employment_types:
-            return False
+        return all(
+            state != "contradicted"
+            for state in self._hard_constraint_states(item, profile).values()
+        )
+
+    def _hard_constraint_states(self, item: JobRecord, profile: SearchProfile) -> dict[str, str]:
+        """Return evidence states, never treating absence as contradiction."""
+        states: dict[str, str] = {}
+        # Permissive by default: the bot only sets ``allowed_languages``
+        # when the user ran a PDF resume through LLM extraction. A
+        # text-only ``/positive`` run does not touch it, and a missing
+        # allow-list must not silently block otherwise-relevant jobs.
+        if (
+            profile.allowed_languages
+            and item.language not in profile.allowed_languages
+            and item.language != "unknown"
+        ):
+            states["language"] = "contradicted"
+        elif profile.allowed_languages:
+            states["language"] = "unknown" if item.language == "unknown" else "present"
+        if profile.employment_types:
+            states["employment_type"] = (
+                "unknown"
+                if item.employment_type.value == "unknown"
+                else "present"
+                if item.employment_type in profile.employment_types
+                else "contradicted"
+            )
         if (
             profile.blocked_companies
             and item.company is not None
@@ -249,7 +324,9 @@ class MultiProfileMatchNode:
                 for company in profile.blocked_companies
             )
         ):
-            return False
+            states["company"] = "contradicted"
+        elif profile.blocked_companies:
+            states["company"] = "unknown" if item.company is None else "present"
         if (
             profile.blocked_domains
             and item.domain is not None
@@ -257,16 +334,32 @@ class MultiProfileMatchNode:
                 domain.casefold() in item.domain.casefold() for domain in profile.blocked_domains
             )
         ):
-            return False
+            states["domain"] = "contradicted"
+        elif profile.blocked_domains:
+            states["domain"] = "unknown" if item.domain is None else "present"
         if (
             profile.seniority_min is not Seniority.UNKNOWN
-            and _SENIORITY_ORDER.get(item.seniority, -1) < _SENIORITY_ORDER[profile.seniority_min]
+            or profile.seniority_max is not Seniority.UNKNOWN
         ):
-            return False
-        return not (
-            profile.seniority_max is not Seniority.UNKNOWN
-            and _SENIORITY_ORDER.get(item.seniority, -1) > _SENIORITY_ORDER[profile.seniority_max]
-        )
+            if item.seniority is Seniority.UNKNOWN:
+                states["seniority"] = "unknown"
+            elif (
+                profile.seniority_min is not Seniority.UNKNOWN
+                and _SENIORITY_ORDER.get(item.seniority, -1)
+                < _SENIORITY_ORDER[profile.seniority_min]
+            ) or (
+                profile.seniority_max is not Seniority.UNKNOWN
+                and _SENIORITY_ORDER.get(item.seniority, -1)
+                > _SENIORITY_ORDER[profile.seniority_max]
+            ):
+                states["seniority"] = "contradicted"
+            else:
+                states["seniority"] = "present"
+        if profile.required_skills:
+            explicit = {skill.canonical_name.casefold() for skill in item.skills_explicit}
+            required = {skill.canonical_name.casefold() for skill in profile.required_skills}
+            states["required_skills"] = "present" if required <= explicit else "unknown"
+        return states
 
     def _seniority_score(self, seniority: Seniority, profile: SearchProfile) -> float:
         if seniority is Seniority.UNKNOWN:

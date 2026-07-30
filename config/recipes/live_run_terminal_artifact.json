@@ -1,0 +1,80 @@
+{
+  "schema_version": "live-run-terminal-artifact/v1",
+  "source_run_id": "1186fce093494a2ab1ad4215521e29eb",
+  "run_report": "artifacts/release/prod_run_live_17_clean_20260726.json",
+  "manual_label_scope": "terminal decision set only: ACCEPT jobs + REVIEW jobs + REJECT job; excludes prefilter/dedup/sanitize drops",
+  "started_at": "2026-07-26 15:27:00.611953+00:00",
+  "finished_at": "2026-07-26 15:29:43.278360+00:00",
+  "wall_seconds": 162.666407,
+  "summary_counts": {
+    "fetched": 758,
+    "sanitized": 763,
+    "triaged": 31,
+    "extracted": 31,
+    "review": 20,
+    "rejected": 1,
+    "emitted": 10,
+    "dropped": 733,
+    "deferred": 3,
+    "source_partial": true
+  },
+  "source_failures": [
+    "career_site:tbank_it",
+    "career_site:yandex_jobs_ml"
+  ],
+  "llm": {
+    "usage_requests": 48,
+    "relevance_calls": 34,
+    "relevance_cache_hits": 0,
+    "tokens_in": 116731,
+    "cached_tokens_in": 14336,
+    "tokens_out": 17152,
+    "llm_latency_ms": 190605,
+    "cost_usd": 0.054975509999999984,
+    "cost_is_complete": true
+  },
+  "manual_counts": {
+    "TP": 10,
+    "TN": 17,
+    "FP": 0,
+    "FN": 4
+  },
+  "metrics": {
+    "precision": 1.0,
+    "recall": 0.7142857142857143,
+    "f1": 0.8333333333333333
+  },
+  "labels": [
+    {"index": 1, "pipeline_bucket": "ACCEPT", "manual_outcome": "TP", "title": "AI-генералист", "source": "rabota_sber_ru"},
+    {"index": 2, "pipeline_bucket": "ACCEPT", "manual_outcome": "TP", "title": "Tech Lead DS/AI", "source": "rabota_sber_ru"},
+    {"index": 3, "pipeline_bucket": "ACCEPT", "manual_outcome": "TP", "title": "Senior Machine Learning Engineer (AI)", "source": "rabota_sber_ru"},
+    {"index": 4, "pipeline_bucket": "ACCEPT", "manual_outcome": "TP", "title": "Machine Learning Engineer, CX Intelligence", "source": "remote_ai_jobs"},
+    {"index": 5, "pipeline_bucket": "ACCEPT", "manual_outcome": "TP", "title": "AI Engineer", "source": "remote_ai_jobs"},
+    {"index": 6, "pipeline_bucket": "ACCEPT", "manual_outcome": "TP", "title": "Head of AI", "source": "ml_jobs_kz"},
+    {"index": 7, "pipeline_bucket": "ACCEPT", "manual_outcome": "TP", "title": "Mid/Senior AI Engineer", "source": "remote_ai_jobs"},
+    {"index": 8, "pipeline_bucket": "ACCEPT", "manual_outcome": "TP", "title": "Senior Machine Learning Engineer", "source": "hh_kz_ml"},
+    {"index": 9, "pipeline_bucket": "ACCEPT", "manual_outcome": "TP", "title": "Middle machine learning engineer", "source": "hh_kz_ml"},
+    {"index": 10, "pipeline_bucket": "ACCEPT", "manual_outcome": "TP", "title": "Senior Python Developer (AI)", "source": "ai_engineers_guild"},
+    {"index": 11, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Прикладной администратор", "source": "rabota_sber_ru"},
+    {"index": 12, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Senior frontend разработчик", "source": "rabota_sber_ru"},
+    {"index": 13, "pipeline_bucket": "REVIEW", "manual_outcome": "FN", "title": "Deep Learning/CUDA Engineer (GigaChat)", "source": "rabota_sber_ru"},
+    {"index": 14, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Junior Python (стажер)", "source": "rabota_sber_ru"},
+    {"index": 15, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Системный аналитик (команда Pro DOC)", "source": "rabota_sber_ru"},
+    {"index": 16, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Senior Golang-разработчик", "source": "rabota_sber_ru"},
+    {"index": 17, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Java разработчик IAM", "source": "rabota_sber_ru"},
+    {"index": 18, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Java/Kotlin разработчик (Сбербанк Онлайн)", "source": "rabota_sber_ru"},
+    {"index": 19, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Junior Java (стажировка)", "source": "rabota_sber_ru"},
+    {"index": 20, "pipeline_bucket": "REVIEW", "manual_outcome": "FN", "title": "Senior CV Data Scientist (SberAI)", "source": "rabota_sber_ru"},
+    {"index": 21, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Junior Python-разработчик (стажировка)", "source": "rabota_sber_ru"},
+    {"index": 22, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Fullstack-разработчик (SberESM)", "source": "rabota_sber_ru"},
+    {"index": 23, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Java-разработчик (Продуктовая фабрика)", "source": "rabota_sber_ru"},
+    {"index": 24, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Java-разработчик (B2C)", "source": "rabota_sber_ru"},
+    {"index": 25, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Backend + DevOps Engineer", "source": "geekjob_ru"},
+    {"index": 26, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Senior Backend + DevOps Engineer (TypeScript/Node.js)", "source": "geekjob_ru"},
+    {"index": 27, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Presale-архитектор ИИ-платформы в AI VK, Москва", "source": "vk_careers"},
+    {"index": 28, "pipeline_bucket": "REVIEW", "manual_outcome": "FN", "title": "Senior Machine Learning Engineer", "source": "remote_ai_jobs"},
+    {"index": 29, "pipeline_bucket": "REVIEW", "manual_outcome": "TN", "title": "Руководитель клиентских AI-решений в AI Space в VK Tech, Москва", "source": "vk_careers"},
+    {"index": 30, "pipeline_bucket": "REVIEW", "manual_outcome": "FN", "title": "Machine Learning Engineer", "source": "remote_ai_jobs"},
+    {"index": 31, "pipeline_bucket": "REJECT", "manual_outcome": "TN", "title": "Системный аналитик (VoIP Platform)", "source": "rabota_sber_ru"}
+  ]
+}

@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import defusedxml.ElementTree as ET
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
 from job_ftch.domain.site_models import (
     DiscoveredPostingPayload,
     MonitorResult,
@@ -120,9 +120,11 @@ async def discover(
     try:
         resp = await client.get(url, follow_redirects=True)
         if resp.status_code != 200:
+            logger.warning("personio.discover.http_error", url=url, status=resp.status_code)
             return []
         root = ET.fromstring(resp.text)
-    except Exception:
+    except Exception as exc:
+        logger.warning("personio.discover.failed", url=url, error=str(exc))
         return []
 
     positions = root.findall(".//position")
@@ -132,6 +134,8 @@ async def discover(
         if parsed:
             jobs.append(parsed)
 
+    if not jobs:
+        return MonitorResult(metadata_updates={"confirmed_empty": True})
     if len(jobs) > MAX_JOBS:
         return truncated_rich_result(jobs)
     return jobs
@@ -154,4 +158,23 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     return None
 
 
-register_monitor("personio", discover, cost=10, rich=True, can_handle=can_handle)
+register_monitor(
+    "personio",
+    discover,
+    cost=10,
+    rich=True,
+    can_handle=can_handle,
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "personio",
+        url_patterns=(r"[\w-]+\.jobs\.personio\.\w+",),
+        has_publication_time=True,
+        has_stable_id=True,
+        has_update_time=True,
+        can_detect_freshness_without_snapshot=True,
+        can_filter_since_yesterday=True,
+        item_level_dates=True,
+        requires_full_snapshot=False,
+        rationale="Personio positions API returns stable IDs and createdAt timestamps.",
+    ),
+)

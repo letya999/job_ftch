@@ -7,7 +7,14 @@ import structlog
 from pydantic import AnyHttpUrl
 
 from job_ftch.application.watermark import IncrementalCursor
-from job_ftch.domain import RawItem, SourceKind
+from job_ftch.domain import (
+    AcquisitionTransport,
+    ObservationKind,
+    RawItem,
+    SourceFamily,
+    SourceIdentity,
+    SourceKind,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -67,8 +74,12 @@ class OfficialAPISource:
         url = f"{self.spec.base_url}{self.spec.jobs_endpoint}"
 
         from job_ftch.config import get_settings
+        from job_ftch.infrastructure.network.ssrf_guard import SSRFGuardedTransport
 
-        async with httpx.AsyncClient(timeout=get_settings().api_timeout_seconds) as client:
+        async with httpx.AsyncClient(
+            timeout=get_settings().api_timeout_seconds,
+            transport=SSRFGuardedTransport(httpx.AsyncHTTPTransport()),
+        ) as client:
             # Simple pagination handling
             # (In a real implementation we would loop and handle cursor/offset/link)
             try:
@@ -80,7 +91,7 @@ class OfficialAPISource:
                 items = (
                     data
                     if isinstance(data, list)
-                    else (data.get("jobs") or data.get("objects") or [])
+                    else (data.get("items") or data.get("jobs") or data.get("objects") or [])
                 )
 
                 for item in items:
@@ -132,7 +143,20 @@ class OfficialAPISource:
             external_id=str(item.get("id") or mapped_data.get("external_id") or ""),
             url=mapped_data.get("url") or item.get("url") or item.get("absolute_url"),
             text=text,
-            metadata=item,
+            source_identity=SourceIdentity(
+                family=SourceFamily.ATS_API,
+                observation_kind=ObservationKind.STRUCTURED_RECORD,
+                transport=AcquisitionTransport.HTTP,
+                adapter=self.source_name or "api",
+                parser_version=str(item.get("parser_version") or "api-v1"),
+                legacy_kind=str(self.source_kind),
+            ),
+            metadata={
+                **item,
+                "source_family": SourceFamily.ATS_API.value,
+                "observation_kind": "structured_record",
+                "extraction_cost_hint": "structured",
+            },
         )
 
     def _get_by_path(self, data: dict[str, Any], path: str) -> Any:

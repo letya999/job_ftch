@@ -29,6 +29,8 @@ class RoutingSink[ItemT]:
                 return
         if self._fallback is not None:
             await self._fallback.emit(item)
+            return
+        raise RuntimeError("RoutingSink received an item that matches no configured route")
 
     async def flush(self) -> None:
         seen: list[object] = [sink for _, sink in self._routes]

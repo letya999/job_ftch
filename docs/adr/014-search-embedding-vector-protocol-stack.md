@@ -1,3 +1,8 @@
+---
+title: "014 — Search, embedding, and vector protocol stack"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 014 — Search, embedding, and vector protocol stack
 
 **Status**: ACCEPTED

@@ -1,0 +1,11 @@
+name: current_compat
+version: "1.0.0"
+metadata: {purpose: synthetic_builder_parity, production_default: false}
+nodes:
+  - {id: sanitize, node: sanitize, effect: gate}
+  - {id: snapshot, node: snapshot_filter, effect: gate, after: [sanitize]}
+  - {id: context, node: source_context, effect: observe, after: [snapshot]}
+  - {id: ontology, node: ontology_snapshot, effect: observe, after: [context]}
+  - {id: extraction, node: extraction, effect: observe, after: [ontology]}
+  - {id: normalization, node: job_normalization, effect: observe, after: [extraction]}
+  - {id: decision, node: evidence_decision, effect: terminal_decision, after: [normalization]}

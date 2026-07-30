@@ -1,3 +1,8 @@
+---
+title: "027 — Runtime candidate profile overlay in tenant store"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 027 — Runtime candidate profile overlay in tenant store
 
 **Status**: ACCEPTED

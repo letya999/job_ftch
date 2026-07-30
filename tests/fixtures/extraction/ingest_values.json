@@ -1,0 +1,19 @@
+{
+  "dates": [
+    {"input": "2 days ago", "expected": "2026-07-18T12:00:00+00:00"},
+    {"input": "вчера", "expected": "2026-07-19T12:00:00+00:00"},
+    {"input": "2026-07-01", "expected": "2026-07-01T00:00:00+00:00"}
+  ],
+  "compensation": [
+    {"input": "$50k-70k", "currency": "USD", "min": 50000, "max": 70000},
+    {"input": "от 100 000 ₽", "currency": "RUB", "min": 100000, "max": null},
+    {"input": "EUR 80 000 to 95 000", "currency": "EUR", "min": 80000, "max": 95000}
+  ],
+  "api_payload": {
+    "data": {
+      "jobs": [
+        {"title": "Senior Python Engineer", "url": "/jobs/42", "location": "Remote"}
+      ]
+    }
+  }
+}

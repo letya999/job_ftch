@@ -1,0 +1,89 @@
+schema_version: "legacy-baseline/v1"
+name: historical_86bc192
+purpose: reproduce_best_legacy_relevance_pipeline
+authority:
+  source_commit: 86bc192e9ec666427747bdf112e892fee95f051c
+  checkout: C:\Users\User\a_projects\job_ftch_historical_86bc
+  builder: job_ftch.application.builder:build_nodes
+  evaluator: scripts/eval/run_pipeline_eval.py
+  note: >-
+    This manifest is executed only by the source checkout above. It is not a
+    current graph-executor manifest: the current compiler deliberately rejects
+    the legacy RoutingNode/aggregation ordering.
+benchmark:
+  dataset: fixtures/dataset/eval_dataset.jsonl
+  sample: 400
+  seed: 42
+  profile_source: tenant
+  tenant_id: ai_jobs
+  user_id: "480637186"
+  state_mode: memory
+runtime:
+  store_backend: postgres
+  job_group_store_backend: postgres
+  llm_backend: openai
+  models:
+    extraction: gpt-4.1-nano
+    relevance: gpt-4.1-mini
+    presentable: gpt-4.1-nano
+  shots:
+    backend: qdrant
+    source: database_tenant_scope
+    collection: profile_shots_bgem3
+    bgem3_enabled: true
+    model: BAAI/bge-m3
+    relevance_backend: shots
+    relevance_shot_threshold: 0.05
+  budgets:
+    extraction_max_calls: null
+    relevance_max_calls: 500
+    presentable_enabled: true
+    presentable_max_calls: 50
+  routing:
+    accept_threshold: 0.55
+    review_threshold: 0.50
+    quality_override_threshold: 0.60
+  relevance_window:
+    low_threshold: 0.20
+    high_threshold: 0.55
+pipeline:
+  sanitize_first: true
+  nodes:
+    - {id: sanitize, implementation: SanitizeNode, effect: gate}
+    - {id: source_context, implementation: SourceContextNode, effect: observe}
+    - {id: garbage_filter, implementation: GarbageFilterNode, effect: gate}
+    - {id: post_type, implementation: PostTypeClassificationNode, effect: observe}
+    - {id: hard_filter, implementation: HardFilterNode, effect: gate}
+    - {id: dedup, implementation: DedupNode, effect: gate, params: {defer_commit: false}}
+    - {id: bgem3, implementation: BgeMThreeNode, effect: observe, params: {max_chars: 2048}}
+    - {id: semantic_prefilter, implementation: SemanticPrefilterNode, effect: gate, params: {dense_margin_threshold: 0.05}}
+    - {id: extraction, implementation: ExtractionNode, effect: observe}
+    - {id: extraction_validation, implementation: ExtractionValidationNode, effect: gate}
+    - {id: normalization, implementation: TitleCompanyNormalizationNode, effect: observe}
+    - {id: skill_normalization, implementation: SkillNormalizationNode, effect: observe}
+    - {id: location_work_mode, implementation: LocationWorkModeNormalizationNode, effect: observe}
+    - {id: compensation, implementation: CompensationParsingNode, effect: observe}
+    - {id: lifecycle, implementation: JobLifecycleNode, effect: observe}
+    - {id: aggregation, implementation: JobAggregationNode, effect: side_effect}
+    - {id: embedding, implementation: EmbeddingNode, effect: observe, enabled_from: embedding_enabled}
+    - {id: profile_match, implementation: MultiProfileMatchNode, effect: observe}
+    - {id: parallel_scoring, implementation: ParallelScoringNode, effect: observe, params: {margin_k: 20}}
+    - {id: is_job, implementation: IsJobNode, effect: observe}
+    - {id: risk, implementation: RiskScoringNode, effect: observe}
+    - {id: quality, implementation: QualityScoringNode, effect: observe}
+    - {id: job_validation, implementation: JobValidationNode, effect: gate, params: {min_relevance_score: 0.05, llm_band_floor: 0.20}}
+    - {id: llm_relevance, implementation: LLMRelevanceClassificationNode, effect: observe}
+    - {id: presentable, implementation: PresentableTextNode, effect: observe}
+    - {id: routing, implementation: RoutingNode, effect: terminal_decision}
+    - {id: final_group_update, implementation: _FinalGroupUpdateNode, effect: side_effect}
+integrity:
+  forbid_current_graph_executor: true
+  forbid_current_evidence_nodes: [OntologySnapshotNode, CandidateSegmentationNode, CompletenessGateNode, EvidenceDecisionNode]
+  require_bgem3: true
+  require_non_empty_qdrant_shots: true
+  expected_build_nodes:
+    - BgeMThreeNode
+    - ParallelScoringNode
+    - LLMRelevanceClassificationNode
+    - PresentableTextNode
+    - RoutingNode

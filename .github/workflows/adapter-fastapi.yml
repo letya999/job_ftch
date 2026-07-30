@@ -3,12 +3,12 @@ name: adapter-fastapi
 on:
   push:
     paths:
-      - "adapters/fastapi/**"
+      - "job_ftch/adapters/fastapi/**"
       - "job_ftch/**"
       - "pyproject.toml"
   pull_request:
     paths:
-      - "adapters/fastapi/**"
+      - "job_ftch/adapters/fastapi/**"
       - "job_ftch/**"
 
 jobs:
@@ -22,6 +22,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Lint adapter
-        run: uvx ruff check adapters/fastapi
+        run: uvx ruff check job_ftch/adapters/fastapi
       - name: Build image
-        run: docker build -f adapters/fastapi/Dockerfile -t job-ftch-fastapi .
+        run: docker build -f job_ftch/adapters/fastapi/Dockerfile -t job-ftch-fastapi .

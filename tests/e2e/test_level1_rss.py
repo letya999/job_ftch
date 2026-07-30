@@ -29,7 +29,7 @@ def habr_ds_spec() -> RSSFeedSourceSpec:
 
 
 @pytest.mark.network
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_habr_ml_rss_returns_items(
     habr_ml_spec: RSSFeedSourceSpec, in_memory_store, null_auth
 ) -> None:
@@ -55,7 +55,7 @@ async def test_habr_ml_rss_returns_items(
 
 
 @pytest.mark.network
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_habr_ds_rss_returns_items(
     habr_ds_spec: RSSFeedSourceSpec, in_memory_store, null_auth
 ) -> None:
@@ -73,7 +73,7 @@ async def test_habr_ds_rss_returns_items(
 
 
 @pytest.mark.network
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_habr_rss_incremental_dedup(
     habr_ml_spec: RSSFeedSourceSpec, in_memory_store, null_auth
 ) -> None:
@@ -100,7 +100,7 @@ async def test_habr_rss_incremental_dedup(
     assert len(state) >= len(first_items)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_habr_rss_fixture_roundtrip(
     habr_ml_spec: RSSFeedSourceSpec, in_memory_store, habr_ml_rss_xml: str, monkeypatch, null_auth
 ) -> None:
