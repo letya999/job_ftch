@@ -150,6 +150,7 @@ def _default_layout() -> CardLayout:
             link_labels={
                 "career_site": "открыть вакансию",
                 "telegram_channel": "открыть пост",
+                "telegram_group": "открыть пост",
                 "default": "открыть",
             },
         ),
