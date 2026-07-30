@@ -1,0 +1,80 @@
+version: 1
+
+blocks:
+  - field: role
+    style: bold
+    max_len: 90
+  - field: company
+    omit_if_empty: true
+  - field: conditions
+    join: " · "
+    order: [location, salary]
+    max_len: 120
+  - spacer: true
+  - field: summary
+    max_len: 180
+    omit_if_empty: true
+  - field: key_requirements
+    prefix: "Нужно: "
+    max_len: 160
+    omit_if_empty: true
+  - field: stack
+    prefix: "Стек: "
+    join: " · "
+    max_len: 200
+    omit_if_empty: true
+
+footer:
+  template: "{source_label} {link}"
+  auto_mark: ""
+  link_labels:
+    career_site: "открыть вакансию"
+    telegram_channel: "открыть пост"
+    telegram_group: "открыть пост"
+    default: "открыть"
+
+formatting:
+  leading_emoji: false
+  italic: false
+  currency_symbols:
+    RUB: "₽"
+    USD: "$"
+    EUR: "€"
+    GBP: "£"
+    KZT: "₸"
+    UAH: "₴"
+    BYN: "Br"
+    GEL: "₾"
+    TRY: "₺"
+    PLN: "zł"
+    CZK: "Kč"
+    ILS: "₪"
+    JPY: "¥"
+    CNY: "¥"
+    INR: "₹"
+    BRL: "R$"
+    CAD: "C$"
+    AUD: "A$"
+    CHF: "CHF"
+    SGD: "S$"
+    AED: "AED"
+
+banlist:
+  - "Войти и откликнуться"
+  - "Show contacts"
+  - "Report"
+  - "Навыки:"
+  - "Квалификация:"
+  - "Специализации:"
+  - "Откликнуться"
+  - "Показать контакты"
+  - "Saved searches"
+  - "Отклик без резюме"
+
+profiles:
+  channel:
+    capabilities: [html, link_in_footer]
+    feedback: false
+  control_bot:
+    capabilities: [html, inline_keyboard]
+    feedback: true
