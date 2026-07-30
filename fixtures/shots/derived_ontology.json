@@ -1,0 +1,861 @@
+{
+  "positive_keywords": [
+    {
+      "term": "Python",
+      "weight": 5
+    },
+    {
+      "term": "FastAPI",
+      "weight": 4
+    },
+    {
+      "term": "PostgreSQL",
+      "weight": 4
+    },
+    {
+      "term": "Redis",
+      "weight": 3
+    },
+    {
+      "term": "Celery",
+      "weight": 3
+    },
+    {
+      "term": "Kafka",
+      "weight": 3
+    },
+    {
+      "term": "Docker",
+      "weight": 3
+    },
+    {
+      "term": "GitLab CI",
+      "weight": 2
+    },
+    {
+      "term": "pytest",
+      "weight": 3
+    },
+    {
+      "term": "OpenAI API",
+      "weight": 5
+    },
+    {
+      "term": "Anthropic API",
+      "weight": 4
+    },
+    {
+      "term": "Gemini API",
+      "weight": 3
+    },
+    {
+      "term": "LiteLLM",
+      "weight": 3
+    },
+    {
+      "term": "Instructor",
+      "weight": 2
+    },
+    {
+      "term": "vLLM",
+      "weight": 3
+    },
+    {
+      "term": "Ollama",
+      "weight": 3
+    },
+    {
+      "term": "LM Studio",
+      "weight": 2
+    },
+    {
+      "term": "llama.cpp",
+      "weight": 2
+    },
+    {
+      "term": "Qdrant",
+      "weight": 4
+    },
+    {
+      "term": "pgvector",
+      "weight": 3
+    },
+    {
+      "term": "FAISS",
+      "weight": 3
+    },
+    {
+      "term": "BM25",
+      "weight": 3
+    },
+    {
+      "term": "embeddings",
+      "weight": 5
+    },
+    {
+      "term": "reranking",
+      "weight": 4
+    },
+    {
+      "term": "hybrid search",
+      "weight": 3
+    },
+    {
+      "term": "structured extraction",
+      "weight": 5
+    },
+    {
+      "term": "prompt engineering",
+      "weight": 4
+    },
+    {
+      "term": "runtime guards",
+      "weight": 4
+    },
+    {
+      "term": "eval harnesses",
+      "weight": 4
+    },
+    {
+      "term": "promptfoo",
+      "weight": 2
+    },
+    {
+      "term": "DeepEval",
+      "weight": 2
+    },
+    {
+      "term": "RAG",
+      "weight": 4
+    },
+    {
+      "term": "LangChain",
+      "weight": 3
+    },
+    {
+      "term": "LlamaIndex",
+      "weight": 3
+    },
+    {
+      "term": "agentic systems",
+      "weight": 4
+    },
+    {
+      "term": "function calling",
+      "weight": 3
+    },
+    {
+      "term": "tool calling",
+      "weight": 4
+    },
+    {
+      "term": "planner/executor",
+      "weight": 3
+    },
+    {
+      "term": "memory layer",
+      "weight": 3
+    },
+    {
+      "term": "retry policy",
+      "weight": 3
+    },
+    {
+      "term": "budget policy",
+      "weight": 3
+    },
+    {
+      "term": "tracing",
+      "weight": 3
+    },
+    {
+      "term": "OpenTelemetry",
+      "weight": 3
+    },
+    {
+      "term": "Prometheus",
+      "weight": 2
+    },
+    {
+      "term": "Grafana",
+      "weight": 2
+    },
+    {
+      "term": "cost optimization",
+      "weight": 4
+    },
+    {
+      "term": "batching",
+      "weight": 4
+    },
+    {
+      "term": "caching",
+      "weight": 4
+    },
+    {
+      "term": "rate limiting",
+      "weight": 3
+    },
+    {
+      "term": "fallback policies",
+      "weight": 3
+    },
+    {
+      "term": "human-in-the-loop",
+      "weight": 4
+    },
+    {
+      "term": "structured output",
+      "weight": 5
+    },
+    {
+      "term": "JSON Schema",
+      "weight": 4
+    },
+    {
+      "term": "workflow automation",
+      "weight": 4
+    },
+    {
+      "term": "n8n",
+      "weight": 3
+    },
+    {
+      "term": "Make",
+      "weight": 2
+    },
+    {
+      "term": "Zapier",
+      "weight": 2
+    },
+    {
+      "term": "Telegram Bot API",
+      "weight": 4
+    },
+    {
+      "term": "Slack API",
+      "weight": 3
+    },
+    {
+      "term": "CRM integration",
+      "weight": 4
+    },
+    {
+      "term": "Google Sheets API",
+      "weight": 3
+    },
+    {
+      "term": "Playwright",
+      "weight": 2
+    },
+    {
+      "term": "Apify",
+      "weight": 2
+    },
+    {
+      "term": "OpenWebUI",
+      "weight": 3
+    },
+    {
+      "term": "Flowise",
+      "weight": 2
+    },
+    {
+      "term": "Dify",
+      "weight": 2
+    },
+    {
+      "term": "Langflow",
+      "weight": 2
+    },
+    {
+      "term": "Claude Code",
+      "weight": 3
+    },
+    {
+      "term": "Codex CLI",
+      "weight": 3
+    },
+    {
+      "term": "Cursor",
+      "weight": 3
+    },
+    {
+      "term": "MCP",
+      "weight": 2
+    },
+    {
+      "term": "AI coding workflows",
+      "weight": 4
+    },
+    {
+      "term": "Next.js",
+      "weight": 3
+    },
+    {
+      "term": "React",
+      "weight": 3
+    },
+    {
+      "term": "TypeScript",
+      "weight": 3
+    },
+    {
+      "term": "Tailwind",
+      "weight": 2
+    },
+    {
+      "term": "shadcn/ui",
+      "weight": 2
+    },
+    {
+      "term": "Vercel",
+      "weight": 2
+    },
+    {
+      "term": "Railway",
+      "weight": 2
+    },
+    {
+      "term": "Fly.io",
+      "weight": 2
+    },
+    {
+      "term": "Render",
+      "weight": 2
+    },
+    {
+      "term": "GitHub Actions",
+      "weight": 2
+    },
+    {
+      "term": "pytest",
+      "weight": 3
+    },
+    {
+      "term": "Playwright smoke tests",
+      "weight": 3
+    },
+    {
+      "term": "Vitest",
+      "weight": 2
+    },
+    {
+      "term": "RBAC",
+      "weight": 3
+    },
+    {
+      "term": "error handling",
+      "weight": 3
+    },
+    {
+      "term": "logging",
+      "weight": 3
+    },
+    {
+      "term": "latency monitoring",
+      "weight": 3
+    },
+    {
+      "term": "cost monitoring",
+      "weight": 3
+    },
+    {
+      "term": "Telegram notifications",
+      "weight": 3
+    },
+    {
+      "term": "Slack notifications",
+      "weight": 3
+    },
+    {
+      "term": "AI MVP",
+      "weight": 4
+    },
+    {
+      "term": "fullstack AI engineer",
+      "weight": 4
+    },
+    {
+      "term": "AI product engineer",
+      "weight": 4
+    },
+    {
+      "term": "LLM engineer",
+      "weight": 5
+    },
+    {
+      "term": "AI engineer",
+      "weight": 5
+    },
+    {
+      "term": "AI automation engineer",
+      "weight": 4
+    },
+    {
+      "term": "AI integration engineer",
+      "weight": 4
+    },
+    {
+      "term": "AI agent engineer",
+      "weight": 4
+    },
+    {
+      "term": "AI platform engineer",
+      "weight": 4
+    },
+    {
+      "term": "LLM solution architect",
+      "weight": 4
+    },
+    {
+      "term": "RAG engineer",
+      "weight": 4
+    },
+    {
+      "term": "prompt engineer",
+      "weight": 4
+    },
+    {
+      "term": "AI-first fullstack engineer",
+      "weight": 4
+    },
+    {
+      "term": "product engineer",
+      "weight": 4
+    },
+    {
+      "term": "rapid prototyping engineer",
+      "weight": 3
+    },
+    {
+      "term": "internal tools engineer",
+      "weight": 3
+    },
+    {
+      "term": "workflow automator",
+      "weight": 4
+    },
+    {
+      "term": "automation developer",
+      "weight": 4
+    },
+    {
+      "term": "agentic AI engineer",
+      "weight": 4
+    },
+    {
+      "term": "LLM backend engineer",
+      "weight": 4
+    }
+  ],
+  "negative_keywords": [
+    {
+      "term": "fine-tuning",
+      "weight": 5
+    },
+    {
+      "term": "LoRA",
+      "weight": 5
+    },
+    {
+      "term": "QLoRA",
+      "weight": 5
+    },
+    {
+      "term": "SFT",
+      "weight": 5
+    },
+    {
+      "term": "DPO",
+      "weight": 5
+    },
+    {
+      "term": "distributed training",
+      "weight": 5
+    },
+    {
+      "term": "multi-GPU training",
+      "weight": 5
+    },
+    {
+      "term": "GPU training",
+      "weight": 5
+    },
+    {
+      "term": "training models from scratch",
+      "weight": 5
+    },
+    {
+      "term": "ML research",
+      "weight": 5
+    },
+    {
+      "term": "research engineer",
+      "weight": 5
+    },
+    {
+      "term": "NLP research",
+      "weight": 5
+    },
+    {
+      "term": "ML platform engineer",
+      "weight": 4
+    },
+    {
+      "term": "MLOps",
+      "weight": 4
+    },
+    {
+      "term": "Kubernetes",
+      "weight": 4
+    },
+    {
+      "term": "Terraform",
+      "weight": 4
+    },
+    {
+      "term": "CI/CD for ML",
+      "weight": 4
+    },
+    {
+      "term": "feature store",
+      "weight": 4
+    },
+    {
+      "term": "model registry",
+      "weight": 4
+    },
+    {
+      "term": "monitoring drift",
+      "weight": 4
+    },
+    {
+      "term": "GPU cluster optimization",
+      "weight": 4
+    },
+    {
+      "term": "computer vision",
+      "weight": 5
+    },
+    {
+      "term": "image segmentation",
+      "weight": 5
+    },
+    {
+      "term": "object detection",
+      "weight": 5
+    },
+    {
+      "term": "speech processing",
+      "weight": 5
+    },
+    {
+      "term": "ASR",
+      "weight": 5
+    },
+    {
+      "term": "TTS",
+      "weight": 5
+    },
+    {
+      "term": "audio classification",
+      "weight": 5
+    },
+    {
+      "term": "tabular ML",
+      "weight": 5
+    },
+    {
+      "term": "credit scoring",
+      "weight": 5
+    },
+    {
+      "term": "antifraud",
+      "weight": 5
+    },
+    {
+      "term": "forecasting",
+      "weight": 5
+    },
+    {
+      "term": "product analytics",
+      "weight": 5
+    },
+    {
+      "term": "A/B testing",
+      "weight": 5
+    },
+    {
+      "term": "BI",
+      "weight": 5
+    },
+    {
+      "term": "data engineering",
+      "weight": 5
+    },
+    {
+      "term": "ETL",
+      "weight": 5
+    },
+    {
+      "term": "data warehouse",
+      "weight": 5
+    },
+    {
+      "term": "Spark",
+      "weight": 5
+    },
+    {
+      "term": "Airflow",
+      "weight": 5
+    },
+    {
+      "term": "dbt",
+      "weight": 5
+    },
+    {
+      "term": "recommendation systems",
+      "weight": 5
+    },
+    {
+      "term": "ranking ML",
+      "weight": 5
+    },
+    {
+      "term": "collaborative filtering",
+      "weight": 5
+    },
+    {
+      "term": "matrix factorization",
+      "weight": 5
+    },
+    {
+      "term": "recSys",
+      "weight": 5
+    },
+    {
+      "term": "ML infrastructure",
+      "weight": 5
+    },
+    {
+      "term": "ML SRE",
+      "weight": 5
+    },
+    {
+      "term": "model deployment",
+      "weight": 5
+    },
+    {
+      "term": "training optimization",
+      "weight": 5
+    },
+    {
+      "term": "research prototyping",
+      "weight": 5
+    },
+    {
+      "term": "deep learning research",
+      "weight": 5
+    },
+    {
+      "term": "pure research",
+      "weight": 5
+    },
+    {
+      "term": "product owner",
+      "weight": 4
+    },
+    {
+      "term": "product management",
+      "weight": 4
+    },
+    {
+      "term": "BI analyst",
+      "weight": 5
+    },
+    {
+      "term": "analytics engineer",
+      "weight": 5
+    },
+    {
+      "term": "data analyst",
+      "weight": 5
+    },
+    {
+      "term": "no-code automation only",
+      "weight": 4
+    },
+    {
+      "term": "pure frontend",
+      "weight": 4
+    },
+    {
+      "term": "enterprise bureaucracy",
+      "weight": 4
+    },
+    {
+      "term": "long architecture design",
+      "weight": 4
+    }
+  ],
+  "anti_patterns": [
+    "training models from scratch",
+    "fine-tuning LLM",
+    "distributed GPU training",
+    "ML research without product integration",
+    "pure data science or analytics",
+    "pure data engineering and ETL",
+    "computer vision tasks",
+    "speech/audio ML",
+    "recommendation systems ML",
+    "MLOps and ML infrastructure",
+    "product management without coding",
+    "no-code automation without engineering",
+    "pure frontend development",
+    "enterprise legacy monolith support",
+    "long enterprise architecture design without shipping"
+  ],
+  "skills": [
+    "Python",
+    "FastAPI",
+    "PostgreSQL",
+    "Redis",
+    "Celery",
+    "Kafka",
+    "Docker",
+    "GitLab CI",
+    "pytest",
+    "OpenAI API",
+    "Anthropic API",
+    "Gemini API",
+    "LiteLLM",
+    "Instructor",
+    "vLLM",
+    "Ollama",
+    "LM Studio",
+    "llama.cpp",
+    "Qdrant",
+    "pgvector",
+    "FAISS",
+    "BM25",
+    "embeddings",
+    "reranking",
+    "hybrid search",
+    "structured extraction",
+    "prompt engineering",
+    "runtime guards",
+    "eval harnesses",
+    "promptfoo",
+    "DeepEval",
+    "RAG",
+    "LangChain",
+    "LlamaIndex",
+    "agentic systems",
+    "function calling",
+    "tool calling",
+    "planner/executor",
+    "memory layer",
+    "retry policy",
+    "budget policy",
+    "tracing",
+    "OpenTelemetry",
+    "Prometheus",
+    "Grafana",
+    "cost optimization",
+    "batching",
+    "caching",
+    "rate limiting",
+    "fallback policies",
+    "human-in-the-loop",
+    "structured output",
+    "JSON Schema",
+    "workflow automation",
+    "n8n",
+    "Make",
+    "Zapier",
+    "Telegram Bot API",
+    "Slack API",
+    "CRM integration",
+    "Google Sheets API",
+    "Playwright",
+    "Apify",
+    "OpenWebUI",
+    "Flowise",
+    "Dify",
+    "Langflow",
+    "Claude Code",
+    "Codex CLI",
+    "Cursor",
+    "MCP",
+    "AI coding workflows",
+    "Next.js",
+    "React",
+    "TypeScript",
+    "Tailwind",
+    "shadcn/ui",
+    "Vercel",
+    "Railway",
+    "Fly.io",
+    "Render",
+    "GitHub Actions",
+    "RBAC",
+    "error handling",
+    "logging",
+    "latency monitoring",
+    "cost monitoring",
+    "Telegram notifications",
+    "Slack notifications"
+  ],
+  "roles": [
+    "AI Engineer",
+    "LLM Engineer",
+    "Applied AI Engineer",
+    "ML Backend Engineer",
+    "Search Engineer",
+    "Retrieval Engineer",
+    "AI Platform Engineer",
+    "AI Automation Engineer",
+    "AI Integration Engineer",
+    "AI Agent Engineer",
+    "AI Product Engineer",
+    "Product Engineer",
+    "Fullstack AI Engineer",
+    "Rapid Prototyping Engineer",
+    "Internal Tools Engineer",
+    "Workflow Automator",
+    "Automation Developer",
+    "Agentic AI Engineer",
+    "LLM Backend Engineer",
+    "Prompt Engineer",
+    "LLM Solution Architect",
+    "RAG Engineer",
+    "AI-first Fullstack Engineer",
+    "AI MVP Builder",
+    "GPT/LLM API Integrator"
+  ],
+  "positive_examples": [
+    "LLM Application Engineer\n\nО компании: Мы продуктовая команда, которая строит AI-ассистентов для корпоративных клиентов.\nНаш продукт помогает сотрудникам находить ответы во внутренней базе знаний через чат.\n\nЧем предстоит заниматься:\n- Разрабатывать продуктовые фичи поверх LLM API (OpenAI, Anthropic, YandexGPT) на Python.\n- Строить и улучшать RAG-пайплайны: чанкинг, embeddings, векторный поиск, reranking.\n- Проектировать промпты, system-инструкции, few-shot, structured output через JSON Schema.\n- Настраивать guardrails: фильтрация, защита от prompt injection, проверка фактологичности.\n- Оценивать качество ответов: offline eval, метрики, human-in-the-loop, A/B.\n- Оптимизировать стоимость и латентность: кэширование, batching, выбор модели под задачу.\n\nТребования:\n- Уверенный Python, опыт промышленной разработки backend.\n- Практический опыт интеграции LLM API в продукт (не только pet-проекты).\n- Понимание RAG, embeddings, векторных БД (Qdrant, pgvector, Pinecone).\n- Опыт с инструментами: LangChain / LlamaIndex / собственные пайплайны.\n\nБудет плюсом: опыт построения агентов, function calling, оценки качества генерации.\nУдаленно, полная занятость.",
+    "AI Agent Engineer (agentic systems)\n#удаленка #senior\n\nКомпания: продуктовый стартап в сфере автоматизации поддержки\nЧто предстоит делать:\n- Проектировать и внедрять multi-step AI-агентов для бизнес-задач (tool calling, планирование, память).\n- Строить оркестрацию агентов на LangGraph / собственном фреймворке поверх LLM API.\n- Интегрировать инструменты: поиск, БД, внешние API, выполнение действий.\n- Настраивать observability агентов: трейсинг шагов, оценка качества, отлов галлюцинаций.\n- Оптимизировать стоимость вызовов LLM и стабильность пайплайнов.\n\nНаш стек: Python, OpenAI / Anthropic API, LangGraph, Qdrant, FastAPI, PostgreSQL.\n\nЖдём:\n- Сильный Python и опыт построения сервисов.\n- Опыт с агентными системами, function calling, RAG.\n- Понимание, как доводить LLM-фичи до production: eval, guardrails, мониторинг.\n\nУдаленка, вилка по итогам интервью.",
+    "🔹AI Automation Engineer\n#удаленнаяработа #middle #senior\n\nКомпания: агентство по автоматизации бизнес-процессов\n🔹Чем предстоит заниматься:\n- Строить бизнес-автоматизации с LLM: n8n, Python, OpenAI API, Telegram-боты, CRM-интеграции.\n- Проектировать workflow: триггеры, обработка документов через LLM, маршрутизация, уведомления.\n- Внедрять RAG над клиентскими базами знаний для авто-ответов.\n- Интегрировать сервисы: Google Workspace, amoCRM, Notion, вебхуки, REST/GraphQL API.\n- Настраивать промпты и контролировать качество и стоимость генерации.\n\n🔹Что важно:\n- Python и опыт автоматизации (n8n / Make / собственные пайплайны).\n- Практика интеграции LLM API в рабочие процессы.\n- Умение собрать сквозной поток от данных до действия.\n\nЭто не чистый no-code: значительная часть - код на Python вокруг LLM.\nУдаленно.",
+    "GenAI Product Engineer\n\nО продукте: Мы делаем генеративные фичи внутри B2C-приложения - ассистент, генерация контента,\nумный поиск. Генеративный AI - ядро продукта, а не побочная функция.\n\nОбязанности:\n- Разрабатывать продуктовые фичи на базе генеративных моделей (текст, мультимодальность) через API.\n- Интегрировать GenAI в пользовательские сценарии: ассистенты, саммаризация, генерация, поиск.\n- Проектировать промпты и пайплайны, structured output, streaming-ответы.\n- Строить eval-инфраструктуру качества генерации и A/B-эксперименты.\n- Работать в связке с продактами и дизайнерами над AI-UX.\n\nТребования:\n- Опыт промышленной разработки (Python / TypeScript).\n- Реальный опыт интеграции GenAI / LLM API в пользовательский продукт.\n- Понимание prompt engineering, RAG, ограничений и стоимости моделей.\n\nПлюс: опыт с мультимодальными API, function calling, agentic-фичами.\nГибрид, Москва или удаленно.",
+    "Prompt Engineer (LLM)\n\n<p>Компания разрабатывает AI-ассистентов для клиентского сервиса крупных брендов.</p>\n<p><strong>Чем предстоит заниматься:</strong></p>\n<ul>\n<li>Проектировать и итеративно улучшать промпты, system-инструкции, few-shot примеры для LLM.</li>\n<li>Строить структурированные пайплайны: chain-of-thought, decomposition, structured output.</li>\n<li>Настраивать поведение ассистентов под тон бренда, политики и edge-кейсы.</li>\n<li>Создавать наборы для оценки качества, проводить регрессии промптов, A/B-тесты.</li>\n<li>Работать с LLM API (OpenAI, Anthropic, GigaChat), анализировать ошибки и галлюцинации.</li>\n</ul>\n<p><strong>Требования:</strong></p>\n<ul>\n<li>Опыт работы с LLM API и глубокое понимание prompt engineering.</li>\n<li>Базовый Python для построения eval-скриптов и пайплайнов.</li>\n<li>Аналитический подход: умение измерять качество и улучшать его системно.</li>\n</ul>\n<p>Удаленно, полная занятость.</p>",
+    "AI Integration Engineer\n#remote #ai #python\n\nКомпания: SaaS-платформа, встраивающая AI в продукты клиентов\nЗадачи:\n- Интегрировать LLM API в существующие продукты и внутренние сервисы (backend на Python).\n- Строить коннекторы к источникам данных, RAG-слой, structured extraction из документов.\n- Разрабатывать API-обёртки и SDK для AI-функций, следить за надёжностью и стоимостью.\n- Внедрять кэширование, rate-limiting, fallback между провайдерами моделей.\n- Покрывать пайплайны тестами и мониторингом качества.\n\nСтек: Python, FastAPI, OpenAI/Anthropic API, Qdrant/pgvector, PostgreSQL, Docker.\n\nОжидания:\n- Крепкий backend-Python и опыт интеграций.\n- Практика работы с LLM API в проде.\n- Понимание RAG, embeddings, эвалюации качества.\n\nУдаленка.",
+    "AI-first Fullstack Engineer (Vibe Coder)\n\nО нас: Небольшая продуктовая команда, быстро собираем AI-MVP и внутренние инструменты.\nРаботаем AI-first: активно используем Claude Code, Cursor, Codex для ускорения разработки.\n\nЧем предстоит заниматься:\n- Быстро прототипировать и доводить до прода продукты с LLM-фичами (Python + TypeScript).\n- Собирать fullstack: backend на FastAPI/Node, frontend на React, интеграция LLM API.\n- Строить RAG, чат-интерфейсы, агентные сценарии, structured output.\n- Использовать AI-ассистентов разработки как часть рабочего процесса.\n- Итеративно улучшать продукт по обратной связи, измерять качество AI-фич.\n\nТребования:\n- Fullstack-опыт (Python и/или TypeScript).\n- Опыт интеграции LLM API в реальные продукты.\n- AI-first подход к разработке, быстрый прототипинг.\n\nУдаленно, гибкий график.",
+    "LLM Solution Architect\n\n<p>Мы помогаем enterprise-клиентам внедрять LLM-решения. Ищем архитектора именно\nLLM-продуктов (не ML-инфраструктуры в целом).</p>\n<p><strong>Обязанности:</strong></p>\n<ul>\n<li>Проектировать архитектуру продуктов на базе LLM: RAG, агенты, оркестрация, интеграции.</li>\n<li>Выбирать модели и провайдеров (OpenAI, Anthropic, YandexGPT), считать стоимость и латентность.</li>\n<li>Определять подходы к качеству: eval, guardrails, безопасность, prompt injection.</li>\n<li>Сопровождать команды разработки, ревью дизайна LLM-пайплайнов.</li>\n<li>Готовить технические решения и PoC под задачи заказчика.</li>\n</ul>\n<p><strong>Требования:</strong></p>\n<ul>\n<li>Опыт проектирования и вывода в прод LLM-продуктов.</li>\n<li>Глубокое понимание RAG, агентов, embeddings, оценки качества.</li>\n<li>Сильный инженерный бэкграунд (Python), системное мышление.</li>\n</ul>\n<p>Удаленно.</p>",
+    "RAG / Retrieval Engineer\n#удаленка #middle\n\nКомпания: продукт для работы с корпоративными знаниями\nЧто делать:\n- Строить и улучшать RAG-пайплайн: ingestion, чанкинг, embeddings, гибридный поиск, reranking.\n- Интегрировать LLM API для генерации ответов с цитированием источников.\n- Развивать качество retrieval: оценка relevance, metrics, борьба с галлюцинациями.\n- Работать с векторными БД (Qdrant, pgvector), sparse+dense поиском, фильтрами по метаданным.\n- Оптимизировать стоимость и скорость: кэш, выбор модели, батчинг.\n\nСтек: Python, OpenAI/Anthropic API, Qdrant, BGE/e5 embeddings, FastAPI.\n\nЖдём:\n- Python и опыт построения поисковых/RAG-систем.\n- Понимание embeddings, reranking, эвалюации retrieval.\n- Опыт интеграции LLM API в продукт.\n\nУдаленно.",
+    "AI Engineer (LLM products)\n\nЛокация: Remote\nЗарплата: 250 000 - 350 000 ₽\nСтек: Python, OpenAI API, Anthropic API, LangChain, Qdrant, FastAPI, PostgreSQL, Docker\n\nКомпания строит AI-продукты для автоматизации работы с документами и клиентами.\n\nЗадачи:\n- Разрабатывать backend AI-фич на Python поверх LLM API.\n- Строить пайплайны structured extraction, RAG, классификацию и маршрутизацию через LLM.\n- Проектировать промпты и structured output, repair-loop для некорректных ответов модели.\n- Внедрять eval качества, guardrails, мониторинг стоимости и латентности.\n- Интегрировать векторный поиск и метаданные для релевантности.\n\nТребования:\n- 2+ года backend-разработки на Python.\n- Реальный опыт интеграции LLM API в production-продукты.\n- Знание RAG, embeddings, векторных БД, оценки качества генерации.\n\nНе подойдёт тем, кто хочет заниматься обучением моделей с нуля или классическим DS."
+  ],
+  "negative_examples": [
+    "Data Scientist (продуктовая аналитика)\n\nО команде: Развиваем продукт и принимаем решения на данных. Ищем DS с фокусом на\nпродуктовую аналитику и эксперименты.\n\nЧем предстоит заниматься:\n- Строить модели churn, LTV, propensity на табличных данных (CatBoost, LightGBM).\n- Проектировать и анализировать A/B-тесты, считать статзначимость и guardrail-метрики.\n- Делать feature engineering, сегментацию, forecasting спроса.\n- Готовить дашборды и аналитические отчёты для продактов.\n\nТребования:\n- Сильная статистика, A/B-тестирование, классический ML на табличных данных.\n- SQL, Python, pandas, sklearn, statsmodels.\n- Опыт продуктовой аналитики и работы с бизнес-метриками.\n\nУдаленно/гибрид.",
+    "Data Engineer\n\n<p>Строим и поддерживаем дата-платформу компании. Ищем инженера данных в команду DWH.</p>\n<p><strong>Обязанности:</strong></p>\n<ul>\n<li>Разрабатывать ETL/ELT пайплайны на Airflow, dbt, Spark.</li>\n<li>Проектировать витрины и модели данных в ClickHouse / Greenplum.</li>\n<li>Настраивать стриминг на Kafka, CDC, data quality.</li>\n<li>Оптимизировать запросы, партиционирование, стоимость хранилища.</li>\n</ul>\n<p><strong>Требования:</strong></p>\n<ul>\n<li>Сильный SQL, опыт Spark, Airflow, dbt.</li>\n<li>Опыт построения DWH и потоковых пайплайнов.</li>\n<li>Python для пайплайнов.</li>\n</ul>\n<p>Удаленно.</p>",
+    "Research Engineer / ML Researcher\n#research #ml\n\nКомпания: AI-лаборатория\nЧем предстоит заниматься:\n- Исследовать и улучшать архитектуры моделей, проводить эксперименты.\n- Обучать модели с нуля, дообучать, оптимизировать training throughput на multi-GPU.\n- Работать над reasoning capabilities, alignment, дообучением языковых моделей.\n- Публиковать результаты, воспроизводить SOTA, готовить датасеты для обучения.\n\nТребования:\n- Глубокое понимание DL, опыт обучения моделей (PyTorch, distributed training).\n- Опыт research: эксперименты, benchmarking, error analysis.\n- Желательно публикации.\n\nЭто исследовательская роль про создание и обучение моделей, не про продуктовую интеграцию API.",
+    "MLOps Engineer\n\nО команде: Отвечаем за инфраструктуру обучения и деплоя ML-моделей в компании.\n\nОбязанности:\n- Строить CI/CD для ML, model registry, feature store.\n- Развёртывать инференс на Kubernetes, Triton, оптимизировать GPU-кластеры.\n- Настраивать мониторинг дрейфа, метрик и алертинг.\n- Автоматизировать train/validate/deploy пайплайны на Airflow/Kubeflow.\n\nТребования:\n- Kubernetes, Docker, Terraform, CI/CD.\n- MLflow, Kubeflow, Feast, Triton/BentoML.\n- Python, понимание ML-жизненного цикла.\n\nЭто инфраструктурная роль, не продуктовая разработка на LLM API.",
+    "Computer Vision Engineer\n\n<p>Разрабатываем системы видеоаналитики для промышленности и ритейла.</p>\n<p><strong>Обязанности:</strong></p>\n<ul>\n<li>Обучать модели детекции и сегментации (YOLO, Detectron2, U-Net).</li>\n<li>Оптимизировать инференс под edge: TensorRT, ONNX, квантизация.</li>\n<li>Строить трекинг объектов и видеоаналитику.</li>\n<li>Собирать и размечать датасеты изображений.</li>\n</ul>\n<p><strong>Требования:</strong></p>\n<ul>\n<li>PyTorch, OpenCV, опыт CV-задач.</li>\n<li>Знание архитектур детекции/сегментации.</li>\n<li>Оптимизация моделей под устройства.</li>\n</ul>",
+    "NLP Engineer (Лаборатория машинного обучения)\n\nО подразделении: Исследовательская лаборатория МО банка. Занимаемся обучением и\nадаптацией языковых моделей под внутренние задачи.\n\nЧем предстоит заниматься:\n- Дообучать трансформерные модели (BERT, RoBERTa) под NER, классификацию, извлечение.\n- Готовить датасеты, проводить эксперименты, error analysis, benchmarking.\n- Оптимизировать гиперпараметры и качество моделей на русскоязычных корпусах.\n- Готовить внутренние исследовательские отчёты.\n\nТребования:\n- PyTorch, HuggingFace Transformers, опыт обучения NLP-моделей.\n- Понимание классических NLP-задач и метрик.\n- Исследовательский подход.\n\nРоль про обучение и адаптацию моделей в лаборатории, не про продуктовую интеграцию LLM API.",
+    "AI Product Owner\n\n<p>Ищем владельца продукта для направления AI-фич. Роль продуктовая, не инженерная.</p>\n<p><strong>Обязанности:</strong></p>\n<ul>\n<li>Формировать стратегию и роадмап AI-продукта.</li>\n<li>Приоритизировать бэклог, писать требования, работать со стейкхолдерами.</li>\n<li>Анализировать метрики, проводить customer development.</li>\n<li>Координировать команду разработки и дизайна.</li>\n</ul>\n<p><strong>Требования:</strong></p>\n<ul>\n<li>Опыт продакт-менеджмента, желательно в AI/ML.</li>\n<li>Понимание возможностей LLM на уровне продукта.</li>\n<li>Сильные коммуникации и аналитика.</li>\n</ul>\n<p>Это управленческая роль, разработки кода не предполагает.</p>",
+    "Analytics Engineer (BI)\n#удаленка #аналитика\n\nКомпания: SaaS-продукт\nЗадачи:\n- Строить слой метрик на dbt, semantic layer, сертифицированные витрины.\n- Разрабатывать дашборды (Tableau, Power BI, DataLens, Superset).\n- Считать продуктовые метрики: retention, conversion, ARPU, cohort analysis.\n- Поддерживать self-service аналитику.\n\nТребования:\n- Сильный SQL, dbt, опыт BI-инструментов.\n- Продуктовая аналитика и метрики.\n- Python на базовом уровне.\n\nРоль аналитическая, не разработка AI-продуктов.",
+    "Principal ML Engineer (Recommendations)\n\nЛокация: Remote\nЗарплата: 400 000 - 550 000 ₽\nСтек: Python, PyTorch, Spark, FAISS, CatBoost, Airflow\n\nКомпания: крупный маркетплейс, команда рекомендаций.\n\nЗадачи:\n- Развивать рекомендательную систему: candidate generation, learning-to-rank.\n- Обучать модели ранжирования (two-tower, DLRM) на больших кликовых логах.\n- Строить user/item embeddings, ANN-поиск, онлайн-обучение.\n- Вести A/B-тесты метрик CTR, конверсии, retention.\n- Менторить команду, задавать технические стандарты.\n\nТребования:\n- Глубокий опыт recsys / ranking ML на больших данных.\n- Сильный PyTorch, Spark, продакшн ML.\n- Лидерский опыт.\n\nРоль про recsys и ranking ML, не про LLM-продукты.",
+    "LLM Training Engineer (Fine-tuning)\n\nО команде: Обучаем и дообучаем большие языковые модели под доменные задачи.\n\nЧем предстоит заниматься:\n- Дообучать LLM: SFT, LoRA/QLoRA, DPO/RLHF, alignment.\n- Готовить и чистить обучающие датасеты, дедупликация, contamination checks.\n- Оптимизировать multi-GPU training throughput, distributed training.\n- Проводить benchmarking чекпоинтов, preference datasets, экспертную оценку.\n- Исследовать reasoning capabilities и способности к рассуждению моделей.\n\nТребования:\n- Глубокое понимание обучения трансформеров, PyTorch, DeepSpeed/FSDP.\n- Опыт fine-tuning и distributed training на кластере GPU.\n- Research-бэкграунд.\n\nРоль про обучение и адаптацию моделей, НЕ про интеграцию готовых LLM API в продукт."
+  ]
+}

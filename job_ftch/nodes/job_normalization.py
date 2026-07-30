@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from job_ftch.application.contracts import TypeChangingNode
 from job_ftch.domain import (
-    CompensationRange,
     JobDraft,
     JobRecord,
     Seniority,
@@ -20,9 +19,17 @@ if TYPE_CHECKING:
 
 _PREFIX_RE = re.compile(r"^(hiring|vacancy|opening|role|ищем|вакансия)\s*[:\-]\s*", re.IGNORECASE)
 _COMP_SPLIT_RE = re.compile(r"\s+(?:at|@|-)\s+", re.IGNORECASE)
-_SALARY_RE = re.compile(
-    r"(?P<currency>USD|EUR|GBP|KZT|\$|€|£)\s*(?P<min>\d[\d\s]{2,})"
-    r"(?:\s*(?:-|to|–)\s*(?P<max>\d[\d\s]{2,}))?",
+_CURRENCY_PATTERN = r"USD|EUR|GBP|RUB|RUR|KZT|\$|€|£|₽"
+_AMOUNT_PATTERN = r"\d(?:[\d\s.,]*\d)?\s*[kк]?"
+_SALARY_PREFIX_RE = re.compile(
+    rf"(?P<currency>{_CURRENCY_PATTERN})\s*(?:от\s*)?"
+    rf"(?P<min>{_AMOUNT_PATTERN})(?:\s*(?:-|to|–|—)\s*(?P<max>{_AMOUNT_PATTERN}))?",
+    re.IGNORECASE,
+)
+_SALARY_SUFFIX_RE = re.compile(
+    rf"(?:от\s*)?(?P<min>{_AMOUNT_PATTERN})"
+    rf"(?:\s*(?:-|to|–|—)\s*(?P<max>{_AMOUNT_PATTERN}))?"
+    rf"\s*(?P<currency>{_CURRENCY_PATTERN})",
     re.IGNORECASE,
 )
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -72,12 +79,40 @@ def _detect_work_mode(*parts: str | None) -> WorkMode:
 def _normalize_amount(value: str | None) -> int | None:
     if value is None:
         return None
-    digits = re.sub(r"\D", "", value)
+    normalized = value.strip().casefold()
+    multiplier = 1000 if normalized.endswith(("k", "к")) else 1
+    if multiplier > 1:
+        normalized = normalized[:-1].strip().replace(",", ".")
+        normalized = normalized.replace(" ", "")
+        try:
+            return round(float(normalized) * multiplier)
+        except ValueError:
+            return None
+    digits = re.sub(r"\D", "", normalized)
     return int(digits) if digits else None
 
 
 def _normalize_currency(value: str) -> str:
-    return {"$": "USD", "€": "EUR", "£": "GBP"}.get(value.upper(), value.upper())
+    return {"$": "USD", "€": "EUR", "£": "GBP", "₽": "RUB", "RUR": "RUB"}.get(
+        value.upper(), value.upper()
+    )
+
+
+def _parse_compensation_text(value: str) -> tuple[str, int, int | None] | None:
+    match = _SALARY_PREFIX_RE.search(value) or _SALARY_SUFFIX_RE.search(value)
+    if match is None:
+        return None
+    minimum = _normalize_amount(match.group("min"))
+    if minimum is None:
+        return None
+    maximum = _normalize_amount(match.group("max"))
+    if maximum is not None and minimum > maximum:
+        minimum, maximum = maximum, minimum
+    return (
+        _normalize_currency(match.group("currency")),
+        minimum,
+        maximum,
+    )
 
 
 class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
@@ -185,13 +220,72 @@ class CompensationParsingNode:
     async def process(self, item: JobRecord) -> JobRecord | None:
         if item.compensation is not None:
             return item
-        match = _SALARY_RE.search(item.description or "")
-        if match is None:
+
+        base_salary = item.metadata.get("base_salary")
+        if isinstance(base_salary, dict):
+            try:
+                currency = str(base_salary.get("currency") or "USD")
+                currency = _normalize_currency(
+                    currency[:3].upper() if len(currency) >= 3 else "USD"
+                )
+
+                minimum = base_salary.get("min")
+                maximum = base_salary.get("max")
+
+                if isinstance(minimum, str) and minimum.isdigit():
+                    minimum = int(minimum)
+                if isinstance(maximum, str) and maximum.isdigit():
+                    maximum = int(maximum)
+
+                minimum = int(minimum) if isinstance(minimum, (int, float)) else None
+                maximum = int(maximum) if isinstance(maximum, (int, float)) else None
+
+                if minimum is not None or maximum is not None:
+                    if minimum is not None and maximum is not None and minimum > maximum:
+                        minimum, maximum = maximum, minimum
+
+                    raw_period = str(base_salary.get("period") or "unknown").lower()
+
+                    from job_ftch.domain import CompensationPeriod, CompensationRange
+
+                    try:
+                        period = CompensationPeriod(raw_period)
+                    except ValueError:
+                        period = CompensationPeriod.UNKNOWN
+
+                    compensation = CompensationRange(
+                        currency=currency,
+                        min_amount=minimum,
+                        max_amount=maximum,
+                        period=period,
+                    )
+                    return item.model_copy(
+                        update={
+                            "compensation": compensation,
+                            "provenance": item.provenance.model_copy(
+                                update={
+                                    "normalization": tuple(
+                                        list(item.provenance.normalization)
+                                        + ["compensation:structured_metadata"]
+                                    )
+                                }
+                            ),
+                        }
+                    )
+            except (ValueError, TypeError, KeyError):
+                pass
+
+        parsed = _parse_compensation_text(item.description or "")
+        if parsed is None:
             return item
+        currency, minimum, maximum = parsed
+
+        from job_ftch.domain import CompensationRange
+
         compensation = CompensationRange(
-            currency=_normalize_currency(match.group("currency")),
-            min_amount=_normalize_amount(match.group("min")),
-            max_amount=_normalize_amount(match.group("max")),
+            currency=currency,
+            min_amount=minimum,
+            max_amount=maximum,
         )
         return item.model_copy(
             update={

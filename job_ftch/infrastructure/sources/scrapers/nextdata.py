@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from job_ftch.application.registry import register_scraper
-from job_ftch.infrastructure.sources.nextdata_utils import (
+from job_ftch.infrastructure.sources.embedded_state_utils import (
     extract_next_data,
     extract_rsc_data,
     resolve_path,

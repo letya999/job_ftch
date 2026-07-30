@@ -1,0 +1,46 @@
+# eval Index
+
+`scripts/eval/`
+
+Generated index for navigation and maintenance. Rerun `uv run python scripts/build_index_docs.py` after structural changes.
+
+## Files On This Level
+
+- [apply_label_patch.py](apply_label_patch.py)
+- [apply_manual_target_label_fixes.py](apply_manual_target_label_fixes.py)
+- [apply_reaudit_to_eval_dataset.py](apply_reaudit_to_eval_dataset.py)
+- [audit_dataset_labels.py](audit_dataset_labels.py)
+- [baseline_report.py](baseline_report.py)
+- [build_adjudication_queue.py](build_adjudication_queue.py)
+- [build_gold.py](build_gold.py)
+- [build_positive_jobness_patch.py](build_positive_jobness_patch.py)
+- [build_prefilter_dataset_from_manual_labels.py](build_prefilter_dataset_from_manual_labels.py)
+- [build_provider_failure_patch.py](build_provider_failure_patch.py)
+- [build_recipe_ledger.py](build_recipe_ledger.py)
+- [build_selected_item_ids.py](build_selected_item_ids.py)
+- [build_source_audit_dataset.py](build_source_audit_dataset.py)
+- [build_split_manifest.py](build_split_manifest.py)
+- [calibrate_decision_policy.py](calibrate_decision_policy.py)
+- [clean_pool.py](clean_pool.py)
+- [compare_policy_runs.py](compare_policy_runs.py)
+- [export_typed_evidence_features.py](export_typed_evidence_features.py)
+- [full_surface_loss_report.py](full_surface_loss_report.py)
+- [label_dataset.py](label_dataset.py)
+- [label_llm.py](label_llm.py)
+- [live_trace_report.py](live_trace_report.py)
+- [merge_manual_labels.py](merge_manual_labels.py)
+- [merge_pool.py](merge_pool.py)
+- [promote_champion_recipe.py](promote_champion_recipe.py)
+- [refreeze_production_recipe.py](refreeze_production_recipe.py)
+- [run_eval.py](run_eval.py)
+- [run_graph_sweep.py](run_graph_sweep.py)
+- [run_h22_h26_n140.ps1](run_h22_h26_n140.ps1)
+- [run_pipeline_eval.py](run_pipeline_eval.py)
+- [run_prod_like_replay.py](run_prod_like_replay.py)
+- [run_sequential_research.ps1](run_sequential_research.ps1)
+- [run_warmed_legacy_suite.py](run_warmed_legacy_suite.py)
+- [seed_shots.py](seed_shots.py)
+- [sweep_routing_threshold.py](sweep_routing_threshold.py)
+- [train_relevance_prefilter.py](train_relevance_prefilter.py)
+- [validate_eval_dataset.py](validate_eval_dataset.py)
+- [validate_split_manifest.py](validate_split_manifest.py)

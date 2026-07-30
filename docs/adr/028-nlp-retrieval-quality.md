@@ -1,6 +1,11 @@
+---
+title: "ADR-028: NLP Retrieval Quality — E5 Prefixes, Language Detection, Translation, Cross-Encoder Reranking"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # ADR-028: NLP Retrieval Quality — E5 Prefixes, Language Detection, Translation, Cross-Encoder Reranking
 
-**Status**: Accepted
+**Status**: ACCEPTED
 **Date**: 2026-06-14
 
 ## Context

@@ -1,0 +1,14 @@
+extends: mvp_eval_no_bge.yaml
+name: mvp_eval_bgem3_gate
+version: "1.0.0"
+metadata:
+  purpose: mvp_bgem3_prefilter_comparison
+  benchmark: {dataset: fixtures/dataset/eval_dataset.jsonl, sample: 140, tenant_id: ai_jobs, user_id: "480637186"}
+  runtime:
+    models: {extraction: gpt-4.1-nano, relevance: gpt-4.1-mini}
+    shots: {backend: qdrant, source: user_db_only, collection: profile_shots_bgem3_mvp_v3}
+nodes:
+  - {id: bgem3_embed, node: bgem3_embed, effect: observe, after: [dedup], params: {model: BAAI/bge-m3, max_chars: 4096}}
+  # BGE is evidence only until a calibrated safe-negative region exists.
+  - {id: semantic_prefilter, node: semantic_prefilter, effect: observe, after: [bgem3_embed], params: {dense_margin_threshold: 0.05, rescue_logic: strong_ai_signal}}
+  - {id: extraction, after: [semantic_prefilter]}

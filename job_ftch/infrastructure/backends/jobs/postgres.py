@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -34,6 +33,8 @@ except ImportError as exc:
 
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from job_ftch.config import Settings
 
 
@@ -58,7 +59,11 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         if not settings.store_dsn:
             raise ValueError("store_dsn is required for postgres backend")
 
-        self.dsn = settings.store_dsn
+        self.dsn = (
+            settings.store_dsn.get_secret_value()
+            if hasattr(settings.store_dsn, "get_secret_value")
+            else str(settings.store_dsn)
+        )
         self.pool_min = settings.store_pool_min
         self.pool_max = settings.store_pool_max
         self.search_language = settings.search_language
@@ -84,18 +89,27 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             )
             if not self._schema_initialized:
                 async with self._pool.acquire() as conn:
-                    # Initial schema
-                    migration_path = Path(__file__).parent / "migrations" / "001_postgres_jobs.sql"
-                    with open(migration_path, encoding="utf-8") as f:
-                        schema = f.read()
-                    await conn.execute(schema)
-
-                    # Migration 002: blocking_key
-                    m2_path = Path(__file__).parent / "migrations" / "002_postgres_blocking_key.sql"
-                    with open(m2_path, encoding="utf-8") as f:
-                        m2_sql = f.read()
-                    with contextlib.suppress(Exception):  # Already exists
-                        await conn.execute(m2_sql)
+                    await conn.execute("""
+                        CREATE TABLE IF NOT EXISTS jf_migrations (
+                            filename TEXT PRIMARY KEY,
+                            applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                        )
+                    """)
+                    migrations_dir = Path(__file__).parent / "migrations"
+                    for path in sorted(migrations_dir.glob("*.sql")):
+                        if "sqlite" in path.name:
+                            continue
+                        filename = path.name
+                        row = await conn.fetchrow(
+                            "SELECT filename FROM jf_migrations WHERE filename = $1", filename
+                        )
+                        if not row:
+                            with open(path, encoding="utf-8") as f:
+                                sql = f.read()
+                            await conn.execute(sql)
+                            await conn.execute(
+                                "INSERT INTO jf_migrations (filename) VALUES ($1)", filename
+                            )
 
                 self._schema_initialized = True
         return self._pool
@@ -118,22 +132,15 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         job = _coerce_job_record(job)
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
-            group_id: str | None = None
-
-            # Check url index
-            if job.canonical_url:
-                group_id = await conn.fetchval(
-                    "SELECT group_id FROM jf_job_group_urls WHERE canonical_url = $1",
-                    str(job.canonical_url),
-                )
-
-            # Check fingerprint index
             fingerprint = compute_identity_fingerprint(job)
-            if not group_id:
-                group_id = await conn.fetchval(
-                    "SELECT group_id FROM jf_job_group_fingerprints WHERE fingerprint = $1",
-                    fingerprint,
-                )
+            # Serialize the read/merge/write sequence for one identity across
+            # all workers without taking a global table lock.
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", fingerprint)
+            group_id = await self._resolve_group_id(
+                conn,
+                str(job.canonical_url) if job.canonical_url is not None else None,
+                fingerprint,
+            )
 
             if group_id:
                 row = await conn.fetchrow(
@@ -162,18 +169,13 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
 
     async def create(self, job: JobRecord) -> JobGroup:
         job = _coerce_job_record(job)
-        pool = await self._get_pool()
-        async with pool.acquire() as conn, conn.transaction():
-            group = create_job_group(job)
-            await self._persist_group(conn, group)
-            await self._persist_job(conn, job, group.group_id)
-
-            # Update stats
-            self.new_groups_created += 1
-            sk = str(job.source_kind)
-            self.by_source_kind_new[sk] = self.by_source_kind_new.get(sk, 0) + 1
-
-            return group
+        # Keep create consistent with the atomic identity path used by save.
+        await self.save(job)
+        group = await self.find_by_url(str(job.canonical_url)) if job.canonical_url else None
+        group = group or await self.find_by_fingerprint(compute_identity_fingerprint(job))
+        if group is None:
+            raise RuntimeError("Job group was not persisted after atomic save")
+        return group
 
     async def find_by_url(self, canonical_url: str) -> JobGroup | None:
         pool = await self._get_pool()
@@ -234,6 +236,42 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
 
             return updated_group
 
+    async def replace_member(self, group_id: str, job: JobRecord) -> JobGroup:
+        """Persist post-accept enrichment without counting an identity merge."""
+        job = _coerce_job_record(job)
+        pool = await self._get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT raw_json FROM jf_job_groups WHERE group_id = $1", group_id
+            )
+            if not row:
+                raise ValueError(f"Group {group_id} not found.")
+            group = load_group(row["raw_json"])
+            updated_group = merge_job_into_group(
+                group, job, merge_confidence=group.merge_confidence
+            )
+            await self._persist_group(conn, updated_group)
+            await self._persist_job(conn, job, updated_group.group_id)
+            return updated_group
+
+    async def _resolve_group_id(
+        self,
+        conn: asyncpg.Connection,
+        canonical_url: str | None,
+        fingerprint: str,
+    ) -> str | None:
+        value = await conn.fetchval(
+            """
+            SELECT COALESCE(
+                (SELECT group_id FROM jf_job_group_urls WHERE canonical_url = $1),
+                (SELECT group_id FROM jf_job_group_fingerprints WHERE fingerprint = $2)
+            )
+            """,
+            str(canonical_url) if canonical_url else None,
+            fingerprint,
+        )
+        return str(value) if value is not None else None
+
     async def _persist_group(self, conn: asyncpg.Connection, group: JobGroup) -> None:
         raw_json = dump_group(group)
         await conn.execute(
@@ -245,19 +283,24 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             group.blocking_key,
         )
 
-        # update URL/fingerprint indexes
+        # Batch index maintenance to avoid one round-trip per job.
+        url_rows: list[tuple[str, str]] = []
+        fingerprint_rows: list[tuple[str, str]] = []
         for job in group.jobs:
             if job.canonical_url:
-                await conn.execute(
-                    "INSERT INTO jf_job_group_urls (canonical_url, group_id) VALUES ($1, $2) ON CONFLICT (canonical_url) DO UPDATE SET group_id=EXCLUDED.group_id",
-                    str(job.canonical_url),
-                    group.group_id,
-                )
+                url_rows.append((str(job.canonical_url), group.group_id))
             fp = compute_identity_fingerprint(job)
-            await conn.execute(
+            fingerprint_rows.append((fp, group.group_id))
+
+        if url_rows:
+            await conn.executemany(
+                "INSERT INTO jf_job_group_urls (canonical_url, group_id) VALUES ($1, $2) ON CONFLICT (canonical_url) DO UPDATE SET group_id=EXCLUDED.group_id",
+                url_rows,
+            )
+        if fingerprint_rows:
+            await conn.executemany(
                 "INSERT INTO jf_job_group_fingerprints (fingerprint, group_id) VALUES ($1, $2) ON CONFLICT (fingerprint) DO UPDATE SET group_id=EXCLUDED.group_id",
-                fp,
-                group.group_id,
+                fingerprint_rows,
             )
 
     async def _persist_job(self, conn: asyncpg.Connection, job: JobRecord, group_id: str) -> None:
@@ -272,15 +315,14 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         )
         raw_json = dump_job(job_copy)
 
-        # SQL safe building of FTS vector
-        # self.search_language is already whitelisted in __init__
-        fts_query = f"to_tsvector('{self.search_language}', coalesce($5, '') || ' ' || coalesce($6, '') || ' ' || coalesce($7, '') || ' ' || coalesce($8, ''))"
-
         await conn.execute(
-            f"""INSERT INTO jf_jobs (
+            """INSERT INTO jf_jobs (
                 job_id, group_id, source_kind, source_name, title, company, 
                 company_canonical, description, canonical_url, location, work_mode, raw_json, updated_at, fts_vector
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), {fts_query})
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(),
+                to_tsvector($13::regconfig, coalesce($5, '') || ' ' || coalesce($6, '') || ' ' || coalesce($7, '') || ' ' || coalesce($8, ''))
+            )
             ON CONFLICT(job_id) DO UPDATE SET 
                 group_id=EXCLUDED.group_id,
                 source_kind=EXCLUDED.source_kind,
@@ -294,9 +336,9 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 work_mode=EXCLUDED.work_mode,
                 raw_json=EXCLUDED.raw_json,
                 updated_at=NOW(),
-                fts_vector={fts_query}
-            """,  # nosec B608
-            job.stable_id,
+                fts_vector=to_tsvector($13::regconfig, coalesce($5, '') || ' ' || coalesce($6, '') || ' ' || coalesce($7, '') || ' ' || coalesce($8, ''))
+            """,
+            job.job_id,
             group_id,
             str(job.source_kind),
             job.source_name,
@@ -308,6 +350,7 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             job.location,
             str(job.work_mode),
             raw_json,
+            self.search_language,
         )
 
     async def get_job(self, job_id: str) -> JobRecord | None:
@@ -327,6 +370,12 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 offset,
             )
             return [load_job(row["raw_json"]) for row in rows]
+
+    async def count_jobs(self) -> int:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            value = await conn.fetchval("SELECT COUNT(*) FROM jf_jobs")
+            return int(value or 0)
 
     async def get_group(self, group_id: str) -> JobGroup | None:
         pool = await self._get_pool()
@@ -373,25 +422,51 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                     )
                     await self._persist_group(conn, updated_group)
 
-    async def list_groups(self, limit: int = 100) -> list[JobGroup]:
+    async def list_groups(self, limit: int = 100, since: datetime | None = None) -> list[JobGroup]:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT raw_json FROM jf_job_groups ORDER BY updated_at DESC LIMIT $1",
-                limit,
-            )
+            if since is None:
+                rows = await conn.fetch(
+                    "SELECT raw_json FROM jf_job_groups ORDER BY updated_at DESC LIMIT $1",
+                    limit,
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT raw_json
+                    FROM jf_job_groups
+                    WHERE raw_json->'canonical_job'->>'fetched_at' IS NULL
+                       OR (raw_json->'canonical_job'->>'fetched_at')::timestamptz >= $1
+                    ORDER BY updated_at DESC
+                    LIMIT $2
+                    """,
+                    since,
+                    limit,
+                )
             return [load_group(row["raw_json"]) for row in rows]
 
-    async def count(self) -> int:
+    async def count(self, since: datetime | None = None) -> int:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
-            val = await conn.fetchval("SELECT COUNT(*) FROM jf_job_groups")
+            if since is None:
+                val = await conn.fetchval("SELECT COUNT(*) FROM jf_job_groups")
+            else:
+                val = await conn.fetchval(
+                    """
+                    SELECT COUNT(*)
+                    FROM jf_job_groups
+                    WHERE raw_json->'canonical_job'->>'fetched_at' IS NULL
+                       OR (raw_json->'canonical_job'->>'fetched_at')::timestamptz >= $1
+                    """,
+                    since,
+                )
             return val or 0
 
     async def clear(self) -> int:
         pool = await self._get_pool()
         async with pool.acquire() as conn, conn.transaction():
             count = await conn.fetchval("SELECT COUNT(*) FROM jf_job_groups")
+            await conn.execute("DELETE FROM jf_jobs")
             await conn.execute("DELETE FROM jf_job_group_urls")
             await conn.execute("DELETE FROM jf_job_group_fingerprints")
             await conn.execute("DELETE FROM jf_job_groups")
@@ -405,18 +480,16 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         pool = await self._get_pool()
         async with pool.acquire() as conn:
             overfetch = limit * 5
-            # Safe FTS query
-            fts_query_sql = f"plainto_tsquery('{self.search_language}', $1)"
-
             rows = await conn.fetch(
-                f"""
+                """
                 SELECT group_id FROM jf_jobs
-                WHERE fts_vector @@ {fts_query_sql}
-                ORDER BY ts_rank(fts_vector, {fts_query_sql}) DESC
+                WHERE fts_vector @@ plainto_tsquery($3::regconfig, $1)
+                ORDER BY ts_rank(fts_vector, plainto_tsquery($3::regconfig, $1)) DESC
                 LIMIT $2
-            """,  # nosec B608
+                """,
                 q,
                 overfetch,
+                self.search_language,
             )
 
             seen = set()

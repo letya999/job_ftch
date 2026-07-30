@@ -1,0 +1,8 @@
+{
+  "_comment": "Dev test user fixture. Register in DB via scripts/bootstrap_dev.py. telegram_id is a fake dev ID — replace with your real Telegram ID for live bot testing.",
+  "telegram_id": 100000001,
+  "username": "test_ai_jobs_user",
+  "first_name": "Test",
+  "tenant_id": "ai_jobs",
+  "language_code": "ru"
+}

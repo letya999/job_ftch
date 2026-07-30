@@ -8,6 +8,7 @@ import os
 import socket
 import sys
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 from dotenv import load_dotenv
@@ -238,7 +239,7 @@ def print_section(title: str) -> None:
     print("=" * 64)
 
 
-async def probe_rss(session: httpx.AsyncClient, label: str, url: str) -> dict:
+async def probe_rss(session: httpx.AsyncClient, label: str, url: str) -> dict[str, Any]:
     try:
         r = await session.get(url, timeout=20)
         r.raise_for_status()
@@ -252,7 +253,9 @@ async def probe_rss(session: httpx.AsyncClient, label: str, url: str) -> dict:
         return {"label": label, "items": 0, "titles": [], "error": str(exc)[:100]}
 
 
-async def probe_url(session: httpx.AsyncClient, label: str, url: str, method: str) -> dict:
+async def probe_url(
+    session: httpx.AsyncClient, label: str, url: str, method: str
+) -> dict[str, Any]:
     hostname = url.split("/")[2]
     if not dns_resolves(hostname):
         return {"label": label, "status": "DNS_FAIL", "ct": "", "preview": ""}

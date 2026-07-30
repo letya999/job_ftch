@@ -1,3 +1,8 @@
+---
+title: "024 — Canonical Job Contract And Top-Tier Matching Funnel"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 024 — Canonical Job Contract And Top-Tier Matching Funnel
 
 **Status**: ACCEPTED

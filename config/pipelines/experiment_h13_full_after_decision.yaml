@@ -1,0 +1,38 @@
+name: experiment_h13_full_after_decision
+version: "1.0.0"
+metadata:
+  purpose: triage_card_then_post_decision_full_extraction
+  experiment: {id: H13, control: asis_legacy_best}
+  benchmark: {dataset: fixtures/dataset/eval_dataset.jsonl, sample: 400, seed: 42}
+resources: {profile: active_profile, store: active_store, llm: active_llm, shots: active_shots}
+nodes:
+  - {id: sanitize, node: sanitize, effect: gate}
+  - {id: snapshot_filter, node: snapshot_filter, effect: gate, after: [sanitize]}
+  - {id: source_context, node: source_context, effect: observe, after: [snapshot_filter]}
+  - {id: ontology_snapshot, node: ontology_snapshot, effect: observe, after: [source_context]}
+  - {id: candidate_segmentation, node: candidate_segmentation, effect: observe, after: [ontology_snapshot]}
+  - {id: garbage_filter, node: garbage_filter, effect: gate, after: [candidate_segmentation]}
+  - {id: post_type, node: post_type, effect: observe, after: [garbage_filter]}
+  - {id: hard_filter, node: hard_filter, effect: gate, after: [post_type]}
+  - {id: dedup, node: dedup, effect: gate, after: [hard_filter]}
+  - {id: bgem3, node: bgem3_embed, effect: observe, after: [dedup], timeout_ms: 180000, params: {model: BAAI/bge-m3}}
+  - {id: semantic_prefilter, node: semantic_prefilter, effect: gate, after: [bgem3], params: {dense_margin_threshold: 0.05, rescue_logic: any_positive}}
+  - {id: completeness, node: completeness_gate, effect: gate, after: [semantic_prefilter]}
+  - {id: triage_extraction, node: triage_extraction, effect: observe, after: [completeness]}
+  - {id: extraction_validation, node: extraction_validation, effect: gate, after: [triage_extraction]}
+  - {id: normalization, node: job_normalization, effect: observe, after: [extraction_validation]}
+  - {id: skill_normalization, node: skill_normalization, effect: observe, after: [normalization]}
+  - {id: location_work_mode, node: location_work_mode_normalization, effect: observe, after: [skill_normalization]}
+  - {id: compensation, node: compensation, effect: observe, after: [location_work_mode]}
+  - {id: lifecycle, node: lifecycle, effect: observe, after: [compensation]}
+  - {id: profile_match, node: profile_match, effect: observe, after: [lifecycle]}
+  - {id: parallel_scoring, node: parallel_scoring, effect: observe, after: [profile_match], params: {margin_k: 20}}
+  - {id: is_job, node: is_job, effect: observe, after: [parallel_scoring]}
+  - {id: risk, node: risk, effect: observe, after: [is_job]}
+  - {id: quality, node: quality, effect: observe, after: [risk]}
+  - {id: job_validation, node: job_validation, effect: gate, after: [quality]}
+  - {id: llm_relevance, node: llm_relevance, effect: observe, after: [job_validation], params: {prompt: targeted_historical}}
+  - {id: presentable_text, node: presentable_text, effect: observe, after: [llm_relevance]}
+  - {id: legacy_routing, node: legacy_routing, effect: terminal_decision, after: [presentable_text]}
+  - {id: full_extraction, node: full_extraction, effect: observe, after: [legacy_routing]}
+  - {id: aggregation, node: aggregation, effect: side_effect, after: [full_extraction]}

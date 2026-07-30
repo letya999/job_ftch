@@ -8,6 +8,14 @@ from job_ftch.infrastructure.sources.monitor_detector import get_ordered_monitor
 from job_ftch.infrastructure.sources.site_fingerprinter import SiteClass, SiteProfile, fingerprint
 
 
+@pytest.fixture(autouse=True)
+def _disable_curl_stealth(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _raise_value_error(name: str):
+        raise ValueError(name)
+
+    monkeypatch.setattr("job_ftch.application.registry.resolve_bypass", _raise_value_error)
+
+
 @pytest.mark.asyncio
 async def test_fingerprint_ssr_via_vacancy_links():
     mock_response = MagicMock(spec=httpx.Response)
@@ -232,7 +240,7 @@ async def test_get_ordered_monitors_ssr():
         "job_ftch.infrastructure.sources.site_fingerprinter.httpx.AsyncClient",
         return_value=mock_client,
     ):
-        monitors = await get_ordered_monitors("https://example.com/jobs", None)
+        monitors, _, _canonical = await get_ordered_monitors("https://example.com/jobs", None)
 
     assert monitors[0] == "dom"
 
@@ -243,7 +251,7 @@ async def test_get_ordered_monitors_fallback_on_error():
         "job_ftch.infrastructure.sources.monitor_detector.fingerprint",
         side_effect=Exception("Fingerprint error"),
     ):
-        monitors = await get_ordered_monitors("https://example.com/jobs", None)
+        monitors, _, _canonical = await get_ordered_monitors("https://example.com/jobs", None)
 
     assert monitors == ["dom", "api_sniffer"]
 

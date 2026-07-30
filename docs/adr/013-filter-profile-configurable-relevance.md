@@ -1,3 +1,8 @@
+---
+title: "013 — FilterProfile: configurable relevance"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 013 — FilterProfile: configurable relevance
 
 **Status**: ACCEPTED
@@ -22,7 +27,7 @@ class FilterProfile(BaseModel):
 
 `FilterProfile` is loaded from YAML (per-tenant or default) and injected into `TriageNode` at build time via `PipelineBuilder`. Multiple profiles can coexist; operators switch profiles by changing config, not code.
 
-Built-in profiles shipped in `job_ftch/profiles/`: `ai_roles.yaml`, `backend_engineering.yaml`, `all_roles.yaml` (no-op passthrough). Operators can provide custom profiles without modifying the package.
+Built-in profiles ship in `config/profiles/`: `ai_roles.yaml`, `ai_jobs_ru_kz.yaml`, `all_roles.yaml` (no-op passthrough). Operators can provide custom profiles without modifying the package.
 
 ## Consequences
 

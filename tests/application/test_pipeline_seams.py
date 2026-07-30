@@ -1,23 +1,26 @@
 import pytest
 
-from job_ftch.application.drops import RawItemDropped
 from job_ftch.application.pipeline import Pipeline
 from job_ftch.application.tenant_runner import TenantStore
 from job_ftch.domain import (
     JobDraft,
     JobRecord,
-    JobReviewReason,
     LanguageCode,
-    MatchDecision,
     PostType,
-    ProfileMatchScore,
     RawItem,
     RejectedOutcome,
     SkillTag,
     SourceKind,
-    TriageRejectionReason,
+    processed_key_for_raw_item,
 )
 from job_ftch.domain.profile import ProfileCatalog, SearchProfile
+from job_ftch.infrastructure.classifiers.keyword_lists import (
+    load_announcement_tokens,
+    load_candidate_tokens,
+    load_job_posting_strong_tokens,
+    load_job_posting_tokens,
+    load_spam_tokens,
+)
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 from job_ftch.infrastructure.stores.sqlite import SQLiteStore
 from job_ftch.nodes.dedup import DedupNode
@@ -27,9 +30,20 @@ from job_ftch.nodes.job_normalization import SkillNormalizationNode, TitleCompan
 from job_ftch.nodes.match_scoring import MultiProfileMatchNode
 from job_ftch.nodes.post_type import PostTypeClassificationNode
 from job_ftch.nodes.quality import JobValidationNode, QualityScoringNode
-from job_ftch.nodes.routing import RoutingNode
 from job_ftch.nodes.sanitize import SanitizeNode
 from job_ftch.nodes.semantic_prefilter import SemanticPrefilterNode
+
+
+def _make_post_type_node(**kwargs):
+    """Helper: PostTypeClassificationNode with real YAML tokens loaded."""
+    return PostTypeClassificationNode(
+        announcement_tokens=load_announcement_tokens(),
+        job_posting_tokens=load_job_posting_tokens(),
+        job_posting_strong_tokens=load_job_posting_strong_tokens(),
+        candidate_tokens=load_candidate_tokens(),
+        spam_tokens=load_spam_tokens(),
+        **kwargs,
+    )
 
 
 @pytest.fixture
@@ -158,24 +172,25 @@ async def test_seam_04_sanitize_quarantines_invalid_item(
 
 @pytest.mark.anyio
 @pytest.mark.integration
-async def test_seam_05_post_type_to_hard_filter_candidate_seeking_dropped(
+async def test_seam_05_post_type_to_hard_filter_candidate_seeking_is_evidence(
     source_factory, sink, store, make_raw_item, minimal_catalog
 ):
     item = make_raw_item(text="#резюме")
     pipeline = Pipeline(
         source=source_factory([item]),
         sanitize_node=SanitizeNode(),
-        nodes=[PostTypeClassificationNode(), HardFilterNode(minimal_catalog)],
+        nodes=[_make_post_type_node(), HardFilterNode(minimal_catalog)],
         sink=sink,
         store=store,
     )
     await pipeline.run()
-    assert len(sink.items) == 0
+    assert len(sink.items) == 1
+    assert "post_type:candidate_seeking" in sink.items[0].metadata["hard_filter_evidence"]
 
 
 @pytest.mark.anyio
 @pytest.mark.integration
-async def test_seam_06_only_job_posting_reaches_extraction(
+async def test_seam_06_uncertain_post_type_reaches_extraction(
     source_factory, sink, store, make_raw_item, minimal_catalog
 ):
     item1 = make_raw_item(text="Hiring ML engineer")
@@ -193,18 +208,18 @@ async def test_seam_06_only_job_posting_reaches_extraction(
     pipeline = Pipeline(
         source=source_factory([item1, item2]),
         sanitize_node=SanitizeNode(),
-        nodes=[PostTypeClassificationNode(), HardFilterNode(minimal_catalog), extractor],
+        nodes=[_make_post_type_node(), HardFilterNode(minimal_catalog), extractor],
         sink=sink,
         store=store,
     )
     await pipeline.run()
-    assert len(extractor.called_with) == 1
+    assert len(extractor.called_with) == 2
     assert "Hiring" in extractor.called_with[0].text
 
 
 @pytest.mark.anyio
 @pytest.mark.integration
-async def test_seam_07_language_detection_to_hard_filter_drops_disallowed(
+async def test_seam_07_language_detection_to_hard_filter_is_evidence(
     source_factory, sink, store, make_raw_item
 ):
     profile = SearchProfile(profile_id="p1", allowed_languages=(LanguageCode.RU,))
@@ -224,7 +239,8 @@ async def test_seam_07_language_detection_to_hard_filter_drops_disallowed(
         store=store,
     )
     await pipeline.run()
-    assert len(sink.items) == 0
+    assert len(sink.items) == 1
+    assert "language_not_allowed:en" in sink.items[0].metadata["hard_filter_evidence"]
 
 
 @pytest.mark.anyio
@@ -337,79 +353,6 @@ async def test_seam_10_normalization_chain_feeds_matching(
 
 @pytest.mark.anyio
 @pytest.mark.integration
-async def test_seam_11_match_scoring_to_routing_accept(
-    source_factory, sink, store, make_raw_item, make_job_record
-):
-    score = ProfileMatchScore(
-        profile_id="test_ml", profile_name="ML", final_score=0.9, decision=MatchDecision.ACCEPT
-    )
-
-    class FakeMatcherRecord:
-        async def process(self, item):
-            return make_job_record(profile_scores=(score,), quality_score=0.9)
-
-    pipeline = Pipeline(
-        source=source_factory([make_raw_item()]),
-        sanitize_node=SanitizeNode(),
-        nodes=[FakeMatcherRecord(), RoutingNode(accept_threshold=0.8)],
-        sink=sink,
-        store=store,
-    )
-    await pipeline.run()
-    assert sink.items[0].routing_decision == MatchDecision.ACCEPT
-
-
-@pytest.mark.anyio
-@pytest.mark.integration
-async def test_seam_12_match_scoring_to_routing_review(
-    source_factory, sink, store, make_raw_item, make_job_record
-):
-    score = ProfileMatchScore(
-        profile_id="p1", profile_name="P1", final_score=0.6, decision=MatchDecision.REVIEW
-    )
-
-    class FakeMatcher:
-        async def process(self, item):
-            return make_job_record(profile_scores=(score,))
-
-    pipeline = Pipeline(
-        source=source_factory([make_raw_item()]),
-        sanitize_node=SanitizeNode(),
-        nodes=[FakeMatcher(), RoutingNode(accept_threshold=0.8, review_threshold=0.5)],
-        sink=sink,
-        store=store,
-    )
-    await pipeline.run()
-    assert sink.items[0].routing_decision == MatchDecision.REVIEW
-
-
-@pytest.mark.anyio
-@pytest.mark.integration
-async def test_seam_13_risk_signals_demote_routing_to_review(
-    source_factory, sink, store, make_raw_item, make_job_record
-):
-    score = ProfileMatchScore(
-        profile_id="p1", profile_name="P1", final_score=0.9, decision=MatchDecision.ACCEPT
-    )
-
-    class FakeMatcher:
-        async def process(self, item):
-            return make_job_record(profile_scores=(score,), quality_score=0.4)  # low quality
-
-    pipeline = Pipeline(
-        source=source_factory([make_raw_item()]),
-        sanitize_node=SanitizeNode(),
-        nodes=[FakeMatcher(), RoutingNode(quality_override_threshold=0.6)],
-        sink=sink,
-        store=store,
-    )
-    await pipeline.run()
-    assert sink.items[0].routing_decision == MatchDecision.REVIEW
-    assert JobReviewReason.LOW_QUALITY_SCORE.value in sink.items[0].review_reasons
-
-
-@pytest.mark.anyio
-@pytest.mark.integration
 async def test_seam_14_low_quality_job_dropped_at_validation(
     source_factory, sink, store, make_raw_item, make_job_record
 ):
@@ -449,7 +392,7 @@ async def test_seam_15_fanout_sink_delivers_to_all_sinks(source_factory, store, 
 
 @pytest.mark.anyio
 @pytest.mark.integration
-async def test_seam_16_rejected_item_goes_to_rejected_sink(
+async def test_seam_16_unconfirmed_spam_is_not_early_rejected(
     source_factory, sink, store, make_raw_item, minimal_catalog
 ):
     item = make_raw_item(metadata={"preclassified_post_type": PostType.SPAM.value})
@@ -465,8 +408,8 @@ async def test_seam_16_rejected_item_goes_to_rejected_sink(
         rejected_sink=rejected_sink,
     )
     await pipeline.run()
-    assert len(sink.items) == 0
-    assert len(rejected_sink.items) == 1
+    assert len(sink.items) == 1
+    assert len(rejected_sink.items) == 0
 
 
 @pytest.mark.anyio
@@ -513,9 +456,12 @@ async def test_seam_18_store_protocol_equivalence_in_memory(store):
 async def test_seam_18_store_protocol_equivalence_sqlite(tmp_path):
     db_path = tmp_path / "test.db"
     store = SQLiteStore(db_path)
-    await store.mark_processed("k1")
-    assert await store.has_processed("k1")
-    assert not await store.has_processed("k2")
+    try:
+        await store.mark_processed("k1")
+        assert await store.has_processed("k1")
+        assert not await store.has_processed("k2")
+    finally:
+        await store.close()
 
 
 @pytest.mark.anyio
@@ -554,7 +500,7 @@ async def test_seam_21_pipeline_saves_cursor_to_store(source_factory, sink, stor
     await pipeline.run()
     stored = await store.get_run_state("pipeline.last_processed_key")
     assert stored is not None
-    assert f"raw:{item.stable_id}" == stored
+    assert stored == processed_key_for_raw_item(item)
 
 
 @pytest.mark.anyio
@@ -627,14 +573,13 @@ profiles:
 
 @pytest.mark.anyio
 @pytest.mark.integration
-async def test_seam_26_filter_profile_language_blocks_item(make_raw_item):
+async def test_seam_26_filter_profile_language_is_policy_evidence(make_raw_item):
     profile = SearchProfile(profile_id="p", allowed_languages=(LanguageCode.RU,))
     catalog = ProfileCatalog(profiles=[profile])
     node = HardFilterNode(catalog)
 
     item = make_raw_item(metadata={"detected_language": "en"})
-    with pytest.raises(RawItemDropped):
-        await node.process(item)
+    assert "language_not_allowed:en" in (await node.process(item)).metadata["hard_filter_evidence"]
 
 
 @pytest.mark.anyio
@@ -642,7 +587,7 @@ async def test_seam_26_filter_profile_language_blocks_item(make_raw_item):
 async def test_seam_27_source_classifier_labels_propagate_to_output(
     source_factory, sink, store, make_raw_item
 ):
-    node = PostTypeClassificationNode()
+    node = _make_post_type_node()
     item = make_raw_item(text="Hiring ML Engineer")
     pipeline = Pipeline(
         source=source_factory([item]),
@@ -690,13 +635,11 @@ async def test_seam_29_pipeline_max_items_stops_early(source_factory, sink, stor
 
 @pytest.mark.anyio
 @pytest.mark.integration
-async def test_seam_30_semantic_prefilter_drops_low_signal_before_extraction(
+async def test_seam_30_semantic_prefilter_marks_low_signal_before_extraction(
     source_factory, sink, store, make_raw_item, minimal_catalog
 ):
     # Minimal profile wants ML Engineer
     node = SemanticPrefilterNode(minimal_catalog)
     item = make_raw_item(text="Something completely unrelated to ML")
 
-    with pytest.raises(RawItemDropped) as exc:
-        await node.process(item)
-    assert exc.value.reason == TriageRejectionReason.LOW_RELEVANCE_PREFILTER
+    assert (await node.process(item)).metadata["semantic_prefilter_uncertain"] is True

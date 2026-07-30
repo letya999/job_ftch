@@ -55,7 +55,7 @@ async def test_in_memory_store_persists_duplicate_explainability() -> None:
         source_name="ai-jobs",
         reason=DuplicateRejectionReason.DUPLICATE_NEAR_MATCH,
         duplicate_key="content:new",
-        matched_key="content:old",
+        matched_key="content:new",
         matched_item_id="item-1",
         matched_source_kind=SourceKind.CAREER_SITE,
         matched_source_name="ClickHouse",
@@ -96,7 +96,7 @@ async def test_incremental_cursor_uses_unified_key_pattern() -> None:
 
 
 @pytest.mark.asyncio
-async def test_in_memory_store_evicts_oldest_kv_entries_when_capped() -> None:
+async def test_in_memory_store_evicts_newest_kv_entries_when_capped() -> None:
     store = InMemoryStore(max_keys=2)
 
     await store.set("one", "1")
@@ -109,7 +109,7 @@ async def test_in_memory_store_evicts_oldest_kv_entries_when_capped() -> None:
 
 
 @pytest.mark.asyncio
-async def test_in_memory_store_evicts_oldest_set_members_when_capped() -> None:
+async def test_in_memory_store_evicts_newest_set_members_when_capped() -> None:
     store = InMemoryStore(max_set_members=2)
 
     await store.set_add("processed", "one")

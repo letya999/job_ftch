@@ -1,0 +1,8 @@
+extends: historical_best.yaml
+name: experiment_prefilter_threshold_003
+version: "1.0.0"
+metadata:
+  purpose: threshold_ablation
+  experiment: {variable: node:semantic_prefilter.params.dense_margin_threshold}
+nodes:
+  - {id: semantic_prefilter, params: {dense_margin_threshold: 0.03}}

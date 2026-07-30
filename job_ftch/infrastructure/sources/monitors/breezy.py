@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlparse
 
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     fetch_page_text,
@@ -91,4 +91,16 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     return None
 
 
-register_monitor("breezy", discover, cost=10, rich=False, can_handle=can_handle)
+register_monitor(
+    "breezy",
+    discover,
+    cost=10,
+    rich=False,
+    can_handle=can_handle,
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "breezy",
+        url_patterns=(r"[\w-]+\.breezy\.hr/?$",),
+        has_stable_id=True,
+    ),
+)

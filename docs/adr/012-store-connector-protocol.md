@@ -1,3 +1,8 @@
+---
+title: "012 — StoreConnector protocol hierarchy"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 012 — StoreConnector protocol hierarchy
 
 **Status**: ACCEPTED

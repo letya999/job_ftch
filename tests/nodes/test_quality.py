@@ -50,6 +50,18 @@ async def test_quality_scoring_risk_signals_penalize(make_job_record):
 
 
 @pytest.mark.anyio
+async def test_quality_is_independent_from_relevance_score(make_job_record):
+    node = QualityScoringNode()
+    low_relevance = make_job_record(relevance_score=0.01)
+    high_relevance = make_job_record(relevance_score=0.99)
+
+    low = await node.process(low_relevance)
+    high = await node.process(high_relevance)
+
+    assert low.quality_score == high.quality_score
+
+
+@pytest.mark.anyio
 async def test_quality_scoring_adds_review_reason_when_below_threshold(make_job_record):
     node = QualityScoringNode(review_threshold=0.6)
     job = make_job_record(title=None, company=None, description="short")

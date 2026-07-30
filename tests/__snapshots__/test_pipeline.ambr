@@ -6,6 +6,7 @@
         'created_at': None,
         'external_id': 'snap-1',
         'metadata': dict({
+          'original_posting_text': 'Senior Python Engineer remote position in AI company',
         }),
         'schema_version': '1',
         'source_kind': 'debug',

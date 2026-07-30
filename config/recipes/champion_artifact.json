@@ -1,0 +1,1171 @@
+{
+  "source_artifact_path": "artifacts/release/controlled_postgres_eval_400_threshold020_20260729.json",
+  "run_at": "2026-07-29T14:48:25.422462+00:00",
+  "dataset": "fixtures\\dataset\\eval_dataset_fixed140_locked_v1.jsonl",
+  "dataset_name": "job_ftch_pipeline_eval",
+  "run_name": "pipeline_eval_20260729_1445",
+  "profile_shots": {
+    "total": 40,
+    "positive_resume": 10,
+    "negative_resume": 10,
+    "positive_jobs": 10,
+    "negative_jobs": 10,
+    "source": "active tenant profile user:480637186"
+  },
+  "provenance": {
+    "recipe_id": "c111d182ec9afa62",
+    "comparison_key": "996a6833a6e90daa",
+    "graph_path": "config/pipelines/evidence_v2_compact_prefilter.yaml",
+    "graph_hash": "0d73de0663d220da62e37d9a41159542547d167f9f096088f7ae85ec587e44fb",
+    "ontology_hash": "ab4ff2d173c713a455daf7d9aacd7f72ee381a29a56debcb58520bd03dcb280d",
+    "ontology_counts": {
+      "skills": 94,
+      "roles": 13,
+      "positive_keywords": 56,
+      "negative_keywords": 26,
+      "anti_patterns": 18
+    },
+    "state_mode": "production",
+    "store_backend": "postgres",
+    "dirty_state": false,
+    "reset": {
+      "performed": true,
+      "counts": {
+        "kv": 3661,
+        "sets": 6137,
+        "observations": 1116,
+        "snapshots": 1116,
+        "source_ingest_states": 17,
+        "dedup_claims": 0,
+        "outbox": 0,
+        "job_groups": 20
+      },
+      "at": "2026-07-29T14:45:48.750353+00:00",
+      "source_snapshots_after_reset": 0
+    },
+    "candidate_counts": {
+      "parent_items": 400,
+      "total_candidates": 486,
+      "expected_total_candidates": 486,
+      "incomplete_candidate_set": false,
+      "by_source_kind": {
+        "career_site": 90,
+        "telegram_channel": 367,
+        "telegram_group": 29
+      }
+    },
+    "incomplete_candidate_set": false,
+    "git_rev": "0344880496530cb51eee1ed01b83c8cecec253d3",
+    "git_dirty": true,
+    "dataset_path": "fixtures\\dataset\\eval_dataset_fixed140_locked_v1.jsonl",
+    "dataset_sha256": "0c3f9eeecf382af038196fcd6482d58f9907040ac178fd9fd50a8bbbc23c98fa",
+    "sample_size": 400,
+    "seed": 42,
+    "models": {
+      "openai_model": "gpt-5.4-nano",
+      "relevance_llm_model": "gpt-4.1-mini"
+    },
+    "flags": {
+      "embedding_prefilter_enabled": false,
+      "bgem3_enabled": false,
+      "relevance_backend": "keywords",
+      "llm_presentable_enabled": true
+    },
+    "config_resolution": {
+      "adaptive_scraping_enabled": {
+        "layer": "default",
+        "value": "True"
+      },
+      "api_sniffer_decode_concurrency": {
+        "layer": "default",
+        "value": "4"
+      },
+      "api_sniffer_default_page_size": {
+        "layer": "default",
+        "value": "10"
+      },
+      "api_sniffer_max_pages": {
+        "layer": "default",
+        "value": "10"
+      },
+      "api_sniffer_max_response_bytes": {
+        "layer": "default",
+        "value": "2000000"
+      },
+      "api_sniffer_max_responses": {
+        "layer": "default",
+        "value": "100"
+      },
+      "api_sniffer_max_total_bytes": {
+        "layer": "default",
+        "value": "10000000"
+      },
+      "api_sniffer_settle_seconds": {
+        "layer": "default",
+        "value": "4.0"
+      },
+      "api_timeout_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "30.0"
+      },
+      "auth_file_path": {
+        "layer": "default",
+        "value": "None"
+      },
+      "auth_telegram_bot_admin_user_ids": {
+        "layer": "env",
+        "value": "480637186"
+      },
+      "auth_telegram_bot_allowed_chat_ids": {
+        "layer": "env",
+        "value": ""
+      },
+      "auth_telegram_bot_allowed_user_ids": {
+        "layer": "env",
+        "value": "480637186"
+      },
+      "auth_telegram_bot_digest_size": {
+        "layer": "env",
+        "value": "5"
+      },
+      "auth_telegram_bot_rate_limit_seconds": {
+        "layer": "env",
+        "value": "1.0"
+      },
+      "auth_telegram_bot_token": {
+        "layer": "env",
+        "value": "***"
+      },
+      "bgem3_enabled": {
+        "layer": "env",
+        "value": "False"
+      },
+      "bgem3_model": {
+        "layer": "default",
+        "value": "BAAI/bge-m3"
+      },
+      "bot_send_limit_per_run": {
+        "layer": "base_runtime_yaml",
+        "value": "100"
+      },
+      "browser_challenge_retries": {
+        "layer": "base_runtime_yaml",
+        "value": "1"
+      },
+      "browser_challenge_wait_ms": {
+        "layer": "default",
+        "value": "6000"
+      },
+      "browser_channel": {
+        "layer": "default",
+        "value": "chrome"
+      },
+      "browser_context_timeout_ms": {
+        "layer": "base_runtime_yaml",
+        "value": "120000"
+      },
+      "browser_default_timeout_ms": {
+        "layer": "base_runtime_yaml",
+        "value": "30000"
+      },
+      "browser_headless": {
+        "layer": "default",
+        "value": "True"
+      },
+      "bypass_default_requests_per_second": {
+        "layer": "default",
+        "value": "2.0"
+      },
+      "bypass_max_detail_browser_launches": {
+        "layer": "default",
+        "value": "1"
+      },
+      "bypass_max_listing_browser_launches": {
+        "layer": "default",
+        "value": "3"
+      },
+      "bypass_max_proxy_rotations_per_operation": {
+        "layer": "default",
+        "value": "2"
+      },
+      "bypass_max_route_attempts_per_operation": {
+        "layer": "default",
+        "value": "6"
+      },
+      "bypass_max_source_browser_launches": {
+        "layer": "default",
+        "value": "16"
+      },
+      "bypass_max_source_proxy_rotations": {
+        "layer": "default",
+        "value": "8"
+      },
+      "bypass_max_weighted_work_per_source": {
+        "layer": "default",
+        "value": "500"
+      },
+      "bypass_timeout_escalate_threshold": {
+        "layer": "default",
+        "value": "2"
+      },
+      "captcha_enabled_providers": {
+        "layer": "default",
+        "value": "['browser_wait', 'nopecha']"
+      },
+      "captcha_provider": {
+        "layer": "default",
+        "value": "nopecha"
+      },
+      "career_site_browser_concurrency": {
+        "layer": "default",
+        "value": "3"
+      },
+      "career_site_connect_timeout_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "30.0"
+      },
+      "career_site_default_detail_limit": {
+        "layer": "default",
+        "value": "None"
+      },
+      "career_site_default_limit": {
+        "layer": "default",
+        "value": "50"
+      },
+      "career_site_detail_concurrency": {
+        "layer": "base_runtime_yaml",
+        "value": "8"
+      },
+      "career_site_global_detail_concurrency": {
+        "layer": "default",
+        "value": "16"
+      },
+      "career_site_max_connections": {
+        "layer": "base_runtime_yaml",
+        "value": "10"
+      },
+      "career_site_max_keepalive_connections": {
+        "layer": "base_runtime_yaml",
+        "value": "5"
+      },
+      "career_site_max_retries": {
+        "layer": "base_runtime_yaml",
+        "value": "2"
+      },
+      "career_site_protection_failure_limit": {
+        "layer": "default",
+        "value": "3"
+      },
+      "career_site_retry_delay_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "1.0"
+      },
+      "career_site_timeout_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "15.0"
+      },
+      "career_site_url": {
+        "layer": "default",
+        "value": "None"
+      },
+      "career_site_window_max_details": {
+        "layer": "default",
+        "value": "500"
+      },
+      "configs_dir": {
+        "layer": "env",
+        "value": "adapters\\telegram_bot\\config\\tenants"
+      },
+      "debug_source_path": {
+        "layer": "env",
+        "value": "fixtures\\debug\\raw_items.json"
+      },
+      "derived_ontology_path": {
+        "layer": "default",
+        "value": "fixtures/shots/derived_ontology.json"
+      },
+      "display_name": {
+        "layer": "tenant_yaml",
+        "value": "AI Jobs RU/KZ"
+      },
+      "dry_run": {
+        "layer": "default",
+        "value": "False"
+      },
+      "embedded_state_page_text_max_chars": {
+        "layer": "default",
+        "value": "1000000"
+      },
+      "embedding_dimensions": {
+        "layer": "runtime_yaml",
+        "value": "1024"
+      },
+      "embedding_enabled": {
+        "layer": "env",
+        "value": "False"
+      },
+      "embedding_model": {
+        "layer": "runtime_yaml",
+        "value": "BAAI/bge-m3"
+      },
+      "embedding_prefilter_enabled": {
+        "layer": "base_runtime_yaml",
+        "value": "False"
+      },
+      "embedding_prefilter_model": {
+        "layer": "base_runtime_yaml",
+        "value": "paraphrase-multilingual-MiniLM-L12-v2"
+      },
+      "embedding_provider": {
+        "layer": "runtime_yaml",
+        "value": "sentence_transformers"
+      },
+      "embedding_upsert_batch_size": {
+        "layer": "default",
+        "value": "32"
+      },
+      "env": {
+        "layer": "env",
+        "value": "prod"
+      },
+      "evidence_policy_path": {
+        "layer": "default",
+        "value": "config\\evidence_policy.yaml"
+      },
+      "extraction_min_hiring_intent": {
+        "layer": "runtime_yaml",
+        "value": "0.4"
+      },
+      "extraction_min_search_relevance": {
+        "layer": "runtime_yaml",
+        "value": "0.25"
+      },
+      "filter_profile_path": {
+        "layer": "default",
+        "value": "None"
+      },
+      "fingerprint_body_scan_max_chars": {
+        "layer": "default",
+        "value": "100000"
+      },
+      "fingerprinter_timeout_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "8.0"
+      },
+      "freshness_require_date": {
+        "layer": "default",
+        "value": "False"
+      },
+      "http_proxy_list": {
+        "layer": "default",
+        "value": "[]"
+      },
+      "job_backend": {
+        "layer": "env",
+        "value": "postgres"
+      },
+      "job_group_store_backend": {
+        "layer": "env",
+        "value": "postgres"
+      },
+      "job_store_path": {
+        "layer": "default",
+        "value": "None"
+      },
+      "langfuse_host": {
+        "layer": "env",
+        "value": "http://localhost:3001"
+      },
+      "langfuse_public_key": {
+        "layer": "env",
+        "value": "***"
+      },
+      "langfuse_secret_key": {
+        "layer": "env",
+        "value": "***"
+      },
+      "language_detection_enabled": {
+        "layer": "default",
+        "value": "False"
+      },
+      "llm_backend": {
+        "layer": "env",
+        "value": "openai"
+      },
+      "llm_ontology_max_per_shot": {
+        "layer": "default",
+        "value": "1"
+      },
+      "llm_presentable_enabled": {
+        "layer": "default",
+        "value": "True"
+      },
+      "llm_presentable_max_per_run": {
+        "layer": "default",
+        "value": "50"
+      },
+      "llm_relevance_high_threshold": {
+        "layer": "base_runtime_yaml",
+        "value": "0.55"
+      },
+      "llm_relevance_low_threshold": {
+        "layer": "base_runtime_yaml",
+        "value": "0.2"
+      },
+      "llm_relevance_max_per_run": {
+        "layer": "base_runtime_yaml",
+        "value": "500"
+      },
+      "log_level": {
+        "layer": "env",
+        "value": "INFO"
+      },
+      "memory_max_keys": {
+        "layer": "default",
+        "value": "***"
+      },
+      "memory_max_set_members": {
+        "layer": "default",
+        "value": "50000"
+      },
+      "monitor_max_retries": {
+        "layer": "base_runtime_yaml",
+        "value": "3"
+      },
+      "monitor_page_text_max_chars": {
+        "layer": "default",
+        "value": "500000"
+      },
+      "monitor_timeout_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "15.0"
+      },
+      "notify_batch_size": {
+        "layer": "tenant_yaml",
+        "value": "10"
+      },
+      "notify_mode": {
+        "layer": "tenant_yaml",
+        "value": "digest"
+      },
+      "ollama_base_url": {
+        "layer": "default",
+        "value": "http://localhost:11434"
+      },
+      "ollama_timeout_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "30.0"
+      },
+      "ontology_compiler_mode": {
+        "layer": "default",
+        "value": "llm_v2_apply"
+      },
+      "ontology_compiler_model": {
+        "layer": "default",
+        "value": "gpt-4.1-nano"
+      },
+      "ontology_compiler_prompt_path": {
+        "layer": "default",
+        "value": "config/prompts/ontology_compiler_v2.yaml"
+      },
+      "openai_api_key": {
+        "layer": "env",
+        "value": "***"
+      },
+      "openai_base_url": {
+        "layer": "env",
+        "value": "https://api.openai.com/v1"
+      },
+      "openai_max_retries": {
+        "layer": "base_runtime_yaml",
+        "value": "2"
+      },
+      "openai_model": {
+        "layer": "runtime_yaml",
+        "value": "gpt-5.4-nano"
+      },
+      "openai_timeout_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "30.0"
+      },
+      "openobserve_enabled": {
+        "layer": "runtime_yaml",
+        "value": "True"
+      },
+      "openobserve_logs_stream": {
+        "layer": "env",
+        "value": "job_ftch_bot"
+      },
+      "openobserve_metric_export_interval_ms": {
+        "layer": "default",
+        "value": "10000"
+      },
+      "openobserve_org": {
+        "layer": "env",
+        "value": "default"
+      },
+      "openobserve_password": {
+        "layer": "env",
+        "value": "***"
+      },
+      "openobserve_timeout_seconds": {
+        "layer": "default",
+        "value": "5.0"
+      },
+      "openobserve_url": {
+        "layer": "env",
+        "value": "http://127.0.0.1:5080"
+      },
+      "openobserve_username": {
+        "layer": "env",
+        "value": "admin@job-ftch.local"
+      },
+      "otel_service_name": {
+        "layer": "default",
+        "value": "job_ftch"
+      },
+      "output_jsonl": {
+        "layer": "base_runtime_yaml",
+        "value": "False"
+      },
+      "output_path": {
+        "layer": "env",
+        "value": "artifacts\\ai_jobs\\jobs.json"
+      },
+      "output_schema_version": {
+        "layer": "base_runtime_yaml",
+        "value": "job_ftch.job.v1"
+      },
+      "pipeline_candidate_segmentation_enabled": {
+        "layer": "default",
+        "value": "True"
+      },
+      "pipeline_completeness_gate_enabled": {
+        "layer": "default",
+        "value": "True"
+      },
+      "pipeline_completeness_threshold": {
+        "layer": "default",
+        "value": "0.8"
+      },
+      "pipeline_decision_version": {
+        "layer": "default",
+        "value": "pipeline-v1"
+      },
+      "pipeline_full_extraction_max_calls_per_run": {
+        "layer": "default",
+        "value": "100"
+      },
+      "pipeline_graph_expected_hash": {
+        "layer": "runtime_yaml",
+        "value": "0d73de0663d220da62e37d9a41159542547d167f9f096088f7ae85ec587e44fb"
+      },
+      "pipeline_graph_path": {
+        "layer": "runtime_yaml",
+        "value": "config\\pipelines\\evidence_v2_compact_prefilter.yaml"
+      },
+      "pipeline_item_concurrency": {
+        "layer": "runtime_yaml",
+        "value": "3"
+      },
+      "pipeline_item_concurrency_adaptive": {
+        "layer": "runtime_yaml",
+        "value": "False"
+      },
+      "pipeline_jobness_decision_enabled": {
+        "layer": "default",
+        "value": "True"
+      },
+      "pipeline_max_browser_navigations_per_run": {
+        "layer": "default",
+        "value": "None"
+      },
+      "pipeline_max_items_per_run": {
+        "layer": "base_runtime_yaml",
+        "value": "None"
+      },
+      "pipeline_max_llm_calls_per_run": {
+        "layer": "runtime_yaml",
+        "value": "125"
+      },
+      "pipeline_max_text_length": {
+        "layer": "base_runtime_yaml",
+        "value": "20000"
+      },
+      "posting_backend": {
+        "layer": "env",
+        "value": "none"
+      },
+      "posting_min_quality_score": {
+        "layer": "base_runtime_yaml",
+        "value": "0.8"
+      },
+      "processed_item_ttl_hours": {
+        "layer": "base_runtime_yaml",
+        "value": "24"
+      },
+      "proxy_country_default": {
+        "layer": "default",
+        "value": ""
+      },
+      "proxy_gateway": {
+        "layer": "default",
+        "value": ""
+      },
+      "proxy_gb_budget": {
+        "layer": "default",
+        "value": "0.0"
+      },
+      "proxy_pass": {
+        "layer": "default",
+        "value": ""
+      },
+      "proxy_per_domain_gb_budget": {
+        "layer": "default",
+        "value": "0.0"
+      },
+      "proxy_provider": {
+        "layer": "default",
+        "value": "raw"
+      },
+      "proxy_sticky_ttl_seconds": {
+        "layer": "default",
+        "value": "600"
+      },
+      "proxy_strict_geo": {
+        "layer": "default",
+        "value": "False"
+      },
+      "proxy_user": {
+        "layer": "default",
+        "value": ""
+      },
+      "qdrant_api_key": {
+        "layer": "env",
+        "value": "***"
+      },
+      "qdrant_collection": {
+        "layer": "base_runtime_yaml",
+        "value": "job_ftch_jobs_mvp_v1"
+      },
+      "qdrant_url": {
+        "layer": "env",
+        "value": "http://localhost:6333"
+      },
+      "quarantine_output_jsonl": {
+        "layer": "base_runtime_yaml",
+        "value": "True"
+      },
+      "quarantine_output_path": {
+        "layer": "env",
+        "value": "artifacts\\ai_jobs\\quarantine.jsonl"
+      },
+      "quarantine_output_schema_version": {
+        "layer": "base_runtime_yaml",
+        "value": "job_ftch.quarantine.v1"
+      },
+      "rejected_output_jsonl": {
+        "layer": "base_runtime_yaml",
+        "value": "True"
+      },
+      "rejected_output_path": {
+        "layer": "env",
+        "value": "artifacts\\ai_jobs\\rejected.jsonl"
+      },
+      "rejected_output_schema_version": {
+        "layer": "base_runtime_yaml",
+        "value": "job_ftch.rejected.v1"
+      },
+      "relevance_backend": {
+        "layer": "env",
+        "value": "keywords"
+      },
+      "relevance_llm_model": {
+        "layer": "runtime_yaml",
+        "value": "gpt-4.1-mini"
+      },
+      "relevance_prompt_path": {
+        "layer": "default",
+        "value": "fixtures/shots/generated_relevance_prompt.txt"
+      },
+      "relevance_shot_backend": {
+        "layer": "base_runtime_yaml",
+        "value": "qdrant"
+      },
+      "relevance_shot_collection": {
+        "layer": "default",
+        "value": "profile_shots_e5"
+      },
+      "relevance_shot_collection_bgem3": {
+        "layer": "default",
+        "value": "profile_shots_bgem3_mvp_v3"
+      },
+      "relevance_shot_model": {
+        "layer": "default",
+        "value": "intfloat/multilingual-e5-small"
+      },
+      "relevance_shot_seed_collection_bgem3": {
+        "layer": "default",
+        "value": "profile_shots_bgem3_seed"
+      },
+      "relevance_shot_source_mode": {
+        "layer": "base_runtime_yaml",
+        "value": "user_db_only"
+      },
+      "relevance_shot_threshold": {
+        "layer": "base_runtime_yaml",
+        "value": "0.05"
+      },
+      "review_max_quality_score": {
+        "layer": "base_runtime_yaml",
+        "value": "0.65"
+      },
+      "review_output_jsonl": {
+        "layer": "base_runtime_yaml",
+        "value": "True"
+      },
+      "review_output_path": {
+        "layer": "env",
+        "value": "artifacts\\ai_jobs\\review.jsonl"
+      },
+      "review_output_schema_version": {
+        "layer": "base_runtime_yaml",
+        "value": "job_ftch.job.v1"
+      },
+      "robots_enforce": {
+        "layer": "default",
+        "value": "False"
+      },
+      "routing_accept_threshold": {
+        "layer": "base_runtime_yaml",
+        "value": "0.55"
+      },
+      "routing_quality_override_threshold": {
+        "layer": "default",
+        "value": "0.6"
+      },
+      "routing_reranker_accept_threshold": {
+        "layer": "default",
+        "value": "None"
+      },
+      "routing_reranker_review_threshold": {
+        "layer": "default",
+        "value": "None"
+      },
+      "routing_review_threshold": {
+        "layer": "default",
+        "value": "0.5"
+      },
+      "rss_timeout_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "30.0"
+      },
+      "runtime_config_path": {
+        "layer": "env",
+        "value": "config/runtime.yaml;config/runtime.prod.yaml;job_ftch/adapters/telegram_bot/runtime.prod.yaml"
+      },
+      "schedule_interval_seconds": {
+        "layer": "default",
+        "value": "None"
+      },
+      "scheduler_jitter_seconds": {
+        "layer": "default",
+        "value": "0.0"
+      },
+      "search_backend": {
+        "layer": "env",
+        "value": "hybrid"
+      },
+      "search_language": {
+        "layer": "tenant_yaml",
+        "value": "russian"
+      },
+      "session_memory_enabled": {
+        "layer": "default",
+        "value": "False"
+      },
+      "sink_backend": {
+        "layer": "env",
+        "value": "json_file"
+      },
+      "site_parsers_manifest_path": {
+        "layer": "default",
+        "value": "None"
+      },
+      "snapshot_fail_open": {
+        "layer": "default",
+        "value": "False"
+      },
+      "source_assessment_ttl_days": {
+        "layer": "default",
+        "value": "7"
+      },
+      "source_backend": {
+        "layer": "env",
+        "value": "telegram_channel"
+      },
+      "source_eviction_pause_threshold": {
+        "layer": "default",
+        "value": "3"
+      },
+      "source_fetch_concurrency": {
+        "layer": "runtime_yaml",
+        "value": "4"
+      },
+      "source_fetch_concurrency_adaptive": {
+        "layer": "runtime_yaml",
+        "value": "False"
+      },
+      "source_fetch_concurrency_max": {
+        "layer": "default",
+        "value": "16"
+      },
+      "source_hard_cancel_grace_seconds": {
+        "layer": "default",
+        "value": "0.1"
+      },
+      "source_hard_deadline_seconds": {
+        "layer": "runtime_yaml",
+        "value": "180.0"
+      },
+      "source_health_drift_ratio": {
+        "layer": "default",
+        "value": "0.2"
+      },
+      "source_health_failure_streak_pause": {
+        "layer": "default",
+        "value": "3"
+      },
+      "source_health_min_baseline": {
+        "layer": "default",
+        "value": "3.0"
+      },
+      "source_health_probe_every_n_runs": {
+        "layer": "default",
+        "value": "5"
+      },
+      "source_overflow_concurrency": {
+        "layer": "base_runtime_yaml",
+        "value": "2"
+      },
+      "source_pool_adaptive_resize": {
+        "layer": "default",
+        "value": "False"
+      },
+      "source_pool_dynamic_enabled": {
+        "layer": "base_runtime_yaml",
+        "value": "True"
+      },
+      "source_preparation_concurrency": {
+        "layer": "runtime_yaml",
+        "value": "1"
+      },
+      "source_preparation_concurrency_adaptive": {
+        "layer": "runtime_yaml",
+        "value": "False"
+      },
+      "source_soft_deadline_seconds": {
+        "layer": "runtime_yaml",
+        "value": "60.0"
+      },
+      "sources": {
+        "layer": "tenant_yaml",
+        "value": "[{'type': 'telegram_channel', 'entity': 'ml_jobs_kz', 'limit': 100, 'source_name': 'ml_jobs_kz'}, {'type': 'telegram_channel', 'entity': 'remote_ai_jobs', 'limit': 100, 'source_name': 'remote_ai_jobs'}, {'type': 'telegram_channel', 'entity': 'forproducts', 'limit': 100, 'source_name': 'forproducts'}, {'type': 'telegram_channel', 'entity': 'gleb_pro_ai', 'limit': 100, 'source_name': 'gleb_pro_ai'}, {'type': 'telegram_group', 'entity': 'ai_engineers_guild', 'limit': 100, 'source_name': 'ai_engineers_guild'}, {'type': 'career_site', 'url': 'https://geekjob.ru/vacancies', 'source_name': 'geekjob_ru', 'limit': 50}, {'type': 'career_site', 'url': 'https://hh.ru/search/vacancy?text=machine+learning&area=113', 'source_name': 'hh_ru_ml', 'limit': 50}, {'type': 'career_site', 'url': 'https://hh.kz/search/vacancy?text=machine+learning', 'source_name': 'hh_kz_ml', 'limit': 50}, {'type': 'career_site', 'url': 'https://yandex.ru/jobs/vacancies?text=machine+learning', 'source_name': 'yandex_jobs_ml', 'limit': 50}, {'type': 'career_site', 'url': 'https://www.superjob.ru/vacancy/search/?keywords=machine+learning', 'source_name': 'superjob_ru_ml', 'limit': 50}, {'type': 'career_site', 'url': 'https://rabota.sber.ru/search', 'source_name': 'rabota_sber_ru', 'limit': 50}, {'type': 'career_site', 'url': 'https://www.tbank.ru/career/vacancies/it/?tcareer_it_profession=ml', 'source_name': 'tbank_it', 'limit': 50}, {'type': 'career_site', 'url': 'https://team.vk.company/vacancy/', 'source_name': 'vk_careers', 'limit': 50}, {'type': 'career_site', 'url': 'https://career.avito.com/vacancies/', 'source_name': 'avito_careers', 'limit': 50}, {'type': 'career_site', 'url': 'https://career.habr.com/vacancies?q=machine+learning', 'source_name': 'habr_career_ml', 'limit': 50}, {'type': 'career_site', 'url': 'https://kolesa.group/career/job', 'source_name': 'kolesa_group', 'limit': 50}, {'type': 'career_site', 'url': 'https://hirify.me/jobs-in-russia', 'source_name': 'hirify_me', 'limit': 50}]"
+      },
+      "sources_file_path": {
+        "layer": "default",
+        "value": "None"
+      },
+      "store_allow_fallback": {
+        "layer": "default",
+        "value": "False"
+      },
+      "store_backend": {
+        "layer": "env",
+        "value": "postgres"
+      },
+      "store_dsn": {
+        "layer": "env",
+        "value": "***"
+      },
+      "store_fallback_on_error": {
+        "layer": "default",
+        "value": "True"
+      },
+      "store_path": {
+        "layer": "default",
+        "value": ".runtime\\ai_jobs\\job_ftch.db"
+      },
+      "store_pool_max": {
+        "layer": "default",
+        "value": "10"
+      },
+      "store_pool_min": {
+        "layer": "default",
+        "value": "2"
+      },
+      "telegram_api_hash": {
+        "layer": "env",
+        "value": "**********"
+      },
+      "telegram_api_id": {
+        "layer": "env",
+        "value": "35085587"
+      },
+      "telegram_channel_default_limit": {
+        "layer": "default",
+        "value": "50"
+      },
+      "telegram_comment_default_limit": {
+        "layer": "default",
+        "value": "20"
+      },
+      "telegram_comment_limit_per_post": {
+        "layer": "base_runtime_yaml",
+        "value": "50"
+      },
+      "telegram_comment_post_limit": {
+        "layer": "base_runtime_yaml",
+        "value": "20"
+      },
+      "telegram_connection_retries": {
+        "layer": "base_runtime_yaml",
+        "value": "3"
+      },
+      "telegram_entity": {
+        "layer": "env",
+        "value": "durov"
+      },
+      "telegram_flood_sleep_threshold_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "60"
+      },
+      "telegram_group_default_limit": {
+        "layer": "default",
+        "value": "50"
+      },
+      "telegram_history_wait_time_seconds": {
+        "layer": "default",
+        "value": "0.0"
+      },
+      "telegram_jitter_max_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "4.0"
+      },
+      "telegram_jitter_min_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "1.0"
+      },
+      "telegram_message_limit": {
+        "layer": "base_runtime_yaml",
+        "value": "100"
+      },
+      "telegram_proxy_host": {
+        "layer": "default",
+        "value": "None"
+      },
+      "telegram_proxy_password": {
+        "layer": "default",
+        "value": "***"
+      },
+      "telegram_proxy_port": {
+        "layer": "default",
+        "value": "None"
+      },
+      "telegram_proxy_type": {
+        "layer": "default",
+        "value": "None"
+      },
+      "telegram_proxy_username": {
+        "layer": "default",
+        "value": "None"
+      },
+      "telegram_publish_entity": {
+        "layer": "env",
+        "value": "my_output_channel"
+      },
+      "telegram_request_retries": {
+        "layer": "base_runtime_yaml",
+        "value": "3"
+      },
+      "telegram_retry_delay_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "1.0"
+      },
+      "telegram_session_path": {
+        "layer": "env",
+        "value": ".runtime\\telegram-dev.session"
+      },
+      "telegram_timeout_seconds": {
+        "layer": "base_runtime_yaml",
+        "value": "10.0"
+      },
+      "telegram_window_max_messages": {
+        "layer": "default",
+        "value": "1000"
+      },
+      "telemetry_console_exporter": {
+        "layer": "env",
+        "value": "False"
+      },
+      "telemetry_service_name": {
+        "layer": "env",
+        "value": "job_ftch"
+      },
+      "tenant_display_name": {
+        "layer": "default",
+        "value": "AI Jobs RU/KZ"
+      },
+      "tenant_id": {
+        "layer": "tenant_yaml",
+        "value": "ai_jobs"
+      },
+      "tracing_capture_payloads": {
+        "layer": "env",
+        "value": "False"
+      },
+      "tracing_enabled": {
+        "layer": "env",
+        "value": "True"
+      },
+      "translation_enabled": {
+        "layer": "default",
+        "value": "False"
+      },
+      "translation_target_language": {
+        "layer": "default",
+        "value": "ru"
+      },
+      "vector_backend": {
+        "layer": "env",
+        "value": "qdrant"
+      }
+    }
+  },
+  "summary": {
+    "items": 486,
+    "relevant": 54,
+    "not_relevant": 432,
+    "elapsed_seconds": 156.08072939999693,
+    "avg_item_ms": 321.15376419752454,
+    "p50_item_ms": 14.863,
+    "p95_item_ms": 1440.654,
+    "confusion_matrix": {
+      "tp": 44,
+      "fp": 8,
+      "fn": 10,
+      "tn": 424,
+      "precision": 0.8461538461538461,
+      "recall": 0.8148148148148148,
+      "f1": 0.830188679245283
+    },
+    "first_loss_nodes": {
+      "decision": 39,
+      "dedup": 13,
+      "sanitize": 13,
+      "tfidf_logreg_prefilter": 369
+    }
+  },
+  "llm": {
+    "model": "gpt-4.1-mini",
+    "configured_model": "gpt-4.1-mini",
+    "root_configured_model": "gpt-5.4-nano",
+    "models_used": [
+      "gpt-4.1-mini"
+    ],
+    "provider": "OpenAIInstructorLLMProvider",
+    "provider_module": "job_ftch.infrastructure.llm.openai_provider",
+    "external_billed": true,
+    "calls": 104,
+    "tokens_in": 179647,
+    "cached_tokens_in": 0,
+    "tokens_out": 3506,
+    "latency_ms": 127665,
+    "cost_usd": 0.07746839999999999,
+    "cost_is_complete": true,
+    "cost_pricing_version": "openai-public-2026-07-16",
+    "cost_unknown_models": [],
+    "by_method": {
+      "classify": {
+        "calls": 104,
+        "tokens_in": 179647,
+        "tokens_out": 3506,
+        "latency_ms": 127665,
+        "cost_usd": 0.07746839999999999
+      }
+    },
+    "by_provider": {
+      "OpenAIInstructorLLMProvider": {
+        "calls": 104,
+        "tokens_in": 179647,
+        "tokens_out": 3506,
+        "latency_ms": 127665,
+        "cost_usd": 0.07746839999999999
+      }
+    },
+    "method_models": {
+      "_provider:OpenAIInstructorLLMProvider": "gpt-4.1-mini",
+      "classify": "gpt-4.1-mini"
+    }
+  },
+  "metrics_delivered": {
+    "tp": 44,
+    "fp": 8,
+    "fn": 10,
+    "tn": 424,
+    "precision": 0.8461538461538461,
+    "recall": 0.8148148148148148,
+    "f1": 0.830188679245283
+  },
+  "metrics_accept": {
+    "tp": 44,
+    "fp": 8,
+    "fn": 10,
+    "tn": 424,
+    "precision": 0.8461538461538461,
+    "recall": 0.8148148148148148,
+    "f1": 0.830188679245283
+  },
+  "by_source_kind": {
+    "career_site": {
+      "tp": 12,
+      "fp": 5,
+      "fn": 4,
+      "tn": 69,
+      "precision": 0.7058823529411765,
+      "recall": 0.75,
+      "f1": 0.7272727272727272,
+      "items": 90,
+      "delivered_precision": 0.7058823529411765,
+      "delivered_recall": 0.75,
+      "delivered_f1": 0.7272727272727272
+    },
+    "telegram_channel": {
+      "tp": 32,
+      "fp": 3,
+      "fn": 6,
+      "tn": 326,
+      "precision": 0.9142857142857143,
+      "recall": 0.8421052631578947,
+      "f1": 0.8767123287671234,
+      "items": 367,
+      "delivered_precision": 0.9142857142857143,
+      "delivered_recall": 0.8421052631578947,
+      "delivered_f1": 0.8767123287671234
+    },
+    "telegram_group": {
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "tn": 29,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "items": 29,
+      "delivered_precision": 0.0,
+      "delivered_recall": 0.0,
+      "delivered_f1": 0.0
+    }
+  },
+  "slice_gates": []
+}

@@ -1,3 +1,10 @@
+<!-- Memory Metadata
+Last updated: 2026-06-17
+Last commit: f9fc8b8 fix(classifier): remove false-positive announcement tokens
+Scope: application/registry.py
+Area: ARCHITECTURE
+-->
+
 # ADR-020: Registry Fallback via Named Backend
 
 Date: 2026-06-08. Status: ACCEPTED.

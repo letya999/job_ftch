@@ -1,3 +1,8 @@
+---
+title: "009 - Sink Fan-Out And Routing"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 009 - Sink Fan-Out And Routing
 
 **Status**: ACCEPTED

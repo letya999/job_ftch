@@ -2,28 +2,74 @@
 
 from __future__ import annotations
 
-import asyncio
-import re
+import ssl
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, Protocol
-from urllib.parse import urljoin
+from typing import TYPE_CHECKING, Any
 
 import httpx
-from selectolax.lexbor import LexborHTMLParser
 
-from job_ftch.application.registry import (
-    register_parser,
-    resolve_career_site_parser,
-)
-from job_ftch.domain import RawItem, SourceKind
-from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
+from job_ftch.infrastructure.sources.source_deadline import sleep_with_source_deadline
+from job_ftch.infrastructure.sources.ssrf_guard import SSRFGuardedTransport
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from types import TracebackType
 
 
-_BCC_JOB_ID_RE = re.compile(r"/career/(?P<job_id>\d+)/?$")
+# Realistic Chrome-on-Windows UA. httpx has no default User-Agent that mimics
+# a real browser, and a bare/absent UA is an instant bot-fingerprint signal
+# that some career sites reject outright.
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+# Real Chrome HTML-fetch Accept header. httpx's own default is ``*/*``, which
+# some sites (e.g. Uber's career pages) reject with HTTP 406. Keeping
+# ``*/*;q=0.8`` at the tail means non-HTML endpoints still match via the
+# wildcard; per-request ``Accept`` overrides from monitor/scraper configs
+# still win (httpx merges client + request headers, per-request wins on
+# conflict).
+DEFAULT_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+# Statuses considered transient/retryable in addition to any 5xx: 408 (request
+# timeout), 425 (too early), 429 (rate-limited).
+_EXTRA_RETRYABLE_STATUSES = frozenset({408, 425, 429})
+
+# Cold-session WAF statuses eligible for a single bounded retry on the SAME
+# client. Some anti-bot layers 401/403 the first request of a session and
+# then pass once a challenge cookie is set by the client itself (e.g. via
+# a Set-Cookie header on the blocked response) — retrying once recovers
+# those without masking a genuine, persistent hard block.
+_SOFT_403_STATUSES = frozenset({401, 403})
+
+
+def _make_ssl_context() -> ssl.SSLContext:
+    """Build an SSL context tolerant of CDNs that mishandle TLS internals.
+
+    Some CDNs (notably Akamai) send TLS 1.3 session tickets that can hang
+    httpcore's async I/O; ``OP_NO_TICKET`` disables session-ticket
+    negotiation to avoid this, mirroring urllib3's default behavior.
+
+    ``OP_LEGACY_SERVER_CONNECT`` allows connections to servers that require
+    legacy TLS renegotiation, which OpenSSL 3.0+ disables by default. The
+    constant is looked up via ``getattr`` because it may be absent on newer
+    Python/OpenSSL builds.
+
+    Uses certifi's CA bundle instead of the system store for broader
+    coverage of intermediate CA certificates.
+
+    Returns:
+        A configured :class:`ssl.SSLContext` for use as httpx's ``verify``.
+    """
+    import certifi
+
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    ctx.options |= ssl.OP_NO_TICKET
+    op_legacy_server_connect = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0x4)
+    ctx.options |= op_legacy_server_connect
+    return ctx
 
 
 class _RetryingHttpClient:
@@ -50,18 +96,77 @@ class _RetryingHttpClient:
     ) -> None:
         await self._client.__aexit__(exc_type, exc, tb)
 
-    async def get(self, url: str, *, follow_redirects: bool = False) -> httpx.Response:
-        for attempt in range(self._max_retries + 1):
+    async def aclose(self) -> None:
+        """Release the underlying connection pool without entering it first."""
+        await self._client.aclose()
+
+    async def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        *,
+        follow_redirects: bool = False,
+        **request_kwargs: Any,
+    ) -> httpx.Response:
+        from job_ftch.infrastructure.sources.http_retry import fetch_with_retry
+
+        empty_200_used = False
+        soft_403_used = False
+        while True:
+            retry_kwargs = dict(request_kwargs)
+            if method != "GET":
+                retry_kwargs["method"] = method
+            response = await fetch_with_retry(
+                self._client,
+                url,
+                follow_redirects=follow_redirects,
+                max_attempts=self._max_retries + 1,
+                **retry_kwargs,
+            )
             try:
-                response = await self._client.get(url, follow_redirects=follow_redirects)
                 response.raise_for_status()
-                return response
-            except Exception as exc:
-                if attempt >= self._max_retries or not _is_retryable_http_error(exc):
-                    raise
-                await asyncio.sleep(self._retry_delay_seconds * (attempt + 1))
-        msg = "career-site retry loop exhausted unexpectedly"
-        raise RuntimeError(msg)
+            except httpx.HTTPStatusError as exc:
+                # One cold-session 401/403 retry is retained for sites that
+                # set a clearance cookie in the first response. It cannot
+                # become the new unbounded 4xx retry loop.
+                if _is_soft_403_error(exc) and not soft_403_used:
+                    soft_403_used = True
+                    await sleep_with_source_deadline(self._retry_delay_seconds)
+                    continue
+                raise
+            if _is_empty_200_response(response) and not empty_200_used:
+                empty_200_used = True
+                await sleep_with_source_deadline(self._retry_delay_seconds)
+                continue
+            return response
+
+    async def get(
+        self,
+        url: str,
+        *,
+        follow_redirects: bool = False,
+        **request_kwargs: Any,
+    ) -> httpx.Response:
+        return await self._request_with_retry(
+            "GET",
+            url,
+            follow_redirects=follow_redirects,
+            **request_kwargs,
+        )
+
+    async def post(
+        self,
+        url: str,
+        *,
+        follow_redirects: bool = False,
+        **request_kwargs: Any,
+    ) -> httpx.Response:
+        return await self._request_with_retry(
+            "POST",
+            url,
+            follow_redirects=follow_redirects,
+            **request_kwargs,
+        )
 
 
 @asynccontextmanager
@@ -90,213 +195,60 @@ async def client_for_config(
     yield client
 
 
-def _clean_text(value: str) -> str:
-    return " ".join(value.split())
-
-
 def _is_retryable_http_error(exc: Exception) -> bool:
     if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError)):
         return True
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
-        return status == 429 or status >= 500
+        return status >= 500 or status in _EXTRA_RETRYABLE_STATUSES
     return False
 
 
-class _CareerSiteParser(Protocol):
-    async def parse(
-        self,
-        *,
-        client: Any,
-        url: str,
-        html: str,
-        limit: int,
-    ) -> list[RawItem]:
-        """Parse a career-site page into RawItems."""
+def _is_soft_403_error(exc: Exception) -> bool:
+    """Whether *exc* is a cold-session WAF status eligible for one soft retry.
+
+    Args:
+        exc: The exception raised by ``response.raise_for_status()``.
+
+    Returns:
+        ``True`` for HTTP 401/403 responses only; all other errors (including
+        other 4xx and 5xx statuses) are handled by ``_is_retryable_http_error``.
+    """
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in _SOFT_403_STATUSES
 
 
-class _BCCParser:
-    def __init__(self, *, max_concurrency: int = 5) -> None:
-        self._max_concurrency = max_concurrency
+def _is_empty_200_response(response: httpx.Response) -> bool:
+    """Whether a 200 response has an empty HTML body — an anti-bot signal.
 
-    def _job_id(self, url: str) -> str:
-        match = _BCC_JOB_ID_RE.search(url)
-        return match.group("job_id") if match is not None else url
-
-    async def _parse_anchor(self, client: Any, vacancies_url: str, anchor: Any) -> RawItem | None:
-        href = anchor.attributes.get("href")
-        if not href:
-            return None
-        detail_url = urljoin(vacancies_url, href)
-        detail_response = await client.get(detail_url, follow_redirects=True)
-        detail_parser = LexborHTMLParser(detail_response.text)
-        detail_card = detail_parser.css_first(".bg-white.rounded-xl") or detail_parser
-
-        title_node = detail_card.css_first("h1")
-        location_node = detail_card.css_first("h1 + div")
-        body_node = detail_card.css_first(".text-neutral-700")
-        badge_nodes = anchor.css(".rounded-\\[72px\\]")
-
-        title = (
-            _clean_text(title_node.text(separator=" ", strip=True))
-            if title_node is not None
-            else None
-        )
-        location = (
-            _clean_text(location_node.text(separator=" ", strip=True))
-            if location_node is not None
-            else None
-        )
-        description = body_node.text(separator="\n", strip=True) if body_node is not None else None
-        description_text = _clean_text(description) if description else None
-        if not title:
-            return None
-
-        badges = list(
-            dict.fromkeys(
-                _clean_text(node.text(separator=" ", strip=True))
-                for node in badge_nodes
-                if _clean_text(node.text(separator=" ", strip=True))
-            )
-        )
-        text_parts = [title, location]
-        if description_text:
-            text_parts.append(description_text)
-
-        return build_raw_item(
-            source_kind=SourceKind.CAREER_SITE,
-            source_name="BCC",
-            external_id=self._job_id(detail_url),
-            url=detail_url,
-            text="\n".join(part for part in text_parts if part),
-            metadata={
-                "board_url": vacancies_url,
-                "job_url": detail_url,
-                "location": location,
-                "badges": badges,
-                "parser": "bcc",
-            },
-        )
-
-    async def parse(
-        self,
-        *,
-        client: Any,
-        url: str,
-        html: str,
-        limit: int,
-    ) -> list[RawItem]:
-        parser = LexborHTMLParser(html)
-        list_node = parser.css_first('[data-ajax-partial="career/list"]')
-        if list_node is None:
-            return []
-
-        anchors = list_node.css('a[href^="https://www.bcc.kz/career/"], a[href^="/career/"]')
-        semaphore = asyncio.Semaphore(self._max_concurrency)
-
-        async def _load(anchor: Any) -> RawItem | None:
-            async with semaphore:
-                return await self._parse_anchor(client, url, anchor)
-
-        items = await asyncio.gather(*(_load(anchor) for anchor in anchors[:limit]))
-        return [item for item in items if item is not None]
-
-
-class _YandexJobsParser:
-    def _extract_tag_texts(self, card: Any) -> list[str]:
-        texts: list[str] = []
-        for tag in card.css(".lc-jobs-vacancy-card__tag"):
-            text = _clean_text(tag.text(separator=" ", strip=True))
-            if text and text not in texts:
-                texts.append(text)
-        return texts
-
-    async def parse(
-        self,
-        *,
-        client: Any,
-        url: str,
-        html: str,
-        limit: int,
-    ) -> list[RawItem]:
-        del client
-        parser = LexborHTMLParser(html)
-        cards = parser.css("span[data-vacancy-card=true]")
-        items: list[RawItem] = []
-
-        for card in cards[:limit]:
-            href = card.css_first(".lc-jobs-vacancy-card__link")
-            if href is None:
-                continue
-            link = href.attributes.get("href")
-            if not link:
-                continue
-            full_url = urljoin(url, link)
-            title_node = card.css_first(".lc-jobs-vacancy-card__header")
-            summary_node = card.css_first(".lc-jobs-vacancy-card__description")
-            title = _clean_text(title_node.text(separator=" ", strip=True)) if title_node else ""
-            summary = (
-                _clean_text(summary_node.text(separator=" ", strip=True)) if summary_node else None
-            )
-            if not title:
-                continue
-            tags = self._extract_tag_texts(card)
-            service = tags[0] if tags else "Yandex"
-            metadata = {
-                "board_url": url,
-                "job_url": full_url,
-                "service": service,
-                "tags": tags,
-                "parser": "yandex_jobs",
-            }
-            text_parts = [title, summary, *tags]
-            items.append(
-                build_raw_item(
-                    source_kind=SourceKind.CAREER_SITE,
-                    source_name="Yandex",
-                    external_id=str(card.attributes.get("data-vacancy-id") or full_url),
-                    url=full_url,
-                    text="\n".join(part for part in text_parts if part),
-                    metadata=metadata,
-                )
-            )
-        return items
-
-
-class CareerSiteSource:
-    def __init__(
-        self,
-        client: Any,
-        site_url: str,
-        *,
-        limit: int = 100,
-        own_client: bool = False,
-        parser: _CareerSiteParser | None = None,
-    ) -> None:
-        self._client = client
-        self._site_url = site_url.rstrip("/") + "/"
-        self._limit = limit
-        self._own_client = own_client
-        self._parser = parser
-
-    async def fetch(self) -> AsyncIterator[RawItem]:
-        async with _http_session(self._client, own_client=self._own_client) as client:
-            response = await client.get(self._site_url, follow_redirects=True)
-            parser = self._parser or self._select_parser(url=self._site_url, html=response.text)
-            items = await parser.parse(
-                client=client,
-                url=self._site_url,
-                html=response.text,
-                limit=self._limit,
-            )
-            for item in items:
-                yield item
-
-    def _select_parser(self, *, url: str, html: str) -> _CareerSiteParser:
-        return resolve_career_site_parser(url=url, html=html)  # type: ignore[return-value]
+    Some WAF/CDN layers (DataDome, Cloudflare) return HTTP 200 with an empty
+    or near-empty HTML body on the FIRST request of a cold session, then let
+    the real page through on the retry once the session cookie is set.
+    Only triggers for text/html content-type to avoid false-positives on JSON
+    or binary endpoints that legitimately return small bodies.
+    """
+    if response.status_code != 200:
+        return False
+    ct = response.headers.get("content-type", "").lower()
+    if "text/html" not in ct:
+        return False
+    return not response.text.strip()
 
 
 def build_default_http_client(*, verify_ssl: bool = True) -> _RetryingHttpClient:
+    """Build the default retrying HTTP client for career-site fetches.
+
+    Args:
+        verify_ssl: When ``True`` (default), TLS verification uses a
+            hardened :class:`ssl.SSLContext` (certifi CA bundle,
+            ``OP_NO_TICKET``, ``OP_LEGACY_SERVER_CONNECT``). When ``False``,
+            TLS verification is disabled entirely for the ``skip_ssl`` scope,
+            preserving the existing insecure-client path.
+
+    Returns:
+        A :class:`_RetryingHttpClient` wrapping an ``httpx.AsyncClient`` with
+        a realistic Chrome UA/Accept header pair and the configured
+        timeout/limits/retry settings.
+    """
     from job_ftch.config import get_settings
 
     settings = get_settings()
@@ -308,30 +260,12 @@ def build_default_http_client(*, verify_ssl: bool = True) -> _RetryingHttpClient
         max_keepalive_connections=settings.career_site_max_keepalive_connections,
         max_connections=settings.career_site_max_connections,
     )
+    verify: bool | ssl.SSLContext = _make_ssl_context() if verify_ssl else False
+    headers = {"User-Agent": DEFAULT_USER_AGENT, "Accept": DEFAULT_ACCEPT}
+    inner_transport = httpx.AsyncHTTPTransport(verify=verify, limits=limits)
+    transport = SSRFGuardedTransport(inner_transport)
     return _RetryingHttpClient(
-        httpx.AsyncClient(timeout=timeout, limits=limits, verify=verify_ssl),
+        httpx.AsyncClient(timeout=timeout, headers=headers, transport=transport),
         max_retries=settings.career_site_max_retries,
         retry_delay_seconds=settings.career_site_retry_delay_seconds,
     )
-
-
-def _is_bcc(url: str, html: str) -> bool:
-    del url
-    parser = LexborHTMLParser(html)
-    return parser.css_first('[data-ajax-partial="career/list"]') is not None
-
-
-def _is_yandex_jobs(url: str, html: str) -> bool:
-    return "yandex.ru/jobs" in url.lower() and 'data-vacancy-card="true"' in html
-
-
-@register_parser("yandex_jobs", matcher=_is_yandex_jobs)
-def _build_yandex_jobs_parser() -> _YandexJobsParser:
-    return _YandexJobsParser()
-
-
-@register_parser("bcc", matcher=_is_bcc)
-def _build_bcc_parser() -> _BCCParser:
-    from job_ftch.config import get_settings
-
-    return _BCCParser(max_concurrency=get_settings().career_site_detail_concurrency)

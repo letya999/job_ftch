@@ -1,3 +1,10 @@
+<!-- Memory Metadata
+Last updated: 2026-06-17
+Last commit: f9fc8b8 fix(classifier): remove false-positive announcement tokens
+Scope: docs/adr/, application/
+Area: ARCHITECTURE
+-->
+
 # Architecture Master Plan
 
 - Read ADR `docs/adr/024-canonical-job-contract-and-matching-funnel.md`.

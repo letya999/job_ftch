@@ -1,0 +1,11 @@
+extends: experiment_h11_no_late_scoring.yaml
+name: experiment_h22_no_bge
+version: "1.0.0"
+metadata:
+  purpose: bge_removed_from_prefilter_path
+  experiment: {id: H22, control: H11}
+  benchmark: {dataset: fixtures/dataset/eval_dataset.jsonl, sample: 140, seed: 42}
+nodes:
+  - {id: bgem3, enabled: false}
+  - {id: semantic_prefilter, enabled: false}
+  - {id: completeness, after: [dedup]}

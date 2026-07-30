@@ -1,0 +1,27 @@
+# FilterProfile for AI/ML jobs in Russia and Kazakhstan
+# Load with: FilterProfile.model_validate(yaml.safe_load(path.read_text()))
+
+name: ai_jobs_ru_kz
+
+exclude_keywords:
+  - "subscribe"
+  - "follow us"
+  - "webinar"
+  - "meetup"
+  - "conference"
+  - "newsletter"
+  - "digest"
+  - "podcast"
+
+allowed_languages:
+  - ru
+  - en
+  - unknown
+
+relevance_threshold: 0.5
+weights:
+  vector: 0.2
+  semantic_role: 0.30
+  skills: 0.2
+min_text_tokens: 10
+min_text_chars: 50

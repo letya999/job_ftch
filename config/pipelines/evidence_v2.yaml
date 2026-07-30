@@ -1,0 +1,42 @@
+name: precision_first_v2
+version: "2.1.0"
+metadata:
+  purpose: linear_typed_evidence_spine
+  production_default: false
+  graph_schema: v2
+  # Concurrent evidence is owned internally by EvidenceFanOutNode.  The
+  # graph itself deliberately has no start_after/join_at pseudo-DAG edges.
+nodes:
+  - {id: sanitize, node: sanitize, effect: gate}
+  - {id: source_context, node: source_context, effect: observe, after: [sanitize]}
+  - {id: ontology, node: ontology_snapshot, effect: observe, after: [source_context]}
+  - {id: segmentation, node: candidate_segmentation, effect: observe, after: [ontology]}
+  - {id: garbage, node: garbage_filter, effect: observe, after: [segmentation]}
+  - {id: post_type, node: post_type, effect: observe, after: [garbage]}
+  - {id: hard_constraints, node: hard_filter, effect: observe, after: [post_type]}
+  - {id: dedup, node: dedup, effect: gate, after: [hard_constraints]}
+  - {id: semantic, node: semantic_prefilter, effect: observe, after: [dedup]}
+  - {id: raw_jobness, node: raw_jobness, effect: observe, after: [semantic]}
+  - {id: completeness, node: completeness_gate, effect: observe, after: [raw_jobness]}
+  - {id: extraction, node: extraction, effect: observe, after: [completeness]}
+  - {id: extraction_validation, node: extraction_validation, effect: gate, after: [extraction]}
+  - {id: normalization, node: job_normalization, effect: observe, after: [extraction_validation]}
+  - {id: skills, node: skill_normalization, effect: observe, after: [normalization]}
+  - {id: location, node: location_work_mode_normalization, effect: observe, after: [skills]}
+  - {id: compensation, node: compensation, effect: observe, after: [location]}
+  - {id: lifecycle, node: lifecycle, effect: observe, after: [compensation]}
+  - {id: jobness, node: jobness, effect: observe, after: [lifecycle]}
+  - {id: profile_match, node: profile_match, effect: observe, after: [jobness]}
+  - {id: lexical, node: lexical_evidence, effect: observe, after: [profile_match]}
+  - {id: risk, node: risk, effect: observe, after: [lexical]}
+  - {id: quality, node: quality, effect: observe, after: [risk]}
+  - {id: validation, node: job_validation, effect: observe, after: [quality]}
+  - {id: evidence, node: evidence_fanout, effect: observe, after: [validation]}
+  - id: relevance_judge
+    node: llm_relevance_evidence
+    effect: observe
+    after: [evidence]
+    params: {call_policy: force_all}
+  - {id: decision, node: decision, effect: terminal_decision, after: [relevance_judge]}
+  - {id: aggregation, node: aggregation, execution: post_accept, effect: side_effect, after: [decision]}
+  - {id: enrichment, node: post_accept_enrichment, execution: post_accept, effect: side_effect, after: [aggregation]}

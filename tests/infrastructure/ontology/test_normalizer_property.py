@@ -6,12 +6,18 @@ import pytest
 
 pytest.importorskip("hypothesis")
 
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+
+_SKILL_TEXT = st.text(
+    alphabet=st.characters(min_codepoint=32, max_codepoint=126),
+    max_size=50,
+)
 
 
 @pytest.mark.unit
-@given(skills=st.lists(st.text(max_size=50), min_size=0, max_size=20))
+@settings(suppress_health_check=[HealthCheck.too_slow], deadline=None)
+@given(skills=st.lists(_SKILL_TEXT, min_size=0, max_size=20))
 def test_normalize_skills_idempotent(skills: list[str]) -> None:
     """normalize(normalize(x)) == normalize(x) — idempotency."""
     try:

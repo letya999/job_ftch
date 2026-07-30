@@ -1,142 +1,101 @@
-# Career Site Engines (BoardMonitor и JobScraper)
+---
+title: "Career Site Engines"
+description: "Monitor, scraper, site parser и bypass роли внутри career-site ingestion."
+updated: 2026-07-28
+---
+# Career Site Engines
 
-## Что это такое
+Career-site ingestion разбит на несколько ролей. Это защищает систему от
+монолитных “парсеров всего сайта”, которые сложно поддерживать и невозможно
+безопасно эскалировать.
 
-При выкачивании данных с корпоративных сайтов (карьерных
-порталов) процесс разбивается на два логических этапа:
-обнаружение списка ссылок на вакансии и извлечение
-информации по каждой ссылке.
-За эти этапы отвечают два независимых интерфейса из
-`contracts.py`: `BoardMonitor` и `JobScraper`.
+## Главные роли
 
-`BoardMonitor` — это механизм, который исследуउंडует главную
-страницу карьерного сайта (например, company.com/jobs),
-понимает её структуру (API, RSS, HTML) и возвращает список
-ссылок на конкретные вакансии (`MonitorResult`).
+| Роль | Где живёт | Что делает |
+|---|---|---|
+| Monitor | `job_ftch/infrastructure/sources/monitors/` | находит vacancy URLs или structured posting payloads |
+| Scraper | `job_ftch/infrastructure/sources/scrapers/` | извлекает text/metadata из detail page или payload |
+| SiteParser | `job_ftch/infrastructure/sources/site_parsers/` | domain-specific parser для сайтов, где generic extraction недостаточен |
+| BypassStrategy | `job_ftch/infrastructure/bypass/` | меняет access route, browser/session/proxy/captcha поведение |
+| SourceAssessmentAdapter | `job_ftch/infrastructure/source_assessment/` | до ingest оценивает capabilities/freshness/bypass needs |
 
-`JobScraper` — это механизм, который идет по одной
-конкретной ссылке на вакансию (например,
-company.com/job/123), парсит страницу и возвращает
-`ScrapedPostingPayload` (структурированные данные).
+## Monitor
 
-Они используются внутри `CareerSiteSource` для получения
+Monitor должен быть лёгким discovery layer. Он проверяет board/listing/API/feed
+и возвращает `MonitorResult`, URL set/list или `DiscoveredPostingPayload`.
+
+Monitor может:
+
+- найти API endpoint или RSS/sitemap;
+- понять known ATS family;
+- вернуть structured payload без detail-page scraping;
+- дать registry assessment hint.
+
+Monitor не должен:
+
+- скачивать все detail pages без бюджета;
+- решать relevance;
+- скрывать access/blocking failures как “нет вакансий”.
+
+## Scraper
+
+Scraper работает уже с конкретной detail page или structured payload. Он
+извлекает user-visible vacancy text и metadata, которые затем превращаются в
 `RawItem`.
 
-## Зачем это нужно и ПОЧЕМУ так устроено
+Scraper может использовать JSON-LD, embedded state, Next.js data, DOM/XPath,
+main text extraction или board-specific logic.
 
-Выкачивание корпоративных сайтов — самая нестабильная часть
-любой системы скрапинга.
-Если объединить поиск ссылок и парсинг текста в один
-монолитный класс, то малейшее изменение дизайна сайта
-сломает весь парсер.
+Scraper не должен принимать terminal policy decision. Максимум — явно вернуть
+отсутствие usable vacancy payload или degraded extraction signal.
 
-Дизайн-решение (разделение на два интерфейса) позволяет
-сделать систему "умной" и модульной:
+## SiteParser
 
-1. **Автоматический выбор стратегии (Smart Discovery).**
-Многие карьерные сайты используют известные движки
-(Greenhouse, Lever, Workday) или имеют скрытые RSS ленты.
-Когда `BoardMonitor` сканирует главную страницу, он
-проверяет наличие API.
-Если API найдено, `JobScraper` для этой компании будет
-использовать быстрые и стабильные HTTP-запросы вместо
-медленного и хрупкого парсинга HTML через Playwright.
+`SiteParser` — domain-specific parser protocol. Модули self-register’ятся через
+`register_site_parser(name, domain_pattern=...)`.
 
-2. **Экономия ресурсов.**
-`BoardMonitor` работает часто (например, раз в час), чтобы
-проверять появление новых вакансий.
-Он очень легковесный.
-`JobScraper` запускается только для *новых* ссылок,
-которые вернул монитор.
-Если новых вакансий нет, тяжелый скрапинг вообще не
-вызывается.
+Site parser нужен, когда generic monitor/scraper не покрывает конкретный сайт:
+нестандартная DOM-структура, специфичные fields, hidden embedded state,
+нестабильный listing shape.
 
-## Как это работает изнутри
+Новый parser должен жить в `site_parsers/`, а не в `config.py`, builder или
+core pipeline.
 
-### Интерфейс BoardMonitor
+## Bypass
 
-```python
-class BoardMonitor(Protocol):
-    async def discover(
-        self, spec: CareerSiteSpec, http: Any
-    ) -> MonitorResult:
-        ...
+Bypass меняет способ доступа: HTTP impersonation, browser context, stealth
+hardening, proxy, session handoff, CAPTCHA handling. Он не парсит вакансии и
+не решает product policy.
+
+Эскалация должна идти через source assessment, failure signals, route state и
+budgets. Если сайт изменил HTML, это parser/scraper issue, а не повод
+бесконечно вращать proxy.
+
+## Как flow выглядит целиком
+
+```text
+CareerSiteSpec
+  -> SourceAssessmentAdapter / CareerSiteAssessmentEngine
+  -> monitor discovery
+  -> detail scraper or site parser
+  -> RawItem
+  -> pipeline nodes
 ```
 
-Метод `discover` возвращает объект `MonitorResult`, в
-котором лежат:
-- Список свежих URL вакансий.
-- Идентификатор стратегии скрапинга, которую нужно
-применить (например, `greenhouse_api` или `html_xpath`).
+## Где смотреть код
 
-### Интерфейс JobScraper
+- `job_ftch/infrastructure/sources/career_site_source.py`
+- `job_ftch/infrastructure/sources/career_monitor_runner.py`
+- `job_ftch/infrastructure/sources/career_detail_runner.py`
+- `job_ftch/infrastructure/sources/monitors/`
+- `job_ftch/infrastructure/sources/scrapers/`
+- `job_ftch/infrastructure/sources/site_parsers/`
+- `job_ftch/infrastructure/bypass/`
 
-```python
-class JobScraper(Protocol):
-    async def scrape(
-        self, url: str, config: dict[str, Any], http: Any
-    ) -> ScrapedPostingPayload | None:
-        ...
-```
+## Связанные документы
 
-Метод `scrape` переходит по одному URL и собирает сырой
-текст, заголовок, дату публикации.
-Если страница удалена (404), метод возвращает `None`.
-
-## Пример использования в ядре
-
-Обычно эти два интерфейса не вызываются напрямую конечным
-пользователем.
-Их использует системный плагин `CareerSiteSource`:
-
-```python
-# 1. Монитор ищет новые ссылки
-result = await board_monitor.discover(site_spec, http_client)
-
-for job_url in result.urls:
-    # Проверяем в Store, парсили ли мы этот URL ранее
-    if await store.has_processed(job_url):
-        continue
-
-    # 2. Если ссылка новая, вызываем скрапер
-    payload = await job_scraper.scrape(
-        job_url, 
-        config=result.scraper_config, 
-        http=http_client
-    )
-    
-    # 3. Отдаем в пайплайн
-    yield RawItem(text=payload.text, source_url=job_url)
-```
-
-## Типичные ошибки и что нельзя делать
-
-1. **Запихивать парсинг HTML в BoardMonitor.**
-
-Метод `discover` должен быть максимально легковесным.
-Он не должен скачивать страницы с детальным описанием
-вакансий.
-Его единственная цель — найти `href` ссылки или JSON
-массивы с идентификаторами.
-
-2. **Игнорировать конфигурацию из BoardMonitor в Scraper.**
-
-Монитор может определить, что сайт использует `Lever`, и
-вернуть `scraper_config={"engine": "lever"}`.
-Ваш `JobScraper` должен прочитать этот конфиг и вызвать
-соответствующий парсер, а не пытаться угадывать движок
-заново.
-
-3. **Использовать Playwright там, где есть API.**
-
-Всегда пытайтесь написать `BoardMonitor` так, чтобы он
-сначала искал скрытые `graphql` или `api/v1/jobs`
-эндпоинты в сетевом трафике (Chrome DevTools).
-Только если API нет, используйте `BeautifulSoup` или
-браузер.
-
-## Связи с другими сущностями
-
-- [SourceSpec](source_spec.md) — передается в монитор для определения стартового URL.
-- [Source](source.md) — `CareerSiteSource` является "клеем", который управляет монитором и скрапером.
-- [BypassStrategy](bypass_strategy.md) — стратегии обхода могут применяться к `http_client`, передаваемому в монитор.
+- [SourceSpec](source_spec.md)
+- [Source](source.md)
+- [SourceAssessmentAdapter](source_assessment_adapter.md)
+- [BypassStrategy](bypass_strategy.md)
+- [Справочник source stack](../sources/source_stack_reference.md)

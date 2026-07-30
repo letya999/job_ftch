@@ -6,6 +6,7 @@ import pytest
 
 from job_ftch.application.registry import (
     _FALLBACK_STORE_BACKEND,
+    StorageError,
     _store_factories,
     create_store_with_fallback,
 )
@@ -73,6 +74,102 @@ async def test_no_fallback_when_flag_off(monkeypatch: pytest.MonkeyPatch) -> Non
             await create_store_with_fallback(settings)
     finally:
         _store_factories.pop("__test_broken2__", None)
+
+
+@pytest.mark.asyncio
+async def test_auto_backend_resolving_to_postgres_does_not_silently_fall_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BrokenPostgresStore:
+        async def ping(self) -> bool:
+            return False
+
+        async def get(self, key: str) -> str | None:
+            del key
+            return None
+
+        async def set(self, key: str, value: str) -> None:
+            del key, value
+
+        async def delete(self, key: str) -> None:
+            del key
+
+        async def set_add(self, key: str, member: str) -> None:
+            del key, member
+
+        async def set_contains(self, key: str, member: str) -> bool:
+            del key, member
+            return False
+
+        async def clear_set(self, key: str) -> None:
+            del key
+
+        async def set_members(self, key: str) -> tuple[str, ...]:
+            del key
+            return ()
+
+    monkeypatch.setattr(
+        "job_ftch.application.registry.create_store",
+        lambda settings: _BrokenPostgresStore(),
+    )
+    settings = Settings(
+        store_backend="auto",
+        store_dsn="postgresql://user:pass@localhost/db",
+        store_fallback_on_error=True,
+        store_allow_fallback=False,
+    )
+
+    with pytest.raises(StorageError, match="Postgres configured but unreachable"):
+        await create_store_with_fallback(settings)
+
+
+@pytest.mark.asyncio
+async def test_postgres_auto_fallback_can_be_explicitly_allowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BrokenPostgresStore:
+        async def ping(self) -> bool:
+            return False
+
+        async def get(self, key: str) -> str | None:
+            del key
+            return None
+
+        async def set(self, key: str, value: str) -> None:
+            del key, value
+
+        async def delete(self, key: str) -> None:
+            del key
+
+        async def set_add(self, key: str, member: str) -> None:
+            del key, member
+
+        async def set_contains(self, key: str, member: str) -> bool:
+            del key, member
+            return False
+
+        async def clear_set(self, key: str) -> None:
+            del key
+
+        async def set_members(self, key: str) -> tuple[str, ...]:
+            del key
+            return ()
+
+    monkeypatch.setattr(
+        "job_ftch.application.registry.create_store",
+        lambda settings: _BrokenPostgresStore(),
+    )
+    settings = Settings(
+        store_backend="auto",
+        store_dsn="postgresql://user:pass@localhost/db",
+        store_fallback_on_error=True,
+        store_allow_fallback=True,
+    )
+
+    store = await create_store_with_fallback(settings)
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+
+    assert isinstance(store, InMemoryStore)
 
 
 @pytest.mark.asyncio

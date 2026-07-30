@@ -1,22 +1,57 @@
-# Task Completion
+<!-- Memory Metadata
+Last updated: 2026-06-17
+Last commit: f9fc8b8 fix(classifier): remove false-positive announcement tokens
+Scope: .serena/memories/task_completion.md
+Area: CORE
+-->
 
-- Standard verification gates:
-  `uv run ruff check .`
-  `uv run ruff format --check .`
-  `uv run mypy job_ftch/`
-  `uv run pytest tests/`  ← MUST use `uv run`, not `python -m pytest` (system Python lacks dev deps)
-  `python scripts/check_module_boundaries.py`
-  `uv run bandit -r job_ftch/ -ll`
+# job_ftch — Task Completion Checklist
 
-- Expected baseline: 592 passed, 11 skipped, 0 errors (as of MVP commit 7af8a54).
+## Before considering a coding task done, run ALL of these:
 
-- If dependencies or architecture changed:
-  update `docs/tech_stack.md` for dependency rationale.
-  add/update ADR under `docs/adr/` for nontrivial design decisions.
-- If task touches pipeline ordering, verify `SanitizeNode` remains first.
-- If task adds real behavior, expand tests beyond current smoke coverage.
-- If task adds optional dependency (like aiogram): guard tests with `pytest.importorskip("package_name")`.
-- If task moves code from `job_ftch/adapters/` to anywhere else: check `scripts/check_module_boundaries.py`
-  and update `application_runtime_exception` set if the new location is in `application/` but
-  legitimately imports `infrastructure/` at runtime.
-- Root `adapters/` is NOT in the wheel; Dockerfiles must set `ENV PYTHONPATH=/app`.
+### 1. Lint
+```bash
+uv run ruff check .
+```
+Zero errors required.
+
+### 2. Format Check
+```bash
+uv run ruff format --check .
+```
+Zero violations required.
+
+### 3. Type Check
+```bash
+uv run mypy .
+```
+Zero errors required.
+
+### 4. Module Boundaries
+```bash
+python scripts/check_module_boundaries.py
+```
+Must pass — no forbidden imports from `domain/`, `application/`, `nodes/`, `sinks/` into `infrastructure/`.
+
+### 5. Security Lint
+```bash
+uv run bandit -r job_ftch scripts/check_module_boundaries.py -ll
+```
+No high-severity findings.
+
+### 6. Targeted Tests (during development loop)
+```bash
+uv run pytest tests/test_<module>.py -q -o addopts="" --tb=line
+```
+Must pass for touched modules.
+
+### 7. Full Test Suite (before commit)
+```bash
+uv run pytest -q -o addopts="" --tb=short > .pytest.out 2>&1; tail -n 20 .pytest.out
+```
+All tests green.
+
+## Agent-specific rules
+- NEVER run full suite with `-v` in foreground during edit loops (burns ~1M tokens).
+- Use `-o addopts=""` to override default verbose mode in agent mode.
+- For quick feedback: run only affected test file with `--tb=line`.

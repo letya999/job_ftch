@@ -1,25 +1,54 @@
-# Видение проекта job_ftch
+---
+title: "Видение job_ftch"
+description: "Назначение, границы и текущее состояние проекта job_ftch."
+updated: 2026-07-28
+---
+# Видение job_ftch
 
-## Суть
-**job_ftch** — это open-source конвейер (pipeline), который собирает вакансии из Telegram-каналов, групп, комментариев и карьерных сайтов компаний. Система нормализует их в единый формат, удаляет дубликаты и выдает структурированный JSON.
+`job_ftch` — async pipeline для сбора вакансий из Telegram, карьерных сайтов,
+RSS/API-источников и runtime-добавлений. Система приводит входящие сообщения и
+страницы к каноническим `JobRecord`, удаляет дубли, принимает evidence-based
+решение и группирует одинаковые вакансии в `JobGroup`.
 
-## На что это похоже?
-Это ETL-пайплайн для вакансий. По духу проект близок к инструменту для мульти-источникового сбора данных, но с акцентом на расширяемость через протоколы и современный асинхронный стек.
+## Для кого
 
-## Боль, которую мы решаем
-Вакансии на AI-роли (LLM Engineer, AI PM, MLOps) разбросаны по десяткам нишевых Telegram-чатов. Не существует единого места, где можно получить эти вакансии в структурированном и отфильтрованном виде.
+- AI/tech-сообщества, которым нужен собственный агрегатор вакансий.
+- Разработчики, которые хотят расширять источники, парсеры, sinks и runtime
+  adapters без переписывания core.
+- Data-команды, которым нужен структурированный поток вакансий для анализа.
 
-## Для кого этот проект?
-- **AI-сообщества**: Для запуска собственного агрегатора вакансий под конкретную нишу.
-- **Разработчики**: Как база для создания собственных инструментов поиска работы или Telegram-каналов.
-- **Data-команды**: Использование JSON-вывода как источника данных для анализа рынка труда.
+## Что уже есть
 
-## Цели v0
-- **Достигнуто**: Стабильный сбор данных из 5-10 Telegram-каналов (см. статус `Stable` в README).
-- **Достигнуто**: Базовая нормализация и дедупликация.
-- **Достигнуто**: Локальный запуск без сложной инфраструктуры.
+- Production recipe для tenant `ai_jobs`: 22 live sources, 40 profile shots,
+  pinned graph, eval gates и release metrics.
+- Multi-tenant runtime через `TenantRunner`.
+- Telegram bot как основной production-shape adapter.
+- MCP, FastAPI, FastStream и Dagster adapters как дополнительные runtime
+  поверхности.
+- Source assessment, monitor/scraper/site-parser stack и adaptive bypass
+  boundaries для career-site ingest.
 
-## Будущее
-- Поддержка Telegram-бота для персональных уведомлений.
-- Интеграция как MCP server для AI-агентов.
-- Публичный API для сообществ.
+## Что не является целью
+
+- Это не универсальный crawler и не “скрапинг всего интернета”.
+- Это не orchestrator/queue replacement.
+- Это не монолитный scraper в одном файле.
+- Это не realtime-first event streaming platform.
+- Это не набор hardcoded правил под один сайт или один Telegram-канал.
+
+## Текущий фокус
+
+- Держать production graph воспроизводимым и проверяемым.
+- Сохранять чистые layer boundaries: `domain`, `application`, `nodes`,
+  `infrastructure`, `adapters`.
+- Расширять ingest через registered adapters/plugins, а не через core dispatch.
+- Документировать runtime truth рядом с кодом: recipes, graph reference, source
+  stack, node/entity catalog.
+
+## Куда смотреть дальше
+
+- [Архитектура](architecture.md)
+- [Quickstart](quickstart.md)
+- [Production recipe](recipes/pipeline_recipe.md)
+- [Source stack](sources/ingest_stack.md)
+- [Runtime/env](adapters/runtime_and_env.md)

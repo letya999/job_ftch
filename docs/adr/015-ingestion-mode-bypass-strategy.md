@@ -1,3 +1,8 @@
+---
+title: "015 — IngestMode and BypassStrategy protocols"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 015 — IngestMode and BypassStrategy protocols
 
 **Status**: ACCEPTED

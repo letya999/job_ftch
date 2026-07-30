@@ -20,7 +20,7 @@ def superjob_spec() -> RestAPISourceSpec:
     return RestAPISourceSpec(**data)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_superjob_fixture_field_mapping(
     superjob_spec: RestAPISourceSpec, superjob_json: dict, monkeypatch, null_auth
 ) -> None:
@@ -69,7 +69,7 @@ async def test_superjob_fixture_field_mapping(
 
 @pytest.mark.network
 @pytest.mark.superjob
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_superjob_live_fetch(superjob_spec: RestAPISourceSpec) -> None:
     api_key = os.environ.get("SUPERJOB_API_KEY")
     if not api_key:

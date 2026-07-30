@@ -1,3 +1,10 @@
+<!-- Memory Metadata
+Last updated: 2026-06-17
+Last commit: f9fc8b8 fix(classifier): remove false-positive announcement tokens
+Scope: nodes/, application/pipeline.py
+Area: HISTORY
+-->
+
 # Phase 3 Completion
 
 Completed on 2026-06-06.

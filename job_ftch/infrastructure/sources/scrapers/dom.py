@@ -14,6 +14,7 @@ import structlog
 from job_ftch.application.registry import register_scraper
 from job_ftch.domain.site_models import ScrapedPostingPayload
 from job_ftch.infrastructure.sources.dom_utils import flatten, walk_steps
+from job_ftch.infrastructure.sources.http_retry import fetch_with_retry
 
 if TYPE_CHECKING:
     import httpx
@@ -31,6 +32,11 @@ _STOP_MARKERS = [
     "Similar",
     "Share",
     "Related",
+    "Откликнуться",
+    "Похожие",
+    "Поделиться",
+    "Назад",
+    "Отправить",
 ]
 
 
@@ -49,13 +55,20 @@ def _heuristic_steps(elements: list[dict[str, Any]]) -> list[dict[str, Any]] | N
     if not elements:
         return None
 
-    # Find first h1; fall back to <title> on pages that do not expose a body h1.
+    # Prefer an in-document heading over ``<title>``.  A document title is
+    # normally followed by the global header/navigation in flattened order,
+    # so using it as the description anchor can stop immediately on menu copy
+    # (for example a "Back" item) before the actual posting body.  A number
+    # of CMS job pages use h2 rather than h1 for their posting title.
     anchor_idx = None
     anchor_tag = None
-    for i, el in enumerate(elements):
-        if el["tag"] == "h1":
-            anchor_idx = i
-            anchor_tag = "h1"
+    for heading_tag in ("h1", "h2"):
+        for i, el in enumerate(elements):
+            if el["tag"] == heading_tag:
+                anchor_idx = i
+                anchor_tag = heading_tag
+                break
+        if anchor_idx is not None:
             break
 
     if anchor_idx is None:
@@ -73,6 +86,11 @@ def _heuristic_steps(elements: list[dict[str, Any]]) -> list[dict[str, Any]] | N
     # Description: content after title anchor, stop at known marker.
     desc_step: dict[str, Any] = {
         "tag": anchor_tag,
+        # The title step advances the extraction cursor past the heading.  A
+        # description range must deliberately re-find that same heading,
+        # otherwise it searches only for a *second* h1/h2 and usually returns
+        # no body at all (or, worse, starts at an unrelated later heading).
+        "from": 0,
         "offset": 1,
         "field": "description",
         "html": True,
@@ -206,7 +224,7 @@ async def scrape(
     try:
         html = config.get("prefetched_html")
         if not isinstance(html, str):
-            resp = await http.get(url, follow_redirects=True)
+            resp = await fetch_with_retry(http, url)
             resp.raise_for_status()
             html = resp.text
     except Exception as exc:

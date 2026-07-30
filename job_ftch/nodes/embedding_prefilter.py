@@ -14,9 +14,8 @@ class EmbeddingPrefilterNode:
     """
     Cross-lingual prefilter using embeddings anchored on the profile target_roles.
 
-    Unlike a positive-example centroid, this works immediately because target_roles
-    always exist. A Russian post embeds close to its English role anchor (JobBERT-v3
-    is trained for cross-lingual job-title matching). Runs after SemanticPrefilterNode.
+    Compares job text embedding against target_role string embeddings.
+    Scheduled for replacement by BGE-M3 dense+sparse in Phase 1.
     """
 
     def __init__(
@@ -36,7 +35,7 @@ class EmbeddingPrefilterNode:
         # profile_id -> tuple[tuple[float, ...], ...] (one vector per role); built lazily
         self._role_vectors: dict[str, tuple[tuple[float, ...], ...]] | None = None
 
-    def _embed_fn(self):
+    def _embed_fn(self):  # type: ignore
         return getattr(
             self._embedding_provider,
             "embed_query",
@@ -47,7 +46,7 @@ class EmbeddingPrefilterNode:
         if self._role_vectors is not None:
             return
         self._role_vectors = {}
-        embed_fn = self._embed_fn()
+        embed_fn = self._embed_fn()  # type: ignore
         if embed_fn is None:
             return
         for profile in self._catalog.profiles:
@@ -65,7 +64,7 @@ class EmbeddingPrefilterNode:
         if not self._role_vectors:
             return item  # no anchors -> no-op
 
-        embed_fn = self._embed_fn()
+        embed_fn = self._embed_fn()  # type: ignore
         if embed_fn is None:
             return item
         try:

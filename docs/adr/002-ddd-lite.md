@@ -1,3 +1,8 @@
+---
+title: "002 — DDD Lite"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 002 — DDD Lite
 
 **Status**: ACCEPTED

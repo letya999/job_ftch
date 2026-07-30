@@ -20,7 +20,7 @@ class FakeEmbeddingProvider:
         return results
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_embedding_prefilter_passes_relevant_russian():
     catalog = ProfileCatalog(
         profiles=(
@@ -47,7 +47,7 @@ async def test_embedding_prefilter_passes_relevant_russian():
     assert processed.metadata["embedding_prefilter_decision"] == "pass"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_embedding_prefilter_low_signal_passes_through_off_target():
     catalog = ProfileCatalog(
         profiles=(
@@ -77,7 +77,7 @@ async def test_embedding_prefilter_low_signal_passes_through_off_target():
     assert processed.metadata["embedding_prefilter_decision"] == "low_signal"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_embedding_prefilter_uncertain_zone():
     catalog = ProfileCatalog(
         profiles=(
@@ -114,7 +114,7 @@ async def test_embedding_prefilter_uncertain_zone():
     assert processed.metadata["embedding_prefilter_decision"] == "uncertain"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_embedding_prefilter_no_op_no_roles():
     catalog = ProfileCatalog(profiles=(SearchProfile(profile_id="p1", target_roles=()),))
     node = EmbeddingPrefilterNode(catalog, FakeEmbeddingProvider())

@@ -12,6 +12,8 @@ _REJECTED_LABELS = frozenset({"candidate_seeking", "spam"})
 
 
 class SourceClassifierNode:
+    """Not wired into the default pipeline; available for custom configurations and tests."""
+
     def __init__(
         self,
         classifier: ClassifierProvider,

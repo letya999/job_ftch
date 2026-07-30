@@ -1,0 +1,193 @@
+{
+  "original_dataset_hash": "1261ced8e2617cb4693bcc0cf2320efa64e9d83fb6a1c83fd77166ac4c60bccd",
+  "patch_version": "positive-requires-jobness-v1",
+  "entries": [
+    {
+      "stable_id": "3140ebcbd2fc94035fe7a2a7ad22e3e66c99b719b7d5ec0c436965378f2d0ae7",
+      "content_hash": "ba32ffec0bb00a10706f0a33630116fb029a1219ef6658f1e31be7e0573cf455",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": 1,
+        "relevant": 1
+      },
+      "reason": "The relevance-positive invariant requires vacancy jobness.",
+      "status": "deterministic_repair",
+      "repair_kind": "positive_requires_jobness",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "94142ea46ec4a813bb2ceb3cdbf3c62a0a9c1612c9d71c0d1c974c0886006dea",
+      "content_hash": "70958ab86330251ea358ed4cf32eba71a3f3458a3a96b65898a4330d55877898",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": 1,
+        "relevant": 1
+      },
+      "reason": "The relevance-positive invariant requires vacancy jobness.",
+      "status": "deterministic_repair",
+      "repair_kind": "positive_requires_jobness",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "26c6c870db77689574047896bc3e956d790875d875bd732c4f38655e041f717e",
+      "content_hash": "abeb097bf7e262e77885686a3600cbd977e223bb2ffc72da5e9d943bb6e5b892",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": 1,
+        "relevant": 1
+      },
+      "reason": "The relevance-positive invariant requires vacancy jobness.",
+      "status": "deterministic_repair",
+      "repair_kind": "positive_requires_jobness",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "b3f06826f7e3d171fe8a17cc1287e4ea92edaa428248a1c64ae128a7916fecf1",
+      "content_hash": "e7e8ad8d4d3fa35fba4d8cc45402119f5d1493d4a1e123fde346b95de10f24f3",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": 1,
+        "relevant": 1
+      },
+      "reason": "The relevance-positive invariant requires vacancy jobness.",
+      "status": "deterministic_repair",
+      "repair_kind": "positive_requires_jobness",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "00b4905d6a244af482e261d5e6cf551c9e0c25dd8b28db20ce3d7374704656b4",
+      "content_hash": "e9605404a40e2e12f3d26df846f05013f2b8b2b5c327ceaf4d30d69aec46d116",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": 1,
+        "relevant": 1
+      },
+      "reason": "The relevance-positive invariant requires vacancy jobness.",
+      "status": "deterministic_repair",
+      "repair_kind": "positive_requires_jobness",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "99623350723ff0b715650d2ba26aaa1a0c1f7e1a4d9b2dffedb2128d99afad8e",
+      "content_hash": "0cd2fb2c813dff0c9d32f068b5b7266c7148b796d5481e1bdf2498957142cf8d",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": 1,
+        "relevant": 1
+      },
+      "reason": "The relevance-positive invariant requires vacancy jobness.",
+      "status": "deterministic_repair",
+      "repair_kind": "positive_requires_jobness",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "ae1247f49dd699e1bf42f14d05847af402c653a4eec4ec13897ba009871852ac",
+      "content_hash": "8434ce8a724b3e717afc2303d28b5e6a0450f180fc3730117aa9fd33e6abe008",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": 1,
+        "relevant": 1
+      },
+      "reason": "The relevance-positive invariant requires vacancy jobness.",
+      "status": "deterministic_repair",
+      "repair_kind": "positive_requires_jobness",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "8970706271dfbe1635914239dfafc72b173589b5838ad01dd03521c7efad95ed",
+      "content_hash": "efccc817bb3390ad7376ee7288b80461eb2eb4835c3082a441adeb417fbc4021",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": 1,
+        "relevant": 1
+      },
+      "reason": "The relevance-positive invariant requires vacancy jobness.",
+      "status": "deterministic_repair",
+      "repair_kind": "positive_requires_jobness",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "3d4a2a75a684280a0062765ed095a31fddbc9e3e3222d60c28f43c38749dbec5",
+      "content_hash": "c495c455fd62018bf1a7e1a857c37a1fe71959aa70fd1cc15b68ff92bad07f39",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": 1,
+        "relevant": 1
+      },
+      "reason": "The relevance-positive invariant requires vacancy jobness.",
+      "status": "deterministic_repair",
+      "repair_kind": "positive_requires_jobness",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "38f3484be55a5c2ff5b35940a8e5a06eaa707afea73a5f6b65ab623626e8066d",
+      "content_hash": "f5db1ec6db0084f6bbbdc7d675c53af53fde183c5fae3ca1b57988aa1f8f53b8",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": 1,
+        "relevant": 1
+      },
+      "reason": "The relevance-positive invariant requires vacancy jobness.",
+      "status": "deterministic_repair",
+      "repair_kind": "positive_requires_jobness",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "296c09afc51930fb27323ca2a861e427f0b042aec3c9c276f09ec09444365406",
+      "content_hash": "9f592e29154fa7b04c67e2c8a48c6ea7cfb08af4ce36d1f06e050b50cf1d4986",
+      "old": {
+        "is_job": 0,
+        "relevant": 1
+      },
+      "new": {
+        "is_job": 1,
+        "relevant": 1
+      },
+      "reason": "The relevance-positive invariant requires vacancy jobness.",
+      "status": "deterministic_repair",
+      "repair_kind": "positive_requires_jobness",
+      "repairer": "eval-dataset-validator",
+      "rubric_version": "relevance-v2-responsibility-first"
+    }
+  ]
+}

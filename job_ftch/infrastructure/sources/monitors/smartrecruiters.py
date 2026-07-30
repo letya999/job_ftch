@@ -10,7 +10,8 @@ from urllib.parse import urlparse
 
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
+from job_ftch.domain.site_models import MonitorResult
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     slugs_from_url,
@@ -19,8 +20,6 @@ from job_ftch.infrastructure.sources.monitors.shared import (
 
 if TYPE_CHECKING:
     import httpx
-
-    from job_ftch.domain.site_models import MonitorResult
 
 logger = structlog.get_logger("job_ftch.monitors.smartrecruiters")
 
@@ -38,19 +37,26 @@ _IGNORE_TOKENS = frozenset({"api", "v1", "js", "css", "assets", "postings", "com
 
 def _has_smartrecruiters_signal(url: str, html: str | None) -> bool:
     host = (urlparse(url).hostname or "").lower()
-    if "smartrecruiters.com" in host:
+    if host == "smartrecruiters.com" or host.endswith(".smartrecruiters.com"):
         return True
     if not html:
         return False
     lowered = html.lower()
-    return "smartrecruiters.com" in lowered or "smartrecruiters" in lowered
+    return "smartrecruiters" in lowered
 
 
 def _token_from_url(board_url: str) -> str | None:
-    for pattern in _PAGE_PATTERNS:
-        match = pattern.search(board_url)
-        if match:
-            token = match.group(1)
+    parsed = urlparse(board_url)
+    host = (parsed.hostname or "").lower()
+    path = parsed.path.lstrip("/")
+    if host in {"jobs.smartrecruiters.com", "careers.smartrecruiters.com"}:
+        token = path.split("/", 1)[0]
+        if token and token not in _IGNORE_TOKENS:
+            return token
+    if host == "api.smartrecruiters.com":
+        parts = [part for part in path.split("/") if part]
+        if len(parts) >= 3 and parts[:2] == ["v1", "companies"]:
+            token = parts[2]
             if token not in _IGNORE_TOKENS:
                 return token
     return None
@@ -130,6 +136,8 @@ async def discover(
             truncated = True
             break
 
+    if not urls:
+        return MonitorResult(metadata_updates={"confirmed_empty": True})
     if truncated:
         return truncated_url_result(urls)
     return urls
@@ -190,4 +198,21 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     return None
 
 
-register_monitor("smartrecruiters", discover, cost=10, rich=False, can_handle=can_handle)
+register_monitor(
+    "smartrecruiters",
+    discover,
+    cost=10,
+    rich=False,
+    can_handle=can_handle,
+    scraper_chain=("smartrecruiters", "json-ld", "maintext"),
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "smartrecruiters",
+        url_patterns=(
+            r"api\.smartrecruiters\.com/v1/companies/[\w-]+",
+            r"jobs\.smartrecruiters\.com/[\w-]+",
+            r"careers\.smartrecruiters\.com/[\w-]+",
+        ),
+        has_stable_id=True,
+    ),
+)

@@ -1,0 +1,21 @@
+extends: evidence_v2_compact_postaccept.yaml
+name: precision_first_v2_compact_prefilter
+version: "2.6.0"
+metadata:
+  purpose: tfidf_logreg_negative_prefilter_before_llm_judge
+  production_default: false
+nodes:
+  - id: tfidf_logreg_prefilter
+    node: tfidf_logreg_prefilter
+    effect: gate
+    after: [dedup]
+    params:
+      threshold: 0.20
+      mode: gate
+      model_path: fixtures/prefilter/tfidf_logreg_v1.json
+  - id: semantic
+    after: [tfidf_logreg_prefilter]
+  - id: relevance_judge
+    params:
+      max_ambiguity_resolutions: 40
+      max_precision_confirmations: 20

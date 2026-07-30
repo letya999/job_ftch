@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
+
 import pytest
 
 from job_ftch.application.rejections import RawItemRejected
@@ -21,7 +23,7 @@ from job_ftch.nodes import SanitizeNode
         ("https://careers.example.com/jobs/1", False),  # Legitimate
     ],
 )
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_sanitize_node_rejects_dangerous_urls(url: str, should_reject: bool) -> None:
     """SanitizeNode must reject local, file, data, and javascript URLs."""
     node = SanitizeNode(allowed_career_site_hosts=("careers.example.com",))
@@ -42,7 +44,7 @@ async def test_sanitize_node_rejects_dangerous_urls(url: str, should_reject: boo
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_sanitize_node_handles_overlong_url() -> None:
     """URLs of extreme length (>8KB) should not crash the pipeline."""
     node = SanitizeNode(allowed_career_site_hosts=("careers.example.com",))
@@ -57,14 +59,13 @@ async def test_sanitize_node_handles_overlong_url() -> None:
         metadata={},
     )
     # Must either pass (URL normalized) or raise RawItemRejected, but not RuntimeError
-    try:
-        await node.process(item)
-    except RawItemRejected:
-        pass
+    with suppress(RawItemRejected):
+        result = await node.process(item)
+        assert result is not None
 
 
 @pytest.mark.unit
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_raw_item_metadata_with_massive_payload_does_not_crash() -> None:
     """Metadata with massive payload (e.g. 1MB) should not crash the pipeline."""
     node = SanitizeNode()
@@ -78,7 +79,6 @@ async def test_raw_item_metadata_with_massive_payload_does_not_crash() -> None:
         metadata={"big": "x" * 1_000_000},
     )
     # Must not raise unexpected exceptions
-    try:
-        await node.process(item)
-    except RawItemRejected:
-        pass
+    with suppress(RawItemRejected):
+        result = await node.process(item)
+        assert result is not None

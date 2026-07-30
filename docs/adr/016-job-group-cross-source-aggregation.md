@@ -1,3 +1,8 @@
+---
+title: "016 — JobGroup: cross-source aggregation"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 016 — JobGroup: cross-source aggregation
 
 **Status**: ACCEPTED
@@ -5,7 +10,7 @@
 
 > Outdated note (2026-06-12): this ADR is preserved as the original aggregation decision.
 > Current rollout changed the concrete contract and placement:
-> 1. Source-level records are now read as `JobRecord`, not the older flat `Job`.
+> 1. Source-level records are now read as `JobRecord`, not the newer flat `Job`.
 > 2. The shipped node is `JobAggregationNode`; exact funnel position continues to evolve with [ADR-024](024-canonical-job-contract-and-matching-funnel.md).
 > 3. Current high-level architecture is tracked in [Architecture](../architecture.md).
 

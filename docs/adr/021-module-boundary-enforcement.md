@@ -1,3 +1,8 @@
+---
+title: "ADR-021b: Module Boundary Enforcement"
+description: "- Status: ACCEPTED"
+updated: 2026-07-24
+---
 # ADR-021b: Module Boundary Enforcement
 
 - Status: ACCEPTED

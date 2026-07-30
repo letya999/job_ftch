@@ -14,6 +14,9 @@ from . import (
     json_ld as json_ld,
 )
 from . import (
+    maintext as maintext,
+)
+from . import (
     nextdata as nextdata,
 )
 from . import (
@@ -28,6 +31,9 @@ from . import (
 from . import (
     workday as workday,
 )
+from . import (
+    xpath as xpath,
+)
 
 
 def load_scrapers() -> None:
@@ -40,7 +46,11 @@ def load_scrapers() -> None:
         "job_ftch.infrastructure.sources.scrapers.smartrecruiters",
         "job_ftch.infrastructure.sources.scrapers.workable",
         "job_ftch.infrastructure.sources.scrapers.rippling",
+        "job_ftch.infrastructure.sources.scrapers.xpath",
         "job_ftch.infrastructure.sources.scrapers.dom",
+        # maintext is the last-resort trafilatura fallback: it must load AFTER
+        # the structured scrapers so it only wins when they decline a page.
+        "job_ftch.infrastructure.sources.scrapers.maintext",
     ):
         try:
             import_module(module_name)

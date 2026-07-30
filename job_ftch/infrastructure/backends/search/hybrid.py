@@ -43,13 +43,32 @@ class HybridSearchBackend(SearchBackend):
         self.job_group_store = cast("JobGroupStore", self.fts_backend)
         self.job_backend = cast("JobPersistenceBackend", self.fts_backend)
         self.fts_searcher = cast("SearchBackend", self.fts_backend)
+        self._settings = settings
 
         self.embedding_provider: EmbeddingProvider | None = None
         self.vector_backend: VectorBackend | None = None
+        self._vector_search_initialized = False
 
-        if settings.vector_backend:
-            self.vector_backend = cast("VectorBackend", create_vector_backend(settings))
-            self.embedding_provider = cast("EmbeddingProvider", create_embedding_provider(settings))
+    def _initialize_vector_search(self) -> None:
+        """Initialize optional heavy vector dependencies only when search needs them."""
+        if self._vector_search_initialized:
+            return
+        self._vector_search_initialized = True
+        if not self._settings.vector_backend or not self._settings.embedding_enabled:
+            return
+        try:
+            self.vector_backend = cast("VectorBackend", create_vector_backend(self._settings))
+            self.embedding_provider = cast(
+                "EmbeddingProvider", create_embedding_provider(self._settings)
+            )
+        except Exception:
+            import structlog as _sl
+
+            _sl.get_logger("job_ftch.search.hybrid").warning(
+                "vector_search_skipped_provider_init_failed"
+            )
+            self.vector_backend = None
+            self.embedding_provider = None
 
     async def search(self, query: str, limit: int = 20) -> list[JobGroup]:
         query = query.strip()
@@ -63,6 +82,7 @@ class HybridSearchBackend(SearchBackend):
         fts_group_ids = [g.group_id for g in fts_groups]
 
         # 2. If vector search is not configured, return FTS results
+        self._initialize_vector_search()
         if not self.vector_backend or not self.embedding_provider:
             return fts_groups[:limit]
 
@@ -96,7 +116,11 @@ class HybridSearchBackend(SearchBackend):
                         vector_group_ids.append(gid)
         except Exception:
             # If vector search fails, we fallback to FTS instead of failing the whole request
-            # but we might want to log this
+            import structlog
+
+            structlog.get_logger("job_ftch.search.hybrid").warning(
+                "vector_search_failed_falling_back_to_fts", exc_info=True
+            )
             return fts_groups[:limit]
 
         # 4. Merge results using Reciprocal Rank Fusion

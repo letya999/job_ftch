@@ -1,7 +1,12 @@
+---
+title: "ADR 022: Использование CloakBrowser для обхода продвинутых анти-фрод систем"
+description: "**Date**: 2026-06-09"
+updated: 2026-07-24
+---
 # ADR 022: Использование CloakBrowser для обхода продвинутых анти-фрод систем
 
 **Date**: 2026-06-09
-**Status**: Accepted
+**Status**: ACCEPTED
 
 ## Context
 

@@ -6,6 +6,7 @@ from job_ftch.application.contracts import (
     FlushableSink,
     JobPersistenceBackend,
     LLMProvider,
+    ManagedShotBackend,
     PipelineNode,
     PluginMetadata,
     ProcessingNode,
@@ -18,16 +19,15 @@ from job_ftch.application.contracts import (
     VectorBackend,
 )
 from job_ftch.application.pipeline import Pipeline, RunSummary
-from job_ftch.application.telemetry import configure_telemetry
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.domain import TenantConfig
 
 __all__ = [
-    "configure_telemetry",
     "EmbeddingProvider",
     "FlushableSink",
     "JobPersistenceBackend",
     "LLMProvider",
+    "ManagedShotBackend",
     "PipelineNode",
     "Pipeline",
     "PipelineBuilder",

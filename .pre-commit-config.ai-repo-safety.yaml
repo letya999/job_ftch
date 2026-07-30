@@ -1,0 +1,25 @@
+repos:
+  - repo: local
+    hooks:
+      - id: forbid-sensitive-files
+        name: forbid sensitive files
+        entry: python scripts/security/forbid_sensitive_files.py
+        language: system
+        pass_filenames: false
+
+      - id: scan-mcp-config
+        name: scan MCP config safety
+        entry: python scripts/security/scan_mcp_config.py
+        language: system
+        pass_filenames: false
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.2
+    hooks:
+      - id: gitleaks
+        name: gitleaks - detect hardcoded secrets
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets

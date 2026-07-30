@@ -8,6 +8,12 @@ import re
 from html.parser import HTMLParser
 
 
+class DocumentParseError(ValueError):
+    """Raised when document extraction fails."""
+
+    pass
+
+
 class _HTMLTextExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -69,9 +75,11 @@ def _extract_pdf(content: bytes) -> str:
                 pages.append(page_text)
         return "\n".join(pages)
     except ImportError:
-        return "PDF extraction requires 'pypdf' library (install with: pip install pypdf)."
+        raise DocumentParseError(
+            "PDF extraction requires 'pypdf' library (install with: pip install pypdf)."
+        ) from None
     except Exception as exc:
-        return f"PDF extraction failed: {exc}"
+        raise DocumentParseError(f"PDF extraction failed: {exc}") from exc
 
 
 def _extract_docx(content: bytes) -> str:
@@ -81,9 +89,11 @@ def _extract_docx(content: bytes) -> str:
         doc = Document(io.BytesIO(content))
         return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
     except ImportError:
-        return "DOCX extraction requires 'python-docx' library (install with: pip install python-docx)."
+        raise DocumentParseError(
+            "DOCX extraction requires 'python-docx' library (install with: pip install python-docx)."
+        ) from None
     except Exception as exc:
-        return f"DOCX extraction failed: {exc}"
+        raise DocumentParseError(f"DOCX extraction failed: {exc}") from exc
 
 
 def parse_document(content: bytes, filename: str) -> str:

@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "mcp_policy": {
+    "audit_log": ".repo-safety/logs/mcp-audit.jsonl",
+    "allow_write_tools": []
+  },
+  "github_read_guard": {
+    "mode": "strict",
+    "allowed_repositories": [
+      "letya999/job_ftch"
+    ],
+    "allowed_resources": [
+      "issues",
+      "pulls",
+      "branches",
+      "commits"
+    ],
+    "resource_aliases": {
+      "mrs": "pulls",
+      "merge_requests": "pulls",
+      "prs": "pulls"
+    },
+    "require_explicit_reason": true,
+    "max_items": 30,
+    "max_body_chars": 20000,
+    "redact_secrets": true,
+    "block_prompt_injection_patterns": true,
+    "deny_cross_repo_reads": true
+  },
+  "secret_files": [
+    ".env",
+    ".env.*",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "id_rsa",
+    "id_ed25519",
+    "credentials*.json",
+    "service-account*.json",
+    "token.json",
+    "tokens.json",
+    "secrets.json",
+    ".mcp.json",
+    "claude_desktop_config.json",
+    "*.ovpn"
+  ]
+}

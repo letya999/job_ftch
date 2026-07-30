@@ -1,0 +1,13 @@
+extends: experiment_h11_no_late_scoring.yaml
+name: experiment_h26_completeness_gate
+version: "1.0.0"
+metadata:
+  purpose: isolate_completeness_as_defensive_gate
+  experiment: {id: H26-completeness, control: H11}
+  benchmark: {dataset: fixtures/dataset/eval_dataset.jsonl, sample: 140, seed: 42}
+nodes:
+  - {id: lifecycle, node: lifecycle, effect: observe, after: [compensation]}
+  - {id: is_job, node: is_job, effect: observe, after: [lifecycle]}
+  - {id: risk, node: risk, effect: observe, after: [is_job]}
+  - {id: quality, node: quality, effect: observe, after: [risk]}
+  - {id: llm_relevance, node: llm_relevance, after: [quality]}

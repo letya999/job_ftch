@@ -1,0 +1,17 @@
+extends: historical_best.yaml
+name: experiment_ablate_llm_signal
+version: "1.0.0"
+metadata:
+  purpose: signal_ablation
+  experiment: {variable: decision_policy}
+  decision_policy:
+    mode: claims
+    claims:
+      profile_relevance:
+        aggregation: weighted_mean
+        accept_threshold: 0.60
+        review_threshold: 0.50
+        features:
+          parallel_final_score: {transform: clamp01, weight: 1.0}
+        vetoes:
+          - {name: quality_score, lt: 0.60}

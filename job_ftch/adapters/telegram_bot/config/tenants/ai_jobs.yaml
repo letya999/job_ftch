@@ -1,0 +1,110 @@
+# Tenant config consumed by the Telegram bot via TenantRunner.
+# Infra secrets/connection details (OpenAI key/model, Qdrant URL, Postgres DSN)
+# are inherited from the environment (.env.dev/.env.prod); only backend
+# selection and sources live here so the file stays portable across local and
+# container runs.
+tenant_id: ai_jobs
+display_name: AI Jobs RU/KZ
+
+source_backend: telegram_channel
+sources:
+  - type: telegram_channel
+    entity: ml_jobs_kz
+    limit: 100
+    source_name: ml_jobs_kz
+  - type: telegram_channel
+    entity: remote_ai_jobs
+    limit: 100
+    source_name: remote_ai_jobs
+  - type: telegram_channel
+    entity: forproducts
+    limit: 100
+    source_name: forproducts
+  - type: telegram_channel
+    entity: gleb_pro_ai
+    limit: 100
+    source_name: gleb_pro_ai
+  - type: telegram_group
+    entity: ai_engineers_guild
+    limit: 100
+    source_name: ai_engineers_guild
+  - type: career_site
+    url: https://geekjob.ru/vacancies
+    source_name: geekjob_ru
+    limit: 50
+  - type: career_site
+    url: https://hh.ru/search/vacancy?text=machine+learning&area=113
+    source_name: hh_ru_ml
+    limit: 50
+  - type: career_site
+    url: https://hh.ru/search/vacancy?text=LLM+engineer&area=113
+    source_name: hh_ru_llm
+    limit: 50
+  - type: career_site
+    url: https://hh.ru/search/vacancy?text=AI+engineer&area=113
+    source_name: hh_ru_ai_eng
+    limit: 50
+  - type: career_site
+    url: https://hh.ru/search/vacancy?text=MLOps&area=113
+    source_name: hh_ru_mlops
+    limit: 50
+  - type: career_site
+    url: https://hh.kz/search/vacancy?text=machine+learning
+    source_name: hh_kz_ml
+    limit: 50
+  - type: career_site
+    url: https://yandex.ru/jobs/vacancies?text=machine+learning
+    source_name: yandex_jobs_ml
+    limit: 50
+  - type: career_site
+    url: https://www.superjob.ru/vacancy/search/?keywords=machine+learning
+    source_name: superjob_ru_ml
+    limit: 50
+  - type: career_site
+    url: https://rabota.sber.ru/search
+    source_name: rabota_sber_ru
+    limit: 50
+  - type: career_site
+    url: https://www.tbank.ru/career/vacancies/it/?tcareer_it_profession=ml
+    source_name: tbank_it
+    limit: 50
+  - type: career_site
+    url: https://team.vk.company/vacancy/
+    source_name: vk_careers
+    limit: 50
+  - type: career_site
+    url: https://career.avito.com/vacancies/
+    source_name: avito_careers
+    limit: 50
+  - type: career_site
+    url: https://career.habr.com/vacancies?q=machine+learning
+    source_name: habr_career_ml
+    limit: 50
+  - type: career_site
+    url: https://career.habr.com/vacancies/data_scientist
+    source_name: habr_career_ds
+    limit: 50
+  - type: career_site
+    url: https://career.habr.com/vacancies?q=LLM
+    source_name: habr_career_llm
+    limit: 50
+  - type: career_site
+    url: https://kolesa.group/career/job
+    source_name: kolesa_group
+    limit: 50
+  - type: career_site
+    url: https://hirify.me/jobs-in-russia
+    source_name: hirify_me
+    limit: 50
+
+# Library backends: Postgres store. LLM and embedding policy inherit from
+# config/runtime.yaml + config/runtime.prod.yaml; do not duplicate model
+# settings here.
+store_backend: postgres
+job_group_store_backend: postgres
+job_backend: postgres
+search_backend: hybrid
+search_language: russian
+
+notify_mode: digest
+notify_batch_size: 10

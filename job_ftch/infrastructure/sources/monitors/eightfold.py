@@ -1,6 +1,6 @@
-"""Eightfold AI careers portal monitor (simplified sitemap-only).
+"""Eightfnew AI careers portal monitor (simplified sitemap-only).
 
-Every Eightfold portal exposes a sitemap at /careers/sitemap.xml.
+Every Eightfnew portal exposes a sitemap at /careers/sitemap.xml.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
 from job_ftch.infrastructure.sources.monitors.shared import fetch_page_text
 from job_ftch.infrastructure.sources.monitors.sitemap import discover as sitemap_discover
 
@@ -36,7 +36,7 @@ def _sitemap_url(board_url: str) -> str:
 
 
 async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> set[str]:
-    """Discover jobs from an Eightfold portal via its sitemap."""
+    """Discover jobs from an Eightfnew portal via its sitemap."""
     board_url = spec.url
     config = spec.monitor_config or {}
 
@@ -64,14 +64,14 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> se
 
 
 async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[str, Any] | None:
-    """Detect Eightfold: domain pattern or sitemap existence."""
+    """Detect Eightfnew: domain pattern or sitemap existence."""
     if _is_eightfold_domain(url):
         return {"sitemap_url": _sitemap_url(url)}
 
     if client is None:
         return None
 
-    # Check page HTML for Eightfold markers
+    # Check page HTML for Eightfnew markers
     html = await fetch_page_text(url, client)
     if html:
         lower = html.lower()
@@ -81,4 +81,16 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     return None
 
 
-register_monitor("eightfold", discover, cost=30, rich=False, can_handle=can_handle)
+register_monitor(
+    "eightfold",
+    discover,
+    cost=30,
+    rich=False,
+    can_handle=can_handle,
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "eightfold",
+        url_patterns=(r"(?:[\w-]+)\.eightfold\.ai",),
+        has_update_time=True,
+    ),
+)

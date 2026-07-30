@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from rapidfuzz import fuzz
 
 from job_ftch.application.identity import JobIdentityMatcher
+from job_ftch.domain import MatchDecision
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import JobGroupStore
@@ -33,9 +35,19 @@ class JobAggregationNode:
         self._fuzzy_title_threshold = fuzzy_title_threshold
         self._enable_fuzzy = enable_fuzzy
         self._attach_group_id = attach_group_id
+        # Stores can enforce identity uniqueness across processes, but the node
+        # must also serialize its multi-await check-then-create sequence.
+        self._group_lock = asyncio.Lock()
 
     async def process(self, job: JobRecord) -> JobRecord:
-        group_id, merge_hint = await self._find_or_create_group(job)
+        if (job.metadata or {}).get("work_state") == "deferred":
+            return job
+        # Canonical grouping is an ACCEPT-only commit. Review and reject are
+        # operational lanes, not durable job identity evidence.
+        if job.routing_decision is not MatchDecision.ACCEPT:
+            return job
+        async with self._group_lock:
+            group_id, merge_hint = await self._find_or_create_group(job)
 
         if not self._attach_group_id:
             return job

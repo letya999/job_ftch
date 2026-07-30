@@ -46,7 +46,11 @@ class PgVectorBackend(VectorBackend):
         if not settings.store_dsn:
             raise ValueError("store_dsn is required for pgvector backend")
 
-        self.dsn = settings.store_dsn
+        self.dsn = (
+            settings.store_dsn.get_secret_value()
+            if hasattr(settings.store_dsn, "get_secret_value")
+            else str(settings.store_dsn)
+        )
         self.pool_min = settings.store_pool_min
         self.pool_max = settings.store_pool_max
         self._pool: asyncpg.Pool | None = None
@@ -100,7 +104,18 @@ class PgVectorBackend(VectorBackend):
         vector: list[float],
         payload: dict[str, object],
     ) -> None:
-        dim = len(vector)
+        await self.upsert_many([(job_id, vector, payload)])
+
+    async def upsert_many(
+        self,
+        records: list[tuple[str, list[float], dict[str, object]]],
+    ) -> None:
+        if not records:
+            return
+        dim = len(records[0][1])
+        for _job_id, vector, _payload in records:
+            if len(vector) != dim:
+                raise ValueError("Vector dimension mismatch inside batch upsert")
         if self._dimensions is None:
             await self._init_schema(dim)
         elif self._dimensions != dim:
@@ -110,14 +125,18 @@ class PgVectorBackend(VectorBackend):
 
         pool = await self._get_pool()
 
-        # Convert list of floats to pgvector string format
-        vector_str = "[" + ",".join(str(f) for f in vector) + "]"
-
-        group_id = str(payload.get("group_id", ""))
-        payload_json = json.dumps(payload)
+        rows = [
+            (
+                job_id,
+                str(payload.get("group_id", "")),
+                "[" + ",".join(str(f) for f in vector) + "]",
+                json.dumps(payload),
+            )
+            for job_id, vector, payload in records
+        ]
 
         async with pool.acquire() as conn:
-            await conn.execute(
+            await conn.executemany(
                 """
                 INSERT INTO jf_job_vectors (job_id, group_id, vector, payload, updated_at)
                 VALUES ($1, $2, $3::vector, $4::jsonb, NOW())
@@ -127,10 +146,7 @@ class PgVectorBackend(VectorBackend):
                     payload = EXCLUDED.payload,
                     updated_at = EXCLUDED.updated_at
                 """,
-                job_id,
-                group_id,
-                vector_str,
-                payload_json,
+                rows,
             )
 
     async def search(
@@ -169,13 +185,16 @@ class PgVectorBackend(VectorBackend):
                     idx += 1
 
                 where_clause = " AND ".join(conditions)
-                query = f"""
-                    SELECT job_id
-                    FROM jf_job_vectors
-                    WHERE {where_clause}
-                    ORDER BY vector <=> $1::vector
-                    LIMIT $2
-                """  # nosec B608
+                # Column names come exclusively from ALLOWED_FILTER_KEYS; values are bound.
+                query = "\n".join(
+                    (
+                        "SELECT job_id",
+                        "FROM jf_job_vectors",
+                        "WHERE " + where_clause,
+                        "ORDER BY vector <=> $1::vector",
+                        "LIMIT $2",
+                    )
+                )
                 rows = await conn.fetch(query, *args)
             else:
                 query = """

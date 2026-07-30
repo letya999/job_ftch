@@ -1,3 +1,10 @@
+<!-- Memory Metadata
+Last updated: 2026-06-17
+Last commit: f9fc8b8 fix(classifier): remove false-positive announcement tokens
+Scope: application/builder.py, nodes/
+Area: PIPELINE
+-->
+
 # Funnel Strategy
 
 - Target matching funnel is high-signal and multi-node, with cheap gates before expensive extraction.

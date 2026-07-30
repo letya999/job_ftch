@@ -1,0 +1,30 @@
+# Production overrides for config/runtime.yaml.
+#
+# Keep this file light. Override only when prod should intentionally differ from
+# the shared runtime baseline.
+
+# Authoritative runtime graph; see docs/plans/PIPELINE_RELEVANCE_MASTER_PLAN.md §0.1.
+pipeline_graph_path: config/pipelines/evidence_v2_compact_prefilter.yaml
+pipeline_graph_expected_hash: 0d73de0663d220da62e37d9a41159542547d167f9f096088f7ae85ec587e44fb  # pragma: allowlist secret -- compiled graph hash for the current production code
+pipeline_max_llm_calls_per_run: 125
+source_preparation_concurrency: 1
+source_preparation_concurrency_adaptive: false
+source_fetch_concurrency: 4
+source_fetch_concurrency_adaptive: false
+pipeline_item_concurrency: 3
+pipeline_item_concurrency_adaptive: false
+source_soft_deadline_seconds: 60.0
+source_hard_deadline_seconds: 180.0
+
+# Production pipeline traces go to Langfuse when its credentials are present.
+tracing_enabled: true
+tracing_capture_payloads: false
+openobserve_enabled: true
+
+# Evaluated MVP relevance recipe. Keep this in sync with the release eval config.
+# Embeddings/BGE are outside the terminal decision path for the current graph.
+embedding_enabled: false
+bgem3_enabled: false
+relevance_backend: keywords
+openai_model: gpt-5.4-nano
+relevance_llm_model: gpt-4.1-mini

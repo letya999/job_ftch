@@ -7,6 +7,8 @@ from job_ftch.domain import FilterProfile, Job, JobValidationRejectionReason
 
 
 class AIRoleRelevanceNode:
+    """Not wired into the default pipeline; available for custom configurations and tests."""
+
     def __init__(self, *, profile: FilterProfile | None = None) -> None:
         self._profile = profile if profile is not None else FilterProfile.default()
 

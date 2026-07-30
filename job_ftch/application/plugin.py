@@ -21,6 +21,7 @@ class PluginKind(StrEnum):
     SCRAPER = "scraper"
     PARSER = "parser"
     RERANKER = "reranker"
+    SOURCE_ASSESSMENT = "source_assessment"
 
 
 class PluginState(StrEnum):

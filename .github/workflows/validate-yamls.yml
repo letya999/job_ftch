@@ -1,0 +1,34 @@
+name: Validate config YAMLs
+
+on:
+  push:
+    branches: [main, dev, mvp-release-final]
+  pull_request:
+    branches: [main, dev, mvp-release-final]
+  workflow_dispatch:
+
+jobs:
+  validate-yamls:
+    name: Validate config/*.yaml against sources.schema.json
+    runs-on: ubuntu-latest
+    # Currently informational: many existing YAMLs use fields the schema
+    # marks as additional=false. As schemas are loosened or YAMLs are
+    # migrated (per ADR-033, ADR-037), flip this to `fail-fast: true`.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      - name: Run schema validation
+        run: |
+          set +e
+          uv run --with jsonschema --with pyyaml python scripts/validate_yaml_schemas.py 2>&1 | tee .yaml_schema_validation.log
+          exit_code=${PIPESTATUS[0]}
+          set -e
+          if [ "$exit_code" -ne 0 ]; then
+            echo "::warning::YAML schema validation mismatches are tracked in .yaml_schema_validation.log (informational for now)."
+          fi

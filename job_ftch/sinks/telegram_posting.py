@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Protocol, cast
-
-from job_ftch.application.registry import register_sink
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
-    from job_ftch.config import Settings
     from job_ftch.domain import Job
 
 
@@ -33,6 +30,29 @@ async def _client_session(
 
 
 def _format_job(job: Job) -> str:
+    # Use the LLM-formatted ``presentable`` field when PresentableTextNode
+    # has run (per ADR-019 point ③). Otherwise fall back to the basic format.
+    presentable = getattr(job, "presentable", None)
+    if presentable is not None:
+        lines: list[str] = []
+        title = getattr(presentable, "title", None) or job.title or "Untitled AI job"
+        lines.append(f"<b>{title}</b>")
+        if getattr(presentable, "location_formatted", None):
+            lines.append(f"📍 {presentable.location_formatted}")
+        if getattr(presentable, "salary_formatted", None):
+            lines.append(f"💰 {presentable.salary_formatted}")
+        if getattr(presentable, "body", None):
+            lines.append("")
+            lines.append(presentable.body)
+        if getattr(presentable, "contact_section", None):
+            lines.append("")
+            lines.append(presentable.contact_section)
+        if job.canonical_url is not None:
+            lines.append(f"\n🔗 {job.canonical_url}")
+        if getattr(presentable, "tags", None):
+            lines.append("\n" + " ".join(f"#{t}" for t in presentable.tags))
+        return "\n".join(lines)
+
     parts = [job.title or "Untitled AI job"]
     if job.company:
         parts.append(f"Company: {job.company}")
@@ -60,12 +80,14 @@ class TelegramPostingSink:
         own_client: bool = False,
         notify_mode: str = "instant",
         notify_batch_size: int = 10,
+        digest_formatter: Callable[[list[Job], int, int], str] | None = None,
     ) -> None:
         self._client = client
         self._entity = entity
         self._own_client = own_client
         self._notify_mode = notify_mode
         self._notify_batch_size = notify_batch_size
+        self._digest_formatter = digest_formatter
         self._pending_jobs: list[Job] = []
 
     async def emit(self, item: Job) -> None:
@@ -78,7 +100,6 @@ class TelegramPostingSink:
     async def flush(self) -> None:
         if not self._pending_jobs:
             return
-        from adapters.telegram_bot.formatter import format_job_digest
 
         # Split into chunks to avoid message length limits
         chunk_size = self._notify_batch_size
@@ -86,36 +107,14 @@ class TelegramPostingSink:
             for i in range(0, len(self._pending_jobs), chunk_size):
                 chunk = self._pending_jobs[i : i + chunk_size]
                 header = f"<b>Job Digest ({i + 1}-{i + len(chunk)})</b>\n\n"
-                digest = format_job_digest(chunk, page=0, page_size=chunk_size)
+
+                if self._digest_formatter is None:
+                    # fallback: minimal plain-text digest with no adapter dep
+                    digest = "\n\n".join(
+                        f"<b>{j.title or '?'}</b> — {j.company or '?'}" for j in chunk
+                    )
+                else:
+                    digest = self._digest_formatter(chunk, 0, chunk_size)
+
                 await client.send_message(self._entity, header + digest, link_preview=False)
         self._pending_jobs.clear()
-
-
-def _build_telegram_client(settings: Settings) -> TelegramPostingClientLike:
-    if settings.telegram_api_id is None or settings.telegram_api_hash is None:
-        msg = "Telegram posting requires JOB_FTCH_TELEGRAM_API_ID and JOB_FTCH_TELEGRAM_API_HASH."
-        raise ValueError(msg)
-    from telethon import TelegramClient
-
-    settings.telegram_session_path.parent.mkdir(parents=True, exist_ok=True)
-    client = TelegramClient(
-        str(settings.telegram_session_path),
-        settings.telegram_api_id,
-        settings.telegram_api_hash,
-    )
-    client.flood_sleep_threshold = settings.telegram_flood_sleep_threshold_seconds
-    return cast("TelegramPostingClientLike", client)
-
-
-@register_sink("telegram_posting")
-def _build_telegram_posting_sink(settings: Settings) -> TelegramPostingSink:
-    if settings.telegram_publish_entity is None:
-        msg = "telegram_publish_entity is required when sink_backend=telegram_posting."
-        raise ValueError(msg)
-    return TelegramPostingSink(
-        _build_telegram_client(settings),
-        settings.telegram_publish_entity,
-        own_client=True,
-        notify_mode=settings.notify_mode,
-        notify_batch_size=settings.notify_batch_size,
-    )
