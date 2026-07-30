@@ -9,6 +9,8 @@ on:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  JOB_FTCH_LLM_BACKEND: heuristic
+  JOB_FTCH_TRACING_ENABLED: "false"
 
 jobs:
   lint:
