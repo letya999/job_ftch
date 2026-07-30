@@ -6,18 +6,16 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
+from job_ftch.domain.site_models import MonitorResult
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     fetch_page_text,
-    slugs_from_url,
     truncated_url_result,
 )
 
 if TYPE_CHECKING:
     import httpx
-
-    from job_ftch.domain.site_models import MonitorResult
 
 logger = logging.getLogger("job_ftch.monitors.rippling")
 
@@ -61,6 +59,9 @@ async def discover(
         return set()
 
     uuids = [j["uuid"] for j in job_list if j.get("uuid")]
+
+    if not uuids:
+        return MonitorResult(metadata_updates={"confirmed_empty": True})
 
     if len(uuids) > MAX_JOBS:
         return truncated_url_result({_posting_url(slug, uuid) for uuid in uuids})
@@ -110,15 +111,20 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
                             result["jobs"] = count
                         return result
 
-    for slug_candidate in slugs_from_url(url):
-        found, count = await _probe_slug(slug_candidate, client)
-        if found:
-            result = {"slug": slug_candidate}
-            if count is not None:
-                result["jobs"] = count
-            return result
-
     return None
 
 
-register_monitor("rippling", discover, cost=10, rich=False, can_handle=can_handle)
+register_monitor(
+    "rippling",
+    discover,
+    cost=10,
+    rich=False,
+    can_handle=can_handle,
+    scraper_chain=("rippling", "json-ld", "maintext"),
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "rippling",
+        url_patterns=(r"ats\.(?:\w+\.)?rippling\.com/(?:[a-z]{2}-[A-Z]{2}/)?[\w-]+/jobs",),
+        has_stable_id=True,
+    ),
+)

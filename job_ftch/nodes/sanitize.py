@@ -11,6 +11,7 @@ from pydantic import AnyHttpUrl, TypeAdapter, ValidationError
 
 from job_ftch.application.rejections import RawItemRejected
 from job_ftch.domain import RawItemRejectionReason, SourceKind
+from job_ftch.domain.structured_vacancy import is_structured_vacancy
 
 if TYPE_CHECKING:
     from job_ftch.domain import RawItem
@@ -59,6 +60,11 @@ def _host_allowed(host: str, allowed_hosts: set[str]) -> bool:
 
 
 class SanitizeNode:
+    # Marker for builder/pipeline guards. Custom sanitizers can opt in by
+    # setting `_is_sanitizer = True` on their class. Subclassing SanitizeNode
+    # also works because isinstance is checked.
+    _is_sanitizer: bool = True
+
     def __init__(
         self,
         *,
@@ -79,14 +85,12 @@ class SanitizeNode:
                 item=item,
             )
         if len(sanitized_text) > self._max_text_length:
-            raise RawItemRejected(
-                reason=RawItemRejectionReason.TEXT_TOO_LONG,
-                details=(
-                    f"Sanitized text length {len(sanitized_text)} exceeds "
-                    f"the configured limit {self._max_text_length}."
-                ),
-                item=item,
-            )
+            # Truncate at the last whitespace before the limit instead of rejecting entirely.
+            # Long career-site pages are common; wholesale rejection silently drops valid jobs.
+            cutoff = sanitized_text.rfind(" ", 0, self._max_text_length)
+            if cutoff <= 0:
+                cutoff = self._max_text_length
+            sanitized_text = sanitized_text[:cutoff]
         if not sanitized_source_name:
             raise RawItemRejected(
                 reason=RawItemRejectionReason.EMPTY_SOURCE_NAME,
@@ -132,6 +136,15 @@ class SanitizeNode:
                     sanitized[key] = _normalize_text(value)
                 continue
             sanitized[key] = value
+        if "original_posting_text" not in sanitized:
+            sanitized["original_posting_text"] = item.text
+        if not sanitized.get("extraction_source") and not sanitized.get("monitor_type"):
+            structured, fields = is_structured_vacancy(item.text)
+            if structured:
+                sanitized["extraction_source"] = "telegram_structured"
+                for field_name, value in fields.items():
+                    if field_name != "description_marker" and field_name not in sanitized:
+                        sanitized[field_name] = value
         return sanitized
 
     def _validate_primary_url(self, item: RawItem) -> AnyHttpUrl | None:

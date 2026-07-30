@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+pytest.importorskip("telethon", reason="telethon not installed")
 import yaml
 
 from job_ftch.domain.source_spec import TelegramChannelSpec
@@ -28,7 +30,7 @@ def tg_habr_spec() -> TelegramChannelSpec:
     return TelegramChannelSpec(**data)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_telegram_fixture_unit(
     tg_getmatch_spec: TelegramChannelSpec, tg_messages_json: list, monkeypatch
 ) -> None:
@@ -69,7 +71,7 @@ async def test_telegram_fixture_unit(
 
 
 @pytest.mark.telegram
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_telegram_getmatch_live(tg_getmatch_spec: TelegramChannelSpec) -> None:
     api_id = os.environ.get("TG_API_ID")
     api_hash = os.environ.get("TG_API_HASH")
@@ -98,7 +100,7 @@ async def test_telegram_getmatch_live(tg_getmatch_spec: TelegramChannelSpec) -> 
 
 
 @pytest.mark.telegram
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_telegram_habr_career_live(tg_habr_spec: TelegramChannelSpec) -> None:
     api_id = os.environ.get("TG_API_ID")
     api_hash = os.environ.get("TG_API_HASH")

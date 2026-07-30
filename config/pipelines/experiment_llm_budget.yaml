@@ -1,0 +1,8 @@
+extends: historical_best.yaml
+name: experiment_llm_budget
+version: "1.0.0"
+metadata:
+  purpose: conditional_llm_cost_ablation
+  experiment: {variable: node:llm_relevance.params.max_per_run}
+nodes:
+  - {id: llm_relevance, params: {max_per_run: 0}}

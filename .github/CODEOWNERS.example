@@ -1,0 +1,8 @@
+# Copy to .github/CODEOWNERS and replace owners.
+# Security-sensitive areas should require review.
+
+/.github/ @owner/security
+/scripts/security/ @owner/security
+/.repo-safety/ @owner/security
+/AGENTS.md @owner/security
+/SECURITY.md @owner/security

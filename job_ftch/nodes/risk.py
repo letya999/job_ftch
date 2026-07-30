@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from job_ftch.application.graph.params import float_param
 from job_ftch.domain import JobRecord, RiskLevel  # noqa: TC001
 
 
 class RiskScoringNode:
     def __init__(self, *, review_threshold: float = 0.45) -> None:
         self._review_threshold = review_threshold
+
+    def configure_graph_params(self, params: dict[str, object]) -> None:
+        if "review_threshold" in params:
+            self._review_threshold = float_param(params, "review_threshold", self._review_threshold)
 
     async def process(self, item: JobRecord) -> JobRecord | None:
         lowered = "\n".join(

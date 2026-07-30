@@ -1,136 +1,143 @@
+---
+title: "TenantConfig (Конфигурация тенанта)"
+description: "Текущая модель tenant-level конфигурации, изоляции источников и runtime overlay."
+updated: 2026-07-28
+---
 # TenantConfig (Конфигурация тенанта)
 
-## Что это такое
+`TenantConfig` — domain-модель одного tenant runtime: какие источники читать,
+какие backend-ы использовать, как искать/хранить вакансии и в каком режиме
+отправлять уведомления. Модель живёт в `job_ftch/domain/tenant.py`, YAML-файлы
+загружает `job_ftch/application/tenant_loader.py`, а применяет их
+`TenantRunner` из `job_ftch/application/tenant_runner.py`.
 
-`TenantConfig` — это конфигурация одного "тенанта" (клиента,
-заказчика или пользователя системы).
-В мультитенантной среде (multi-tenant architecture) система
-обслуживает множество разных пользователей одновременно, но
-их данные, настройки, источники вакансий и профили
-кандидатов должны быть строго изолированы друг от друга.
+## Где лежит текущая конфигурация
 
-`TenantConfig` обычно описывается в виде YAML-файла и
-содержит статические настройки конкретного клиента.
+Production/dev tenant-файлы для Telegram bot adapter лежат здесь:
 
-## Зачем это нужно и ПОЧЕМУ так устроено
+- `job_ftch/adapters/telegram_bot/config/tenants/*.yaml`
 
-Если вы используете `job_ftch` только для себя на локальном
-компьютере, концепция тенанта вам не очень нужна.
-Но как только вы превращаете систему в SaaS (Software as a
-Service) или Telegram-бота для тысяч пользователей, вам
-нужно управлять их настройками централизованно, но
-изолированно.
+CLI и MCP adapter получают этот каталог через `--configs-dir`. Глобальные
+runtime-настройки берутся из `.env.*`, `config/runtime*.yaml` и, для бота,
+`job_ftch/adapters/telegram_bot/runtime*.yaml`; подробная карта слоёв описана в
+[runtime_and_env](../adapters/runtime_and_env.md).
 
-Дизайн-решение заключается во внедрении сущности
-`TenantRunner` — координатора, который управляет тенантами.
-Вместо того чтобы запускать разные процессы Python для
-каждого пользователя, один процесс `TenantRunner` читает
-настройки всех тенантов из папки (например,
-`config/tenants/`) и запускает пайплайны, подставляя
-правильный префикс для БД.
+## Что находится в TenantConfig
 
-Ключевой аспект — **Tenant Isolation (Изоляция)**.
-Ключи в единой базе данных (Store) формируются по шаблону
-`{tenant_id}:{key}`.
-Если Тенант А и Тенант Б парсят один и тот же
-Telegram-канал, они будут иметь два независимых курсора в
-базе данных.
-Если Тенант А прочитал сообщение, Тенант Б всё равно его
-получит.
-Их данные физически в одной базе, но логически разделены.
+`TenantConfig` хранит только tenant-level wiring. Он не должен становиться
+вторым `.env` и не должен держать секреты.
 
-## Как это работает изнутри (Структура YAML)
+- `tenant_id`, `display_name` — идентификатор и человекочитаемое имя.
+- `sources` — статические `SourceSpec`, которые входят в базовый ingest tenant-а.
+- `source_backend` — основной backend источников, например Telegram или fixture.
+- `store_backend`, `job_group_store_backend`, `job_backend` — durable storage.
+- `search_backend`, `search_language` — режим поиска/дедупликации.
+- `embedding_enabled`, `embedding_provider`, `embedding_model`,
+  `embedding_dimensions`, `vector_backend` — vector enrichment, если он включён.
+- `notify_mode`, `notify_batch_size` — режим уведомлений для sink/runtime adapter.
+- Опциональные backend overrides и model overrides — tenant-level переопределения
+  поверх базовых `Settings`.
 
-Классический файл конфигурации
-`config/tenants/company_a.yaml` выглядит так:
+Минимальный текущий пример похож на `ai_jobs.yaml`:
 
-```yaml tenant_id: "company_a"
-description: "Backend Recruitment Team"
+```yaml
+tenant_id: ai_jobs
+display_name: AI Jobs RU/KZ
 
-# Статические источники, которые мы парсим всегда sources:
-  - type: telegram_channel
-    entity: company_a_jobs
-  - type: career_site
-    url: https://company-a.com/careers
+source_backend: telegram_channel
+sources: []
 
-# Куда отправлять уведомления о новых вакансиях notifications:
-  trigger: batched           # отправлять пачками
-  interval_seconds: 3600     # раз в час
-  targets:
-    - type: webhook
-      url: "https://api.company-a.com/jobs-webhook"
+store_backend: postgres
+job_group_store_backend: postgres
+job_backend: postgres
+search_backend: hybrid
+search_language: russian
+
+embedding_enabled: false
+embedding_provider: openai
+embedding_model: text-embedding-3-small
+embedding_dimensions: 1536
+vector_backend: qdrant
+
+notify_mode: digest
+notify_batch_size: 10
 ```
 
-## Управление через TenantRunner
+## Как TenantRunner применяет конфиг
 
-В коде вы работаете с тенантами через `TenantRunner`:
+`TenantRunner.from_tenants(...)` создаёт `TenantRuntime` на каждый tenant и
+связывает конфиг с актуальными `Settings`, store, sink, pipeline graph,
+source inputs и runtime state. На запуске tenant-а runner строит effective
+source list, прогоняет ingest, pipeline stages и delivery/outbox.
 
-```python from job_ftch.application.tenant_runner import TenantRunner from job_ftch.application.tenant_loader import load_tenants
+Типовой Python-путь:
 
-# 1. Загружаем все YAML конфиги из директории tenants = load_tenants("config/tenants/")
+```python
+from pathlib import Path
 
-# 2. Создаем координатор (передаем глобальные настройки БД и LLM)
-runner = TenantRunner.from_tenants(tenants, base_settings=global_settings)
+from job_ftch.application.tenant_loader import load_tenants
+from job_ftch.application.tenant_runner import TenantRunner
+from job_ftch.config import Settings
 
-# 3. Запустить пайплайн для конкретного тенанта summary = await runner.run_tenant("company_a")
+settings = Settings(configs_dir=Path("job_ftch/adapters/telegram_bot/config/tenants"))
+tenants = load_tenants(settings.configs_dir)
+runner = TenantRunner.from_tenants(tenants, base_settings=settings)
 
-# 4. Запустить все тенанты по очереди (или конкурентно)
-summaries = await runner.run_all()
+summary = await runner.run_tenant("ai_jobs")
 ```
 
-## Динамические источники (RuntimeSource Overlay)
+## Изоляция tenant-ов
 
-YAML — это статика.
-Но что если клиент "company_a" хочет через Telegram-бота
-добавить новый канал прямо сейчас?
-Нам не нужно перезаписывать YAML-файл (это плохая практика).
+Один backend storage может обслуживать несколько tenant-ов. Изоляция достигается
+не отдельным процессом на tenant, а tenant-aware ключами, runtime state и store
+операциями. Курсоры источников, runtime sources, outbox/delivery state и
+результаты привязаны к `tenant_id`, поэтому два tenant-а могут читать один и тот
+же Telegram-канал, но иметь независимые курсоры и независимый набор результатов.
 
-Система поддерживает RuntimeSource Overlay.
-Дополнительные (динамические) источники можно добавить через
-API:
-```python await runner.add_source_spec("company_a", telegram_spec, added_via="bot")
+## RuntimeSource overlay
+
+YAML — это базовая декларативная конфигурация. Динамические источники, добавленные
+через Telegram bot, MCP или API, не записываются обратно в YAML. Они сохраняются
+в tenant store как runtime records и при запуске объединяются с `sources`:
+
+```python
+record = await runner.add_source_spec(
+    "ai_jobs",
+    telegram_spec,
+    added_via="telegram_bot",
+)
 ```
 
-Эти динамические источники сохраняются в базу данных
-(`Store`) под специальным ключом
-`{tenant_id}:runtime_sources`.
-При каждом запуске `run_tenant()` система "мёрджит"
-(склеивает) статические источники из YAML и динамические из
-БД.
-Это позволяет совмещать надежность инфраструктуры как кода
-(IaaC) и гибкость управления в рантайме.
+Effective source set строится как базовые YAML-источники плюс enabled runtime
+sources минус disabled/deleted runtime records. Это позволяет держать
+инфраструктурный baseline в Git, а пользовательские добавления — в durable
+runtime state.
 
-## Типичные ошибки и что нельзя делать
+## Границы ответственности
 
-1. **Забывать префиксы в кастомных плагинах.**
+`TenantConfig` не выбирает конкретную реализацию pipeline graph вручную. Граф
+приходит через `Settings.pipeline_graph_path` и builder/runtime layer; подробности
+в [builder_and_graph](../pipelines/builder_and_graph.md).
 
-Если вы пишете свой `Store` или свой `Sink`, убедитесь, что
-вы учитываете `tenant_id`.
-Если вы проигнорируете его и будете писать данные в
-глобальный namespace, пользователи начнут получать вакансии
-друг друга.
+`TenantConfig` также не оценивает качество источников. Source-level пригодность
+проверяют `SourceAssessmentAdapter` и source assessment flow; см.
+[source_assessment](../sources/source_assessment.md).
 
-2. **Перезаписывать YAML файл программно.**
+## Типичные ошибки
 
-Никогда не делайте `yaml.dump()` обратно в файл при
-добавлении источника через бота.
-В контейнерных средах (Docker/Kubernetes) файлы конфигурации
-часто read-only.
-Используйте метод `add_source_spec()`, который сохранит
-динамический источник в базу данных.
+- Не храните секреты в tenant YAML: ключи API, DSN и токены должны приходить из
+  `.env.*` или secret manager.
+- Не перезаписывайте tenant YAML из runtime handler-ов: динамические добавления
+  должны идти через `add_source_spec` и store.
+- Не обходите `tenant_id` в кастомных store/sink: иначе runtime state разных
+  tenant-ов начнёт смешиваться.
+- Не считайте `sources: []` ошибкой: для Telegram bot tenant базовый список может
+  быть пустым, а реальные источники приходят через runtime overlay.
 
-3. **Запускать run_all() без ограничений.**
+## Связанные документы
 
-Если у вас 10,000 тенантов, вызов `run_all()` может повесить
-сервер или исчерпать лимиты подключений к БД/LLM.
-В больших инсталляциях тенанты должны запускаться через
-очередь (например, Celery/Dagster), а не простым циклом в
-`TenantRunner`.
-
-## Связи с другими сущностями
-
-- [SourceSpec](source_spec.md) — список спецификаций источников, определенных в YAML конфиге тенанта.
-
-- [Store](store.md) — использует `tenant_id` для формирования изолированных ключей.
-
-- [RunSummary](run_summary.md) — результат работы возвращается с привязкой к конкретному `tenant_id`.
+- [SourceSpec](source_spec.md) — формат описания источников.
+- [SourceAssessmentAdapter](source_assessment_adapter.md) — pre-ingest оценка источников.
+- [PipelineBuilder](pipeline_builder.md) — сборка pipeline из recipe/graph.
+- [Store](store.md) — durable storage и tenant-aware state.
+- [RunSummary](run_summary.md) — результат tenant run.

@@ -1,0 +1,14 @@
+extends: experiment_h20_profile_signals.yaml
+name: experiment_h21_bounded_review_resolution
+version: "1.0.0"
+metadata:
+  purpose: primary_llm_reject_is_terminal_and_explicit_reviews_get_bounded_second_opinion
+  experiment: {id: H21, control: H20}
+nodes:
+  - {id: decision_aggregator, effect: observe}
+  - id: review_resolution
+    node: review_resolution
+    effect: terminal_decision
+    after: [decision_aggregator]
+    params: {accept_confidence: 0.70, max_calls: 40}
+  - {id: accept_template_presentation, after: [review_resolution]}

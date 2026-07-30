@@ -1,0 +1,8 @@
+extends: historical_best.yaml
+name: experiment_shadow_prefilter
+version: "1.0.0"
+metadata:
+  purpose: authority_ablation
+  experiment: {variable: node:semantic_prefilter.authority}
+nodes:
+  - {id: semantic_prefilter, authority: shadow}

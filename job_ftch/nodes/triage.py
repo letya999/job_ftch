@@ -68,6 +68,8 @@ def _has_any(text: str, patterns: list[str] | tuple[str, ...]) -> bool:
 
 
 class HeuristicTriageNode:
+    """Not wired into the default pipeline; available for custom configurations and tests."""
+
     def __init__(self, *, profile: FilterProfile | None = None) -> None:
         self._profile = profile if profile is not None else FilterProfile.default()
 

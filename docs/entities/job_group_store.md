@@ -1,3 +1,8 @@
+---
+title: "Job Group Store"
+description: "`JobGroupStore` — это специализированное хранилище (база"
+updated: 2026-07-24
+---
 # Job Group Store
 
 ## Что это такое

@@ -1,166 +1,86 @@
-# Stage / ProcessingNode (Узел обработки)
+---
+title: "Stage / Node"
+description: "**Слой**: `application` + `nodes/`"
+updated: 2026-07-28
+---
+# Stage / Node
 
-## Что это такое
+**Слой**: `application` + `nodes/`
 
-Узел (stage, node) — это любой логический шаг обработки
-данных внутри конвейера (пайплайна).
-Узел получает один объект на вход, выполняет над ним
-операцию и возвращает объект (возможно, другого типа) для
-передачи следующему узлу, либо возвращает `None`, чтобы
-удалить этот элемент из потока обработки.
-Сам пайплайн представляет собой цепочку таких узлов.
+## Что это
 
-## Зачем это нужно и ПОЧЕМУ так устроено
-
-Разделение логики обработки на мелкие, независимые узлы
-позволяет комбинировать их в любом порядке и
-переиспользовать.
-Вместо монолитной функции, которая читает, фильтрует, парсит
-и сохраняет, мы имеем набор сменных деталей конструктора.
-
-Дизайн-решение включает правило возврата `None` для дропа
-элементов.
-Если элемент не подходит по критериям на раннем этапе
-(например, это спам), нода возвращает `None`, и пайплайн
-логирует это как успешный "дроп", переходя к следующему
-элементу, не тратя ресурсы на дальнейшие сложные обработки.
-Исключения (Exception) используются только для реальных
-ошибок.
-
-Архитектура узлов следует принципу "дешёвое сначала":
-пайплайн строится так, чтобы самые быстрые проверки
-(регулярные выражения, хэширование) отсекали мусор до того,
-как данные дойдут до дорогих операций (LLM, эмбеддинги).
-Это экономит ресурсы и деньги.
-
-## Как это работает изнутри
-
-В `contracts.py` определена иерархия Protocol-ов для узлов.
-Зачем их несколько?
-Для строгости типов и сигнализации о намерениях:
+Узел пайплайна реализует `Stage[In, Out]`:
 
 ```python
-# Базовый протокол: In и Out могут быть разными типами class Stage(Protocol[StageInput, StageOutput]):
-    async def process(self, item: StageInput) -> StageOutput | None:
-        ...
-
-# Частный случай: тип не меняется (In == Out == T)
-class ProcessingNode(Stage[PipelineItem, PipelineItem], Protocol[PipelineItem]):
-    ...
-
-# Явно сигнализирует о смене типа данных class TypeChangingNode(Stage[StageInput, StageOutput], Protocol[StageInput, StageOutput]):
-    ...
-
-# Маркер безопасности: этот узел всегда должен быть первым class SanitizingNode(Stage[PipelineItem, PipelineItem], Protocol[PipelineItem]):
-    ...
+async def process(self, item: In) -> Out | None
 ```
 
-Например, `ExtractionNode` является
-`TypeChangingNode[RawItem, JobDraft]`, так как он берет
-сырой текст и преобразует его в структурированный черновик.
-Большинство же фильтров являются `ProcessingNode`.
+Node может:
 
-## Встроенные узлы
+- пропустить item дальше
+- трансформировать тип
+- вернуть `None` и дропнуть item
 
-В проекте есть множество готовых узлов, каждый решает узкую
-задачу.
-Вот их последовательность от дешевых к дорогим:
+## Важные protocol variants
 
-- `SanitizeNode`: **Обязательно первый**. Проверяет текст на безопасность (утечки PII, инъекции), задает базовые политики. Без него пайплайн упадет с ошибкой сборки.
+- `SanitizingNode` — обязательный первый stage
+- `ProcessingNode[T]` — stage, который сохраняет тип
+- `TypeChangingNode[In, Out]` — stage, который меняет тип payload
 
-- `LanguageContextNode`: Дешёво определяет язык (ru/en/kk). Не использует LLM.
+## Текущая логика пайплайна
 
-- `PostTypeClassificationNode`: Быстро классифицирует текст (вакансия, спам, резюме).
+В `job_ftch` runtime nodes образуют ordered chain, а не произвольный DAG.
 
-- `HardFilterNode`: Жёсткие фильтры (regex/длина) ДО вызова языковых моделей.
+Самые важные группы узлов:
 
-- `DedupNode`: Дедупликация на основе точного хэша и алгоритмов поиска дубликатов с использованием `Store`.
+1. Intake and freshness
+   `SanitizeNode`, `SnapshotFilterNode`, `SourceContextNode`,
+   `OntologySnapshotNode`, `CandidateSegmentationNode`
 
-- `SemanticPrefilterNode`: Быстрое векторное сравнение с профилем ДО полной экстракции.
+2. Early gates
+   `GarbageFilterNode`, `PostTypeClassificationNode`, `HardFilterNode`,
+   `DedupNode`
 
-- `ExtractionNode`: **Главный узел**. Превращает `RawItem` в `JobDraft` с помощью языковой модели (LLM). Это самая дорогая операция.
+3. Cheap relevance and extraction prep
+   embedding/BGE prefilter, `SemanticPrefilterNode`,
+   `RawJobnessEvidenceNode`, `CompletenessGateNode`
 
-- `ExtractionValidationNode`: Проверяет, что LLM вернула хотя бы минимально осмысленные данные (отбрасывает галлюцинации).
+4. Structured extraction
+   `ExtractionNode`, `ExtractionValidationNode`
 
-- `TitleCompanyNormalizationNode`: Очищает заголовок и название компании от опечаток и "мусора".
+5. Canonicalization
+   title/company/skills/location/compensation/lifecycle normalization
 
-- `LocationWorkModeNormalizationNode`: Приводит локации и режим работы (офис/удаленка) к единому стандарту.
+6. Evidence production
+   `MultiProfileMatchNode`, `LexicalEvidenceNode`, `RiskScoringNode`,
+   `QualityScoringNode`, `JobValidationNode`,
+   `LLMRelevanceClassificationNode`
 
-- `CompensationParsingNode`: Парсит тексты с зарплатой в структурированный диапазон.
+7. Terminal decision and post-accept path
+   `EvidenceDecisionNode`, `JobAggregationNode`, durable delivery outbox,
+   post-accept enrichment queue
 
-- `MultiProfileMatchNode`: Оценивает, насколько вакансия подходит всем поисковым профилям (`SearchProfile`) кандидата (relevance score).
+## Практические правила
 
-- `RiskScoringNode`: Оценивает риски (скам, нереалистичные условия).
+- `SanitizeNode` всегда первый
+- `EvidenceDecisionNode` — единственная терминальная runtime-граница
+- type changes делайте только через `Stage[In, Out]`
+- дешёвые проверки ставьте раньше дорогих
+- фильтрацию не нужно моделировать как exception, если это обычный controlled drop
 
-- `QualityScoringNode`: Оценивает полноту и качество описания вакансии.
+## Что не делать
 
-- `JobValidationNode`: Финальная проверка качества. Дропает плохие результаты.
+- не вставлять heavy LLM logic перед early filters
+- не менять тип данных внутри `ProcessingNode[T]`
+- не обходить builder invariants ручной сборкой, если нужен стандартный pipeline
+- не возвращать legacy `RoutingNode` / `ParallelScoringNode` в основной runtime graph
 
-- `JobAggregationNode`: Группирует дубликаты из разных источников в `JobGroup`.
+## Связанные документы
 
-## Как написать свою реализацию
-
-Вы можете легко написать собственный фильтр или обработчик,
-реализовав нужный Protocol:
-
-```python from job_ftch.application.contracts import ProcessingNode from job_ftch.domain.models import JobDraft
-
-class SalaryRequiredFilter(ProcessingNode[JobDraft]):
-    """Узел, который отбрасывает вакансии без указания зарплаты."""
-    
-    async def process(self, item: JobDraft) -> JobDraft | None:
-        # Если зарплаты нет — дропаем (возвращаем None)
-        if item.compensation is None:
-            return None
-            
-        # Иначе пропускаем дальше
-        return item
-```
-
-Если вам нужно изменить данные, вы возвращаете новый
-изменённый объект:
-
-```python class TagAppenderNode(ProcessingNode[JobDraft]):
-    async def process(self, item: JobDraft) -> JobDraft | None:
-        # Создаем копию с изменениями (предполагая immutability или dataclasses.replace)
-        item.tags.append("processed_by_custom_node")
-        return item
-```
-
-## Типичные ошибки и что нельзя делать
-
-1. **Бросать Exception вместо возврата None для фильтрации.**
-
-Exception означает, что произошла непредвиденная ошибка
-(например, упала БД).
-Если вы хотите просто удалить мусорную вакансию — верните
-`None`.
-Исключение логируется как `error`, а `None` — как ожидаемый
-`drop`.
-
-2. **Нарушать правило "дешёвое сначала".**
-
-Если вы поставите вызов тяжелой LLM или `ExtractionNode`
-перед `HardFilterNode` или `DedupNode`, вы потратите
-огромное количество денег на обработку дубликатов и спама.
-
-3. **Изменять тип данных внутри ProcessingNode.**
-
-Если ваш узел меняет `RawItem` на `JobDraft`, он должен
-реализовывать `TypeChangingNode`. `ProcessingNode`
-гарантирует сохранение типа для статической проверки типов.
-
-4. **Запускать пайплайн без SanitizeNode.**
-
-Система безопасности (Builder) просто не позволит вам это
-сделать, выбросив `ValueError`.
-
-## Связи с другими сущностями
-
-- [PipelineBuilder](pipeline_builder.md) — собирает узлы в единую цепочку, проверяя их порядок.
-
-- [Store](store.md) — используется узлом `DedupNode` для проверки, не видели ли мы этот текст раньше.
-
-- [LLMProvider](llm_provider.md) — используется в `ExtractionNode` для получения структурированных данных.
-
-- [JobRecord](job_record.md) и [JobDraft](job_draft.md) — основные типы данных, перемещающиеся между узлами.
+- [Protocols](protocols.md)
+- [PipelineBuilder](pipeline_builder.md)
+- [RawItem](raw_item.md)
+- [JobDraft](job_draft.md)
+- [JobRecord](job_record.md)
+- [Node catalog](../nodes/README.md)
+- [PipelineBuilder, Pipeline и Graph](../pipelines/builder_and_graph.md)

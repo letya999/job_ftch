@@ -1,5 +1,6 @@
 """Domain layer - pure models, zero I/O. Entities, value objects, domain rules."""
 
+from job_ftch.domain.assessment import AssessedJob, DecisionResult, WorkState
 from job_ftch.domain.candidate import CandidateIdentity, CandidateProfile, CandidateResumeSnapshot
 from job_ftch.domain.contracts import draft_to_record, job_to_draft, job_to_record
 from job_ftch.domain.dedup import (
@@ -14,8 +15,32 @@ from job_ftch.domain.dedup import (
     dedup_title_for_raw_item,
     dedup_url_for_raw_item,
     processed_key_for_raw_item,
+    processed_key_for_url,
 )
+from job_ftch.domain.enrichment import EnrichmentTask
+from job_ftch.domain.evidence import (
+    ClaimAssessment,
+    ClaimKind,
+    ClaimParameters,
+    EvidenceAtom,
+    EvidenceBundle,
+    EvidencePolarity,
+    aggregate_bundle,
+    aggregate_claim,
+)
+from job_ftch.domain.experiment import RelevanceCard
 from job_ftch.domain.filter_profile import FilterProfile
+from job_ftch.domain.job_group import (
+    JobGroup,
+    SourceAttribution,
+    compute_content_version,
+    compute_group_id,
+    compute_identity_fingerprint,
+    create_job_group,
+    merge_job_into_group,
+    merge_jobs,
+    remove_job_from_group,
+)
 from job_ftch.domain.job_quality import (
     ExtractionRejectionReason,
     JobReviewReason,
@@ -23,15 +48,21 @@ from job_ftch.domain.job_quality import (
 )
 from job_ftch.domain.lineage import JobLineage, build_job_lineage
 from job_ftch.domain.models import (
+    CandidateSpan,
+    CompensationPeriod,
     CompensationRange,
     EmploymentType,
+    EvidenceProvenance,
     Job,
     JobDraft,
     JobExtractionStatus,
+    JobnessDecision,
     JobRecord,
     JobStatus,
     LanguageCode,
     MatchDecision,
+    OntologySnapshot,
+    PageKind,
     PostType,
     ProfileMatchScore,
     ProvenanceTrail,
@@ -40,8 +71,26 @@ from job_ftch.domain.models import (
     Seniority,
     SkillTag,
     SourceKind,
+    StructuredSourceEvidence,
     WorkMode,
 )
+from job_ftch.domain.observation import ObservationLedgerEntry, content_hash_for_raw_item
+from job_ftch.domain.ontology_graph import (
+    CompiledOntology,
+    CompiledOntologyRelation,
+    CompiledOntologyTerm,
+    ExtractedOntologyClaim,
+    ExtractedRoleSkillEdge,
+    MaterializedOntologyTerms,
+    OntologyEdge,
+    OntologyEvidence,
+    OntologyNode,
+    OntologyTermStat,
+    ShotOntologyExtraction,
+    ShotOntologyGraph,
+)
+from job_ftch.domain.outbox import OutboxRecord, OutboxState, delivery_idempotency_key
+from job_ftch.domain.presentable import PresentableJob
 from job_ftch.domain.profile import (
     CompensationExpectation,
     ProfileCatalog,
@@ -50,6 +99,8 @@ from job_ftch.domain.profile import (
 )
 from job_ftch.domain.quarantine import QuarantinedRawItem, RawItemRejectionReason
 from job_ftch.domain.rejected import RejectedItem, RejectedOutcome
+from job_ftch.domain.relevance import RelevanceClassification, RelevanceEvidenceClassification
+from job_ftch.domain.resolution import ResolutionTask
 from job_ftch.domain.runtime_profile import ManagedCandidateProfile
 from job_ftch.domain.runtime_source import (
     RuntimeSourceRecord,
@@ -57,31 +108,57 @@ from job_ftch.domain.runtime_source import (
     source_spec_locator,
     source_spec_name,
 )
+from job_ftch.domain.shot_extraction import RelevanceKeyword, ShotExtraction
+from job_ftch.domain.source_assessment import (
+    AssessmentConfidence,
+    FreshnessAssessment,
+    SourceAssessmentResult,
+    SourceCapabilities,
+    SourceEvidence,
+)
 from job_ftch.domain.source_health import SourceHealth
+from job_ftch.domain.source_identity import (
+    AcquisitionTransport,
+    ObservationKind,
+    SourceFamily,
+    SourceIdentity,
+    source_identity_for_parts,
+    source_identity_for_raw_item,
+)
+from job_ftch.domain.source_outcomes import SourceOutcome
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.domain.tenant import OutputSpec, ScheduleSpec, TenantConfig, TenantInfo
 from job_ftch.domain.triage import TriageRejectionReason
 
-from .job_group import (
-    JobGroup,
-    SourceAttribution,
-    compute_group_id,
-    compute_identity_fingerprint,
-    create_job_group,
-    merge_job_into_group,
-    merge_jobs,
-    remove_job_from_group,
-)
-
 __all__ = [
+    "AssessmentConfidence",
+    "AcquisitionTransport",
+    "AssessedJob",
+    "FreshnessAssessment",
+    "CompensationPeriod",
     "CompensationRange",
     "CareerSiteSpec",
     "CandidateIdentity",
     "CandidateProfile",
     "CandidateResumeSnapshot",
+    "CompiledOntology",
+    "CompiledOntologyRelation",
+    "CompiledOntologyTerm",
+    "CandidateSpan",
+    "ClaimAssessment",
+    "ClaimKind",
+    "ClaimParameters",
+    "EvidenceProvenance",
+    "EvidenceAtom",
+    "EvidenceBundle",
+    "EnrichmentTask",
+    "EvidencePolarity",
+    "ExtractedOntologyClaim",
+    "ExtractedRoleSkillEdge",
     "DedupKeyKind",
     "DuplicateRecord",
     "DuplicateRejectionReason",
+    "DecisionResult",
     "CompensationExpectation",
     "ExtractionRejectionReason",
     "EmploymentType",
@@ -89,6 +166,7 @@ __all__ = [
     "Job",
     "JobDraft",
     "JobExtractionStatus",
+    "JobnessDecision",
     "JobGroup",
     "JobLineage",
     "JobRecord",
@@ -97,9 +175,17 @@ __all__ = [
     "JobStatus",
     "LanguageCode",
     "MatchDecision",
+    "MaterializedOntologyTerms",
+    "OntologySnapshot",
+    "OntologyEdge",
+    "OntologyEvidence",
+    "OntologyNode",
+    "OntologyTermStat",
     "ManagedCandidateProfile",
     "PostType",
+    "PageKind",
     "OutputSpec",
+    "PresentableJob",
     "ProfileCatalog",
     "ProfileMatchScore",
     "ProvenanceTrail",
@@ -107,23 +193,43 @@ __all__ = [
     "QuarantinedRawItem",
     "RawItem",
     "RawItemRejectionReason",
+    "RelevanceClassification",
+    "RelevanceEvidenceClassification",
+    "ResolutionTask",
     "RejectedItem",
     "RejectedOutcome",
+    "RelevanceKeyword",
     "RememberedDedupKey",
     "RiskLevel",
     "RuntimeSourceRecord",
     "ScheduleSpec",
     "SearchProfile",
     "Seniority",
+    "ShotExtraction",
+    "ShotOntologyExtraction",
+    "ShotOntologyGraph",
     "SkillTag",
+    "StructuredSourceEvidence",
+    "SourceAssessmentResult",
+    "SourceCapabilities",
+    "SourceEvidence",
     "SourceAttribution",
     "SourceHealth",
+    "SourceFamily",
+    "SourceIdentity",
+    "source_identity_for_raw_item",
+    "source_identity_for_parts",
     "SourceKind",
     "TenantConfig",
     "TenantInfo",
     "TriageRejectionReason",
+    "RelevanceCard",
     "WorkMode",
+    "WorkState",
+    "aggregate_bundle",
+    "aggregate_claim",
     "compute_group_id",
+    "compute_content_version",
     "compute_identity_fingerprint",
     "draft_to_record",
     "create_job_group",
@@ -137,6 +243,14 @@ __all__ = [
     "dedup_url_for_raw_item",
     "merge_jobs",
     "processed_key_for_raw_item",
+    "ObservationLedgerEntry",
+    "ObservationKind",
+    "content_hash_for_raw_item",
+    "OutboxRecord",
+    "OutboxState",
+    "SourceOutcome",
+    "delivery_idempotency_key",
+    "processed_key_for_url",
     "job_to_draft",
     "job_to_record",
     "build_job_lineage",

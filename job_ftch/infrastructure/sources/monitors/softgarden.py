@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
 from job_ftch.infrastructure.sources.monitors.shared import fetch_page_text
 
 if TYPE_CHECKING:
@@ -176,4 +176,16 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     return None
 
 
-register_monitor("softgarden", discover, cost=70, rich=False, can_handle=can_handle)
+register_monitor(
+    "softgarden",
+    discover,
+    cost=70,
+    rich=False,
+    can_handle=can_handle,
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "softgarden",
+        url_patterns=(r"[\w-]+\.softgarden\.io",),
+        has_stable_id=True,
+    ),
+)

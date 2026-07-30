@@ -25,6 +25,9 @@ from . import (
     greenhouse as greenhouse,
 )
 from . import (
+    inline as inline,
+)
+from . import (
     join as join,
 )
 from . import (

@@ -1,0 +1,224 @@
+"""Build a recipe ledger from all eval result artifacts.
+
+Groups runs by comparison_key, sorts within groups by F1. Runs without
+provenance are listed separately as non-reproducible. Outputs both
+Markdown (docs/recipes/ledger.md) and JSON (artifacts/recipes/ledger.json).
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from collections import defaultdict
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[2]
+ARTIFACTS_DIR = ROOT / "artifacts" / "release"
+DOCS_OUT = ROOT / "docs" / "recipes" / "ledger.md"
+JSON_OUT = ROOT / "artifacts" / "recipes" / "ledger.json"
+
+
+def _load_results(directory: Path) -> list[dict[str, Any]]:
+    """Load all JSON result files from the artifacts directory."""
+    results: list[dict[str, Any]] = []
+    if not directory.exists():
+        return results
+    for path in sorted(directory.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and "metrics_delivered" in data:
+                data["_source_file"] = path.name
+                results.append(data)
+        except (json.JSONDecodeError, OSError):
+            continue
+    return results
+
+
+def _extract_row(result: dict[str, Any]) -> dict[str, Any]:
+    """Extract the fields needed for the ledger from a result file."""
+    provenance = result.get("provenance")
+    metrics = result.get("metrics_delivered", {})
+    llm = result.get("llm", {})
+    summary = result.get("summary", {})
+    return {
+        "file": result.get("_source_file", "unknown"),
+        "run_at": result.get("run_at"),
+        "run_name": result.get("run_name"),
+        "has_provenance": provenance is not None,
+        "comparison_key": provenance.get("comparison_key") if provenance else None,
+        "recipe_id": provenance.get("recipe_id") if provenance else None,
+        "graph_hash": (
+            provenance.get("graph_hash")
+            if provenance
+            else result.get("build_context", {}).get("graph_hash")
+        ),
+        "ontology_hash": provenance.get("ontology_hash") if provenance else None,
+        "state_mode": (
+            provenance.get("state_mode")
+            if provenance
+            else result.get("settings", {}).get("state_mode")
+        ),
+        "store_backend": (
+            provenance.get("store_backend")
+            if provenance
+            else result.get("settings", {}).get("store_backend")
+        ),
+        "dirty_state": provenance.get("dirty_state") if provenance else None,
+        "incomplete_candidate_set": (
+            provenance.get("incomplete_candidate_set") if provenance else None
+        ),
+        "total_candidates": summary.get("items", 0),
+        "precision": metrics.get("precision", 0.0),
+        "recall": metrics.get("recall", 0.0),
+        "f1": metrics.get("f1", 0.0),
+        "tp": metrics.get("tp", 0),
+        "fp": metrics.get("fp", 0),
+        "fn": metrics.get("fn", 0),
+        "tn": metrics.get("tn", 0),
+        "calls": llm.get("calls", 0),
+        "cost_usd": llm.get("cost_usd", 0.0),
+        "model": llm.get("configured_model"),
+        "missing_provenance_fields": _missing_provenance_fields(provenance),
+    }
+
+
+def _missing_provenance_fields(provenance: dict[str, Any] | None) -> list[str]:
+    """List required provenance fields that are absent."""
+    if provenance is None:
+        return ["provenance"]
+    required = [
+        "recipe_id",
+        "comparison_key",
+        "graph_hash",
+        "ontology_hash",
+        "state_mode",
+        "store_backend",
+        "dataset_sha256",
+        "sample_size",
+        "seed",
+    ]
+    return [field for field in required if provenance.get(field) is None]
+
+
+def _build_ledger(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Organize results into comparison groups."""
+    rows = [_extract_row(r) for r in results]
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    non_reproducible: list[dict[str, Any]] = []
+
+    for row in rows:
+        if not row["has_provenance"] or row["comparison_key"] is None:
+            non_reproducible.append(row)
+        else:
+            groups[row["comparison_key"]].append(row)
+
+    # Sort within groups by F1 descending
+    for key in groups:
+        groups[key].sort(key=lambda r: float(r["f1"]), reverse=True)
+
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "total_runs": len(rows),
+        "comparable_groups": len(groups),
+        "non_reproducible_count": len(non_reproducible),
+        "groups": dict(sorted(groups.items())),
+        "non_reproducible": non_reproducible,
+    }
+
+
+def _format_markdown(ledger: dict[str, Any]) -> str:
+    """Render the ledger as Markdown."""
+    lines = [
+        "---",
+        'title: "Recipe ledger"',
+        'description: "Generated ledger grouping eval artifacts by comparison key."',
+        "updated: 2026-07-26",
+        "---",
+        "<!-- GENERATED by scripts/eval/build_recipe_ledger.py - DO NOT EDIT -->",
+        "",
+        "# Recipe Ledger",
+        "",
+        f"Generated: {ledger['generated_at']}",
+        f"Total runs: {ledger['total_runs']}",
+        f"Comparable groups: {ledger['comparable_groups']}",
+        f"Non-reproducible: {ledger['non_reproducible_count']}",
+        "",
+    ]
+
+    for key, group in ledger["groups"].items():
+        lines.append(f"## Group: {key}")
+        lines.append("")
+        first = group[0]
+        lines.append(f"- state_mode: {first.get('state_mode')}")
+        lines.append(f"- store_backend: {first.get('store_backend')}")
+        lines.append(f"- graph_hash: {first.get('graph_hash')}")
+        lines.append("")
+        lines.append("| File | F1 | P | R | Calls | Cost | Recipe | Ontology |")
+        lines.append("|------|-----|-----|-----|-------|------|--------|----------|")
+        for row in group:
+            onto_short = (row.get("ontology_hash") or "?")[:8]
+            recipe_short = (row.get("recipe_id") or "?")[:8]
+            lines.append(
+                f"| {row['file']} "
+                f"| {row['f1']:.3f} "
+                f"| {row['precision']:.3f} "
+                f"| {row['recall']:.3f} "
+                f"| {row['calls']} "
+                f"| ${row['cost_usd']:.4f} "
+                f"| {recipe_short} "
+                f"| {onto_short} |"
+            )
+        lines.append("")
+
+    if ledger["non_reproducible"]:
+        lines.append("## Non-reproducible runs")
+        lines.append("")
+        lines.append("These runs lack complete provenance and cannot be compared.")
+        lines.append("")
+        lines.append("| File | F1 | P | R | Missing |")
+        lines.append("|------|-----|-----|-----|---------|")
+        for row in ledger["non_reproducible"]:
+            missing = ", ".join(row.get("missing_provenance_fields", []))
+            lines.append(
+                f"| {row['file']} "
+                f"| {row['f1']:.3f} "
+                f"| {row['precision']:.3f} "
+                f"| {row['recall']:.3f} "
+                f"| {missing} |"
+            )
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def main() -> int:
+    results = _load_results(ARTIFACTS_DIR)
+    if not results:
+        print(f"No result files found in {ARTIFACTS_DIR}", file=sys.stderr)
+        return 1
+
+    ledger = _build_ledger(results)
+
+    # Write Markdown
+    DOCS_OUT.parent.mkdir(parents=True, exist_ok=True)
+    DOCS_OUT.write_text(_format_markdown(ledger), encoding="utf-8")
+    print(f"Markdown ledger: {DOCS_OUT}")
+
+    # Write JSON
+    JSON_OUT.parent.mkdir(parents=True, exist_ok=True)
+    JSON_OUT.write_text(
+        json.dumps(ledger, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    print(f"JSON ledger: {JSON_OUT}")
+
+    print(f"\nTotal runs: {ledger['total_runs']}")
+    print(f"Comparable groups: {ledger['comparable_groups']}")
+    print(f"Non-reproducible: {ledger['non_reproducible_count']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

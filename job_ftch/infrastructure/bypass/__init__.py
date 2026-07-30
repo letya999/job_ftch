@@ -1,23 +1,32 @@
 """Bypass strategies for anti-bot protection."""
 
-from . import (
-    adaptive as adaptive,
-)
-from . import (
-    behavior_sim as behavior_sim,
-)
-from . import (
-    cloak_bypass as cloak_bypass,
-)
-from . import (
-    curl_bypass as curl_bypass,
-)
-from . import (
-    noop as noop,
-)
-from . import (
-    proxy_rotator as proxy_rotator,
-)
-from . import (
-    stealth_browser as stealth_browser,
-)
+from . import adaptive as adaptive
+from . import behavior_sim as behavior_sim
+from . import behavioral_noise as behavioral_noise
+from . import camoufox_bypass as camoufox_bypass
+from . import captcha_solver as captcha_solver
+from . import cloak_bypass as cloak_bypass
+from . import cognitive_state as cognitive_state
+from . import context as context
+from . import curl_bypass as curl_bypass
+from . import distributed_simulator as distributed_simulator
+from . import domain_intel as domain_intel
+from . import fingerprint_baseline as fingerprint_baseline
+from . import fingerprint_evolution as fingerprint_evolution
+from . import fingerprint_generator as fingerprint_generator
+from . import fingerprint_profile as fingerprint_profile
+from . import humanize as humanize
+from . import managed as managed
+from . import multi_layer_obfuscation as multi_layer_obfuscation
+from . import nodriver_bypass as nodriver_bypass
+from . import noop as noop
+from . import pacing as pacing
+from . import persona as persona
+from . import preflight as preflight
+from . import proxy_bypass as proxy_bypass
+from . import risk_router as risk_router
+from . import session_handoff as session_handoff
+from . import session_memory as session_memory
+from . import stealth_browser as stealth_browser
+from . import stealth_hardening as stealth_hardening
+from . import temporal_shaper as temporal_shaper

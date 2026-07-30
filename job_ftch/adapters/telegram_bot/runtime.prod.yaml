@@ -1,0 +1,14 @@
+# Telegram bot adapter runtime overrides for production.
+#
+# Loaded on top of the shared runtime baseline via:
+# JOB_FTCH_RUNTIME_CONFIG_PATH=config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml
+
+sink_backend: none
+posting_backend: none
+
+embedding_provider: sentence_transformers
+embedding_model: BAAI/bge-m3
+embedding_dimensions: 1024
+
+extraction_min_search_relevance: 0.25
+extraction_min_hiring_intent: 0.4

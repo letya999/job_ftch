@@ -1,0 +1,8 @@
+extends: historical_best.yaml
+name: experiment_shadow_dedup
+version: "1.0.0"
+metadata:
+  purpose: authority_ablation
+  experiment: {variable: node:dedup.authority}
+nodes:
+  - {id: dedup, authority: shadow}

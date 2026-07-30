@@ -1,0 +1,36 @@
+# Calibration knobs only. Evidence structure and policy remain in code.
+claims:
+  is_job:
+    unknown:
+      prior: 0.50
+      coverage_rate: 1.60
+    ats_api:
+      prior: 0.70
+      coverage_rate: 1.60
+    telegram:
+      prior: 0.45
+      coverage_rate: 1.60
+  profile_relevance:
+    unknown:
+      prior: 0.50
+      coverage_rate: 1.60
+    ats_api:
+      prior: 0.55
+      coverage_rate: 1.60
+    telegram:
+      prior: 0.40
+      coverage_rate: 1.60
+  freshness:
+    unknown:
+      prior: 0.55
+      coverage_rate: 1.60
+    ats_api:
+      prior: 0.70
+      coverage_rate: 1.60
+  risk:
+    unknown:
+      prior: 0.15
+      contradiction_weight: 1.25
+    telegram:
+      prior: 0.15
+      contradiction_weight: 1.25

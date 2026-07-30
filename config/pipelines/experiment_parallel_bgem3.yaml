@@ -1,0 +1,8 @@
+extends: historical_best.yaml
+name: experiment_parallel_bgem3
+version: "1.0.0"
+metadata:
+  purpose: execution_ablation
+  experiment: {variable: node:bgem3.execution}
+nodes:
+  - {id: bgem3, execution: background}

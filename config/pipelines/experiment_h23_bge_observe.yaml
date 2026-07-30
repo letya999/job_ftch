@@ -1,0 +1,10 @@
+extends: experiment_h11_no_late_scoring.yaml
+name: experiment_h23_bge_observe
+version: "1.0.0"
+metadata:
+  purpose: bge_observation_without_prefilter_gate
+  experiment: {id: H23, control: H11}
+  benchmark: {dataset: fixtures/dataset/eval_dataset.jsonl, sample: 140, seed: 42}
+nodes:
+  - {id: semantic_prefilter, enabled: false}
+  - {id: completeness, node: completeness_gate, after: [dedup]}

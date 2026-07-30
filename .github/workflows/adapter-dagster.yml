@@ -3,12 +3,12 @@ name: adapter-dagster
 on:
   push:
     paths:
-      - "adapters/dagster/**"
+      - "job_ftch/adapters/dagster/**"
       - "job_ftch/**"
       - "pyproject.toml"
   pull_request:
     paths:
-      - "adapters/dagster/**"
+      - "job_ftch/adapters/dagster/**"
       - "job_ftch/**"
 
 jobs:
@@ -22,6 +22,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Lint adapter
-        run: uvx ruff check adapters/dagster
+        run: uvx ruff check job_ftch/adapters/dagster
       - name: Build image
-        run: docker build -f adapters/dagster/Dockerfile -t job-ftch-dagster .
+        run: docker build -f job_ftch/adapters/dagster/Dockerfile -t job-ftch-dagster .

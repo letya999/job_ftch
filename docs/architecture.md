@@ -1,319 +1,372 @@
+---
+title: "Архитектура job_ftch"
+description: "Полное описание текущей архитектуры: слои, порты, pipeline, graph runtime, ingest stack, bypass и адаптеры."
+updated: 2026-07-28
+---
 # Архитектура job_ftch
 
-## Цель
+`job_ftch` — library-first async pipeline для сбора и обработки вакансий из
+Telegram, карьерных сайтов, RSS/API-источников и runtime overlays. Архитектура
+держится на строгих границах слоёв, typed contracts, registry-based extension
+points и воспроизводимом production graph.
 
-Гексагональная архитектура (Ports & Adapters): доменная логика в центре, инфраструктурные детали снаружи. Система растёт вместе с роадмапом, не меняя форму ядра.
+## 1. Границы слоёв
 
-Визуальные диаграммы (C4 L1/L2/L3) и эволюционные слайды — в [README.md](../README.md).
-
----
-
-## Принципы модульных границ
-
-Правила жёсткие, без исключений:
-
-| Слой | Разрешённые импорты |
-|---|---|
-| `domain/` | только `pydantic` + stdlib |
-| `application/` | только `domain/` + stdlib + `pydantic` |
-| `nodes/`, `sinks/` | только `domain/` + `application/` |
-| `infrastructure/`, `adapters/` | всё выше + внешние клиенты |
-
-Проверка в CI: `grep -r "from infrastructure" domain/ application/ nodes/ sinks/` должен вернуть пустой результат.
-
-Инфраструктурные клиенты (Telethon, asyncpg, Playwright, Qdrant, aiogram, FastMCP) **никогда** не попадают в `domain/`, `application/`, `nodes/`, `sinks/`.
-
----
-
-## 6 основных протоколов (порты)
-
-Все определены в `application/contracts.py` как `@runtime_checkable Protocol`.
-
-| Протокол | Сигнатура | Назначение |
+| Слой | Ответственность | Ограничение |
 |---|---|---|
-| `Source[T]` | `async fetch() → AsyncIterator[T]` | Асинхронный итератор входящих элементов |
-| `Stage[In, Out]` | `async process(item: In) → Out \| None` | Шаг обработки; `None` = дроп элемента |
-| `Sink[T]` | `async emit(item: T)` | Финальная запись элемента |
-| `Store` | `has_processed / mark_processed / set_run_state / get_run_state` | Хранение состояния дедупликации и запуска |
-| `LLMProvider` | `extract[T](text, schema) → T` | Структурированное извлечение через LLM |
-| `StoreConnector` | универсальный коннектор → `SQLStoreAdapter` → `PostgreSQLStore` | Трёхуровневая иерархия хранилища |
+| `job_ftch/domain/` | Pydantic-модели, value objects, enums, contract payloads | Только stdlib и `pydantic` |
+| `job_ftch/application/` | Порты, registry, builder, pipeline, tenant runtime, source inputs | Без `infrastructure`/`adapters`, кроме composition/runtime exceptions из `scripts/check_module_boundaries.py` |
+| `job_ftch/nodes/` | Processing stages и graph-facing node implementations | Без прямых импортов `job_ftch.infrastructure` и `job_ftch.adapters` |
+| `job_ftch/sinks/` | Output sinks и sink wrappers | Следует тем же boundary-принципам, что и nodes |
+| `job_ftch/infrastructure/` | Реализации портов: sources, stores, LLM, browser, bypass, observability | Может импортировать внешние клиенты |
+| `job_ftch/adapters/` | Внешние runtime entrypoints: Telegram bot, MCP, FastAPI, FastStream, Dagster | Использует public application/runtime API |
 
-Дополнительные протоколы для расширяемых слоёв (фазы 11+):
+Разрешённые cross-cutting зависимости вне `domain`: `structlog`,
+`opentelemetry-api`, `yaml` и вычислительные библиотеки, если они не затаскивают
+infrastructure layer в `nodes`.
 
-| Протокол | Первая реализация |
-|---|---|
-| `JobPersistenceBackend` | `SQLiteJobBackend`, `PostgreSQLJobBackend` |
-| `SearchBackend` | `PostgreSQLFTSBackend`, `PgVectorBackend` |
-| `EmbeddingProvider` | `OpenAIEmbeddingProvider`, `SentenceTransformersProvider` |
-| `VectorBackend` | `QdrantVectorBackend`, `PgVectorBackend` |
-| `AuthProvider` | `EnvAuthProvider`, `FileAuthProvider`, `VaultAuthProvider` |
-| `IngestMode` | `PollingMode`, `EventListenerMode`, `WebhookMode`, `WebSocketMode` |
-| `BypassStrategy` | `NoopBypass`, `ProxyRotatorBypass`, `StealthBrowserBypass`, `CaptchaSolverBypass`, `ManagedScraperBypass` |
+Машинная проверка:
 
----
-
-## Поток данных
-
-### Основной путь (текущее состояние)
-
+```powershell
+uv run python scripts/check_module_boundaries.py
 ```
+
+## 2. Адаптеры, port adapters и plugins
+
+В проекте слово “adapter” используется в нескольких смыслах; смешивать их нельзя.
+
+| Тип | Что делает | Где живёт | Примеры |
+|---|---|---|---|
+| Port adapter | Реализует application port | `infrastructure/`, `sinks/` | Source, Store, Sink, LLMProvider |
+| Runtime adapter | Даёт внешний вход в runtime | `job_ftch/adapters/` | Telegram bot, MCP, FastAPI, FastStream, Dagster |
+| Assessment adapter | Оценивает `SourceSpec` до ingest | `application` contract + `infrastructure/source_assessment/` | Telegram/RSS/known/generic assessment |
+| Plugin | Способ подключения реализации через registry/entry points | внешний package или local module | source/sink/store/parser/backend plugins |
+
+Plugin — это механизм подключения, а не отдельная архитектурная роль. Один и тот
+же объект может быть port adapter по ответственности и plugin-connected по
+способу регистрации.
+
+## 3. Основные порты
+
+Source of truth: `job_ftch/application/contracts.py`.
+
+| Протокол | Сигнатура/идея | Назначение |
+|---|---|---|
+| `Source[T]` | `fetch() -> AsyncIterator[T | QuarantinedRawItem]` | Поставщик входящих элементов |
+| `Stage[In, Out]` | `async process(item: In) -> Out | None` | Processing stage или type-changing stage |
+| `Sink[T]` | `async emit(item: T) -> None` | Финальный вывод |
+| `Store` | run state, dedup, snapshots, runtime records | Состояние pipeline/runtime |
+| `AuthProvider` | resolve credentials by source/runtime context | Секреты вне YAML |
+| `LLMProvider` | extract/classify/present/generate text | LLM boundary |
+
+Расширяющие порты:
+
+- `JobPersistenceBackend`;
+- `SearchBackend`;
+- `EmbeddingProvider`;
+- `VectorBackend`;
+- `BypassStrategy`;
+- `ManagedShotBackend`;
+- `OntologyStore`;
+- `SourceAssessmentAdapter`.
+
+## 4. Семья payload-типов
+
+Каноническая линия данных:
+
+```text
+Source -> RawItem -> CandidateSpan[] -> JobDraft -> JobRecord -> JobGroup
+```
+
+- `RawItem` существует до extraction boundary.
+- `CandidateSpan[]` появляется только в явной one-to-many segmentation path.
+- `JobDraft` — структурированный черновик после extraction.
+- `JobRecord` — публичный контракт для sinks, persistence и search.
+- `JobGroup` — агрегированная вакансия из нескольких source records.
+
+## 5. Путь evidence decision
+
+После нормализации runtime входит в `EvidenceDecisionNode`. Он запускает bounded
+`EvidenceFanOutNode`, агрегирует независимые `EvidenceAtom` в typed confidence
+assessment и передаёт terminal lane в `DecisionNode`.
+
+Ключевые правила:
+
+- Legacy routing/scoring/LLM judge/reranker/presentation/translation stages не
+  владеют terminal decision в production path.
+- Unknown critical evidence сохраняется как deferred resolver task.
+- Только ACCEPT продолжает canonical group commit и physical delivery outbox.
+- REVIEW сохраняется отдельно и не публикуется как ACCEPT.
+- Post-accept enrichment ставится в очередь после ACCEPT и не может изменить
+  terminal decision.
+
+## 6. Текущий pipeline
+
+Порядок важен и отражает builder/graph contract:
+
+```text
 Source.fetch()
-  → SanitizeNode                  # первые ворота: карантин при нарушении политики
-  → LanguageContextNode           # язык + дешёвый source context
-  → PostTypeClassificationNode    # что это: job/candidate/announcement/spam/unknown
-  → HardFilterNode                # дешёвые жёсткие фильтры до LLM
-  → DedupNode                     # exact/near-dup checks на raw-уровне
-  → SemanticPrefilterNode         # дешёвый multi-profile relevance gate
-  → ExtractionNode                # RawItem → JobDraft через LLM/heuristics
-  → ExtractionValidationNode      # минимальная полезность и review reasons
-  → TitleCompanyNormalizationNode # JobDraft → JobRecord
-  → LocationWorkModeNormalizationNode
-  → CompensationParsingNode
-  → MultiProfileMatchNode         # финальный profile-aware scoring
-  → RiskScoringNode               # риск отдельно от relevance
-  → QualityScoringNode            # качество отдельно от риска
-  → JobValidationNode             # terminal drop/review gates
-  → JobAggregationNode            # cross-source grouping, attach group_id
-  → main JobRecord Sink
-        ↘ review Sink             # пограничные вакансии
-        ↘ posting Sink            # публикация в Telegram
-        ↘ NotificationSink        # рассылка событий (фаза 27+)
-
-side-channels:
-  QuarantinedRawItem → quarantine Sink
-  RejectedItem       → rejected Sink (любой этап)
-  Store              ← → DedupNode / IncrementalCursor
+  -> SanitizeNode
+  -> SnapshotFilterNode                optional, always 2nd when enabled
+  -> SourceContextNode
+  -> OntologySnapshotNode              optional ontology provenance
+  -> CandidateSegmentationNode         optional explicit 1:N boundary
+  -> GarbageFilterNode
+  -> PostTypeClassificationNode
+  -> HardFilterNode
+  -> DedupNode                         defer_commit until terminal decision
+  -> TfidfLogregRelevancePrefilterNode production graph gate
+  -> BgeMThreeNode | EmbeddingPrefilterNode optional variants
+  -> SemanticPrefilterNode
+  -> RawJobnessEvidenceNode            optional evidence
+  -> CompletenessGateNode              optional structured-source annotation
+  -> ExtractionNode                    RawItem -> JobDraft
+  -> ExtractionValidationNode
+  -> TitleCompanyNormalizationNode
+  -> SkillNormalizationNode
+  -> LocationWorkModeNormalizationNode
+  -> CompensationParsingNode
+  -> JobLifecycleNode
+  -> JobnessEvidenceProducer           optional
+  -> LanguageDetectionNode             optional
+  -> MultiProfileMatchNode
+  -> LexicalEvidenceNode
+  -> RiskScoringNode
+  -> QualityScoringNode
+  -> JobValidationNode
+  -> LLMRelevanceClassificationNode    optional evidence, not terminal owner
+  -> EvidenceDecisionNode              single terminal boundary
+  -> JobAggregationNode                canonical commit for accepted/reviewable records
+  -> main sink(s)
 ```
 
-### Важные инварианты
+Production binding:
 
-- `SanitizeNode` всегда первый.
-- `RawItem` живёт только до `ExtractionNode`.
-- `ExtractionNode` — единственная обязательная граница raw → structured.
-- Текущая целевая семья payload'ов: `RawItem → JobDraft → JobRecord → JobGroup`.
-- `JobDraft` уже несёт source identity/timestamps (`source_record_id`, `source_url`, `fetched_at`, `posted_at`) и extraction provenance.
-- `JobRecord` — публичный canonical contract: кроме normalised content, он несёт `schema_version`, `group_id`, `risk_score`, `risk_level`, `extraction_completeness` и `provenance`.
-- После `ExtractionNode` pipeline больше не возвращается к raw-text routing.
-- `None` из любого узла = дроп элемента с записью причины в `RunSummary`.
-- `RawItemDropped` = управляемый дроп (дедуп, тема).
-- `RawItemRejected` = карантин (политика безопасности).
-- Неожиданные исключения изолированы на уровне элемента — запуск продолжается.
+- runtime: `config/runtime.prod.yaml`;
+- graph: `config/pipelines/evidence_v2_compact_prefilter.yaml`;
+- graph hash:
+  `0d73de0663d220da62e37d9a41159542547d167f9f096088f7ae85ec587e44fb`.
 
-### Целевое состояние funnel
+Generated references:
 
-Текущий pipeline уже соответствует целевой архитектуре master plan:
+- [pipelines/graphs](pipelines/graphs.md);
+- [nodes/reference](nodes/reference.md);
+- [nodes catalog](nodes/README.md).
 
-- intake и cheap understanding уже выделены в отдельные узлы;
-- `RoutingNode` полностью реализован (`nodes/routing.py`) и интегрирован в `builder.py`;
-- canonical contract вынес explicit source/risk/provenance поля из `metadata`, rollout основного master-plan field set завершён (остались минорные уточнения ontology/ESCO);
-- агрегация реализована как `JobAggregationNode`, порядок относительно scoring стабилизирован.
+## 7. Побочные каналы
 
----
+Pipeline имеет отдельные каналы вывода:
 
-## Открытый реестр
+- `QuarantinedRawItem` -> quarantine sink;
+- `RejectedItem` -> rejected sink;
+- review-routed `JobRecord` -> review sink;
+- accepted `JobRecord` -> main sink/outbox.
 
-Все адаптеры регистрируются через декораторы:
+Sinks не должны переписывать весь output file на каждый `emit`.
 
-```python
-@register_source("telegram_channel")
-def create_telegram_channel(spec: SourceSpec, auth: AuthProvider) -> Source:
-    ...
+## 8. Drop, reject и failure
+
+У item есть разные исходы, и их нельзя смешивать:
+
+- `return None` из stage — controlled drop.
+- `RawItemDropped` — управляемый drop с reason code.
+- `RawItemRejected` — quarantine/security/policy rejection.
+- Unexpected exception — isolated item failure; run продолжается, если ошибка
+  не случилась на source iterator или final flush уровне.
+
+Эта модель нужна, чтобы metrics, review, retry и release gates не смешивали
+“не вакансия”, “опасный payload”, “ошибка инфраструктуры” и “дубликат”.
+
+## 9. Snapshot и dedup
+
+Система использует два разных механизма:
+
+1. `SnapshotFilterNode`
+   - freshness/cost optimization;
+   - identity включает source locator и content version;
+   - неизменившийся item может быть пропущен;
+   - изменившийся content replay-ится даже при том же URL/external ID.
+
+2. `DedupNode`
+   - exact/near duplicate suppression;
+   - использует dedup keys/fingerprints;
+   - defer-commit до terminal decision, чтобы не потерять item при later failure.
+
+`SourceAssessmentAdapter` не управляет runtime drop/gate logic. Он только
+классифицирует source capability/freshness до ingest.
+
+## 10. Корни композиции
+
+Есть два основных composition path.
+
+### Одноразовый library path
+
+```text
+PipelineBuilder + build_nodes() + Pipeline.run()
 ```
 
-Сторонние пакеты используют entry points:
+Используется CLI, smoke examples и library consumers.
 
-```toml
-[project.entry-points."job_ftch.sources"]
-my_custom_source = "my_pkg.sources:create_my_source"
+### Multi-tenant runtime path
+
+```text
+TenantRunner + TenantRuntime + TenantStore + GraphPipelineStage/Pipeline
 ```
 
-Группы entry points: `job_ftch.sources`, `job_ftch.sinks`, `job_ftch.stores`, `job_ftch.parsers`, `job_ftch.notification_targets`, `job_ftch.bypass`, `job_ftch.job_backends`, `job_ftch.search_backends`, `job_ftch.embedding_providers`, `job_ftch.vector_backends`.
+`TenantRunner`:
 
----
+- мержит base и runtime sources;
+- запускает source assessment при добавлении runtime sources и lazy для
+  config-backed sources;
+- применяет source health, pause и probe logic;
+- собирает runtime ontology и candidate profiles;
+- пишет run history, snapshots, source health, outbox/delivery state.
 
-## SourceSpec + AuthProvider
+Ontology details: [ontology/compiler](ontology/compiler.md).
 
-Конфиг источника и учётные данные — всегда разделены:
+## 11. Source assessment
 
-```yaml
-# sources.yaml — безопасно хранить в git
-sources:
-  - type: telegram_channel
-    entity: ai_jobs_channel
-    limit: 50
-    ingest_mode: polling
-    bypass: proxy_rotator
+`SourceAssessmentAdapter` отвечает за pre-ingest оценку источника:
+
+- capability hints;
+- freshness evidence;
+- known API/monitor/site-parser support;
+- estimated bypass/browser need;
+- confidence и ingest state.
+
+Он не возвращает `RawItem`, не вызывает LLM и не запускает обычный
+`Source.fetch()`. Для career sites assessment может bounded-образом использовать
+fingerprints, headers, monitor `can_handle`, parser manifests и малую выборку.
+
+Подробно: [sources/source_assessment](sources/source_assessment.md).
+
+## 12. Career-site ingest stack
+
+Career-site ingest разделён на роли:
+
+- `monitor` — находит вакансии или rich payloads;
+- `scraper` — извлекает detail data;
+- `site_parser` — domain-specific fast path для сложных сайтов;
+- `bypass_strategy` — controlled access escalation;
+- `CareerSiteSource` — orchestrates discovery/detail/raw-item emission.
+
+Это не один монолитный scraper. Роли описаны в:
+
+- [sources/ingest_stack](sources/ingest_stack.md);
+- [sources/source_stack_reference](sources/source_stack_reference.md);
+- [entities/career_site_engines](entities/career_site_engines.md).
+
+## 13. Bypass architecture
+
+`bypass="auto"` управляется signal-driven route graph, а не простой лестницей
+tiers. Route состоит из независимых осей:
+
+- transport;
+- browser/runtime;
+- network/proxy;
+- session;
+- challenge/CAPTCHA;
+- legal/config gates.
+
+Для неизвестного сигнала используется консервативный fallback:
+
+```text
+noop -> curl_stealth -> stealth_browser -> nodriver -> camoufox -> cloak
 ```
 
-```python
-# AuthProvider разрешает секреты в рантайме
-auth = EnvAuthProvider()  # читает JOB_FTCH_TELEGRAM_API_KEY из env
-```
+Классифицированный сигнал может выбирать capability напрямую:
 
-`SourceSpec` — дискриминированный union по полю `type`. Секреты **никогда** не попадают в `SourceSpec` или YAML.
+- TLS/fingerprint signal -> curl impersonation;
+- Chromium fingerprint -> Camoufox/browser tier;
+- IP/ASN/rate-limit -> proxy на той же transport/browser axis;
+- подходящий challenge -> Nodriver/CAPTCHA bounded action.
 
----
+Proxy — независимая network capability из `config/proxies.yaml` и/или
+`JOB_FTCH_PROXY_LIST`, а не “ступень между браузерами”.
 
-## TenantConfig и мультиарендность
+Bypass не должен скрываться внутри site parser. Эскалация должна быть driven by
+source assessment, failure signals и runtime policy.
 
-```yaml
-tenant_id: "company_a"
-sources:
-  - type: telegram_channel
-    entity: ...
-notifications:
-  trigger: batched
-  interval_seconds: 600
-  targets:
-    - type: webhook
-      url: "https://api.company-a.example.com/jobs"
-```
+Подробно: [sources/bypass_and_escalation](sources/bypass_and_escalation.md).
 
-`TenantConfig` добавляет `tenant_id` как пространство имён к каждому ключу в Store, индексу в JobBackend и метке в Prometheus. Несколько тенантов изолированы без пересечения данных.
+## 14. Registry и расширяемость
 
----
+Расширение ядра идёт через registry:
 
-## Хранилище данных (трёхуровневая иерархия)
+- `@register_source`;
+- `@register_source_spec`;
+- `@register_sink`;
+- `@register_store`;
+- `@register_llm`;
+- `@register_site_parser`;
+- monitor/parser/backend-specific `register_*`.
 
-```
-StoreConnector  (универсальный протокол)
-  └─ SQLStoreAdapter  (СУБД-агностичный SQL-слой)
-       ├─ SQLiteStore       (dev / self-hosted, zero infra)
-       └─ PostgreSQLStore   (production, asyncpg, no ORM)
-```
+Builtins и entry points загружаются через `job_ftch/application/registry.py`.
+Core dispatch не должен расти через `if/elif`.
 
-Аналогично для вакансий:
+## 15. Runtime adapters
 
-```
-JobPersistenceBackend
-  ├─ SQLiteJobBackend   (FTS5, встроенный в SQLite)
-  └─ PostgreSQLJobBackend  (FTS + pgvector / Qdrant)
-```
+Runtime adapters живут под `job_ftch/adapters/`:
 
-Принцип: лёгкий дефолт — SQLite без инфраструктуры. PostgreSQL и Qdrant — опции масштабирования, не обязательные зависимости.
+- Telegram bot — production-shape deploy;
+- MCP server — agent-facing tenant runtime;
+- FastAPI bridge;
+- FastStream worker;
+- Dagster wrapper.
 
----
+Они используют public API библиотеки и не должны переносить infrastructure
+details обратно в `domain`, `application` без разрешённого composition seam или
+`nodes`.
 
-## Поиск (протокольный стек)
+## 16. Что не считать реализованным
 
-```
-SearchBackend
-  ├─ PostgreSQLFTSBackend   (tsvector + GIN индекс)
-  └─ PgVectorBackend        (pgvector, FTS + векторный поиск)
+Наличие `SourceSpec`, ADR или adapter scaffold не означает production-ready
+runtime path.
 
-EmbeddingProvider
-  ├─ OpenAIEmbeddingProvider
-  └─ SentenceTransformersProvider  (локально)
+На текущий момент:
 
-VectorBackend
-  ├─ QdrantVectorBackend    (первая реализация, оптимизирована для высоких объёмов)
-  └─ PgVectorBackend        (удобно если уже используется PostgreSQL)
-```
+- webhook/websocket specs существуют, но push/realtime maturity неоднородна;
+- optional adapters имеют разную глубину runtime contract coverage;
+- `NotificationSink` и event broadcasting targets остаются архитектурным
+  направлением, а не текущим builtin production sink stack.
 
-Поиск по умолчанию (SQLite FTS5) требует ноль дополнительной инфраструктуры.
+## 17. Связанные документы
 
----
+- [Runtime/env](adapters/runtime_and_env.md)
+- [Pipeline builder and graph](pipelines/builder_and_graph.md)
+- [Filtering pipeline](pipelines/filtering_pipeline.md)
+- [Production recipe](recipes/pipeline_recipe.md)
+- [Entities](entities/README.md)
+- [Node catalog](nodes/README.md)
 
-## Рассылка событий (Phase 27 — не реализовано)
+## 18. Связанные ADR
 
-> **Статус**: архитектурный план, код не написан. `NotificationSink` и все
-> перечисленные ниже таргеты (WebhookTarget, NATSTarget, KafkaTarget и др.)
-> запланированы на Phase 27 и в текущей кодовой базе отсутствуют.
+Evidence/decision:
 
-`NotificationSink` реализует `Sink[JobRecord]` и подключается через `FanOutSink`. `Pipeline` не знает о рассылке.
+- [ADR-024](adr/024-canonical-job-contract-and-matching-funnel.md)
+- [ADR-055](adr/055-one-to-many-candidate-segmentation-contract.md)
+- [ADR-056](adr/056-structured-evidence-jobness-and-extraction.md)
+- [ADR-058](adr/058-calibrated-multi-axis-decision-policy.md)
+- [ADR-062](adr/062-unified-evidence-and-confidence.md)
+- [ADR-063](adr/063-controlled-evidence-fanout-and-deferred-resolution.md)
+- [ADR-064](adr/064-post-accept-enrichment-queue.md)
 
-```
-NotificationSink
-  ├─ trigger: per_job | batched(interval_seconds) | on_count(n) | on_run_complete
-  ├─ payload_format: full_job | job_summary | batch | jinja_template
-  └─ targets (параллельно, изолированы по сбоям):
-       ├─ WebhookTarget  (HTTP POST, HMAC-подпись)
-       ├─ NATSTarget     (nats.py)
-       ├─ RedisTarget    (Redis Pub/Sub)
-       ├─ KafkaTarget    (aiokafka)
-       ├─ SlackTarget    (Slack webhook)
-       └─ DiscordTarget  (Discord webhook)
-```
+Runtime/delivery/observability:
 
-Конфигурация в YAML в блоке `TenantConfig`. Credentials всегда через `AuthProvider`.
+- [ADR-031](adr/031-run-based-source-snapshot.md)
+- [ADR-052](adr/052-immutable-observation-ledger-and-content-versioned-replay.md)
+- [ADR-053](adr/053-durable-outbox-and-delivery-idempotency.md)
+- [ADR-054](adr/054-terminal-deferred-and-retryable-pipeline-states.md)
+- [ADR-069](adr/069-split-operational-and-ml-observability.md)
+- [ADR-070](adr/070-mvp-run-delivery-and-graph-promotion-contract.md)
+- [ADR-071](adr/071-durable-delivery-and-runtime-degradation.md)
 
----
+Source/scraping:
 
-## PipelineBuilder
-
-```python
-from job_ftch import PipelineBuilder
-
-pipeline = (
-    PipelineBuilder()
-    .source(SourceSpec(type="telegram_channel", entity="ai_jobs"))
-    .source(SourceSpec(type="career_site", url="https://..."))
-    .stage(SanitizeNode())
-    .stage(LanguageContextNode())
-    .stage(PostTypeClassificationNode())
-    .stage(HardFilterNode(ProfileCatalog.default()))
-    .stage(ExtractionNode(llm=OpenAIProvider()))
-    .stage(ExtractionValidationNode())
-    .stage(TitleCompanyNormalizationNode())
-    .stage(MultiProfileMatchNode(ProfileCatalog.default()))
-    .sink(JsonFileSink("artifacts/jobs.json"))
-    .sink(NotificationSink(config=NotificationConfig.load("notif.yaml")))
-    .store(SQLiteStore(".runtime/store.db"))
-    .build()
-)
-
-summary = await pipeline.run(max_items=500)
-```
-
----
-
-## Версионирование схемы
-
-`JobRecord` содержит поле `schema_version`. При изменении поля оператор указывает политику эволюции:
-
-| Политика | Действие |
-|---|---|
-| `evolve` | аддитивное изменение, безопасно |
-| `freeze` | изменения поля запрещены |
-| `discard` | поле удаляется после цикла устаревания |
-
----
-
-## Жизненный цикл вакансии
-
-```
-open → filled       # вакансия закрыта (заполнена)
-     → expired      # вакансия устарела
-     → delisted     # вакансия исчезла из источника
-```
-
-Исчезновение обнаруживается путём сравнения результатов текущего и предыдущего запуска.
-
----
-
-## Наблюдаемость
-
-| Компонент | Назначение |
-|---|---|
-| `IncrementalCursor` | Унифицированный водяной знак для всех source-адаптеров |
-| `RunHistory` | Персистентная история запусков (время, статистика, ошибки) |
-| Lineage graph | Трассировка `raw_item_id → job_id → group_id` |
-| `PrometheusExporter` | Метрики: jobs_fetched, jobs_extracted, jobs_failed + по источнику |
-| structlog + OTel | JSON-логирование + трейсинг без привязки к вендору |
-
----
-
-## Связанные документы
-
-- [ADR-001](adr/001-hexagonal-architecture.md) — гексагональная архитектура
-- [ADR-007](adr/007-extension-registry-and-plugin-discovery.md) — открытый реестр
-- [ADR-010](adr/010-reliability-and-recovery-policies.md) — политики надёжности
-- [ADR-011](adr/011-source-spec-auth-provider.md) — SourceSpec + AuthProvider
-- [ADR-012](adr/012-store-connector-protocol.md) — иерархия StoreConnector
-- [ADR-013](adr/013-filter-profile-configurable-relevance.md) — FilterProfile
-- [ADR-014](adr/014-search-embedding-vector-protocol-stack.md) — поисковый стек
-- [ADR-015](adr/015-ingestion-mode-bypass-strategy.md) — IngestMode + BypassStrategy
-- [ADR-016](adr/016-job-group-cross-source-aggregation.md) — JobGroup агрегация
-- [ADR-017](adr/017-notification-sink-event-broadcasting.md) — рассылка событий
-- [Роадмап](roadmap.md)
-- [Технологический стек](tech_stack.md)
+- [ADR-046](adr/046-source-assessment-adapter.md)
+- [ADR-047](adr/047-adaptive-pipeline-item-concurrency.md)
+- [ADR-048](adr/048-proxy-tier-in-adaptive-bypass-chain.md)
+- [ADR-050](adr/050-browser-session-bypass-protocol.md)
+- [ADR-057](adr/057-hybrid-retrieval-and-cross-encoder-reranking.md)
+- [ADR-072](adr/072-career-site-deadline-and-global-work-budgets.md)
+- [ADR-074](adr/074-adaptive-route-state-graph.md)

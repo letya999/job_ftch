@@ -2,9 +2,48 @@
 
 from __future__ import annotations
 
+import datetime as dt  # noqa: TC003
 from typing import Annotated, Any, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
+
+type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+
+_SECRET_CONFIG_MARKERS = (
+    "password",
+    "secret",
+    "token",
+    "cookie",
+    "authorization",
+    "api_key",
+    "apikey",
+    "proxy_url",
+    "proxyurl",
+    "credential",
+    "dsn",
+)
+
+
+def _validate_secret_free_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Reject credentials at every depth of declarative source configuration."""
+
+    def visit(value: Any, path: str = "") -> None:
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                normalized = str(key).lower().replace("-", "_")
+                child_path = f"{path}.{key}" if path else str(key)
+                if any(marker in normalized for marker in _SECRET_CONFIG_MARKERS):
+                    raise ValueError(
+                        f"Configuration key {child_path!r} may contain credentials. "
+                        "Use auth_source_id or runtime environment variables instead."
+                    )
+                visit(nested, child_path)
+        elif isinstance(value, list):
+            for index, nested in enumerate(value):
+                visit(nested, f"{path}[{index}]")
+
+    visit(config)
+    return config
 
 
 class BaseSourceSpec(BaseModel):
@@ -13,8 +52,17 @@ class BaseSourceSpec(BaseModel):
     rate_limit_min_interval_seconds: float = 0.0
     rate_limit_backoff_multiplier: float = 2.0
     ingest_mode: str = "polling"
-    bypass: str | None = None  # registered bypass strategy name, e.g. "proxy_rotator"
-    bypass_config: dict[str, str] = Field(default_factory=dict)
+    bypass: str | None = None  # registered bypass strategy name, e.g. "proxy"
+    bypass_config: dict[str, JsonValue] = Field(default_factory=dict)
+    initial_ingest_mode: Literal["auto", "max_items", "lookback_window"] = "auto"
+    initial_ingest_max_items: int = Field(default=50, gt=0)
+    initial_ingest_lookback_seconds: int = Field(default=7 * 24 * 60 * 60, gt=0)
+    freshness_cutoff_utc: dt.datetime | None = None  # runtime overlay, not a static capability
+
+    @field_validator("bypass_config")
+    @classmethod
+    def _validate_bypass_config(cls, bypass_config: dict[str, Any]) -> dict[str, Any]:
+        return _validate_secret_free_config(bypass_config)
 
 
 class TelegramChannelSpec(BaseSourceSpec):
@@ -64,6 +112,11 @@ class CareerSiteSpec(BaseSourceSpec):
     url_filter: str | dict[str, Any] | None = None  # regex or {include, exclude}
     url_transform: dict[str, Any] | None = None  # {find, replace} regex rewrite
 
+    @field_validator("monitor_config", "scraper_config")
+    @classmethod
+    def _validate_configs(cls, config: dict[str, Any]) -> dict[str, Any]:
+        return _validate_secret_free_config(config)
+
 
 class LocalFixtureSpec(BaseSourceSpec):
     type: Literal["local_fixture"] = "local_fixture"
@@ -108,6 +161,15 @@ class RestAPISourceSpec(BaseSourceSpec):
     source_name: str | None = None
     auth_source_id: str | None = None
 
+    @field_validator("headers")
+    @classmethod
+    def _validate_headers(cls, headers: dict[str, str]) -> dict[str, str]:
+        for k in headers:
+            normalized = k.lower().replace("-", "_")
+            if any(marker in normalized for marker in _SECRET_CONFIG_MARKERS):
+                raise ValueError(f"Header {k!r} is a credential. Use auth_source_id instead.")
+        return headers
+
 
 class BrowserSourceSpec(BaseSourceSpec):
     type: Literal["browser"] = "browser"
@@ -139,14 +201,16 @@ class LeverSourceSpec(BaseSourceSpec):
 class WebhookSourceSpec(BaseSourceSpec):
     type: Literal["webhook"] = "webhook"
     path: str = "/webhook"
-    host: str = "0.0.0.0"  # nosec B104
+    host: str = "0.0.0.0"  # nosec B104 - explicit webhook listener configuration
     port: int = 8080
+    event_id_field: str = "id"
     source_name: str | None = None
 
 
 class WebSocketSourceSpec(BaseSourceSpec):
     type: Literal["websocket"] = "websocket"
     url: str = Field(min_length=1)
+    event_id_field: str = "id"
     source_name: str | None = None
 
 

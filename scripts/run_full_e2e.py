@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 sources_file = "precise_debug_sources.yaml"
-profile_path = "profiles/ai_jobs_ru_kz.yaml"
+profile_path = "config/profiles/ai_jobs_ru_kz.yaml"
 
 with open(sources_file, encoding="utf-8") as f:
     config = yaml.safe_load(f)

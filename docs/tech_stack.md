@@ -1,158 +1,99 @@
-# Технологический стек job_ftch
-
-Таблица показывает финальный стек (после реализации всего роадмапа). Столбец "Фаза" указывает, когда зависимость вводится. Тяжёлые опциональные зависимости — всегда в группах extras, никогда в `[project.dependencies]`.
-
 ---
-
-## Язык и рантайм
-
-| Инструмент | Версия | Назначение |
-|---|---|---|
-| Python | 3.12+ | Основной язык |
-| asyncio | stdlib | Асинхронное выполнение |
-| uv | latest | Управление зависимостями и venv |
-
+title: "Технологический стек"
+description: "Актуальный стек зависимостей job_ftch по pyproject.toml: core dependencies, extras и запрещённые инструменты."
+updated: 2026-07-28
 ---
+# Технологический стек
 
-## Ядро (обязательные зависимости)
+Источник правды: `pyproject.toml`. Этот документ объясняет назначение
+зависимостей и границы добавления новых библиотек.
 
-| Библиотека | Фаза | Назначение |
-|---|---|---|
-| `pydantic >= 2.7` | 0 | Модели данных, валидация, SourceSpec discriminated unions |
-| `pydantic-settings` | 0 | `Settings` из env / .env |
-| `httpx` | 0 | Асинхронный HTTP-клиент для career sites и API |
-| `selectolax` | 0 | Быстрый парсинг HTML (без lxml) |
-| `rapidfuzz` | 0 | Нечёткое сравнение строк для дедупликации |
-| `structlog` | 0 | Структурированное JSON-логирование |
-| `opentelemetry-api` | 0 | Трейсинг без привязки к вендору |
-| `opentelemetry-sdk` | 0 | SDK трейсинга |
-| `defusedxml >= 0.7.1` | 0 | Безопасный XML парсинг (Personio, RSS boards, Sitemap) |
+## Runtime
 
----
-
-## LLM и извлечение
-
-| Библиотека | Extras group | Фаза | Назначение |
-|---|---|---|---|
-| `openai` | `[openai]` | 0 | OpenAI API клиент |
-| `instructor` | `[openai]` | 0 | Структурированное извлечение (RawItem → JobDraft) через LLM |
-| `fastembed` | `[fastembed]` | MVP | Локальные мультиязычные ONNX-эмбеддинги без GPU; включает `TextCrossEncoder` для реранкинга |
-| `sentence-transformers` | `[embeddings]` | 14 | Локальные эмбеддинги для семантического поиска |
-
-**Важно для fastembed**: модель `intfloat/multilingual-e5-small` требует префиксов `"query: "` для запросов и `"passage: "` для документов. Без них качество поиска падает на 10-15%. `FastEmbedProvider.embed_query()` / `embed_passage()` добавляют префиксы автоматически.
-
----
-
-## NLP качество поиска (opt-in, MVP batch B/C)
-
-| Библиотека | Extras group | Назначение |
-|---|---|---|
-| `lingua-language-detector>=2.0` | `[language]` | Определение языка вакансий (72+ языка, включая KZ). Модели ~500MB при первом запуске. |
-| `ctranslate2` | `[translation]` | CPU-быстрый машинный перевод RU↔EN через Helsinki-NLP opus-mt |
-| `sentencepiece` | `[translation]` | Токенизатор для opus-mt |
-| `huggingface_hub` | `[translation]` | Скачивание моделей перевода (~300MB в `.runtime/translation_models/`) |
-| `jinaai/jina-reranker-v2-base-multilingual` | через `fastembed` | Cross-encoder реранкинг (278M, 100+ языков, ~200-500ms CPU) |
-
-KZ: определяется lingua (`kk→kz`), перевод не поддерживается (нет opus-mt модели) — `TranslatorPort.supports()` возвращает False, пропускается молча. Векторный поиск работает кросс-лингвально нативно.
-
----
-
-## Источники данных
-
-| Библиотека | Extras group | Фаза | Назначение |
-|---|---|---|---|
-| `telethon` | `[telegram]` | 1 | Telegram MTProto-клиент |
-| `playwright` | `[browser]` | 18 | Безголовый браузер для защищённых сайтов |
-| `Pillow` + `pytesseract` | `[captcha]` | 16 | Базовое распознавание CAPTCHA |
-
----
-
-## Хранилища
-
-| Библиотека | Extras group | Фаза | Назначение |
-|---|---|---|---|
-| `aiosqlite` | `[sqlite]` | 15 | SQLiteStore и SQLiteJobBackend (dev / self-hosted) |
-| `asyncpg` | `[postgres]` | 15 | PostgreSQL без ORM (быстрее SQLAlchemy в async) |
-| `qdrant-client` | `[qdrant]` | 14 | VectorBackend: индексация и запросы эмбеддингов |
-
-SQLAlchemy не используется: `asyncpg` на прямых запросах быстрее, проще тестировать, нет N+1 скрытых запросов.
-
----
-
-## Планировщик
-
-| Библиотека | Extras group | Фаза | Назначение |
-|---|---|---|---|
-| — | — | 17 | Чистый `asyncio` (`application/scheduler.py`). APScheduler не используется (RM-087). |
-
----
-
-## Обход защиты
-
-| Библиотека / сервис | Extras group | Фаза | Назначение |
-|---|---|---|---|
-| ScrapeOps / Apify | настраивается | 16 | Управляемые облачные скраперы (ManagedScraperBypass) |
-
----
-
-## Сообщения и события
-
-| Библиотека | Extras group | Фаза | Назначение |
-|---|---|---|---|
-| `nats.py` | `[nats]` | 27 | NATSTarget для рассылки job-событий |
-| `aiokafka` | `[kafka]` | 27 | KafkaTarget для рассылки job-событий |
-| `faststream` | `[faststream]` | 20 | Обёртка пайплайна как воркер очереди сообщений |
-| `dagster` | `[dagster]` | 22 | Runtime adapter: assets/materializations поверх `Pipeline.run()` |
-
----
-
-## MCP и API
-
-| Библиотека | Extras group | Фаза | Назначение |
-|---|---|---|---|
-| `fastmcp` | `[mcp]` | 22 | FastMCP-сервер: stdio + SSE/HTTP транспорты |
-| `fastapi` | `[api]` | 23 | FastAPI-мост для Telegram webhook |
-| `uvicorn` | `[api]` | 23 | ASGI-сервер для FastAPI |
-
----
-
-## Telegram-бот
-
-| Библиотека | Extras group | Фаза | Назначение |
-|---|---|---|---|
-| `aiogram >= 3.7` | `[telegram]` | 23 | Фреймворк для Telegram Bot API (aiogram 3.x) |
-| `httpx` | — | 23 | Низкоуровневый клиент (используется aiogram внутри) |
-
----
-
-## Наблюдаемость (производство)
-
-| Библиотека | Extras group | Фаза | Назначение |
-|---|---|---|---|
-| `prometheus-client` | `[metrics]` | 26 | Экспорт метрик (jobs_fetched, jobs_failed и др.) |
-| `opentelemetry-exporter-otlp` | `[otel]` | 26 | Экспорт трейсов в Jaeger / Tempo |
-
----
-
-## Инструменты разработки (dev-зависимости)
-
-| Инструмент | Назначение |
+| Инструмент | Роль |
 |---|---|
-| `ruff` | Линтинг + форматирование (заменяет flake8, black, isort) |
-| `mypy` | Статическая проверка типов |
-| `pytest` + `pytest-asyncio` | Тестирование |
-| `bandit` | Поиск уязвимостей |
-| `coverage` | Покрытие тестами |
+| Python 3.12+ | Основной runtime |
+| `uv` | Установка, venv, запуск команд |
+| `asyncio` / `anyio` | Async execution и concurrency limiting |
 
----
+## Core dependencies
 
-## Почему НЕ используются некоторые инструменты
-
-| Инструмент | Причина отказа |
+| Библиотека | Зачем |
 |---|---|
-| Scrapy | Не нативный asyncio; собственный цикл событий конфликтует с нашим |
-| LangChain | Избыточная абстракция, vendor lock-in, скрывает что именно делает LLM-вызов |
-| SQLAlchemy | Накладные расходы ORM не нужны; asyncpg на прямых запросах быстрее и прозрачнее |
-| Celery | Избыточен; APScheduler + asyncio задачи достаточны на начальных этапах |
-| BeautifulSoup | selectolax в 5-10x быстрее при парсинге HTML |
-| requests / aiohttp | httpx предоставляет синхронный + асинхронный API, лучшее соответствие типов |
+| `pydantic`, `pydantic-settings` | Domain/config models |
+| `httpx` | HTTP ingest/API client |
+| `selectolax`, `trafilatura` | HTML/main-text extraction |
+| `rapidfuzz` | Dedup/string similarity |
+| `structlog` | Structured logging |
+| `opentelemetry-api`, `opentelemetry-sdk` | Telemetry boundary |
+| `defusedxml` | Safe XML/RSS/sitemap parsing |
+| `slowapi` | FastAPI/webhook rate limiting |
+| `PyYAML` | Runtime/tenant/source YAML |
+| `dateparser` | Multilingual/relative dates |
+| `filelock` | Cross-process tenant locks |
+| `psutil` | Browser child-process cleanup |
+
+## Extras
+
+| Extra | Основные зависимости | Назначение |
+|---|---|---|
+| `[openai]` | `openai`, `instructor` | LLM extraction/classification |
+| `[telegram]` | `telethon`, `aiogram` | Telegram reader и bot API |
+| `[bot]` | `aiogram`, `telethon`, `fastapi`, document parsers | Telegram bot runtime |
+| `[api]` | `fastapi`, `uvicorn` | HTTP adapter |
+| `[mcp]` | `fastmcp` | MCP server |
+| `[faststream]` | `faststream` | Message-worker adapter |
+| `[dagster]` | `dagster` | Dagster wrapper |
+| `[sqlite]` | `aiosqlite` | Local/dev store |
+| `[postgres]` | `asyncpg` | Production store |
+| `[qdrant]` | `qdrant-client` | Vector backend |
+| `[pgvector]` | `asyncpg`, `pgvector` | Postgres vector backend |
+| `[fastembed]` | `fastembed`, `huggingface-hub` | Local embeddings/reranker |
+| `[embeddings]` | `sentence-transformers`, `torch` | Local embedding providers |
+| `[bgem3]` | `flagembedding`, `torch`, bounded HF stack | BGE-M3 dense/sparse experiments |
+| `[reranker]` | `fastembed` | Cross-encoder reranking |
+| `[language]` | `lingua-language-detector` | Language detection |
+| `[translation]` | `ctranslate2`, `sentencepiece` | RU/EN translation path |
+| `[feeds]` | `feedparser` | RSS feeds |
+| `[site_scrapers]` | `jmespath`, `feedparser`, `parsel` | Monitors/scrapers |
+| `[extraction]` | `trafilatura`, `extruct`, `lxml` | Structured extraction |
+| `[realtime]` | `aiohttp`, `websockets` | Realtime/push variants |
+| `[browser]` | `patchright`, `cloakbrowser` | Browser-backed scraping tiers |
+| `[stealth]` | `playwright-stealth`, `curl-cffi==0.15.0` | TLS/browser impersonation |
+| `[camoufox]` | `camoufox` | Firefox anti-detect tier |
+| `[nodriver]` | `nodriver` | CDP-native browser tier |
+| `[tracing]` | OTLP HTTP exporter | OpenObserve/Langfuse export |
+| `[langfuse]` | `langfuse` | Eval/trace client |
+| `[resilience]` | `tenacity` | Explicit retry helpers |
+| `[ollama]` | `httpx` | Ollama-compatible LLM path |
+
+`[all]` объединяет shipped optional stack. Новые heavy зависимости добавлять
+только через отдельный extra и с обновлением этого файла.
+
+## Dev dependencies
+
+- `ruff` — lint + format.
+- `mypy` — static typing.
+- `pytest`, `pytest-asyncio`, `pytest-cov` — tests/coverage.
+- `bandit`, `pip-audit` — security/supply-chain checks.
+- `hypothesis`, `syrupy`, `pytest-benchmark` — property/snapshot/benchmark tests.
+
+## Явно не используем
+
+| Инструмент | Причина |
+|---|---|
+| Scrapy | Чужой event loop и тяжёлая crawler-модель |
+| SQLAlchemy/ORM | Stores используют прямой async SQL/driver layer |
+| Celery | Текущий scheduler и runtime orchestration построены на asyncio |
+| Kafka/Airflow | Не входят в текущую архитектуру и release contour |
+| LangChain/LangGraph | Скрывают LLM boundary и усложняют воспроизводимость |
+| BeautifulSoup | `selectolax` быстрее и уже покрывает нужный HTML parsing |
+| FlareSolverr | Удалён из bypass architecture и не является fallback |
+
+## Правило добавления зависимости
+
+1. Проверить, нельзя ли решить stdlib/current stack.
+2. Если dependency нужна, определить: core или extra.
+3. Для core dependency обосновать, почему она нужна всем runtime paths.
+4. Обновить `pyproject.toml`, этот документ и relevant docs/tests.
+5. Для security-sensitive dependency добавить release/security validation.

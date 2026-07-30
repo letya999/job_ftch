@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, mvp-release-final]
+  workflow_dispatch:
   pull_request:
     branches: [main, dev]
 
@@ -22,10 +23,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --extra openai --extra telegram --extra sqlite --extra feeds
+        run: uv sync --all-extras
 
-      - name: Ruff lint
-        run: uv run ruff check .
+      - name: Canonical lint checks
+        run: uv run python scripts/run_ci_checks.py lint
 
       - name: Legacy import gate
         run: |
@@ -34,9 +35,6 @@ jobs:
             exit 1
           fi
 
-      - name: Module boundaries
-        run: uv run python scripts/check_module_boundaries.py
-
       - name: Enforce layer boundaries (no infra imports in domain/application/nodes/sinks)
         run: |
           if rg -n '^from job_ftch\.infrastructure|^import job_ftch\.infrastructure' \
@@ -44,8 +42,6 @@ jobs:
             echo "Layer boundary violation: module-level infrastructure import in a pure layer"; exit 1
           fi
 
-      - name: Ruff format check
-        run: uv run ruff format --check .
 
   type-check:
     name: Type Check
@@ -59,10 +55,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --extra openai --extra telegram --extra sqlite --extra feeds
+        run: uv sync --all-extras
 
-      - name: mypy
-        run: uv run mypy job_ftch
+      - name: Canonical type checks
+        run: uv run python scripts/run_ci_checks.py type
 
   test:
     name: Tests
@@ -76,10 +72,15 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --extra openai --extra telegram --extra sqlite --extra feeds
+        run: uv sync --all-extras
 
       - name: Run tests
-        run: uv run pytest tests/ --cov --cov-report=xml -v
+        run: |
+          if find tests -maxdepth 1 \( -name 'test_phase*.py' -o -name 'test_3phase*.py' \) -print -quit | grep -q .; then
+            echo 'Legacy chronology-named test files must not return to tests/ root'
+            exit 1
+          fi
+          uv run python scripts/run_ci_checks.py test
 
       - name: Upload coverage
         uses: codecov/codecov-action@v6
@@ -100,13 +101,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: uv sync --extra openai --extra telegram --extra sqlite --extra feeds
+        run: uv sync --all-extras
 
-      - name: Bandit security scan
-        run: uv run bandit -r job_ftch scripts/check_module_boundaries.py -ll
-
-      - name: Dependency security audit
-        run: uv run pip-audit --ignore-vuln GHSA-w596-868m-8v6m
+      - name: Canonical security checks
+        run: uv run python scripts/run_ci_checks.py security
 
   core-import-check:
     name: Core Import Hygiene
@@ -122,4 +120,34 @@ jobs:
           uv venv
           uv pip install .
       - name: Verify core imports without optional dependencies
-        run: .venv/bin/python -c "import job_ftch; import job_ftch.application.contracts; import job_ftch.cli"
+        run: .venv/bin/python scripts/run_ci_checks.py core-import
+
+  release-contract:
+    name: Release Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Verify graph, eval, and ingest contracts
+        run: uv run python scripts/run_ci_checks.py release-contract
+
+  browser-smoke:
+    name: Browser Runtime Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Install Chromium runtime
+        run: uv run patchright install chromium
+      - name: Launch and close Chromium
+        run: uv run python scripts/browser_smoke.py

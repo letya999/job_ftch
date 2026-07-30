@@ -1,0 +1,24 @@
+rules:
+  - id: mcp-plaintext-token-json
+    message: MCP or agent config appears to contain plaintext credentials.
+    severity: ERROR
+    languages: [json]
+    pattern-regex: '(?i)(token|secret|password|api[_-]?key)"?\s*:\s*"[A-Za-z0-9_\-/.=]{12,}'
+
+  - id: mcp-risky-stdio-command
+    message: Risky command in MCP config.
+    severity: ERROR
+    languages: [json]
+    pattern-regex: '(curl.+\|\s*(bash|sh)|wget.+\|\s*(bash|sh)|powershell.+(iex|invoke-expression)|python\s+-c|node\s+-e)'
+
+  - id: mcp-overprivileged-scope
+    message: MCP config appears to grant write/delete/admin scope by default.
+    severity: ERROR
+    languages: [json]
+    pattern-regex: '(?i)"(scope|scopes|permissions)"\s*:\s*(\[[^\]]*(write|delete|admin|full|all|\*)[^\]]*\]|"(write|delete|admin|full|all|\*)")'
+
+  - id: mcp-unpinned-runner
+    message: MCP config appears to use an unpinned package runner or mutable image tag.
+    severity: ERROR
+    languages: [json]
+    pattern-regex: '(?i)(npx\s+@?[A-Za-z0-9._/\-]+"?|uvx\s+[A-Za-z0-9._/\-]+"?|docker://[^\s"''`]+:latest)'

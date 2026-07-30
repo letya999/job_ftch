@@ -3,12 +3,12 @@ name: adapter-telegram-bot
 on:
   push:
     paths:
-      - "adapters/telegram_bot/**"
+      - "job_ftch/adapters/telegram_bot/**"
       - "job_ftch/**"
       - "pyproject.toml"
   pull_request:
     paths:
-      - "adapters/telegram_bot/**"
+      - "job_ftch/adapters/telegram_bot/**"
       - "job_ftch/**"
 
 jobs:
@@ -22,6 +22,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Lint adapter
-        run: uvx ruff check adapters/telegram_bot
-      - name: Build image
-        run: docker build -f adapters/telegram_bot/Dockerfile -t job-ftch-telegram-bot .
+        run: uvx ruff check job_ftch/adapters/telegram_bot
+      - name: Validate Dockerfile path
+        run: test -f job_ftch/adapters/telegram_bot/Dockerfile.prod

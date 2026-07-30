@@ -5,11 +5,15 @@ from job_ftch.config import Settings
 from job_ftch.domain import CareerSiteSpec, JobRecord, SourceKind, TenantConfig
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_tenant_runner_clear_all():
     settings = Settings(store_backend="memory", job_group_store_backend="memory")
     tenant = TenantConfig(
-        tenant_id="test", display_name="Test", sources=(CareerSiteSpec(url="http://example.com"),)
+        tenant_id="test",
+        display_name="Test",
+        sources=(CareerSiteSpec(url="http://example.com"),),
+        store_backend="memory",
+        job_group_store_backend="memory",
     )
     runner = TenantRunner.from_tenants([tenant], base_settings=settings)
 
@@ -28,18 +32,23 @@ async def test_tenant_runner_clear_all():
     await runtime.store.mark_processed("raw1")
 
     initial_count = await runtime.job_group_store.count()
-    dedup, groups, vectors = await runner.clear_all("test")
+    dedup, jobs, groups, vectors = await runner.clear_all("test")
+    assert jobs == 0
     assert groups == initial_count
     assert vectors == 0
     assert await runtime.job_group_store.count() == 0
     assert not await runtime.store.has_processed("raw1")
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_latest_jobs_min_score():
     settings = Settings(store_backend="memory", job_group_store_backend="memory")
     tenant = TenantConfig(
-        tenant_id="test", display_name="Test", sources=(CareerSiteSpec(url="http://example.com"),)
+        tenant_id="test",
+        display_name="Test",
+        sources=(CareerSiteSpec(url="http://example.com"),),
+        store_backend="memory",
+        job_group_store_backend="memory",
     )
     runner = TenantRunner.from_tenants([tenant], base_settings=settings)
 

@@ -1,3 +1,8 @@
+---
+title: "003 - Input Quarantine Flow"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 003 - Input Quarantine Flow
 
 **Status**: ACCEPTED

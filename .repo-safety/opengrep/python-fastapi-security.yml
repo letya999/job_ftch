@@ -1,0 +1,16 @@
+rules:
+  - id: fastapi-wildcard-cors-with-credentials
+    message: Wildcard CORS with credentials is unsafe.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: |
+          CORSMiddleware(..., allow_origins=["*"], allow_credentials=True, ...)
+
+  - id: python-debug-true
+    message: debug=True should not be used in production-like code.
+    severity: WARNING
+    languages: [python]
+    pattern-either:
+      - pattern: app.run(..., debug=True, ...)
+      - pattern: uvicorn.run(..., reload=True, ...)

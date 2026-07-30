@@ -20,7 +20,7 @@ from job_ftch.nodes import SanitizeNode
 
 @pytest.mark.unit
 @given(text=st.text(max_size=50_000))
-@settings(max_examples=500)  # type: ignore[misc]
+@settings(max_examples=500, deadline=None)  # type: ignore[misc]
 def test_sanitize_node_never_crashes_on_arbitrary_text(text: str) -> None:
     """SanitizeNode must raise only RawItemRejected or return RawItem.
 

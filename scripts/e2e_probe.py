@@ -113,7 +113,7 @@ async def main() -> None:
 
     get_settings()
     auth = EnvAuthProvider()
-    source_adapter = TypeAdapter(SourceSpec)
+    source_adapter = TypeAdapter(SourceSpec)  # type: ignore
 
     results: list[dict[str, Any]] = []
     for spec_dict in specs_data:

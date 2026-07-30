@@ -1,0 +1,66 @@
+{
+  "original_dataset_hash": "13151b7d7f2c5d2194d8adb849a931a5d50e0adf945519d44155b7aa0c804085",
+  "patch_version": "fixed140-seed42-v1",
+  "entries": [
+    {
+      "stable_id": "85a8fbc19c9fceb2de947d5447f3daa033ab9ef34de49ad35d3f6a8c48773a3e",
+      "content_hash": "82f7cf7c2ac20c1523b74cc76f212d5ce7cb70eecb093c3fec9a34a2e290dd0f",
+      "old": {"is_job": 0, "relevant": 0},
+      "new": {"is_job": 1, "relevant": 1},
+      "reason": "Ручная проверка: объявление о найме Team Lead Machine Learning (Computer Vision) для production-задач.",
+      "adjudicator": "user-authorized-codex-review",
+      "status": "adjudicated",
+      "rubric_version": "relevance-v1"
+    },
+    {
+      "stable_id": "53adc0e013ef7e12aca0711246bf698772d6012c88313054ea5701237617ceea",
+      "content_hash": "653125b6e799112374cb2d587e0833eecefb93ec7262d2f7f072ef3ac6e563c6",
+      "old": {"is_job": 0, "relevant": 0},
+      "new": {"is_job": 0, "relevant": 0},
+      "reason": "Ручная проверка: самореклама дизайнера, не вакансия.",
+      "adjudicator": "user-authorized-codex-review",
+      "status": "adjudicated",
+      "rubric_version": "relevance-v1"
+    },
+    {
+      "stable_id": "3285f598f648dcf19581e1b3eff9e964cf0b654c579ffdab1d57343717b79497",
+      "content_hash": "1d5f7e271ee67bb57c162292ec438ecabdbf4f68c62e8c0d2354e0add6a170c0",
+      "old": {"is_job": 0, "relevant": 0},
+      "new": {"is_job": 0, "relevant": 0},
+      "reason": "Ручная проверка: предложение услуг продюсера и поиск партнёра для запуска, не вакансия.",
+      "adjudicator": "user-authorized-codex-review",
+      "status": "adjudicated",
+      "rubric_version": "relevance-v1"
+    },
+    {
+      "stable_id": "10fb3ffec73bdbc81f8c3ae2156d7b9eafea2ee9278b0b9f86a06c5f60d125a7",
+      "content_hash": "b1fe1cc89ce3d471f671df0780f1a554b07850dddf0f0e75ce7ecea78dea0702",
+      "old": {"is_job": 0, "relevant": 0},
+      "new": {"is_job": 0, "relevant": 0},
+      "reason": "Ручная проверка: анонс ML-соревнований с призами, не вакансия.",
+      "adjudicator": "user-authorized-codex-review",
+      "status": "adjudicated",
+      "rubric_version": "relevance-v1"
+    },
+    {
+      "stable_id": "62e96e4ed30a9ac9e3a3afb6d17347d4baaf39a0c108c32ad624666df72ba2c1",
+      "content_hash": "a7d5a1718db3538b15ed9971c628e40e4752688e8890ad701c5464f4b3280b89",
+      "old": {"is_job": 0, "relevant": 0},
+      "new": {"is_job": 0, "relevant": 0},
+      "reason": "Ручная проверка: рекламное предложение услуг AI-автоматизации, не вакансия.",
+      "adjudicator": "user-authorized-codex-review",
+      "status": "adjudicated",
+      "rubric_version": "relevance-v1"
+    },
+    {
+      "stable_id": "9c6f3627d1452becf3cb9c60f7fc5e3587db58efdc3b4806e45f9071c2218478",
+      "content_hash": "a34dfcc85b64aedbd36ac1221555df5b4f5d14a79955511ddaf2d84e1781da5a",
+      "old": {"is_job": 0, "relevant": 0},
+      "new": {"is_job": 1, "relevant": 0},
+      "reason": "Ручная проверка: запрос исполнителя для доработки WordPress — это заказ, но не целевая AI/ML-вакансия.",
+      "adjudicator": "user-authorized-codex-review",
+      "status": "adjudicated",
+      "rubric_version": "relevance-v1"
+    }
+  ]
+}

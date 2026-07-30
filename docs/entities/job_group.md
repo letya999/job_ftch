@@ -1,3 +1,8 @@
+---
+title: "JobGroup"
+description: "**Слой**: domain"
+updated: 2026-07-24
+---
 # JobGroup
 
 **Слой**: domain

@@ -1,3 +1,8 @@
+---
+title: "020 — Registry Fallback via Named Backend, Not Concrete Import"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 020 — Registry Fallback via Named Backend, Not Concrete Import
 
 **Status**: ACCEPTED

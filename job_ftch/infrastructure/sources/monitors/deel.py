@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from job_ftch.application.registry import register_monitor
-from job_ftch.domain.site_models import DiscoveredPostingPayload
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
+from job_ftch.domain.site_models import DiscoveredPostingPayload, MonitorResult
 
 if TYPE_CHECKING:
     import httpx
@@ -134,7 +134,7 @@ async def discover(
     spec: Any,
     client: httpx.AsyncClient,
     auth: Any = None,
-) -> list[DiscoveredPostingPayload]:
+) -> list[DiscoveredPostingPayload] | MonitorResult:
     """Fetch all job postings from the Deel API."""
     board_url = spec.url
     config = spec.monitor_config or {}
@@ -171,6 +171,9 @@ async def discover(
 
     postings = data if isinstance(data, list) else data.get("jobPostings") or []
     jobs = [j for raw in postings if isinstance(raw, dict) and (j := _parse_job(raw, slug))]
+
+    if not jobs:
+        return MonitorResult(metadata_updates={"confirmed_empty": True})
 
     if len(jobs) > MAX_JOBS:
         log.info("deel.truncated", count=len(jobs), cap=MAX_JOBS)
@@ -211,4 +214,22 @@ async def can_handle(
     }
 
 
-register_monitor("deel", discover, cost=20, rich=True, can_handle=can_handle)
+register_monitor(
+    "deel",
+    discover,
+    cost=20,
+    rich=True,
+    can_handle=can_handle,
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "deel",
+        url_patterns=(r"jobs\.deel\.com/(?:job-boards/)?[\w-]+",),
+        has_publication_time=True,
+        has_stable_id=True,
+        can_detect_freshness_without_snapshot=True,
+        can_filter_since_yesterday=True,
+        item_level_dates=True,
+        requires_full_snapshot=False,
+        rationale="Deel board API returns stable job IDs and createdAt timestamps.",
+    ),
+)

@@ -1,3 +1,8 @@
+---
+title: "026 — Runtime source overlay in tenant store"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 026 — Runtime source overlay in tenant store
 
 **Status**: ACCEPTED

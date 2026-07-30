@@ -1,133 +1,63 @@
-# Store (Хранилище состояний пайплайна)
+---
+title: "Store"
+description: "`Store` — operational persistence layer пайплайна."
+updated: 2026-07-24
+---
+# Store
 
-## Что это такое
+## Что это
 
-Store — это «кратковременная память» пайплайна между его
-запусками.
-В отличие от долгосрочных баз данных вакансий, Store
-отвечает за контроль самого процесса работы конвейера.
-Он хранит три ключевые вещи:
-1. Идентификаторы элементов, которые уже были успешно обработаны (чтобы избежать двойной работы).
+`Store` — operational persistence layer пайплайна.
 
-2. Ключи дедупликации (текстовые хэши, чтобы выявлять почти одинаковые тексты из разных источников).
+Он не равен `JobPersistenceBackend`. `Store` хранит состояние обработки, а не
+долгосрочный каталог вакансий.
 
-3. Курсоры источников (указатель, откуда источнику нужно начать читать данные в следующий раз).
+## За что отвечает Store
 
-## Зачем это нужно и ПОЧЕМУ так устроено
+- processed-item state
+- dedup keys
+- duplicate records
+- arbitrary run state
+- cached source strategies
+- source snapshots для `SnapshotFilterNode`
 
-Главная задача Store — обеспечить идемпотентность пайплайна.
-Если мы запускаем скрипт сбора данных каждые 10 минут, мы не
-хотим каждый раз скачивать и обрабатывать всю историю
-Telegram-канала с самого начала.
-Мы также не хотим платить за прогон одного и того же текста
-через LLM дважды.
-Store позволяет системе запоминать, где она остановилась и
-что уже видела.
+В multi-tenant режиме поверх него строится namespaced `TenantStore`.
 
-Важно различать доменный интерфейс и низкоуровневую
-реализацию.
-Для этого введено строгое разделение:
-- `Store` — это высокоуровневый доменный Protocol. У него есть методы вроде `has_dedup_key` или `mark_processed`.
+## Основные методы
 
-- `StoreConnector` — это низкоуровневый инфраструктурный Protocol, представляющий из себя универсальное Key-Value хранилище (с поддержкой множеств `Set`).
+- `has_processed` / `mark_processed`
+- `has_dedup_key` / `remember_dedup_key`
+- `list_dedup_keys`
+- `record_duplicate` / `list_duplicate_records`
+- `get_run_state` / `set_run_state`
+- `get_source_strategy` / `save_source_strategy`
+- `get_last_run_snapshot`
+- `save_snapshot_rows`
+- `purge_old_snapshots`
 
-Зачем так сделано?
-Пайплайн работает в терминах бизнес-логики (`Store`), но под
-капотом он может использовать SQLite, PostgreSQL или Redis
-(`StoreConnector`), не зная специфики этих баз данных.
+## Что не путать
 
-## Как это работает изнутри
+### `Store`
 
-Сначала рассмотрим `StoreConnector` (низкий уровень):
-```python class StoreConnector(Protocol):
-    async def get(self, key: str) -> str | None: ...
-    async def set(self, key: str, value: str) -> None: ...
-    async def set_add(self, key: str, member: str) -> None: ...
-    async def set_contains(self, key: str, member: str) -> bool: ...
-```
+Хранит operational state pipeline.
 
-Над ним строится `Store` (интерфейс для пайплайна):
-```python class Store(Protocol):
-    async def has_processed(self, item_id: str) -> bool: ...
-    async def mark_processed(self, item_id: str) -> None: ...
-    async def has_dedup_key(self, key: str) -> bool: ...
-    
-    # Состояние курсоров
-    async def get_run_state(self, key: str, ...) -> str | None: ...
-    async def set_run_state(self, key: str, value: str, ...) -> None: ...
-```
+### `JobPersistenceBackend`
 
-Иерархия реализаций в проекте выглядит так:
-```text StoreConnector (KV Protocol)
-  └─ SQLStoreAdapter (Универсальная реализация поверх SQL)
-       ├─ SQLiteStore (Для self-hosted и разработки)
-       └─ PostgreSQLStore (Для продакшена и multi-tenant)
+Хранит финальные `JobRecord` для выдачи, поиска и UI.
 
-Store (Pipeline Protocol)
-  ├─ SQLiteStore (Наследует оба интерфейса)
-  ├─ PostgreSQLStore (Наследует оба интерфейса)
-  └─ InMemoryStore (Исключительно для тестов в памяти)
-```
+Это разные порты и разные уровни ответственности.
 
-**Курсоры (run state)**
-Курсор — это произвольная строка, которую источник сохраняет
-и читает.
-Telegram использует `last_message_id`, а RSS — `last_guid`. 
+## Реализации
 
-Пример в источнике:
-```python
-# Читаем, где остановились last_id = await store.get_run_state(
-    "cursor", source_kind="telegram_channel", source_name=channel_name
-)
+В репозитории есть как минимум:
 
-# ... получаем новые посты начиная с last_id ...
+- `InMemoryStore`
+- `SQLiteStore`
+- `PostgreSQLStore`
+- `TenantStore` как namespaced façade
 
-# Запоминаем новую позицию await store.set_run_state(
-    "cursor", str(new_last_id), source_kind="telegram_channel", source_name=channel_name
-)
-```
+## Связанные документы
 
-**Изоляция тенантов (Tenant Isolation)**
-В мультитенантной системе каждый клиент (тенант) должен
-иметь свои независимые курсоры и ключи дедупликации.
-`TenantRunner` автоматически передаёт `tenant_id` как
-префикс ко всем ключам, поэтому данные не смешиваются даже в
-одной физической базе.
-
-## Store vs JobPersistenceBackend
-
-Это самая частая ошибка понимания архитектуры:
-- `Store` отслеживает ПРОЦЕСС сбора. Он хранит короткие технические данные (хэши, курсоры). Читается только пайплайном. Хранит данные в виде "ключ-значение".
-
-- `JobPersistenceBackend` хранит РЕЗУЛЬТАТЫ. Он хранит полноценные готовые объекты `JobRecord`. Читается через API, UI, используется для полнотекстового поиска. Хранит данные в реляционных таблицах.
-
-## Типичные ошибки и что нельзя делать
-
-1. **Использовать InMemoryStore в продакшене.**
-
-В оперативной памяти все данные живут ровно до перезапуска
-процесса.
-При каждом рестарте пайплайн будет скачивать всю историю
-заново.
-Используйте SQLite или PostgreSQL.
-
-2. **Путать StoreConnector и Store.**
-
-Не передавайте `StoreConnector` в узлы пайплайна.
-Узлы работают с методами доменной логики (`has_processed`),
-которых нет в базовом KV-интерфейсе.
-
-3. **Хранить большие объекты в get_run_state.**
-
-Run state предназначен исключительно для легковесных
-указателей (строк, ID, небольших JSON).
-Если вы сохраняете туда полные страницы или HTML-код — вы
-используете Store не по назначению.
-
-## Связи с другими сущностями
-
-- [Source](source.md) — источники читают и пишут курсоры через `get_run_state`.
-
-- [Stage](stage_node.md) — узел `DedupNode` активно использует `Store` для поиска дубликатов.
-
-- [Backend](backend.md) — не путать `Store` и `JobPersistenceBackend`!
+- [RunSummary](run_summary.md)
+- [Store backend and persistence entities](backend.md)
+- [PipelineBuilder](pipeline_builder.md)

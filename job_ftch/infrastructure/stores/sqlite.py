@@ -32,6 +32,80 @@ class SQLiteStore(SQLStoreAdapter):
     _SQL_SET_CLEAR = "DELETE FROM jf_set WHERE key = ?"
     _SQL_SET_CONTAINS = "SELECT 1 FROM jf_set WHERE key = ? AND member = ?"
     _SQL_SET_MEMBERS = "SELECT member FROM jf_set WHERE key = ?"
+    _SQL_OUTBOX_ENQUEUE = "INSERT OR IGNORE INTO jf_outbox (outbox_id, tenant_id, idempotency_key, state, payload_json) VALUES (?, ?, ?, ?, ?)"
+    _SQL_OUTBOX_GET = "SELECT payload_json, state FROM jf_outbox WHERE idempotency_key = ?"
+    _SQL_OUTBOX_PENDING = "SELECT payload_json, state FROM jf_outbox WHERE state = ? AND tenant_id = ? ORDER BY updated_at ASC LIMIT ?"
+    _SQL_OUTBOX_DELIVERED = "UPDATE jf_outbox SET state = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE idempotency_key = ?"
+    _SQL_DEDUP_CLAIM_ACQUIRE = """
+        INSERT INTO jf_dedup_claims (claim_key, owner_id, expires_at)
+        VALUES (?, ?, datetime('now', '+' || ? || ' seconds'))
+        ON CONFLICT(claim_key) DO UPDATE SET owner_id=excluded.owner_id, expires_at=excluded.expires_at
+        WHERE jf_dedup_claims.expires_at <= datetime('now')
+    """
+    _SQL_DEDUP_CLAIM_OWNER = "SELECT owner_id FROM jf_dedup_claims WHERE claim_key = ?"
+    _SQL_DEDUP_CLAIM_RELEASE = "DELETE FROM jf_dedup_claims WHERE claim_key = ? AND owner_id = ?"
+    _SQL_OBSERVATION_GET = "SELECT payload_json FROM jf_observations WHERE tenant_id = ? AND stable_id = ? AND content_hash = ?"
+    _SQL_OBSERVATION_MAX_VERSION = (
+        "SELECT MAX(content_version) FROM jf_observations WHERE tenant_id = ? AND stable_id = ?"
+    )
+    _SQL_OBSERVATION_INSERT = "INSERT INTO jf_observations (tenant_id, stable_id, content_hash, content_version, payload_json) VALUES (?, ?, ?, ?, ?)"
+
+    # ADR-031: source snapshot table SQL
+    _SQL_SNAPSHOT_LAST_RUN_IDS = """
+        SELECT stable_id FROM jf_source_snapshots
+        WHERE tenant_id = ? AND source_id = ?
+          AND run_id = (
+              SELECT run_id FROM jf_source_snapshots
+              WHERE tenant_id = ? AND source_id = ?
+              ORDER BY run_at DESC LIMIT 1
+          )
+    """
+    _SQL_SNAPSHOT_LAST_RUN_HASHES = """
+        SELECT stable_id, item_hash FROM jf_source_snapshots
+        WHERE tenant_id = ? AND source_id = ? AND run_id = (
+            SELECT run_id FROM jf_source_snapshots
+            WHERE tenant_id = ? AND source_id = ? ORDER BY run_at DESC LIMIT 1
+        )
+    """
+    _SQL_SNAPSHOT_INSERT = """
+        INSERT INTO jf_source_snapshots
+            (tenant_id, source_id, run_id, stable_id, item_hash, item_json, run_at)
+        VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    """
+    _SQL_SNAPSHOT_PURGE = """
+        DELETE FROM jf_source_snapshots
+        WHERE tenant_id = ? AND source_id = ?
+          AND run_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', printf('-%d days', ?))
+    """
+    _SQL_SNAPSHOT_PURGE_COUNT = "SELECT changes()"
+    _SQL_SOURCE_ASSESSMENT_GET = """
+        SELECT payload_json FROM jf_source_assessments
+        WHERE tenant_id = ? AND source_id = ?
+    """
+    _SQL_SOURCE_ASSESSMENT_UPSERT = """
+        INSERT INTO jf_source_assessments
+            (tenant_id, source_id, source_type, schema_version, assessed_at, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        ON CONFLICT(tenant_id, source_id) DO UPDATE SET
+            source_type=excluded.source_type,
+            schema_version=excluded.schema_version,
+            assessed_at=excluded.assessed_at,
+            payload_json=excluded.payload_json,
+            updated_at=excluded.updated_at
+    """
+    _SQL_SOURCE_INGEST_STATE_GET = """
+        SELECT payload_json FROM jf_source_ingest_state
+        WHERE tenant_id = ? AND source_id = ?
+    """
+    _SQL_SOURCE_INGEST_STATE_UPSERT = """
+        INSERT INTO jf_source_ingest_state
+            (tenant_id, source_id, bootstrap_completed_at, payload_json, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id, source_id) DO UPDATE SET
+            bootstrap_completed_at=excluded.bootstrap_completed_at,
+            payload_json=excluded.payload_json,
+            updated_at=excluded.updated_at
+    """
 
     def __init__(self, path: str | Path = ":memory:") -> None:
         self._path = str(path)
@@ -52,18 +126,51 @@ class SQLiteStore(SQLStoreAdapter):
         return self._conn
 
     async def _initialize(self) -> None:
-        schema_path = Path(__file__).parent / "migrations" / "001_initial_schema.sql"
-        if not schema_path.exists():
-            raise FileNotFoundError(f"Migration file not found: {schema_path}")
-
-        # executescript() issues an implicit COMMIT before running, so no separate
-        # commit is needed. Only call this during initialization (no pending txns).
-        await self._conn.executescript(schema_path.read_text())  # type: ignore[union-attr]
+        migrations_dir = Path(__file__).parent / "migrations"
+        for name in (
+            "001_initial_schema.sql",
+            "002_source_snapshots.sql",
+            "003_ontology.sql",
+            "004_source_assessment.sql",
+            "005_observation_ledger.sql",
+            "006_dedup_claims.sql",
+            "007_outbox.sql",
+            "009_ontology_occurrences.sql",
+            "011_ontology_graph.sql",
+            "012_ontology_term_stats.sql",
+            "013_compiled_ontology.sql",
+        ):
+            path = migrations_dir / name
+            if not path.exists():
+                continue
+            # executescript() issues an implicit COMMIT before running, so no separate
+            # commit is needed. Only call this during initialization (no pending txns).
+            await self._conn.executescript(path.read_text())  # type: ignore[union-attr]
+        async with self._conn.execute("PRAGMA table_info(jf_outbox)") as cursor:  # type: ignore[union-attr]
+            columns = {str(row[1]) for row in await cursor.fetchall()}
+        if "tenant_id" not in columns:
+            await self._conn.execute(
+                "ALTER TABLE jf_outbox ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
+            )
+        await self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jf_outbox_tenant_state ON jf_outbox(tenant_id, state)"
+        )
+        await self._conn.commit()
 
     async def _execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
         conn = await self._ensure_initialized()
         await conn.execute(sql, params)
         await conn.commit()
+
+    async def _execute_batch(self, sql: str, params_list: tuple[tuple[object, ...], ...]) -> None:
+        conn = await self._ensure_initialized()
+        try:
+            await conn.execute("BEGIN TRANSACTION")
+            await conn.executemany(sql, params_list)
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
 
     async def _fetchone(
         self, sql: str, params: tuple[object, ...] = ()
@@ -92,6 +199,71 @@ class SQLiteStore(SQLStoreAdapter):
         await conn.execute("DELETE FROM jf_kv WHERE key LIKE ?", (f"{prefix}%",))
         await conn.execute("DELETE FROM jf_set WHERE key LIKE ?", (f"{prefix}%",))
         await conn.commit()
+
+    async def clear_run_artifacts(self, prefix: str, tenant_id: str) -> dict[str, int]:
+        """Remove run-produced state while preserving tenant configuration and profiles."""
+        kv_patterns = tuple(
+            f"{prefix}{suffix}"
+            for suffix in (
+                "relevance:%",
+                "presentable:%",
+                "processed_at:%",
+                "dedup_record:%",
+                "dup_record:%",
+                "enrichment:%",
+                "resolver:%",
+                "pipeline.%",
+                "snapshot:%",
+                "source_health:%",
+                "bot_publish:%",
+                "bot_scheduler:last_publish%",
+                "bot_scheduler:pending_publish_since",
+            )
+        )
+        set_patterns = tuple(
+            f"{prefix}{suffix}"
+            for suffix in ("processed%", "dedup_keys%", "dup_records%", "source_health_ids")
+        )
+        conn = await self._ensure_initialized()
+
+        async def _count(sql: str, params: tuple[object, ...] = ()) -> int:
+            async with conn.execute(sql, params) as cursor:
+                row = await cursor.fetchone()
+            return int(row[0] or 0) if row else 0
+
+        kv_where = " OR ".join("key LIKE ?" for _ in kv_patterns)
+        set_where = " OR ".join("key LIKE ?" for _ in set_patterns)
+        # Clauses contain only a fixed number of ``key LIKE ?`` fragments.
+        kv_count_sql = "SELECT COUNT(*) FROM jf_kv WHERE " + kv_where  # nosec B608
+        set_count_sql = "SELECT COUNT(*) FROM jf_set WHERE " + set_where  # nosec B608
+        counts = {
+            "kv": await _count(kv_count_sql, kv_patterns),
+            "sets": await _count(set_count_sql, set_patterns),
+            "observations": await _count(
+                "SELECT COUNT(*) FROM jf_observations WHERE tenant_id = ?", (tenant_id,)
+            ),
+            "snapshots": await _count(
+                "SELECT COUNT(*) FROM jf_source_snapshots WHERE tenant_id = ?", (tenant_id,)
+            ),
+            "source_ingest_states": await _count(
+                "SELECT COUNT(*) FROM jf_source_ingest_state WHERE tenant_id = ?", (tenant_id,)
+            ),
+            "dedup_claims": await _count(
+                "SELECT COUNT(*) FROM jf_dedup_claims WHERE claim_key LIKE ?", (f"{prefix}%",)
+            ),
+            "outbox": await _count(
+                "SELECT COUNT(*) FROM jf_outbox WHERE tenant_id = ?", (tenant_id,)
+            ),
+        }
+        await conn.execute("DELETE FROM jf_kv WHERE " + kv_where, kv_patterns)  # nosec B608
+        await conn.execute("DELETE FROM jf_set WHERE " + set_where, set_patterns)  # nosec B608
+        await conn.execute("DELETE FROM jf_observations WHERE tenant_id = ?", (tenant_id,))
+        await conn.execute("DELETE FROM jf_source_snapshots WHERE tenant_id = ?", (tenant_id,))
+        await conn.execute("DELETE FROM jf_source_ingest_state WHERE tenant_id = ?", (tenant_id,))
+        await conn.execute("DELETE FROM jf_dedup_claims WHERE claim_key LIKE ?", (f"{prefix}%",))
+        await conn.execute("DELETE FROM jf_outbox WHERE tenant_id = ?", (tenant_id,))
+        await conn.commit()
+        return counts
 
     async def ping(self) -> bool:
         """Check connection health."""

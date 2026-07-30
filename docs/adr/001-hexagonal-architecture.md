@@ -1,3 +1,8 @@
+---
+title: "001 — Hexagonal Architecture"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 001 — Hexagonal Architecture
 
 **Status**: ACCEPTED

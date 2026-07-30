@@ -1,3 +1,8 @@
+---
+title: "006 - Typed Pipeline Stages"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 006 - Typed Pipeline Stages
 
 **Status**: ACCEPTED

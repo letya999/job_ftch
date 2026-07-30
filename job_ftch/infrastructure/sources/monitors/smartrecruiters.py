@@ -10,7 +10,8 @@ from urllib.parse import urlparse
 
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
+from job_ftch.domain.site_models import MonitorResult
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     slugs_from_url,
@@ -19,8 +20,6 @@ from job_ftch.infrastructure.sources.monitors.shared import (
 
 if TYPE_CHECKING:
     import httpx
-
-    from job_ftch.domain.site_models import MonitorResult
 
 logger = structlog.get_logger("job_ftch.monitors.smartrecruiters")
 
@@ -130,6 +129,8 @@ async def discover(
             truncated = True
             break
 
+    if not urls:
+        return MonitorResult(metadata_updates={"confirmed_empty": True})
     if truncated:
         return truncated_url_result(urls)
     return urls
@@ -190,4 +191,21 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     return None
 
 
-register_monitor("smartrecruiters", discover, cost=10, rich=False, can_handle=can_handle)
+register_monitor(
+    "smartrecruiters",
+    discover,
+    cost=10,
+    rich=False,
+    can_handle=can_handle,
+    scraper_chain=("smartrecruiters", "json-ld", "maintext"),
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "smartrecruiters",
+        url_patterns=(
+            r"api\.smartrecruiters\.com/v1/companies/[\w-]+",
+            r"jobs\.smartrecruiters\.com/[\w-]+",
+            r"careers\.smartrecruiters\.com/[\w-]+",
+        ),
+        has_stable_id=True,
+    ),
+)

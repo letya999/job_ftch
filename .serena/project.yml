@@ -59,16 +59,16 @@ ignore_all_files_in_gitignore: true
 # No documentation on options means no options are available.
 ls_specific_settings: {}
 
-# list of additional workspace folder paths for cross-package reference support (e.g. in monorepos).
+# list of additional workspace fnewer paths for cross-package reference support (e.g. in monorepos).
 # Paths can be absolute or relative to the project root.
-# Each folder is registered as an LSP workspace folder, enabling language servers to discover
+# Each fnewer is registered as an LSP workspace fnewer, enabling language servers to discover
 # symbols and references across package boundaries.
 # Currently supported for: TypeScript.
 # Example:
-#   additional_workspace_folders:
+#   additional_workspace_fnewers:
 #     - ../sibling-package
 #     - ../shared-lib
-additional_workspace_folders: []
+additional_workspace_fnewers: []
 
 # list of additional paths to ignore in this project.
 # Same syntax as gitignore, so you can use * and **.
@@ -131,3 +131,14 @@ read_only_memory_patterns: []
 # Extends the list from the global configuration, merging the two lists.
 # Example: ["_archive/.*", "_episodes/.*"]
 ignored_memory_patterns: []
+
+# list of additional workspace folder paths for cross-package reference support (e.g. in monorepos).
+# Paths can be absolute or relative to the project root.
+# Each folder is registered as an LSP workspace folder, enabling language servers to discover
+# symbols and references across package boundaries.
+# Currently supported for: TypeScript.
+# Example:
+#   additional_workspace_folders:
+#     - ../sibling-package
+#     - ../shared-lib
+additional_workspace_folders: []

@@ -44,7 +44,7 @@ def pipeline_setup(
     return pipeline, in_memory_store, temp_json_path
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_pipeline_rss_to_json_sink(
     pipeline_setup: tuple[Pipeline[Any, Any], Any, Path],
     habr_ml_rss_xml: str,
@@ -82,7 +82,7 @@ async def test_pipeline_rss_to_json_sink(
     assert all(job["stable_id"] for job in data)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_pipeline_dedup_second_run(
     pipeline_setup: tuple[Pipeline[Any, Any], Any, Path],
     habr_ml_rss_xml: str,
@@ -115,13 +115,8 @@ async def test_pipeline_dedup_second_run(
 
 
 def test_pipeline_sanitize_node_is_first() -> None:
-    # This test is a bit meta since SanitizeNode is a required positional arg in Pipeline
-    # But we can try to pass something else and see if it fails (type check or runtime)
-    # The plan says "Build a pipeline with SanitizeNode not first. Assert ValueError or similar is raised"
-    # Actually, in our Pipeline implementation, SanitizeNode is explicitly typed.
-
-    # If I try to pass an ExtractionNode as sanitize_node, it might fail if it doesn't match SanitizingNode protocol.
-    pass
+    with pytest.raises(TypeError, match="must be a SanitizeNode"):
+        Pipeline(object(), object(), [], object(), object())
 
 
 @pytest.fixture

@@ -1,3 +1,8 @@
+---
+title: "Scorer/Normalizer Plugin Template"
+description: "Template for a custom Scorer/Normalizer plugin."
+updated: 2026-07-24
+---
 # Scorer/Normalizer Plugin Template
 
 Template for a custom Scorer/Normalizer plugin.

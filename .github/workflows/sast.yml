@@ -1,0 +1,42 @@
+name: sast
+
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  python-sast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.12'
+      - name: Install Python scanners
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit ruff pip-audit
+      - name: Bandit
+        run: bandit -q -r job_ftch scripts/check_module_boundaries.py -ll
+      - name: Ruff
+        run: ruff check .
+      - name: pip-audit
+        run: pip-audit --ignore-vuln GHSA-w596-868m-8v6m
+
+  opengrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Install pinned Opengrep
+        run: |
+          curl -fsSLo opengrep https://github.com/opengrep/opengrep/releases/download/v1.22.0/opengrep_manylinux_x86
+          echo "45bcd58440e397ed52c50e953ccf5948909ea77087c9186fc7d277216f62e319  opengrep" | sha256sum -c -
+          chmod +x opengrep
+          sudo mv opengrep /usr/local/bin/opengrep
+          opengrep --version
+      - name: Run repository safety rules
+        run: opengrep --config .repo-safety/opengrep .

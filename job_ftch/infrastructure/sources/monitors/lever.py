@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
 from job_ftch.domain.site_models import (
     DiscoveredPostingPayload,
     MonitorResult,
@@ -19,7 +19,6 @@ from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     BoardGoneError,
     fetch_page_text,
-    slugs_from_url,
     truncated_rich_result,
 )
 
@@ -211,6 +210,8 @@ async def discover(
 
         await asyncio.sleep(0.5)
 
+    if not jobs:
+        return MonitorResult(metadata_updates={"confirmed_empty": True})
     return jobs
 
 
@@ -251,15 +252,22 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
                         result["jobs"] = count
                     return result
 
-    for slug in slugs_from_url(url):
-        count = await _fetch_job_count(slug, client, region)
-        if count is not None:
-            result = {"token": slug, "jobs": count}
-            if region:
-                result["region"] = region
-            return result
-
     return None
 
 
-register_monitor("lever_board", discover, cost=10, rich=True, can_handle=can_handle)
+register_monitor(
+    "lever_board",
+    discover,
+    cost=10,
+    rich=True,
+    can_handle=can_handle,
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "lever_board",
+        url_patterns=(
+            r"api\.(?:eu\.)?lever\.co/v0/postings/[\w-]+",
+            r"jobs\.(?:eu\.)?lever\.co/[\w-]+",
+        ),
+        has_stable_id=True,
+    ),
+)

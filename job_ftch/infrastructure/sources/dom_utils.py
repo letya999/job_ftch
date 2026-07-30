@@ -39,7 +39,7 @@ NOISE_TAGS = frozenset(
     }
 )
 
-# Inline tags that don't constitute their own "block" — we fold their
+# Inline tags that don't constitute their own "block" — we fnew their
 # text into the parent block element.
 INLINE_TAGS = frozenset(
     {

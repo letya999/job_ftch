@@ -1,0 +1,13 @@
+extends: mvp_eval_no_bge.yaml
+name: mvp_production_no_bge
+version: "1.0.0"
+metadata:
+  purpose: selected_mvp_production_pipeline
+  production_default: true
+  selected_from: mvp_eval_no_bge
+  decision: no_bge
+  selection_reason: BGE-M3 did not reduce false negatives and degraded F1 by more than 0.02.
+nodes:
+  - {id: aggregation, node: aggregation, execution: post_accept, effect: side_effect, after: [legacy_routing]}
+  - {id: presentable_text, node: presentable_text, execution: post_accept, effect: observe, after: [aggregation], params: {enabled: true, max_per_run: 500}}
+  - {id: post_accept_enrichment, node: post_accept_enrichment, execution: post_accept, effect: side_effect, after: [presentable_text]}

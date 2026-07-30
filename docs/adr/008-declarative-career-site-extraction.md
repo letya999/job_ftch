@@ -1,3 +1,8 @@
+---
+title: "008 - Declarative Career Site Extraction"
+description: "**Status**: ACCEPTED"
+updated: 2026-07-24
+---
 # 008 - Declarative Career Site Extraction
 
 **Status**: ACCEPTED
