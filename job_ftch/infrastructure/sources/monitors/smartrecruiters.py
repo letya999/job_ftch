@@ -42,7 +42,7 @@ def _has_smartrecruiters_signal(url: str, html: str | None) -> bool:
     if not html:
         return False
     lowered = html.lower()
-    return "smartrecruiters.com" in lowered or "smartrecruiters" in lowered
+    return "smartrecruiters" in lowered
 
 
 def _token_from_url(board_url: str) -> str | None:

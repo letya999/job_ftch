@@ -114,7 +114,7 @@ def _visible_text_for_board_check(html: str) -> str:
     """
     visible = unescape(
         re.sub(
-            r"<\s*(?:script|style)\b[^>]*>.*?</\s*(?:script|style)\s*>",
+            r"<\s*(?:script|style)\b[^>]*>.*?<\s*/\s*(?:script|style)\b[^>]*>",
             " ",
             html,
             flags=re.I | re.S,
