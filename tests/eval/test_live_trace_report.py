@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 SCRIPT = Path("scripts/eval/live_trace_report.py")
-PYTHON = str(Path(".venv/Scripts/python.exe"))
+PYTHON = sys.executable
 
 
 def test_live_trace_report_summarizes_wrapped_artifacts(tmp_path: Path) -> None:

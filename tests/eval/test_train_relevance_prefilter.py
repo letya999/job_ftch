@@ -2,12 +2,13 @@
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 SCRIPT = Path("scripts/eval/train_relevance_prefilter.py")
-PYTHON = str(Path(".venv/Scripts/python.exe"))
+PYTHON = sys.executable
 
 _SKLEARN_AVAILABLE = False
 try:

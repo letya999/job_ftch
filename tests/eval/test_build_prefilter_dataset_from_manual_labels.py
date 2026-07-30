@@ -2,10 +2,11 @@
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 SCRIPT = Path("scripts/eval/build_prefilter_dataset_from_manual_labels.py")
-PYTHON = str(Path(".venv/Scripts/python.exe"))
+PYTHON = sys.executable
 
 
 def test_build_prefilter_dataset_from_manual_labels(tmp_path: Path) -> None:

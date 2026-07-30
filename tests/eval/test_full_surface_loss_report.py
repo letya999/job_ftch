@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 SCRIPT = Path("scripts/eval/full_surface_loss_report.py")
-PYTHON = str(Path(".venv/Scripts/python.exe"))
+PYTHON = sys.executable
 
 
 def test_full_surface_loss_report_groups_false_negatives(tmp_path: Path) -> None:
