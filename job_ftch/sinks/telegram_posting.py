@@ -5,6 +5,11 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
 
+from job_ftch.publication.card import build_card
+from job_ftch.publication.layout import CardLayout, load_layout
+from job_ftch.publication.render import render_card
+from job_ftch.publication.validate import validate_card
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
@@ -29,46 +34,12 @@ async def _client_session(
     yield client
 
 
-def _format_job(job: Job) -> str:
-    # Use the LLM-formatted ``presentable`` field when PresentableTextNode
-    # has run (per ADR-019 point ③). Otherwise fall back to the basic format.
-    presentable = getattr(job, "presentable", None)
-    if presentable is not None:
-        lines: list[str] = []
-        title = getattr(presentable, "title", None) or job.title or "Untitled AI job"
-        lines.append(f"<b>{title}</b>")
-        if getattr(presentable, "location_formatted", None):
-            lines.append(f"📍 {presentable.location_formatted}")
-        if getattr(presentable, "salary_formatted", None):
-            lines.append(f"💰 {presentable.salary_formatted}")
-        if getattr(presentable, "body", None):
-            lines.append("")
-            lines.append(presentable.body)
-        if getattr(presentable, "contact_section", None):
-            lines.append("")
-            lines.append(presentable.contact_section)
-        if job.canonical_url is not None:
-            lines.append(f"\n🔗 {job.canonical_url}")
-        if getattr(presentable, "tags", None):
-            lines.append("\n" + " ".join(f"#{t}" for t in presentable.tags))
-        return "\n".join(lines)
-
-    parts = [job.title or "Untitled AI job"]
-    if job.company:
-        parts.append(f"Company: {job.company}")
-    if job.location:
-        parts.append(f"Location: {job.location}")
-    parts.append(f"Work mode: {job.work_mode.value}")
-    if job.compensation is not None:
-        parts.append(
-            f"Compensation: {job.compensation.currency} "
-            f"{job.compensation.min_amount or '?'} - {job.compensation.max_amount or '?'}"
-        )
-    if job.canonical_url is not None:
-        parts.append(f"URL: {job.canonical_url}")
-    parts.append("")
-    parts.append(job.description or "")
-    return "\n".join(parts)
+def _render_job(job: Job, layout: CardLayout, profile: str = "channel") -> str:
+    pub_card = build_card(job)
+    outcome = validate_card(pub_card, layout)
+    if not outcome.ok:
+        return f"<b>{job.title or 'Job posting'}</b>"
+    return render_card(pub_card, layout, profile=profile)
 
 
 class TelegramPostingSink:
@@ -81,6 +52,8 @@ class TelegramPostingSink:
         notify_mode: str = "instant",
         notify_batch_size: int = 10,
         digest_formatter: Callable[[list[Job], int, int], str] | None = None,
+        layout: CardLayout | None = None,
+        profile: str = "channel",
     ) -> None:
         self._client = client
         self._entity = entity
@@ -89,11 +62,14 @@ class TelegramPostingSink:
         self._notify_batch_size = notify_batch_size
         self._digest_formatter = digest_formatter
         self._pending_jobs: list[Job] = []
+        self._layout = layout or load_layout()
+        self._profile = profile
 
     async def emit(self, item: Job) -> None:
         if self._notify_mode == "instant":
             async with _client_session(self._client, own_client=self._own_client) as client:
-                await client.send_message(self._entity, _format_job(item), link_preview=False)
+                text = _render_job(item, self._layout, self._profile)
+                await client.send_message(self._entity, text, link_preview=False)
         else:
             self._pending_jobs.append(item)
 
@@ -101,7 +77,6 @@ class TelegramPostingSink:
         if not self._pending_jobs:
             return
 
-        # Split into chunks to avoid message length limits
         chunk_size = self._notify_batch_size
         async with _client_session(self._client, own_client=self._own_client) as client:
             for i in range(0, len(self._pending_jobs), chunk_size):
@@ -109,7 +84,6 @@ class TelegramPostingSink:
                 header = f"<b>Job Digest ({i + 1}-{i + len(chunk)})</b>\n\n"
 
                 if self._digest_formatter is None:
-                    # fallback: minimal plain-text digest with no adapter dep
                     digest = "\n\n".join(
                         f"<b>{j.title or '?'}</b> — {j.company or '?'}" for j in chunk
                     )
