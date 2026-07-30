@@ -17,7 +17,7 @@ jobs:
     name: Lint & Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Python + uv
         uses: astral-sh/setup-uv@v7
@@ -49,7 +49,7 @@ jobs:
     name: Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Python + uv
         uses: astral-sh/setup-uv@v7
@@ -66,7 +66,7 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Python + uv
         uses: astral-sh/setup-uv@v7
@@ -95,7 +95,7 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Python + uv
         uses: astral-sh/setup-uv@v7
@@ -112,7 +112,7 @@ jobs:
     name: Core Import Hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Set up Python + uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -128,7 +128,7 @@ jobs:
     name: Release Contract
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Set up Python + uv
         uses: astral-sh/setup-uv@v7
         with:
@@ -142,7 +142,7 @@ jobs:
     name: Browser Runtime Smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Set up Python + uv
         uses: astral-sh/setup-uv@v7
         with:

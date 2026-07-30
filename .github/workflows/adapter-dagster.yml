@@ -16,7 +16,7 @@ jobs:
     name: Lint & build image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Set up Python + uv
         uses: astral-sh/setup-uv@v7
         with:
