@@ -5,6 +5,8 @@ import pytest
 from job_ftch.application.contracts import StoreConnector
 from job_ftch.infrastructure.stores.postgres import PostgreSQLStore
 
+pytestmark = pytest.mark.network
+
 
 @pytest.mark.asyncio
 async def test_postgres_store_connectivity():

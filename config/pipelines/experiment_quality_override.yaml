@@ -1,0 +1,8 @@
+extends: historical_best.yaml
+name: experiment_quality_override
+version: "1.0.0"
+metadata:
+  purpose: routing_ablation
+  experiment: {variable: node:legacy_routing.params.quality_override_threshold}
+nodes:
+  - {id: legacy_routing, params: {quality_override_threshold: 0.0}}

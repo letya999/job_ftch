@@ -1,69 +1,63 @@
+---
+title: "RawItem"
+description: "**Слой**: `domain`"
+updated: 2026-07-24
+---
 # RawItem
 
-**Слой**: domain
+**Слой**: `domain`
 **Файл**: `job_ftch/domain/models.py`
-**Протокол / Базовый класс**: `pydantic.BaseModel`
 
 ## Что это
 
-`RawItem` — это "сырая" вакансия в том виде, в котором она была получена из
-источника (API, RSS, Telegram или веб-страница), но до извлечения из неё
-структурированных полей с помощью LLM.
-Это единственная сущность, которая
-поступает на вход пайплайна.
+`RawItem` — минимальный валидный вход пайплайна. Это ещё не вакансия в
+нормализованном смысле, а сырой item из конкретного source.
 
-## Поля
+Source обязан отдать либо `RawItem`, либо `QuarantinedRawItem`.
 
-| Поле | Тип | Описание |
-| :--- | :--- | :--- |
-| `stable_id` | `str` | Хеш от источника и ID, используется для дедупликации. |
-| `source_kind` | `SourceKind` | Тип источника (например, `TELEGRAM`, `CAREER_SITE`). |
-| `source_name` | `str` | Уникальное имя источника (например, имя канала). |
-| `external_id` | `str \| None` | ID вакансии во внешней системе. |
-| `url` | `HttpUrl \| None` | Прямая ссылка на вакансию. |
-| `text` | `str` | Основное текстовое содержимое вакансии. |
-| `fetched_at` | `datetime` | Время получения данных из источника. |
-| `metadata` | `dict` | Дополнительные данные (автор поста, вложения и др.). |
+## Основные поля
 
-## Когда создаётся / откуда берётся
+| Поле | Тип | Назначение |
+|---|---|---|
+| `schema_version` | `str` | Версия схемы raw payload |
+| `stable_id` | `str` | Вычисляемый стабильный идентификатор |
+| `source_kind` | `SourceKind` | Тип источника |
+| `source_name` | `str` | Имя или alias источника |
+| `external_id` | `str \| None` | Внешний ID записи |
+| `url` | `AnyHttpUrl \| None` | Ссылка на источник |
+| `text` | `str` | Основной текст для дальнейшей обработки |
+| `fetched_at` | `datetime` | Когда item был получен |
+| `created_at` | `datetime \| None` | Когда публикация была создана в источнике |
+| `metadata` | `dict[str, Any]` | Source-specific данные |
 
-Создаётся в реализации `Source` (например, `TelegramSource` или `ScraperSource`)
-с помощью `RawItemFactory`.
-Каждый запуск пайплайна начинается с генерации
-потока `RawItem`.
+## Инварианты
 
-## Куда идёт после
+- модель `frozen=True`
+- `source_name` и `text` не могут быть пустыми
+- должен существовать хотя бы один locator: `external_id` или `url`
+- `stable_id` вычисляется из source identity, а не задаётся вручную
 
-В пайплайне `RawItem` проходит через узлы санитайзера, классификатора языка и
-дедупликатора.
-Если элемент проходит все проверки, он попадает в
-`ExtractionNode`, где на его основе создаётся `JobDraft`.
+## Жизненный цикл
 
-## Что с ней нельзя делать / инварианты
+`RawItem` проходит через ранние узлы пайплайна:
 
-1.  `RawItem` неизменяем (`frozen=True`).
-2.  Обязательно наличие либо `external_id`, либо `url` для формирования
-    `stable_id`.
-3.  Поле `text` не может быть пустым.
+- `SanitizeNode`
+- `SnapshotFilterNode` при наличии `run_id`
+- source context / garbage / post type / hard filter
+- `DedupNode`
+- optional semantic prefilters
 
-## Связанные сущности
+Если item выжил, только тогда он попадает в `ExtractionNode`, где превращается
+в `JobDraft`.
 
-*   `SourceSpec` — определяет параметры получения `RawItem`.
-*   `QuarantinedRawItem` — если `RawItem` не прошёл валидацию безопасности.
-*   `JobDraft` — структурированное представление, создаваемое из `RawItem`.
+## Что не делать
 
-## Пример
+- не использовать `RawItem` как публичный контракт
+- не класть секреты в `metadata`
+- не рассчитывать на сохранение `RawItem` в job catalog
 
-```python
-from job_ftch.domain.models import RawItem, SourceKind
+## Связанные документы
 
-item = RawItem(
-    source_kind=SourceKind.TELEGRAM,
-    source_name="channel_name",
-    external_id="12345",
-    text="Требуется Python разработчик...",
-    url="https://t.me/channel/12345"
-)
-# stable_id будет вычислен автоматически
-print(item.stable_id)
-```
+- [Source](source.md)
+- [SourceSpec](source_spec.md)
+- [JobDraft](job_draft.md)

@@ -1,3 +1,8 @@
+---
+title: "BypassStrategy (Стратегия обхода защит)"
+description: "BypassStrategy — это слой абстракции над HTTP-клиентом или"
+updated: 2026-07-24
+---
 # BypassStrategy (Стратегия обхода защит)
 
 ## Что это такое
@@ -50,9 +55,26 @@ headless-браузеров:
         """Инжектировать stealth-скрипты в созданную страницу браузера."""
 ```
 
+Для browser tiers, которые не укладываются в модель "Playwright launch args +
+готовая page", есть отдельное расширение контракта:
+
+```python
+@runtime_checkable class BrowserSessionBypass(BypassStrategy, Protocol):
+    def open_page(
+        self,
+        config: dict[str, Any],
+        *,
+        use_proxy: bool = False,
+    ) -> AsyncContextManager[Any]:
+        """Самостоятельно открыть и закрыть browser page/session."""
+```
+
 Если сайт прост, мы используем модифицированный HTTP-клиент.
 Если сайт сложный — мы запускаем Playwright (браузер) и
 применяем методы `apply_browser_args` и `apply_page`.
+Если tier сам владеет browser runtime (`camoufox`, `nodriver`), source code
+работает через `BrowserSessionBypass.open_page(...)`, а остальная scraping
+логика остаётся общей.
 
 ## Реализации по возрастанию сложности/стоимости
 
@@ -82,7 +104,18 @@ fingerprint реального браузера (например, Chrome 120).
 медленнее.
 Подходит для ~90% защищенных сайтов.
 
-4. `cloak_browser`
+4. `camoufox`
+
+Firefox-based anti-detect browser tier с Playwright-подобным async API.
+Используется как отдельный browser runtime, когда стандартного Chromium-based
+stealth уже недостаточно.
+
+5. `nodriver`
+
+CDP-native undetected browser tier без WebDriver. Нужен как дополнительный
+browser-backed bypass между обычным stealth browser и самым тяжёлым tier.
+
+6. `cloak_browser`
 
 Самый продвинутый режим, использующий специализированный
 антидетект-браузер.
@@ -90,7 +123,7 @@ fingerprint реального браузера (например, Chrome 120).
 HH.ru, LinkedIn), где обычный Playwright-stealth не
 справляется.
 
-5. `proxy_rotator`
+7. `proxy_rotator`
 
 Обертка-декоратор над любой из вышеперечисленных стратегий.
 На каждый запрос она подставляет новый прокси-сервер

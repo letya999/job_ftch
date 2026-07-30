@@ -6,7 +6,15 @@ import structlog
 
 from job_ftch.application.contracts import AuthProvider
 from job_ftch.application.registry import register_source_spec
-from job_ftch.domain import QuarantinedRawItem, RawItem, SourceKind
+from job_ftch.domain import (
+    AcquisitionTransport,
+    ObservationKind,
+    QuarantinedRawItem,
+    RawItem,
+    SourceFamily,
+    SourceIdentity,
+    SourceKind,
+)
 from job_ftch.domain.source_spec import WebhookSourceSpec
 
 try:
@@ -38,7 +46,7 @@ class WebhookSource:
 
         runner = web.AppRunner(app)
         await runner.setup()
-        host = getattr(self.spec, "host", "0.0.0.0")  # nosec B104
+        host = getattr(self.spec, "host", "0.0.0.0")  # nosec B104 - operator-configured
         port = getattr(self.spec, "port", 8080)
         site = web.TCPSite(runner, host, port)
         await site.start()
@@ -64,14 +72,29 @@ class WebhookSource:
         text = _payload_to_text(payload)
         if not text:
             return web.Response(status=422, text="No text content found")
+        event_id = _get_payload_path(payload, self.spec.event_id_field)
+        if event_id in (None, ""):
+            return web.Response(status=422, text="Stable event id is required")
 
         item = RawItem(
             source_kind=SourceKind.CAREER_SITE,
+            source_identity=SourceIdentity(
+                family=SourceFamily.REALTIME,
+                observation_kind=ObservationKind.MESSAGE,
+                transport=AcquisitionTransport.WEBHOOK,
+                adapter="webhook",
+                parser_version="webhook-v1",
+                legacy_kind=str(SourceKind.CAREER_SITE),
+            ),
             source_name=source_name,
-            external_id=str(payload.get("id", id(payload))),
+            external_id=str(event_id),
             url=payload.get("url"),
             text=text,
-            metadata={"raw": payload},
+            metadata={
+                "raw": payload,
+                "source_family": SourceFamily.REALTIME.value,
+                "observation_kind": ObservationKind.MESSAGE.value,
+            },
         )
         await self._queue.put(item)
         return web.Response(status=200, text="OK")
@@ -85,6 +108,15 @@ def _payload_to_text(payload: dict[str, Any]) -> str:
         if isinstance(payload.get(key), str) and payload[key].strip():
             return str(payload[key]).strip()
     return ""
+
+
+def _get_payload_path(payload: dict[str, Any], path: str) -> Any:
+    value: Any = payload
+    for part in path.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
 
 
 @register_source_spec("webhook")

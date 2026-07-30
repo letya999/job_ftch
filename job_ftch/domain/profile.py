@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from job_ftch.domain.models import EmploymentType, LanguageCode, Seniority, SkillTag, SourceKind
 
@@ -61,10 +61,29 @@ class SearchProfile(BaseModel):
     culture_preferences: tuple[str, ...] = ()
     positive_example_texts: tuple[str, ...] = ()
     negative_example_texts: tuple[str, ...] = ()
+    positive_job_example_texts: tuple[str, ...] = ()
+    negative_job_example_texts: tuple[str, ...] = ()
     embedding_vector: tuple[float, ...] | None = None
     negative_embedding_vectors: tuple[tuple[float, ...], ...] = ()
     relevance_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
     weights: ProfileWeights = Field(default_factory=ProfileWeights)
+
+    @field_validator("required_skills", "preferred_skills", mode="before")
+    @classmethod
+    def _coerce_skill_tags(cls, value: object) -> object:
+        if value is None:
+            return ()
+        if not isinstance(value, (list, tuple)):
+            return value
+        normalized: list[SkillTag | object] = []
+        for item in value:
+            if isinstance(item, SkillTag):
+                normalized.append(item)
+            elif isinstance(item, str):
+                normalized.append(SkillTag(canonical_name=item, source="profile_catalog"))
+            else:
+                normalized.append(item)
+        return tuple(normalized)
 
     @model_validator(mode="after")
     def normalize(self) -> SearchProfile:
@@ -90,6 +109,8 @@ class SearchProfile(BaseModel):
             "culture_preferences",
             "positive_example_texts",
             "negative_example_texts",
+            "positive_job_example_texts",
+            "negative_job_example_texts",
         ):
             values = getattr(self, field_name)
             normalized = tuple(v.strip() for v in values if v.strip())
@@ -98,7 +119,7 @@ class SearchProfile(BaseModel):
 
     @property
     def languages_of_interest(self) -> tuple[LanguageCode, ...]:
-        """Backward-compatible alias for older tests/adapters."""
+        """Backward-compatible alias for newer tests/adapters."""
         return self.allowed_languages
 
 
@@ -112,30 +133,3 @@ class ProfileCatalog(BaseModel):
     def normalize(self) -> ProfileCatalog:
         object.__setattr__(self, "catalog_name", self.catalog_name.strip() or "default")
         return self
-
-    @classmethod
-    def default(cls) -> ProfileCatalog:
-        """Return the standard AI-roles catalog used when no profile path is configured."""
-        return cls(
-            catalog_name="default",
-            profiles=(
-                SearchProfile(
-                    profile_id="ai_roles",
-                    name="AI Roles",
-                    target_roles=(
-                        "ai engineer",
-                        "ml engineer",
-                        "llm engineer",
-                        "mlops engineer",
-                        "data scientist",
-                        "nlp engineer",
-                        "computer vision engineer",
-                        "ai product manager",
-                    ),
-                    target_domains=("ai", "machine learning", "data science"),
-                    soft_preferences=("python", "pytorch", "transformers", "rag"),
-                    anti_preferences=("sales", "marketing", "recruiter", "hr"),
-                    relevance_threshold=0.3,
-                ),
-            ),
-        )

@@ -4,6 +4,7 @@ import re
 
 from job_ftch.application.contracts import ClassificationResult
 from job_ftch.domain import FilterProfile
+from job_ftch.infrastructure.classifiers.keyword_lists import load_job_posting_strong_tokens
 
 _ANNOUNCEMENT_PATTERNS = [
     re.compile(p, re.IGNORECASE)
@@ -53,6 +54,12 @@ class KeywordClassifierProvider:
         for pattern in self._profile.spam_signal_patterns:
             if re.search(pattern, lowered):
                 return ClassificationResult("spam", 0.95, self.model_id)
+
+        # Strong job-posting signals override incidental event mentions.
+        # A real job post that mentions a hackathon/workshop must not be
+        # mis-routed to announcement and hard-dropped before extraction.
+        if any(token in lowered for token in load_job_posting_strong_tokens()):
+            return ClassificationResult("job_posting", 0.90, self.model_id)
 
         # Check announcement patterns (fast, no LLM)
         for ann_pattern in _ANNOUNCEMENT_PATTERNS:

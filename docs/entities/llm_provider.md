@@ -1,141 +1,74 @@
-# LLMProvider (Провайдер языковой модели)
+---
+title: "LLMProvider"
+description: "**Слой**: `application`"
+updated: 2026-07-24
+---
+# LLMProvider
 
-## Что это такое
+**Слой**: `application`
+**Файл**: `job_ftch/application/contracts.py`
 
-LLMProvider — это строгий интерфейс для работы с языковыми
-моделями (LLM) внутри проекта.
-В архитектуре системы он используется для решения одной
-главной и самой сложной задачи: извлечения структурированных
-данных (Structured Extraction) из неструктурированного
-сырого текста вакансии.
+## Что это
 
-## Зачем это нужно и ПОЧЕМУ так устроено
+`LLMProvider` — единый порт для текущих LLM-вызовов в системе.
 
-В сыром тексте вакансии из Telegram зарплата, стек
-технологий и локация могут быть написаны как угодно
-(например, "ищем питониста на удаленку, вилка от 3к до 5к
-зелени").
-Обычные регулярные выражения с этим не справляются.
-Нужна языковая модель.
+Это уже не только extraction interface. Сейчас через него проходят три разные
+категории задач:
 
-Дизайн-решение заключается в том, что пайплайн не привязан к
-конкретному API (например, к OpenAI).
-Использование Protocol-а позволяет нам легко менять модели:
-сегодня это GPT-4o, завтра — локальная Llama-3 или Claude.
+- structured extraction
+- borderline relevance classification
+- presentable text generation
 
-Ключевой архитектурный принцип: **Единая точка вызова LLM**.
-Во всём пайплайне обращение к языковой модели происходит
-только в одном узле — `ExtractionNode`.
-Все предварительные этапы (Sanitize, Dedup, HardFilter,
-SemanticPrefilter) фильтруют данные дешевыми методами.
-Это гарантирует, что мы тратим дорогие токены LLM только на
-те вакансии, которые уже прошли проверку на спам и
-релевантность.
+## Текущий контракт
 
-## Как это работает изнутри
-
-В `contracts.py` определен лаконичный Protocol:
-
-```python from typing import Protocol, TypeVar, runtime_checkable
-
-ExtractedItem = TypeVar("ExtractedItem")
-
-@runtime_checkable class LLMProvider(Protocol):
-    async def extract(self, text: str, schema: type[ExtractedItem]) -> ExtractedItem:
-        """Extract a structured object from text."""
+```python
+async def extract(self, text: str, schema: type[T]) -> T
+async def classify(self, prompt: str, schema: type[Any]) -> Any
+async def present(self, job_payload: str, schema: type[Any]) -> Any
+async def generate_text(...)
 ```
 
-Провайдер принимает сырой `text` (содержание вакансии) и
-Pydantic-модель `schema` (обычно это `JobDraft`).
-Его задача — вернуть заполненный объект этой
-Pydantic-модели.
-Вся "магия" структурированного вывода (Function Calling,
-JSON Mode, парсинг ответов) инкапсулирована внутри
-конкретной реализации.
+## Где используется
 
-## Встроенные реализации
+- `ExtractionNode` — `RawItem -> JobDraft`
+- `LLMRelevanceClassificationNode` — late relevance gate
+- `PresentableTextNode` — presentation payload for delivery
+- prompt-building flows, где нужен free-form generation
 
-1. `OpenAIProvider`
+## Важная архитектурная идея
 
-Основная production-реализация.
-Использует официальное API OpenAI и механизм "Structured
-Outputs" (или Function Calling), чтобы гарантировать, что
-модель вернет валидный JSON, строго соответствующий
-переданной Pydantic-схеме.
-Требует наличия ключа `JOB_FTCH_OPENAI_API_KEY`.
+LLM не должен быть размазан по всему пайплайну хаотично. Текущая архитектура
+держит LLM-точки явными и ограниченными.
 
-2. `HeuristicProvider`
+До LLM идут дешёвые ворота:
 
-"Поддельный" провайдер, который не использует LLM вообще.
-Он опирается на быстрые регулярные выражения (regex) и
-эвристики.
-Он не такой умный, как GPT, но работает мгновенно и
-бесплатно.
-Используется в юнит-тестах или для источников данных,
-которые изначально выдают почти структурированный текст
-(например, некоторые REST API).
+- sanitize
+- garbage/post-type filters
+- hard filters
+- dedup
+- semantic prefilters
 
-3. `ClassifierProvider`
+Это уменьшает стоимость и latency.
 
-Отдельный, родственный Protocol, который используется узлом
-`PostTypeClassificationNode` для задачи бинарной
-классификации (например, "это вакансия или спам?").
-Часто реализуется либо через легковесную LLM с дешевым
-промптом, либо через локальные ML-модели классификации.
+## Реализации
 
-## Как написать свою реализацию
+В репозитории есть, как минимум:
 
-Если вы хотите подключить Anthropic Claude или локальную
-модель через Ollama, вам нужно реализовать этот Protocol.
-Главная сложность — заставить модель вернуть строгий JSON по
-схеме.
+- OpenAI-based provider
+- heuristic provider
+- fastembed / reranker-adjacent integrations для соседних scoring paths
 
-Пример для гипотетического API:
+Точная зрелость конкретной реализации зависит от extras и runtime settings.
 
-```python from job_ftch.application.contracts import LLMProvider import json
+## Что не делать
 
-class CustomLocalLLMProvider(LLMProvider):
-    async def extract(self, text: str, schema: type[T]) -> T:
-        prompt = f"Извлеки данные в формате JSON по схеме {schema.model_json_schema()} из текста: {text}"
-        
-        # Вызов вашего локального API
-        response = await my_local_model_api.generate(prompt, response_format="json")
-        
-        # Парсим JSON и валидируем через Pydantic
-        data = json.loads(response.content)
-        return schema(**data)
-```
+- не добавлять LLM-вызовы в случайные nodes без новой явной архитектурной причины
+- не возвращать объект в обход schema validation
+- не смешивать transport concerns и business decisions выше уровня provider
 
-## Типичные ошибки и что нельзя делать
+## Связанные документы
 
-1. **Размывать вызовы LLM по всему пайплайну.**
-
-Не создавайте узлы, которые делают дополнительные вызовы LLM
-"просто чтобы улучшить текст" без строгой необходимости.
-Чем больше вызовов, тем медленнее и дороже система.
-Всегда старайтесь выполнить задачу за один промпт внутри
-`ExtractionNode`.
-
-2. **Возвращать невалидный объект.**
-
-Провайдер обязан гарантировать соответствие типа.
-Если LLM вернула мусор или галлюцинацию (не парсящийся
-JSON), провайдер должен либо сделать retry под капотом, либо
-выбросить ошибку (Exception), но не возвращать сломанный
-объект, обходя проверку типов Pydantic.
-
-3. **Хардкодить промпты в ExtractionNode.**
-
-Узел `ExtractionNode` не должен собирать текстовый промпт
-для OpenAI.
-Формирование промпта (System Message, инструкции) — это
-ответственность самого `LLMProvider`, так как для Claude,
-Llama и GPT оптимальные промпты могут сильно отличаться.
-
-## Связи с другими сущностями
-
-- [Stage](stage_node.md) — провайдер используется узлом `ExtractionNode` (превращение `RawItem` в `JobDraft`).
-
-- [JobDraft](job_draft.md) — типичная Pydantic-схема, которую провайдер обязан заполнить.
-
-- [AuthProvider](auth_provider.md) — предоставляет API-ключи для авторизации в облачных сервисах (например, OpenAI).
+- [JobDraft](job_draft.md)
+- [JobRecord](job_record.md)
+- [AuthProvider](auth_provider.md)
+- [Protocols](protocols.md)

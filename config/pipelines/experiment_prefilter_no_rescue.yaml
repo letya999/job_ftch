@@ -1,0 +1,8 @@
+extends: historical_best.yaml
+name: experiment_prefilter_no_rescue
+version: "1.0.0"
+metadata:
+  purpose: rescue_ablation
+  experiment: {variable: node:semantic_prefilter.params.rescue_logic}
+nodes:
+  - {id: semantic_prefilter, params: {rescue_logic: none}}

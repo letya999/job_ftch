@@ -1,0 +1,26 @@
+{
+  "original_dataset_hash": "5e6334ea328abdb1e5afab443253c4c070ca0cb5019a946ba3e7f01d9ab9ce92",
+  "patch_version": "fixed140-seed42-v2",
+  "entries": [
+    {
+      "stable_id": "46dc8dfcb56843ab1c04993eb34818df5ecd4e4d315e8867fcbd8a9c4739e434",
+      "content_hash": "40704d0bab022a13e4f0233f3426c030d5ff2ea31e6cf650c8ed233c37c8466a",
+      "old": {"is_job": 1, "relevant": 0},
+      "new": {"is_job": 1, "relevant": 1},
+      "reason": "Ручная повторная проверка: вакансия Middle ML Engineer описывает тестирование, оптимизацию, production deployment и интеграцию LLM в пользовательский AI-чат; исходный relevant=0 противоречил собственному текстовому обоснованию разметки.",
+      "adjudicator": "user-authorized-codex-review",
+      "status": "adjudicated",
+      "rubric_version": "relevance-v2-responsibility-first"
+    },
+    {
+      "stable_id": "85a8fbc19c9fceb2de947d5447f3daa033ab9ef34de49ad35d3f6a8c48773a3e",
+      "content_hash": "82f7cf7c2ac20c1523b74cc76f212d5ce7cb70eecb093c3fec9a34a2e290dd0f",
+      "old": {"is_job": 1, "relevant": 1},
+      "new": {"is_job": 1, "relevant": 0},
+      "reason": "Ручная повторная проверка: это реальная вакансия Team Lead Computer Vision, но доступный текст описывает классический CV/ML production track без целевых LLM/RAG/agent responsibilities; прежний positive override был сделан поверх исходного 429 и не соответствовал активному applied-LLM профилю.",
+      "adjudicator": "user-authorized-codex-review",
+      "status": "adjudicated",
+      "rubric_version": "relevance-v2-responsibility-first"
+    }
+  ]
+}

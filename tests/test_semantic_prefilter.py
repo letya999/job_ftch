@@ -2,21 +2,31 @@ from __future__ import annotations
 
 import pytest
 
-from job_ftch.application.drops import RawItemDropped
-from job_ftch.domain import ProfileCatalog, RawItem, SearchProfile, SourceKind, TriageRejectionReason
+from job_ftch.domain import (
+    ObservationKind,
+    ProfileCatalog,
+    RawItem,
+    SearchProfile,
+    SourceKind,
+)
 from job_ftch.nodes.semantic_prefilter import SemanticPrefilterNode
 
 
-_AI_PROFILE = SearchProfile(
-    profile_id="ai_roles",
-    target_roles=("ai engineer", "ml engineer", "data scientist"),
-    target_domains=("ai", "machine learning"),
-    relevance_threshold=0.3,
-)
-
-
 def _make_catalog() -> ProfileCatalog:
-    return ProfileCatalog(profiles=(_AI_PROFILE,))
+    return ProfileCatalog(
+        catalog_name="test",
+        profiles=(
+            SearchProfile(
+                profile_id="ai_roles",
+                name="AI Roles",
+                target_roles=("ai engineer", "ml engineer", "llm engineer", "mlops engineer"),
+                target_domains=("ai", "machine learning"),
+                soft_preferences=("python", "pytorch", "llm"),
+                anti_preferences=("sales", "marketing"),
+                relevance_threshold=0.3,
+            ),
+        ),
+    )
 
 
 @pytest.mark.asyncio
@@ -39,7 +49,7 @@ async def test_semantic_prefilter_keeps_obvious_ai_role() -> None:
 
 
 @pytest.mark.asyncio
-async def test_semantic_prefilter_drops_clear_noise() -> None:
+async def test_semantic_prefilter_marks_clear_noise_uncertain() -> None:
     node = SemanticPrefilterNode(_make_catalog())
     item = RawItem.model_validate(
         {
@@ -51,14 +61,11 @@ async def test_semantic_prefilter_drops_clear_noise() -> None:
         }
     )
 
-    with pytest.raises(RawItemDropped) as exc_info:
-        await node.process(item)
-
-    assert exc_info.value.reason == TriageRejectionReason.LOW_RELEVANCE_PREFILTER
+    assert (await node.process(item)).metadata["semantic_prefilter_uncertain"] is True
 
 
 @pytest.mark.asyncio
-async def test_semantic_prefilter_bypasses_career_site_items() -> None:
+async def test_semantic_prefilter_bypasses_only_confirmed_career_detail_vacancies() -> None:
     node = SemanticPrefilterNode(_make_catalog())
     item = RawItem.model_validate(
         {
@@ -67,12 +74,40 @@ async def test_semantic_prefilter_bypasses_career_site_items() -> None:
             "external_id": "fixture-career-001",
             "url": "https://example.com/careers/job-1",
             "text": "Senior Frontend Developer",
+            "metadata": {"detail_vacancy_confirmed": True},
+            "source_identity": {
+                "family": "career_web",
+                "observation_kind": ObservationKind.VACANCY_DETAIL,
+                "transport": "http",
+                "adapter": "dom",
+                "parser_version": "test",
+                "legacy_kind": "career_site",
+            },
         }
     )
 
     enriched = await node.process(item)
 
     assert enriched is item
+
+
+@pytest.mark.asyncio
+async def test_semantic_prefilter_does_not_bypass_unconfirmed_career_listing() -> None:
+    node = SemanticPrefilterNode(_make_catalog())
+    item = RawItem.model_validate(
+        {
+            "source_kind": SourceKind.CAREER_SITE,
+            "source_name": "dom",
+            "external_id": "fixture-career-listing",
+            "url": "https://example.com/careers",
+            "text": "Senior Frontend Developer",
+        }
+    )
+
+    enriched = await node.process(item)
+
+    assert enriched is not item
+    assert enriched.metadata["semantic_prefilter_uncertain"] is True
 
 
 @pytest.mark.asyncio

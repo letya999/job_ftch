@@ -1,0 +1,12 @@
+extends: experiment_h11_no_late_scoring.yaml
+name: experiment_h24_lexical_observe
+version: "1.0.0"
+metadata:
+  purpose: lexical_role_title_skill_observation_without_semantic_gate
+  experiment: {id: H24, control: H11}
+  benchmark: {dataset: fixtures/dataset/eval_dataset.jsonl, sample: 140, seed: 42}
+nodes:
+  - {id: bgem3, enabled: false}
+  - {id: semantic_prefilter, enabled: false}
+  - {id: completeness, node: completeness_gate, after: [dedup]}
+  - {id: lexical_evidence, node: lexical_evidence, effect: observe, after: [lifecycle]}

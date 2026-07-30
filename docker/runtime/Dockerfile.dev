@@ -1,0 +1,33 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+ENV HOME=/opt/job-ftch-home \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+
+# Runtime image for the library layer only: pipeline, stores, embeddings,
+# scrapers, Playwright, and CloakBrowser. Adapter-specific deps stay out.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl gnupg ca-certificates xvfb xauth \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p /opt/job-ftch-home /opt/playwright
+
+# Dependency metadata only, with a placehnewer package so the wheel can build. The verify
+# script is copied after the installs on purpose: copying it here tied the ~1.1 GB install
+# layer to that file, so editing it re-downloaded torch and CUDA.
+COPY pyproject.toml README.md ./
+RUN mkdir -p job_ftch scripts && touch job_ftch/__init__.py
+
+RUN pip install --no-cache-dir ".[postgres,openai,qdrant,feeds,site_scrapers,browser,stealth,camoufox,nodriver,embeddings,bgem3,tracing]"
+RUN patchright install --with-deps chromium
+# Camoufox is Firefox-based and needs GTK, which the Chromium dep set does not provide.
+# `camoufox fetch` only downloads the binary, so without this the tier imports fine and
+# then dies at launch with "libgtk-3.so.0: cannot open shared object file".
+RUN patchright install-deps firefox
+RUN python -m camoufox fetch
+RUN python -m cloakbrowser install
+
+COPY scripts/verify_browser_runtime.py ./scripts/verify_browser_runtime.py
+RUN python scripts/verify_browser_runtime.py
+
+ENV PYTHONPATH=/app

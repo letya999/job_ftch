@@ -1,0 +1,12 @@
+rules:
+  - id: github-actions-pull-request-target-checkout
+    message: pull_request_target with checkout can expose secrets to untrusted code.
+    severity: WARNING
+    languages: [yaml]
+    pattern-regex: 'pull_request_target'
+
+  - id: github-actions-curl-bash
+    message: Avoid curl|bash installers in CI; pin official actions or verified checksums.
+    severity: ERROR
+    languages: [yaml]
+    pattern-regex: 'curl.+\|\s*(bash|sh)'

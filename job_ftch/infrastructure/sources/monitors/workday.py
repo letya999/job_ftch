@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     fetch_page_text,
@@ -30,6 +30,8 @@ _URL_RE = re.compile(
     r"([\w-]+)\.wd(\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?"
     r"(.+?)/?$"
 )
+
+_HTML_URL_RE = re.compile(r"([\w-]+)\.wd(\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([\w-]+)")
 
 
 def _parse_components(url: str) -> tuple[str, str, str] | None:
@@ -136,9 +138,12 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     if client is None:
         return None
 
-    html = await fetch_page_text(url, client)
+    # Workday links are frequently in a footer/CTA after a substantial CMS
+    # payload (Sabre is one example); the generic fingerprint cap is too
+    # small for this lightweight, bounded marker scan.
+    html = await fetch_page_text(url, client, max_chars=100_000)
     if html:
-        match = _URL_RE.search(html)
+        match = _HTML_URL_RE.search(html)
         if match:
             return {
                 "company": match.group(1),
@@ -148,4 +153,17 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     return None
 
 
-register_monitor("workday", discover, cost=10, rich=False, can_handle=can_handle)
+register_monitor(
+    "workday",
+    discover,
+    cost=10,
+    rich=False,
+    can_handle=can_handle,
+    scraper_chain=("workday", "json-ld", "maintext"),
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "workday",
+        url_patterns=(r"[\w-]+\.wd\d+\.myworkdayjobs\.com/",),
+        has_stable_id=True,
+    ),
+)

@@ -1,0 +1,503 @@
+version: 1
+generated_at: "2026-06-27"
+purpose: "regional vacancy source freshness benchmark"
+sources:
+  - id: ru_yandex_jobs
+    country: RU
+    kind: employer
+    label: "Yandex Jobs"
+    spec:
+      type: career_site
+      url: "https://yandex.ru/jobs/"
+      source_name: "ru_yandex_jobs"
+      monitor: auto
+
+  - id: ru_tbank_it
+    country: RU
+    kind: employer
+    label: "T-Bank IT"
+    spec:
+      type: career_site
+      url: "https://www.tbank.ru/career/vacancies/it/"
+      source_name: "ru_tbank_it"
+      monitor: auto
+
+  - id: ru_sber_careers
+    country: RU
+    kind: employer
+    label: "Sber Careers"
+    spec:
+      type: career_site
+      url: "https://rabota.sber.ru/search/"
+      source_name: "ru_sber_careers"
+      monitor: auto
+
+  - id: ru_vk_careers
+    country: RU
+    kind: employer
+    label: "VK Careers"
+    spec:
+      type: career_site
+      url: "https://team.vk.company/vacancy/"
+      source_name: "ru_vk_careers"
+      monitor: auto
+
+  - id: ru_mts_careers
+    country: RU
+    kind: employer
+    label: "MTS Careers"
+    spec:
+      type: career_site
+      url: "https://job.mts.ru/vacancies"
+      source_name: "ru_mts_careers"
+      monitor: auto
+
+  - id: ru_hh
+    country: RU
+    kind: aggregator
+    label: "HeadHunter Russia"
+    spec:
+      type: career_site
+      url: "https://hh.ru/search/vacancy"
+      source_name: "ru_hh"
+      monitor: auto
+
+  - id: ru_habr_career
+    country: RU
+    kind: aggregator
+    label: "Habr Career"
+    spec:
+      type: career_site
+      url: "https://career.habr.com/vacancies"
+      source_name: "ru_habr_career"
+      monitor: auto
+
+  - id: by_pandadoc
+    country: BY
+    kind: employer
+    label: "PandaDoc Careers"
+    spec:
+      type: career_site
+      url: "https://www.pandadoc.com/careers/"
+      source_name: "by_pandadoc"
+      monitor: auto
+
+  - id: by_flo
+    country: BY
+    kind: employer
+    label: "Flo Careers"
+    spec:
+      type: career_site
+      url: "https://flo.health/careers-listing"
+      source_name: "by_flo"
+      monitor: auto
+
+  - id: by_wargaming
+    country: BY
+    kind: employer
+    label: "Wargaming Careers"
+    spec:
+      type: career_site
+      url: "https://wargaming.com/en/careers/"
+      source_name: "by_wargaming"
+      monitor: auto
+
+  - id: by_rabota
+    country: BY
+    kind: aggregator
+    label: "Rabota.by"
+    spec:
+      type: career_site
+      url: "https://rabota.by/search/vacancy"
+      source_name: "by_rabota"
+      monitor: auto
+
+  - id: kz_kaspi_jobs
+    country: KZ
+    kind: employer
+    label: "Kaspi Jobs"
+    spec:
+      type: career_site
+      url: "https://job.kaspi.kz/search"
+      source_name: "kz_kaspi_jobs"
+      monitor: auto
+
+  - id: kz_kolesa_group
+    country: KZ
+    kind: employer
+    label: "Kolesa Group Jobs"
+    spec:
+      type: career_site
+      url: "https://kolesa.group/career/job"
+      source_name: "kz_kolesa_group"
+      monitor: auto
+
+  - id: kz_hh
+    country: KZ
+    kind: aggregator
+    label: "HeadHunter Kazakhstan"
+    spec:
+      type: career_site
+      url: "https://hh.kz/search/vacancy"
+      source_name: "kz_hh"
+      monitor: auto
+
+  - id: uz_uzum_people
+    country: UZ
+    kind: employer
+    label: "Uzum People"
+    spec:
+      type: career_site
+      url: "https://people.uzum.com/career/ru/vacancies"
+      source_name: "uz_uzum_people"
+      monitor: auto
+
+  - id: uz_uzum_bank_via_people
+    country: UZ
+    kind: employer
+    label: "Uzum Bank via Uzum People"
+    spec:
+      type: career_site
+      url: "https://people.uzum.com/career/ru/vacancies?business_units=bank"
+      source_name: "uz_uzum_bank_via_people"
+      monitor: auto
+
+  - id: uz_hh
+    country: UZ
+    kind: aggregator
+    label: "HeadHunter Uzbekistan"
+    spec:
+      type: career_site
+      url: "https://tashkent.hh.uz/search/vacancy"
+      source_name: "uz_hh"
+      monitor: auto
+
+  - id: cy_exness
+    country: CY
+    kind: employer
+    label: "Exness Careers"
+    spec:
+      type: career_site
+      url: "https://exness-careers.com/jobs/"
+      source_name: "cy_exness"
+      monitor: auto
+
+  - id: cy_welltech
+    country: CY
+    kind: employer
+    label: "Welltech Careers"
+    spec:
+      type: career_site
+      url: "https://welltech.com/career/"
+      source_name: "cy_welltech"
+      monitor: auto
+
+  - id: cy_wolt
+    country: CY
+    kind: employer
+    label: "Wolt Cyprus Jobs"
+    spec:
+      type: career_site
+      url: "https://careers.wolt.com/en/jobs?location=Cyprus"
+      source_name: "cy_wolt"
+      monitor: auto
+
+  - id: ge_wolt
+    country: GE
+    kind: employer
+    label: "Wolt Georgia Jobs"
+    spec:
+      type: career_site
+      url: "https://careers.wolt.com/en/jobs?location=Georgia"
+      source_name: "ge_wolt"
+      monitor: auto
+
+  - id: ge_jobs_ge_it
+    country: GE
+    kind: aggregator
+    label: "Jobs.ge IT"
+    spec:
+      type: career_site
+      url: "https://jobs.ge/en/?cid=6&jid=&lid=&page=1&q="
+      source_name: "ge_jobs_ge_it"
+      monitor: auto
+
+  - id: multi_djinni
+    country: MULTI
+    kind: aggregator
+    label: "Djinni"
+    spec:
+      type: career_site
+      url: "https://djinni.co/jobs/"
+      source_name: "multi_djinni"
+      monitor: auto
+
+  - id: multi_dou_jobs
+    country: MULTI
+    kind: aggregator
+    label: "DOU Jobs"
+    spec:
+      type: career_site
+      url: "https://jobs.dou.ua/vacancies/"
+      source_name: "multi_dou_jobs"
+      monitor: auto
+
+  - id: ru_hh_ai
+    country: RU
+    kind: aggregator
+    label: "HeadHunter Russia AI"
+    spec:
+      type: career_site
+      url: "https://hh.ru/search/vacancy?text=AI"
+      source_name: "ru_hh_ai"
+      monitor: auto
+
+  - id: ru_habr_career_ai
+    country: RU
+    kind: aggregator
+    label: "Habr Career AI"
+    spec:
+      type: career_site
+      url: "https://career.habr.com/vacancies?q=AI&type=all"
+      source_name: "ru_habr_career_ai"
+      monitor: auto
+
+  - id: ru_rabota_ru
+    country: RU
+    kind: aggregator
+    label: "Rabota.ru"
+    spec:
+      type: career_site
+      url: "https://www.rabota.ru/vacancy/"
+      source_name: "ru_rabota_ru"
+      monitor: auto
+
+  - id: ru_geekjob
+    country: RU
+    kind: aggregator
+    label: "GeekJob"
+    spec:
+      type: career_site
+      url: "https://geekjob.ru/vacancies"
+      source_name: "ru_geekjob"
+      monitor: auto
+
+  - id: ru_superjob
+    country: RU
+    kind: aggregator
+    label: "SuperJob Vacancies"
+    spec:
+      type: career_site
+      url: "https://www.superjob.ru/vakansii/"
+      source_name: "ru_superjob"
+      monitor: auto
+
+  - id: ru_hirehi
+    country: RU
+    kind: aggregator
+    label: "HireHi"
+    spec:
+      type: career_site
+      url: "https://hirehi.ru/"
+      source_name: "ru_hirehi"
+      monitor: auto
+
+  - id: ru_hirify
+    country: RU
+    kind: aggregator
+    label: "Hirify"
+    spec:
+      type: career_site
+      url: "https://hirify.me/"
+      source_name: "ru_hirify"
+      monitor: auto
+
+  - id: ru_ozon_tech
+    country: RU
+    kind: employer
+    label: "Ozon Tech Jobs"
+    spec:
+      type: career_site
+      url: "https://ozon.tech/job/"
+      source_name: "ru_ozon_tech"
+      monitor: auto
+
+  - id: ru_avito
+    country: RU
+    kind: employer
+    label: "Avito Careers"
+    spec:
+      type: career_site
+      url: "https://career.avito.com/vacancies/"
+      source_name: "ru_avito"
+      monitor: auto
+
+  - id: ru_2gis
+    country: RU
+    kind: employer
+    label: "2GIS Vacancies"
+    spec:
+      type: career_site
+      url: "https://job.2gis.ru/vacancies"
+      source_name: "ru_2gis"
+      monitor: auto
+
+  - id: ru_ntechlab
+    country: RU
+    kind: employer
+    label: "NtechLab Careers"
+    spec:
+      type: career_site
+      url: "https://ntechlab.com/career"
+      source_name: "ru_ntechlab"
+      monitor: auto
+
+  - id: ru_t1
+    country: RU
+    kind: employer
+    label: "T1 Vacancies"
+    spec:
+      type: career_site
+      url: "https://career.t1.ru/vacancies"
+      source_name: "ru_t1"
+      monitor: auto
+
+  - id: ru_miro
+    country: RU
+    kind: employer
+    label: "Miro Open Positions"
+    spec:
+      type: career_site
+      url: "https://miro.com/careers/open-positions/"
+      source_name: "ru_miro"
+      monitor: auto
+
+  - id: ru_jetbrains
+    country: RU
+    kind: employer
+    label: "JetBrains Jobs"
+    spec:
+      type: career_site
+      url: "https://www.jetbrains.com/careers/jobs/"
+      source_name: "ru_jetbrains"
+      monitor: auto
+
+  - id: ru_abbyy
+    country: RU
+    kind: employer
+    label: "ABBYY Jobs"
+    spec:
+      type: career_site
+      url: "https://job-boards.eu.greenhouse.io/abbyy"
+      source_name: "ru_abbyy"
+      monitor: auto
+
+  - id: ru_semrush
+    country: RU
+    kind: employer
+    label: "Semrush Jobs"
+    spec:
+      type: career_site
+      url: "https://careers.semrush.com/jobs/"
+      source_name: "ru_semrush"
+      monitor: auto
+
+  - id: ru_redmadrobot
+    country: RU
+    kind: employer
+    label: "red_mad_robot Careers"
+    spec:
+      type: career_site
+      url: "https://redmadrobot.ru/career"
+      source_name: "ru_redmadrobot"
+      monitor: auto
+
+  - id: ru_sibur
+    country: RU
+    kind: employer
+    label: "SIBUR Vacancies"
+    spec:
+      type: career_site
+      url: "https://career.sibur.ru/vacancies/"
+      source_name: "ru_sibur"
+      monitor: auto
+
+  - id: kz_bereke
+    country: KZ
+    kind: employer
+    label: "Bereke Career"
+    spec:
+      type: career_site
+      url: "https://bereke.kz/career"
+      source_name: "kz_bereke"
+      monitor: auto
+
+  - id: kz_kcell_jobs
+    country: KZ
+    kind: employer
+    label: "Kcell Vacancies"
+    spec:
+      type: career_site
+      url: "https://jobs.kcell.kz/"
+      source_name: "kz_kcell_jobs"
+      monitor: auto
+
+  - id: kz_halyk
+    country: KZ
+    kind: employer
+    label: "Halyk Bank Career"
+    spec:
+      type: career_site
+      url: "https://halykbank.kz/about/career"
+      source_name: "kz_halyk"
+      monitor: auto
+
+  - id: by_andersen
+    country: BY
+    kind: employer
+    label: "Andersen Vacancies"
+    spec:
+      type: career_site
+      url: "https://people.andersenlab.com/vacancies"
+      source_name: "by_andersen"
+      monitor: auto
+
+  - id: ge_tbc
+    country: GE
+    kind: employer
+    label: "TBC Career"
+    spec:
+      type: career_site
+      url: "https://tbcbank.ge/en/tbc-career"
+      source_name: "ge_tbc"
+      monitor: auto
+
+  - id: ge_bog
+    country: GE
+    kind: employer
+    label: "Bank of Georgia Career"
+    spec:
+      type: career_site
+      url: "https://bankofgeorgia.ge/en/about/career"
+      source_name: "ge_bog"
+      monitor: auto
+
+  - id: cy_playrix
+    country: CY
+    kind: employer
+    label: "Playrix Openings"
+    spec:
+      type: career_site
+      url: "https://playrix.com/job/openings"
+      source_name: "cy_playrix"
+      monitor: auto
+
+  - id: cy_easybrain
+    country: CY
+    kind: employer
+    label: "Easybrain Careers"
+    spec:
+      type: career_site
+      url: "https://easybrain.com/careers"
+      source_name: "cy_easybrain"
+      monitor: auto

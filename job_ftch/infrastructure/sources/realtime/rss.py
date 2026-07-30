@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
+from time import struct_time
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -10,7 +13,14 @@ import structlog
 
 from job_ftch.application.registry import register_source_spec
 from job_ftch.application.watermark import IncrementalCursor
-from job_ftch.domain import RawItem, SourceKind
+from job_ftch.domain import (
+    AcquisitionTransport,
+    ObservationKind,
+    RawItem,
+    SourceFamily,
+    SourceIdentity,
+    SourceKind,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -28,6 +38,25 @@ try:
 except ImportError:
     feedparser = None  # type: ignore[assignment]
     _FEEDPARSER_AVAILABLE = False
+
+
+def _entry_published_at(entry: dict[str, Any]) -> datetime | None:
+    for key in ("published_parsed", "updated_parsed"):
+        value = entry.get(key)
+        if isinstance(value, struct_time):
+            return datetime(*value[:6], tzinfo=UTC)
+    for key in ("published", "updated"):
+        raw_value = entry.get(key)
+        if not raw_value:
+            continue
+        try:
+            parsed = parsedate_to_datetime(str(raw_value))
+        except (TypeError, ValueError, IndexError):
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    return None
 
 
 class RSSFeedSource:
@@ -65,8 +94,12 @@ class RSSFeedSource:
         # Fetch
         headers: dict[str, str] = {}
         from job_ftch.config import get_settings
+        from job_ftch.infrastructure.network.ssrf_guard import SSRFGuardedTransport
 
-        async with httpx.AsyncClient(timeout=get_settings().rss_timeout_seconds) as client:
+        async with httpx.AsyncClient(
+            timeout=get_settings().rss_timeout_seconds,
+            transport=SSRFGuardedTransport(httpx.AsyncHTTPTransport()),
+        ) as client:
             try:
                 response = await client.get(feed_url, headers=headers)
                 response.raise_for_status()
@@ -80,10 +113,18 @@ class RSSFeedSource:
         feed = await loop.run_in_executor(None, feedparser.parse, raw_content)
 
         new_ids: list[str] = []
+        cutoff = self.spec.freshness_cutoff_utc
+        normalized_cutoff = (
+            cutoff if cutoff is None or cutoff.tzinfo is not None else cutoff.replace(tzinfo=UTC)
+        )
         for entry in feed.entries:
             entry_id = entry.get("id") or entry.get("link") or ""
             if self.spec.incremental and entry_id in seen_ids:
                 continue
+            if normalized_cutoff is not None:
+                published_at = _entry_published_at(entry)
+                if published_at is None or published_at < normalized_cutoff.astimezone(UTC):
+                    continue
 
             url = entry.get("link") or entry.get("url") or ""
             title = entry.get("title") or ""
@@ -93,11 +134,26 @@ class RSSFeedSource:
 
             yield RawItem(
                 source_kind=SourceKind.CAREER_SITE,
+                source_identity=SourceIdentity(
+                    family=SourceFamily.RSS,
+                    observation_kind=ObservationKind.LISTING,
+                    transport=AcquisitionTransport.HTTP,
+                    adapter="rss_feed",
+                    parser_version="feedparser-v1",
+                    legacy_kind=str(SourceKind.CAREER_SITE),
+                ),
                 source_name=self.source_name,
                 external_id=entry_id,
                 url=url_str,  # type: ignore[arg-type]
                 text=text,
-                metadata={"title": title, "summary": summary, "entry_id": entry_id},
+                metadata={
+                    "title": title,
+                    "summary": summary,
+                    "entry_id": entry_id,
+                    "source_family": SourceFamily.RSS.value,
+                    "observation_kind": "listing",
+                    "detail_url": url_str,
+                },
             )
 
             if entry_id:

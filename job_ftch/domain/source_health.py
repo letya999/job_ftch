@@ -12,6 +12,7 @@ class SourceHealth(BaseModel):
     source_kind: str
     source_name: str
     last_run_at: str
+    last_started_at: str | None = None
     last_success_at: str | None
     failure_streak: int
     success_count: int
@@ -25,5 +26,11 @@ class SourceHealth(BaseModel):
     status: str
     paused: bool = False
     skipped_runs: int = 0
+    last_eviction_at: str | None = None
+    eviction_streak: int = 0
+    last_eviction_kind: str | None = None
+    last_error: str | None = None
+    last_error_at: str | None = None
+    last_error_kind: str | None = None
 
     model_config = ConfigDict(extra="forbid")

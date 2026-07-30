@@ -3,12 +3,12 @@ name: adapter-faststream
 on:
   push:
     paths:
-      - "adapters/faststream/**"
+      - "job_ftch/adapters/faststream/**"
       - "job_ftch/**"
       - "pyproject.toml"
   pull_request:
     paths:
-      - "adapters/faststream/**"
+      - "job_ftch/adapters/faststream/**"
       - "job_ftch/**"
 
 jobs:
@@ -22,6 +22,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Lint adapter
-        run: uvx ruff check adapters/faststream
+        run: uvx ruff check job_ftch/adapters/faststream
       - name: Build image
-        run: docker build -f adapters/faststream/Dockerfile -t job-ftch-faststream .
+        run: docker build -f job_ftch/adapters/faststream/Dockerfile -t job-ftch-faststream .

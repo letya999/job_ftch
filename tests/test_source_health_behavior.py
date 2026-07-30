@@ -190,3 +190,63 @@ async def test_source_health_thresholds_from_settings() -> None:
     assert new_health.failure_streak == 5
     assert new_health.paused is True
     assert new_health.status == "paused"
+
+
+@pytest.mark.asyncio
+async def test_source_health_marks_transient_failures_as_failing() -> None:
+    stats = SourceRunStats(fetched=0, emitted=0, failed=1)
+
+    new_health = _update_source_health_payload(
+        None,
+        source_id="test:src",
+        source_kind="test",
+        source_name="src",
+        stats=stats,
+        finished_at=datetime.now(UTC),
+        failure_streak_pause=3,
+    )
+
+    assert new_health.failure_streak == 1
+    assert new_health.paused is False
+    assert new_health.status == "failing"
+
+
+@pytest.mark.asyncio
+async def test_source_health_clears_stale_error_on_non_source_fetch_failure() -> None:
+    previous = SourceHealth(
+        source_id="test:src",
+        source_kind="test",
+        source_name="src",
+        last_run_at="2026-06-12T00:00:00+00:00",
+        last_success_at="2026-06-12T00:00:00+00:00",
+        failure_streak=0,
+        success_count=2,
+        last_fetched=3,
+        last_emitted=2,
+        last_failed=0,
+        last_quarantined=0,
+        baseline_emitted=2.0,
+        drift_ratio=1.0,
+        degraded=False,
+        status="healthy",
+        last_error="403 Forbidden",
+        last_error_at="2026-06-12T00:00:00+00:00",
+        last_error_kind="source_fetch_failed",
+    )
+    stats = SourceRunStats(fetched=0, emitted=0, failed=1)
+
+    new_health = _update_source_health_payload(
+        previous,
+        source_id="test:src",
+        source_kind="test",
+        source_name="src",
+        stats=stats,
+        finished_at=datetime.now(UTC),
+        failure_streak_pause=3,
+    )
+
+    assert new_health.failure_streak == 1
+    assert new_health.status == "failing"
+    assert new_health.last_error is None
+    assert new_health.last_error_at is None
+    assert new_health.last_error_kind is None

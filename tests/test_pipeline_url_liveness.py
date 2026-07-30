@@ -4,7 +4,11 @@ from unittest.mock import MagicMock, patch
 import aiohttp
 import pytest
 
-from adapters.telegram_bot.handlers.pipeline import _host_resolves_to_blocked_ip, _url_is_alive
+from job_ftch.adapters.telegram_bot.formatter import resolve_job_url
+from job_ftch.adapters.telegram_bot.handlers.pipeline import (
+    _host_resolves_to_blocked_ip,
+    _url_is_alive,
+)
 
 
 def test_host_resolves_to_blocked_ip():
@@ -113,6 +117,24 @@ async def test_url_is_alive_redirect_treated_as_alive():
             )
 
 
+@pytest.mark.asyncio
+async def test_url_liveness_does_not_hide_accepted_job_on_head_block_or_timeout():
+    url = "https://example.com/job"
+    with patch("socket.getaddrinfo") as mock_dns:
+        mock_dns.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+        forbidden = MagicMock()
+        forbidden.status = 403
+        forbidden.__aenter__.return_value = forbidden
+        session = MagicMock()
+        session.head.return_value = forbidden
+        session.__aenter__.return_value = session
+        with patch("aiohttp.ClientSession", return_value=session):
+            assert await _url_is_alive(url) is True
+
+        with patch("aiohttp.ClientSession", side_effect=TimeoutError):
+            assert await _url_is_alive(url) is True
+
+
 # Helper for fuzzy matching in assert_called_once_with
 class AnyInstanceOf:
     def __init__(self, cls):
@@ -123,3 +145,13 @@ class AnyInstanceOf:
 
 
 pytest.any_instance_of = AnyInstanceOf
+
+
+def test_resolve_job_url_prefers_canonical_but_falls_back_to_urls():
+    canonical_job = MagicMock(canonical_url="https://example.com/1", urls=["https://example.com/x"])
+    fallback_job = MagicMock(canonical_url=None, urls=["https://example.com/fallback"])
+    empty_job = MagicMock(canonical_url=None, urls=[])
+
+    assert resolve_job_url(canonical_job) == "https://example.com/1"
+    assert resolve_job_url(fallback_job) == "https://example.com/fallback"
+    assert resolve_job_url(empty_job) is None

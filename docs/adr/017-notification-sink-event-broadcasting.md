@@ -1,6 +1,11 @@
+---
+title: "017 — NotificationSink: configurable event broadcasting"
+description: "**Status**: PROPOSED"
+updated: 2026-07-24
+---
 # 017 — NotificationSink: configurable event broadcasting
 
-**Status**: ACCEPTED
+**Status**: PROPOSED
 **Date**: 2026-06-07
 
 > Outdated note (2026-06-12): this ADR is preserved as the original notification-broadcasting decision.

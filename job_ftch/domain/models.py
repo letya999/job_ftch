@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from enum import StrEnum
 from hashlib import sha256
 from typing import Any
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, model_validator
+
+from job_ftch.domain.source_identity import SourceIdentity  # noqa: TC001
 
 
 def _stable_hash(*parts: str) -> str:
@@ -231,6 +234,7 @@ class RawItem(BaseModel):
     schema_version: str = "1"
     stable_id: str = ""
     source_kind: SourceKind
+    source_identity: SourceIdentity | None = None
     source_name: str = Field(min_length=1)
     external_id: str | None = Field(default=None, min_length=1)
     url: AnyHttpUrl | None = None
@@ -263,6 +267,136 @@ class RawItem(BaseModel):
                 str(self.url or ""),
             ),
         )
+        return self
+
+
+class CandidateSpan(BaseModel):
+    """One independently processable candidate from a raw observation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    parent_observation_id: str = Field(min_length=1)
+    candidate_span_id: str = ""
+    ordinal: int = Field(ge=0)
+    text: str = Field(min_length=1)
+    raw_item: RawItem
+    source_evidence: tuple[str, ...] = ()
+    context_evidence: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_span(self) -> CandidateSpan:
+        text = self.text.strip()
+        if self.parent_observation_id != self.raw_item.stable_id:
+            raise ValueError("parent_observation_id must match raw_item.stable_id")
+        object.__setattr__(self, "text", text)
+        object.__setattr__(self, "source_evidence", _normalized_tuple(self.source_evidence))
+        object.__setattr__(self, "context_evidence", _normalized_tuple(self.context_evidence))
+        object.__setattr__(
+            self,
+            "candidate_span_id",
+            _stable_hash(self.parent_observation_id, str(self.ordinal), text),
+        )
+        return self
+
+    def materialize_raw_item(self) -> RawItem:
+        """Create an isolated raw candidate for legacy downstream stages."""
+        metadata = dict(self.raw_item.metadata)
+        metadata.update(
+            {
+                "parent_observation_id": self.parent_observation_id,
+                "candidate_span_id": self.candidate_span_id,
+                "candidate_span_ordinal": self.ordinal,
+                "candidate_span_source_evidence": self.source_evidence,
+                "candidate_span_context_evidence": self.context_evidence,
+            }
+        )
+        # Keep the source record identity stable for lineage and audit. The
+        # candidate ordinal is already represented by metadata and the
+        # materialized content produces a distinct stable_id for dedup.
+        base_id = self.raw_item.external_id or self.raw_item.stable_id
+        external_id = f"{base_id}#{self.ordinal}"
+        return RawItem(
+            schema_version=self.raw_item.schema_version,
+            source_kind=self.raw_item.source_kind,
+            source_identity=self.raw_item.source_identity,
+            source_name=self.raw_item.source_name,
+            external_id=external_id,
+            url=self.raw_item.url,
+            text=self.text,
+            fetched_at=self.raw_item.fetched_at,
+            created_at=self.raw_item.created_at,
+            metadata=metadata,
+        )
+
+
+class EvidenceProvenance(StrEnum):
+    SOURCE = "source"
+    PARSER = "parser"
+    INFERRED = "inferred"
+    CLASSIFIER = "classifier"
+    LLM = "llm"
+    EXTERNAL = "external"
+    HUMAN = "human"
+
+
+class PageKind(StrEnum):
+    DETAIL = "detail"
+    LISTING = "listing"
+    UNKNOWN = "unknown"
+
+
+class StructuredSourceEvidence(BaseModel):
+    """Field-level source/parser evidence; not a jobness verdict."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    field_name: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+    evidence_span: str = Field(min_length=1)
+    page_kind: PageKind = PageKind.UNKNOWN
+    parser_version: str = Field(default="unknown", min_length=1)
+    provenance: EvidenceProvenance = EvidenceProvenance.SOURCE
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class JobnessDecision(BaseModel):
+    """Independent decision artifact for vacancy intent and uncertainty."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    job_probability: float = Field(ge=0.0, le=1.0)
+    hiring_intent: float | None = Field(default=None, ge=0.0, le=1.0)
+    post_type_distribution: dict[PostType, float] = Field(default_factory=dict)
+    evidence: tuple[StructuredSourceEvidence, ...] = ()
+    uncertainty: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_distribution(self) -> JobnessDecision:
+        for score in self.post_type_distribution.values():
+            if not 0.0 <= score <= 1.0:
+                raise ValueError("post_type_distribution values must be between 0 and 1")
+        return self
+
+
+class OntologySnapshot(BaseModel):
+    """Immutable canonical ontology view consumed by one tenant/profile run."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tenant_id: str = Field(min_length=1)
+    profile_id: str = Field(min_length=1)
+    payload_json: str = Field(min_length=2)
+    version: str = ""
+
+    @model_validator(mode="after")
+    def validate_snapshot(self) -> OntologySnapshot:
+        try:
+            parsed = json.loads(self.payload_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("payload_json must be valid JSON") from exc
+        canonical = json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        object.__setattr__(self, "payload_json", canonical)
+        object.__setattr__(self, "version", sha256(canonical.encode()).hexdigest())
         return self
 
 
@@ -582,6 +716,9 @@ class JobRecord(Job):
     risk_score: float | None = Field(default=None, ge=0.0, le=1.0)
     risk_level: RiskLevel | None = None
 
+    # Presentable text (filled by PresentableTextNode, point ③ per ADR-019)
+    presentable: Any | None = None  # PresentableJob from domain/presentable.py
+
     # Aggregation block on record level
     aggregate_source_count: int = Field(default=1, ge=1)
     aggregation_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -604,8 +741,6 @@ class JobRecord(Job):
             best = max(self.profile_scores, key=lambda score: score.final_score)
             object.__setattr__(self, "best_profile_id", best.profile_id)
             object.__setattr__(self, "best_score", best.final_score)
-            if self.routing_decision is None:
-                object.__setattr__(self, "routing_decision", best.decision)
         if self.extraction_completeness is None:
             completeness = 1.0
             for value in (self.title, self.company, self.location):

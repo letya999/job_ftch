@@ -1,117 +1,77 @@
-# SourceSpec (Конфигурация источника)
+---
+title: "SourceSpec"
+description: "**Слой**: `domain`"
+updated: 2026-07-24
+---
+# SourceSpec
 
-## Что это такое
+**Слой**: `domain`
+**Файл**: `job_ftch/domain/source_spec.py`
 
-`SourceSpec` (Спецификация источника) — это чистая
-конфигурация источника данных, структура, описывающая
-**что** читать, **откуда** читать и **в каком режиме**.
-Важнейшая концепция заключается в том, что `SourceSpec` —
-это *только данные* (Data Transfer Object, DTO).
-В нем нет ни строчки бизнес-логики, ни сетевых запросов.
-Он предназначен для сериализации и десериализации (чаще
-всего в YAML или JSON).
+## Что это
 
-Из `SourceSpec` фабрика в реестре плагинов собирает
-конкретный исполняемый объект `Source`.
+`SourceSpec` — discriminated union конфигураций источников.
 
-## Зачем это нужно и ПОЧЕМУ так устроено
+Это безопасное описание того, что и как читать. Секреты сюда не кладутся;
+секреты разрешаются отдельно через `AuthProvider`.
 
-Если бы мы настраивали источники прямо в коде, мы бы не
-смогли легко менять их в рантайме.
-Использование DTO-объектов `SourceSpec` позволяет:
-1. Хранить конфигурацию всех источников в простых читаемых `YAML` файлах.
+`SourceSpec` не является результатом source intelligence. Он описывает locator
+и базовые параметры, а `SourceAssessmentAdapter` отдельно сохраняет runtime
+знание о capabilities, incremental strategy и bootstrap plan.
 
-2. Безопасно сохранять их в Git-репозиторий.
+## Общая база
 
-3. Динамически передавать спецификации по API (FastAPI) или через Telegram-бота.
+Все source specs наследуют `BaseSourceSpec`, где уже есть:
 
-4. Валидировать конфигурации при старте приложения с помощью Pydantic.
+- `interval_seconds`
+- `rate_limit_min_interval_seconds`
+- `rate_limit_backoff_multiplier`
+- `ingest_mode`
+- `bypass`
+- `bypass_config`
 
-## Как это работает изнутри (Discriminated Union)
+## Текущие builtin spec types
 
-`SourceSpec` — это не один монолитный класс.
-Это паттерн "Discriminated Union" (объединение с
-дискриминатором) в терминах Pydantic:
+- `telegram_channel`
+- `telegram_group`
+- `telegram_comments`
+- `declarative_html`
+- `career_site`
+- `local_fixture`
+- `rest_api`
+- `browser`
+- `rss_feed`
+- `telegram_realtime`
+- `lever`
+- `webhook`
+- `websocket`
 
-```python SourceSpec = TelegramChannelSpec | TelegramGroupSpec | CareerSiteSpec | LocalFixtureSpec | ...
-```
+## Особо важный пример: CareerSiteSpec
 
-Дискриминатором выступает поле `type`.
-Когда Pydantic читает YAML, он смотрит на значение поля
-`type` и решает, в какой конкретный класс десериализовать
-блок.
-Это позволяет хранить абсолютно разные по структуре
-настройки в одном плоском списке в YAML.
+`CareerSiteSpec` содержит поля для многошагового scraping path:
 
-## Примеры конкретных типов
+- `url`
+- `limit`
+- `source_name`
+- `monitor`
+- `monitor_config`
+- `scraper`
+- `scraper_config`
+- `scraper_fallback`
+- `detail_limit`
+- `url_filter`
+- `url_transform`
 
-### 1. TelegramChannelSpec Используется для парсинга Telegram-каналов (MTProto).
-```yaml type: telegram_channel entity: ai_jobs_channel        # @username канала или t.me/link limit: 100                     # Ограничение: сколько последних постов обработать auth_source_id: tg_account_1   # Ключ для AuthProvider (НЕ пароль!)
-```
+## Практические правила
 
-### 2. TelegramGroupSpec Для парсинга групп (чатов).
-Поля отличаются от канала.
-```yaml type: telegram_group entity: ai_jobs_ru limit: 50 include_comments: false        # Отличие от канала: флаг обработки комментариев треда auth_source_id: tg_account_1
-```
+- `SourceSpec` должен быть безопасен для хранения в git
+- `type` обязан однозначно выбирать factory
+- новые source types добавляются через registry, не через central switch
+- новый `SourceSpec` не добавляется только ради assessment; assessment живёт
+  рядом с ingest, а не внутри source config
 
-### 3. CareerSiteSpec Для выкачивания карьерных порталов корпораций.
-```yaml type: career_site url: https://company.com/jobs limit: 20 monitor: auto                  # Режим мониторинга: auto | api | rss | scraper bypass: curl_impersonate       # Стратегия обхода антибот-защит
-```
+## Связанные документы
 
-**Как работает автодетекция (`monitor: auto`)**:
-Если в `CareerSiteSpec` указан монитор `auto` (по
-умолчанию), `CareerSiteSource` ведет себя умно.
-Он не начинает сразу с тяжелого парсинга HTML.
-Сначала он проверяет, работает ли этот сайт на известном
-движке API (Greenhouse, Lever, Workday).
-Если да — использует API.
-Если нет — ищет скрытую RSS-ленту.
-И только если ничего не найдено, включает Full HTML Scraper.
-Успешный выбор кэшируется в `Store`.
-
-### 4. LocalFixtureSpec Особый тип, используемый только для тестов и локальной разработки.
-```yaml type: local_fixture path: fixtures/test_jobs.json  # Путь к локальному JSON файлу с предзаписанными RawItem
-```
-
-## Безопасность и AuthProvider
-
-Самое главное правило `SourceSpec`: **YAML конфигурация
-безопасна**.
-Она никогда не содержит паролей, API-ключей, токенов сессий
-Telegram. 
-
-Поле `auth_source_id`, которое вы видите в конфигах — это
-просто строковый идентификатор ("указатель").
-Когда спецификация превращается в реальный `Source`, этот
-идентификатор передается в [AuthProvider](auth_provider.md),
-который уже безопасно извлекает настоящие секреты (из
-переменных окружения или Vault).
-Благодаря этому, файлы `.yaml` можно публиковать где угодно.
-
-## Типичные ошибки и что нельзя делать
-
-1. **Добавлять бизнес-логику (методы fetch) в классы *Spec.**
-
-Спецификация должна наследоваться от `pydantic.BaseModel` и
-содержать только поля.
-Логика сетевых вызовов должна жить в классах `Source`.
-
-2. **Забывать указывать поле `type` в YAML.**
-
-Без явного указания `type: telegram_channel` парсер
-(Pydantic) упадет с ошибкой, так как не будет знать, какую
-схему применить для валидации полей.
-
-3. **Хардкодить секретные токены.**
-
-Никогда не добавляйте поле `bot_token` прямо в схему
-спецификации.
-Используйте `auth_source_id`.
-
-## Связи с другими сущностями
-
-- [Source](source.md) — `SourceSpec` является конфигурацией (инструкцией) для создания фабрикой объекта `Source`.
-
-- [AuthProvider](auth_provider.md) — разрешает поле `auth_source_id` в реальные ключи доступа.
-
-- [TenantConfig](tenant_config.md) — содержит список `SourceSpec` для каждого конкретного клиента/тенанта.
+- [Source](source.md)
+- [AuthProvider](auth_provider.md)
+- [TenantConfig](tenant_config.md)

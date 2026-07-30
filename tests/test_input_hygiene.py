@@ -102,7 +102,7 @@ async def test_sanitize_node_rejects_empty_source_name_after_normalization() -> 
 
 
 @pytest.mark.asyncio
-async def test_sanitize_node_rejects_overlong_text() -> None:
+async def test_sanitize_node_truncates_overlong_text() -> None:
     node = SanitizeNode(max_text_length=12)
     malformed = RawItem.model_construct(
         stable_id="",
@@ -114,10 +114,9 @@ async def test_sanitize_node_rejects_overlong_text() -> None:
         metadata={},
     )
 
-    with pytest.raises(RawItemRejected) as exc_info:
-        await node.process(malformed)
-
-    assert exc_info.value.reason == RawItemRejectionReason.TEXT_TOO_LONG
+    result = await node.process(malformed)
+    assert result is not None
+    assert len(result.text) <= 12
 
 
 @pytest.mark.asyncio
@@ -242,16 +241,16 @@ async def test_pipeline_quarantines_source_fetch_failures(tmp_path: Path) -> Non
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "length,should_pass",
+    "length,expected_len",
     [
-        (11, True),  # length - 1
-        (12, True),  # exactly at limit
-        (13, False),  # length + 1
+        (11, 11),  # under limit: unchanged
+        (12, 12),  # exactly at limit: unchanged
+        (13, 12),  # over limit: truncated to max_text_length
     ],
 )
 @pytest.mark.asyncio
-async def test_sanitize_node_text_length_boundary(length: int, should_pass: bool) -> None:
-    """SanitizeNode truncates text at exactly max_text_length boundary."""
+async def test_sanitize_node_text_length_boundary(length: int, expected_len: int) -> None:
+    """SanitizeNode truncates overlong text instead of rejecting it."""
     node = SanitizeNode(max_text_length=12)
     item = RawItem.model_construct(
         stable_id="",
@@ -262,13 +261,9 @@ async def test_sanitize_node_text_length_boundary(length: int, should_pass: bool
         text="x" * length,
         metadata={},
     )
-    if should_pass:
-        result = await node.process(item)
-        assert result is not None
-    else:
-        with pytest.raises(RawItemRejected) as exc:
-            await node.process(item)
-        assert exc.value.reason == RawItemRejectionReason.TEXT_TOO_LONG
+    result = await node.process(item)
+    assert result is not None
+    assert len(result.text) <= expected_len
 
 
 @pytest.mark.unit

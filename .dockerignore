@@ -3,6 +3,10 @@
 .git
 .github
 .venv
+.venv-*
+.venv-test-core
+.serena
+.hypothesis
 .pytest_cache
 .mypy_cache
 .ruff_cache
@@ -17,3 +21,21 @@ __pycache__
 dist
 build
 artifacts
+results
+scratch
+.benchmarks
+.antigravity-delegations
+
+# Documentation and planning: never read at runtime. fixtures/ is NOT listed here
+# because the runtime loads the derived ontology and generated prompt from it.
+docs
+plans
+
+# Local tooling and report output
+.claude
+.cursorrules
+.repo-safety
+.coverage
+coverage.xml
+*.out
+*.log

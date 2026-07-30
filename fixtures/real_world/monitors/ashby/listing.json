@@ -1,0 +1,22 @@
+{
+  "jobs": [
+    {
+      "id": "ashby-1",
+      "jobUrl": "https://jobs.ashbyhq.com/example/ashby-1",
+      "title": "Machine Learning Engineer",
+      "descriptionHtml": "<p>Build model infrastructure.</p>",
+      "location": "Remote",
+      "secondaryLocations": ["Berlin"],
+      "employmentType": "FullTime",
+      "workplaceType": "Remote",
+      "publishedAt": "2026-07-01T10:00:00Z",
+      "department": "Engineering",
+      "compensationTierSummary": "tier-1"
+    }
+  ],
+  "compensation": {
+    "compensationTierSummary": [
+      {"id": "tier-1", "min": 120000, "max": 160000, "currency": "USD", "interval": "year"}
+    ]
+  }
+}

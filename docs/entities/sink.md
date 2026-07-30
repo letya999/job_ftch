@@ -1,145 +1,60 @@
-# Sink (Получатель данных)
+---
+title: "Sink"
+description: "`Sink` — финальная точка назначения для pipeline output."
+updated: 2026-07-24
+---
+# Sink
 
-## Что это такое
+## Что это
 
-Sink — это финальная точка назначения в пайплайне.
-Он получает полностью обработанные и валидированные объекты
-(обычно это готовые `JobRecord`) и отправляет их во внешний
-мир.
-Это может быть запись в файл, сохранение в базу данных,
-отправка сообщения в Telegram или webhook.
-Пайплайн поддерживает использование нескольких получателей
-одновременно.
+`Sink` — финальная точка назначения для pipeline output.
 
-## Зачем это нужно и ПОЧЕМУ так устроено
-
-Пайплайн не должен быть жестко привязан к одному способу
-вывода данных.
-В локальной разработке вы хотите сохранять результат в
-JSON-файл, в продакшене — писать в базу данных, а для
-уведомлений — отправлять в мессенджер.
-Интерфейс Sink изолирует эту логику: пайплайн просто
-передаёт финальный элемент методу `emit()`, не заботясь о
-том, куда именно он уйдёт.
-
-Ключевое дизайн-решение — атомарная запись по одному
-элементу.
-Вместо того чтобы собирать все тысячи вакансий в огромный
-массив и сохранять в самом конце (что привело бы к
-перерасходу памяти), Sink получает и обрабатывает (или
-буферизирует) элементы поштучно (streaming).
-
-## Как это работает изнутри
-
-В проекте используется простой Protocol из `contracts.py`:
-
-```python from typing import Protocol, runtime_checkable
-
-@runtime_checkable class Sink(Protocol[SinkItem]):
-    async def emit(self, item: SinkItem) -> None:
-        """Сохранить или перенаправить один элемент."""
-```
-
-Для систем, которые эффективнее работают с пачками данных
-(батчами), существует расширение:
+Базовый контракт:
 
 ```python
-@runtime_checkable class FlushableSink(Sink[SinkItem], Protocol[SinkItem]):
-    async def flush(self) -> None:
-        """Записать всё накопленное в буфере."""
+async def emit(self, item: T) -> None
 ```
 
-Если Sink реализует `FlushableSink`, пайплайн гарантированно
-вызовет метод `flush()` один раз в самом конце работы, после
-того как все источники завершат отдачу данных.
+На практике чаще всего `T = JobRecord`, но обобщение сохранено.
 
-## Встроенные реализации
+## Что считается текущим sink stack
 
-В проекте реализован богатый набор готовых получателей:
+В repo есть:
 
-- `JsonFileSink`: Атомарно дописывает каждый новый `JobRecord` в конец файла в формате JSONL. Это позволяет работать с огромными объемами без чтения всего файла в память.
+- `JsonFileSink`
+- `NullSink`
+- `FanOutSink`
+- `BufferingSink`
+- `CountedSink`
+- `FailureTolerantSink`
+- routing-related sink composition
+- Telegram posting path через adapter/backend integration
 
-- `TelegramPostingSink`: Публикует красиво отформатированное сообщение о вакансии в Telegram-канал, используя библиотеку aiogram.
+## Важное поведение
 
-- `RoutingSink`: Маршрутизатор. Направляет элементы в разные Sink-и на основе условий. Например, высокорелевантные вакансии — в канал А, остальные — в канал Б (для ручного ревью).
+- Sink получает уже финальный item после routing.
+- `FlushableSink.flush()` вызывается оркестратором в конце run.
+- Sinks не должны переписывать весь output file на каждый `emit`.
 
-- `FanOutSink`: Дубликатор. Берет один элемент и параллельно отправляет его во все дочерние Sink-и (например, и в файл, и в базу).
+## Side channels
 
-- `BufferingSink`: Накапливает элементы в памяти и отправляет их пачками (батчами) дальше, уменьшая количество сетевых вызовов или транзакций в БД.
+Кроме main sink существуют отдельные каналы:
 
-- `CountedSink`: Обертка для метрик, считает количество успешно отправленных элементов.
+- quarantine sink
+- rejected sink
+- review sink
 
-- `FailureTolerantSink`: Защитная обертка. Если `emit` упал с исключением (например, API Telegram недоступно), она логирует ошибку, но не останавливает весь пайплайн.
+Это важная часть текущей runtime-модели: не всё, что не попало в main output,
+теряется молча.
 
-Пример использования FanOut и Routing:
+## Что не делать
 
-```python from job_ftch import PipelineBuilder from job_ftch.sinks import FanOutSink, JsonFileSink, TelegramPostingSink, RoutingSink
+- не принимать `JobDraft` как публичный durable output
+- не завязывать sink на конкретный source type
+- не тащить внутрь sink бизнес-решения про релевантность
 
-pipeline = (
-    PipelineBuilder()
-    # ... конфигурация источников и узлов ...
-    .sink(FanOutSink([
-        JsonFileSink("artifacts/all_jobs.jsonl"),
-        RoutingSink(
-            condition=lambda job: job.relevance_score > 0.9,
-            if_true=TelegramPostingSink(channel="@high_priority_jobs"),
-            if_false=TelegramPostingSink(channel="@review_jobs")
-        ),
-    ]))
-    .build()
-)
-```
+## Связанные документы
 
-## Как написать свою реализацию
-
-Создать свой Sink очень просто.
-Допустим, мы хотим отправлять данные в кастомный Webhook:
-
-```python import httpx from job_ftch.application.contracts import Sink from job_ftch.domain.models import JobRecord
-
-class WebhookSink(Sink[JobRecord]):
-    def __init__(self, url: str):
-        self.url = url
-        self.client = httpx.AsyncClient()
-
-    async def emit(self, item: JobRecord) -> None:
-        # В реальном коде здесь стоит добавить обработку ошибок и retry
-        response = await self.client.post(self.url, json=item.model_dump())
-        response.raise_for_status()
-```
-
-Если нужно закрывать ресурсы, стоит использовать контекстные
-менеджеры или реализовать методы очистки.
-
-## Типичные ошибки и что нельзя делать
-
-1. **Перезапись всего файла на каждом emit.**
-
-Если вы пишете в файл, используйте режим добавления (`"a"`).
-Ни в коем случае не считывайте весь JSON в массив, не
-добавляйте элемент и не записывайте обратно.
-Это O(N²) алгоритм, который убьет диск и память на больших
-объемах.
-Используйте JSONL (один JSON объект на строку).
-
-2. **Падение пайплайна из-за сетевой ошибки.**
-
-Сетевые вызовы нестабильны.
-Если ваш кастомный Sink может упасть (timeout, 502),
-пайплайн прервется.
-Используйте встроенный `FailureTolerantSink` в качестве
-обертки или обрабатывайте `Exception` прямо в методе `emit`.
-
-3. **Блокирующие операции.**
-
-Sink работает внутри асинхронного цикла событий (asyncio).
-Вызов `requests.post()` вместо `httpx.post()` полностью
-заблокирует работу всего приложения.
-
-## Связи с другими сущностями
-
-- [PipelineBuilder](pipeline_builder.md) — место, где вы регистрируете Sink-и.
-
-- [JobRecord](job_record.md) — финальный формат данных, который чаще всего поступает в Sink.
-
-- [Backend](backend.md) — в продакшене Sink часто просто перекладывает данные в `JobPersistenceBackend`.
+- [JobRecord](job_record.md)
+- [RunSummary](run_summary.md)
+- [PipelineBuilder](pipeline_builder.md)

@@ -12,10 +12,10 @@ from urllib.parse import urlparse
 
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
+from job_ftch.infrastructure.sources.embedded_state_utils import extract_next_data, resolve_path
 from job_ftch.infrastructure.sources.monitors.nextdata import discover as nextdata_discover
 from job_ftch.infrastructure.sources.monitors.shared import fetch_page_text
-from job_ftch.infrastructure.sources.nextdata_utils import extract_next_data, resolve_path
 
 if TYPE_CHECKING:
     import httpx
@@ -105,4 +105,15 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     return {"slug": slug, "jobs": total}
 
 
-register_monitor("join", discover, cost=40, rich=False, can_handle=can_handle)
+register_monitor(
+    "join",
+    discover,
+    cost=40,
+    rich=False,
+    can_handle=can_handle,
+    assessment_hint=known_board_assessment_hint(
+        "monitor_shape",
+        "join",
+        url_patterns=(r"join\.com/companies/[\w-]+",),
+    ),
+)

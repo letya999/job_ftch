@@ -1,0 +1,278 @@
+parsers:
+  - name: arc
+    domain_pattern: "^https?://(?:www\\.)?arc\\.dev/"
+    has_custom_parse: true
+    supports_discover: false
+    parser_kind: "arc"
+    render: false
+  - name: avito
+    domain_pattern: "^https?://(?:[a-z0-9-]+\\.)?avito\\.ru(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
+  - name: btsdigital
+    domain_pattern: "^https?://(?:www\\.)?btsdigital\\.kz(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
+  - name: cord
+    domain_pattern: "^https?://(?:www\\.)?cord\\.co/"
+    has_custom_parse: true
+    supports_discover: false
+    parser_kind: "cord"
+    render: false
+  - name: cypruswork
+    domain_pattern: "(?:www\\.)?cypruswork\\.com(?:/|$)"
+    has_custom_parse: true
+    supports_discover: true
+    parser_kind: "cypruswork"
+    include_if_detail_page: true
+    detail_pattern: "/job/\\d+/[a-z0-9\\-]+/?$"
+    limit: 50
+  - name: djinni
+    domain_pattern: "^https?://djinni\\.co/jobs(?:/|$)"
+    has_custom_parse: false
+    supports_discover: false
+    runtime_defaults:
+      url_filter: "djinni\\.co/jobs/\\d+-[a-z0-9-]+/?$"
+      include_if_detail_page: false
+  - name: dou_jobs
+    domain_pattern: "^https?://jobs\\.dou\\.ua(?:/|$)"
+    has_custom_parse: false
+    supports_discover: false
+    runtime_defaults:
+      url_filter: "jobs\\.dou\\.ua/companies/[a-z0-9-]+/vacancies/\\d+/?$"
+      include_if_detail_page: false
+  - name: euremotejobs
+    domain_pattern: "^https?://(?:www\\.)?euremotejobs\\.com(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
+  - name: habr_career
+    domain_pattern: "^https?://career\\.habr\\.com/"
+    has_custom_parse: true
+    supports_discover: true
+    url_filter: "career\\.habr\\.com/vacancies/\\d{5,}"
+    detail_pattern: "((?:https?://career\\.habr\\.com)?/vacancies/\\d+(?:[^\\\"' <]*)?)"
+    limit: 50
+    browser:
+      scroll_loops: 8
+      scroll_pause_ms: 500
+      scroll_px: 2500
+      stale_rounds: 3
+  - name: hh
+    domain_pattern: "^https?://(?:(?:[a-z0-9-]+\\.)?hh\\.(?:ru|kz|uz|by)|hh1\\.az|(?:[a-z0-9-]+\\.)?headhunter\\.kg)(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    url_filter: "(?:[a-z0-9-]+\\.)?(?:hh\\.(?:ru|kz|uz|by)|hh1\\.az|headhunter\\.kg|rabota\\.by)/vacancy/\\d+"
+    detail_pattern: "https?://(?:[a-z0-9-]+\\.)?(?:hh\\.(?:ru|kz|uz|by)|hh1\\.az|headhunter\\.kg|rabota\\.by)/vacancy/(\\d+)"
+    limit: 50
+    extra:
+      listing_page_size: 20
+      listing_page_multiplier: 3
+      max_listing_pages: 5
+    browser:
+      wait: "domcontentloaded"
+      scroll_loops: 6
+      scroll_pause_ms: 500
+      scroll_px: 2500
+      stale_rounds: 2
+  - name: geekjob
+    domain_pattern: "(?:www\\.)?geekjob\\.ru(?:/|$)"
+    has_custom_parse: true
+    supports_discover: true
+    url_filter: "geekjob\\.ru/(?:vacancy/[a-z0-9-]+/?|jobs/\\d+/?$)"
+    detail_pattern: "https?://(?:www\\.)?geekjob\\.ru/(?:vacancy/[a-z0-9-]+/?|jobs/\\d+/?)(?:\\?[^\\\"' <]*)?"
+    limit: 50
+    browser:
+      scroll_loops: 8
+      scroll_pause_ms: 500
+      scroll_px: 2500
+      stale_rounds: 3
+    extra:
+      listing_page_size: 20
+      max_listing_pages: 5
+  - name: hireme
+    domain_pattern: "^https?://(?:www\\.)?hireme\\.kz(?:/|$)"
+    has_custom_parse: true
+    supports_discover: true
+    include_if_detail_page: true
+    limit: 50
+  - name: hirify
+    domain_pattern: "^https?://(?:www\\.)?hirify\\.me(?:/|$)"
+    has_custom_parse: true
+    supports_discover: true
+    include_if_detail_page: true
+  - name: indeed
+    domain_pattern: "^https?://(?:www\\.)?indeed\\.com(?:/|$)"
+    has_custom_parse: true
+    supports_discover: true
+    render: true
+    wait: "domcontentloaded"
+    include_if_detail_page: true
+    detail_pattern: "/viewjob\\?jk=[a-f0-9]{8,}"
+    limit: 50
+    browser:
+      scroll_loops: 8
+      scroll_pause_ms: 500
+    timeout_ms: 45000
+    extra:
+      job_key_pattern: "[?&]jk=([a-f0-9]{8,})"
+  - name: jobs_ge
+    domain_pattern: "^https?://(?:www\\.)?jobs\\.ge(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
+  - name: site_justjoin
+    domain_pattern: "justjoin\\.it"
+    has_custom_parse: true
+    supports_discover: false
+    parser_kind: "site_justjoin"
+    url_filter:
+      include:
+        - "/job-offer/"
+      exclude:
+        - "/job-offers/"
+    api_url: "https://api.justjoin.it/v2/user-panel/offers"
+    limit: 50
+    headers:
+      Version: "2"
+      Accept: "application/json, text/plain, */*"
+      Origin: "https://justjoin.it"
+      Referer: "https://justjoin.it/"
+  - name: kaspersky_career
+    domain_pattern: "^https?://careers\\.kaspersky\\.ru(?:/|$)"
+    has_custom_parse: true
+    supports_discover: true
+    include_if_detail_page: true
+    detail_pattern: "/vacancy/\\d+(?:/|$)"
+    limit: 50
+  - name: kaspi
+    domain_pattern: "(?:www\\.)?job\\.kaspi\\.kz(?:/|$)"
+    has_custom_parse: true
+    supports_discover: true
+    parser_kind: "kaspi"
+    render: true
+    wait: "networkidle"
+    include_if_detail_page: false
+    detail_pattern: "/vacancy/[^/]+"
+    limit: 50
+    browser:
+      scroll_loops: 5
+      scroll_pause_ms: 500
+  - name: kolesa_career
+    domain_pattern: "^https?://kolesa\\.group/career/job(?:[/?#]|$)"
+    has_custom_parse: true
+    supports_discover: true
+    include_if_detail_page: true
+    detail_pattern: "/career/job/[a-z0-9-]+-\\d+(?:/|$)"
+    limit: 50
+  - name: linkedin
+    domain_pattern: "^(?:https?://)?(?:(?:[a-z]{2,3}|www)\\.)?linkedin\\.com(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    parser_kind: "linkedin"
+    url_filter: "linkedin\\.com/jobs/view/\\d+"
+    include_if_detail_page: true
+    detail_pattern: "/jobs/view/\\d+/?"
+    limit: 50
+  - name: ozon_tech
+    domain_pattern: "^https?://ozon\\.tech/vacancies"
+    has_custom_parse: false
+    supports_discover: false
+    runtime_defaults:
+      url_filter: "ozon\\.tech/vacancies/[a-f0-9\\-]+-[a-z0-9-]+/?$"
+      render: true
+      wait: "domcontentloaded"
+      include_if_detail_page: false
+  - name: rabota_by
+    domain_pattern: "^https?://([a-z0-9-]+\\.)?rabota\\.by(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    url_filter: "(?:[a-z0-9-]+\\.)?rabota\\.by/vacancy/\\d+"
+  - name: raiffeisen
+    domain_pattern: "^https?://(?:www\\.)?career[._]raiffeisen\\.ru(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: true
+    wait: "networkidle"
+    include_if_detail_page: false
+  - name: sber
+    domain_pattern: "(?:www\\.)?rabota\\.sber\\.ru(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    parser_kind: "sber"
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
+    detail_pattern: "/search/[a-z0-9]+(?:-[a-z0-9]+)*-\\d+/"
+    limit: 50
+  - name: superjob_kg
+    domain_pattern: "(?:www\\.)?superjob\\.kg(?:/|$)"
+    has_custom_parse: true
+    supports_discover: true
+    parser_kind: "superjob_kg"
+    include_if_detail_page: true
+    detail_pattern: "/job/show/\\d+/?$"
+    limit: 50
+  - name: tbank_career
+    domain_pattern: "^https?://(?:www\\.)?tbank\\.ru/career"
+    has_custom_parse: true
+    supports_discover: true
+    url_filter: "tbank\\.ru/career/(?:it/)?vacanc(?:y|ies)/(?:[a-z0-9_-]+/)+[a-z0-9_-]+/?$"
+    include_if_detail_page: false
+    expand_links:
+      - "tbank\\.ru/career/it(?:/|$)"
+      - "tbank\\.ru/career/it/ml(?:/|$)"
+      - "tbank\\.ru/career/vacancies/it(?:/|\\?|$)"
+    detail_pattern: "https?://(?:www\\.)?tbank\\.ru/career/(?:it/)?vacanc(?:y|ies)/(?:[a-z0-9_-]+/)+[a-z0-9_-]+/?$"
+    listing_pattern: "/career/(?:vacancies/(?:all|service|back-office|it)|service/|blog(?:/|$)|technologies(?:/|$))"
+    limit: 50
+    browser:
+      scroll_loops: 5
+      scroll_pause_ms: 500
+  - name: vk_team
+    domain_pattern: "^https?://team\\.vk\\.company/vacancy/"
+    has_custom_parse: true
+    supports_discover: true
+    url_filter: "team\\.vk\\.company/vacancy/\\d+/?$"
+    include_if_detail_page: false
+    detail_pattern: "^https?://team\\.vk\\.company/vacancy/\\d+/?$"
+    limit: 50
+  - name: weblancer
+    domain_pattern: "^https?://(?:www\\.)?weblancer\\.net(?:/|$)"
+    has_custom_parse: true
+    supports_discover: true
+    include_if_detail_page: true
+    detail_pattern: "/freelance/[^/]+/[^/]+-\\d+/?$"
+    limit: 50
+  - name: workable
+    domain_pattern: "^https?://apply\\.workable\\.com(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: true
+    wait: "networkidle"
+    include_if_detail_page: false
+  - name: yandex_jobs
+    domain_pattern: "yandex\\.ru/jobs"
+    has_custom_parse: true
+    supports_discover: false
+    parser_kind: "yandex_jobs"
+    render: true
+    wait: "domcontentloaded"
+    api_path: "/jobs/api/publications"
+    limit: 50
+    browser:
+      scroll_loops: 120
+      scroll_pause_ms: 1200
+      scroll_px: 3000
+      stale_rounds: 4
+    detail_timeout_ms: 45000

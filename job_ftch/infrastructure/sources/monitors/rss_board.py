@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import defusedxml.ElementTree as ET
 import structlog
 
-from job_ftch.application.registry import register_monitor
+from job_ftch.application.registry import known_board_assessment_hint, register_monitor
 from job_ftch.domain.site_models import (
     DiscoveredPostingPayload,
     MonitorResult,
@@ -237,4 +237,23 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     return None
 
 
-register_monitor("rss_board", discover, cost=40, rich=True, can_handle=can_handle)
+register_monitor(
+    "rss_board",
+    discover,
+    cost=40,
+    rich=True,
+    can_handle=can_handle,
+    assessment_hint=known_board_assessment_hint(
+        "known_monitor",
+        "rss_board",
+        has_publication_time=True,
+        has_update_time=True,
+        has_stable_id=True,
+        has_rss_or_sitemap_dates=True,
+        can_detect_freshness_without_snapshot=True,
+        can_filter_since_yesterday=True,
+        item_level_dates=True,
+        requires_full_snapshot=False,
+        rationale="RSS-backed job boards expose per-item pubDate timestamps.",
+    ),
+)

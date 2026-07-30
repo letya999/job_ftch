@@ -1,168 +1,67 @@
-# Source (Источник данных)
+---
+title: "Source"
+description: "`Source` — это поставщик входящих элементов для пайплайна."
+updated: 2026-07-24
+---
+# Source
 
-## Что это такое
+## Что это
 
-Source — это фундаментальная сущность проекта, любой объект,
-который умеет поставлять данные в пайплайн.
-Формально это абстракция (Python Protocol) с единственным
-методом `fetch()`, который возвращает асинхронный итератор
-элементов.
-В проекте уже есть несколько встроенных реализаций, таких
-как чтение из Telegram или парсинг карьерных сайтов, но
-архитектура позволяет легко добавлять любые кастомные
-источники.
+`Source` — это поставщик входящих элементов для пайплайна.
 
-## Зачем это нужно и ПОЧЕМУ так устроено
+Формально это protocol:
 
-Вся система построена на принципе "вытягивания" (pull model)
-данных из внешних ресурсов.
-Нам нужна единая точка входа для пайплайна, чтобы он не знал
-деталей работы с Telegram API, HTTP-запросами или локальными
-файлами.
-Пайплайну нужен только поток сырых данных (`RawItem`),
-который он будет обрабатывать дальше.
-Source скрывает всю эту сложность.
-
-Дизайн-решение использовать Protocol, а не наследование от
-базового класса, позволяет делать систему гибкой и легко
-тестируемой.
-Итератор позволяет обрабатывать данные по мере их
-поступления (streaming), не загружая весь ответ в память.
-
-## Как это работает изнутри
-
-Protocol `Source` определён в `contracts.py`:
-
-```python from typing import Protocol, runtime_checkable from collections.abc import AsyncIterator
-
-@runtime_checkable class Source(Protocol[SourceItem]):
-    def fetch(self) -> AsyncIterator[SourceItem | QuarantinedRawItem]:
-        ...
+```python
+def fetch(self) -> AsyncIterator[SourceItem | QuarantinedRawItem]
 ```
 
-Когда пайплайн запускается, он вызывает метод `fetch()` у
-каждого зарегистрированного источника.
-Итератор возвращает объекты.
+Pipeline не должен знать, откуда пришли данные: из Telegram, RSS, API,
+career site, fixture или runtime overlay.
 
-Ключевая механика инкрементального поллинга реализуется с
-помощью "курсора" (cursor) и `Store`. `Store` сохраняет
-`last_seen_id` или `last_message_id` для конкретного
-источника.
-При следующем запуске Source читает это значение из `Store`
-и запрашивает у внешнего API только те записи, которые
-появились после этого ID.
-Это делает систему идемпотентной: вы можете запускать
-пайплайн каждую минуту, и он не будет дублировать данные.
+Pre-ingest classification выполняется отдельно через
+`SourceAssessmentAdapter`. Source остаётся контрактом получения `RawItem`, а не
+местом выбора bootstrap, coverage или freshness strategy.
 
-Важное разграничение существует между `SourceSpec` и
-`Source`:
-- `SourceSpec` — это конфигурация в виде данных (YAML), описывающая, откуда и как читать. Она не содержит секретов.
+## Что source обязан делать
 
-- `Source` — это конкретная реализация в коде, которая создаётся из `SourceSpec` фабрикой в реестре плагинов, получая необходимые зависимости (например, ключи доступа).
+- выдавать валидные `RawItem`
+- либо явно отдавать `QuarantinedRawItem`, если raw payload сломан ещё до `RawItem`
+- скрывать детали внешнего API, pagination, retries и auth
 
-## Встроенные реализации
+## Что source не должен делать
 
-В проекте уже есть несколько встроенных реализаций:
+- втаскивать business logic матчинга или routing
+- назначать incremental ingest strategy для самого себя
+- сохранять секреты внутри `SourceSpec`
+- возвращать "пустые" raw items без текста и идентичности
 
-1. `TelegramChannelSource` / `TelegramGroupSource`
+## Текущие встроенные группы sources
 
-Читает посты из Telegram через библиотеку Telethon
-(использует MTProto API).
-Хранит свой курсор (last message id) в `Store`, чтобы не
-перечитывать старые сообщения.
-Поддерживает работу с каналами и группами (с комментариями
-или без).
+- Telegram polling sources
+- `CareerSiteSource`
+- declarative HTML source path
+- fixture source
+- RSS source
+- selected API sources
+- realtime/push-oriented specs и экспериментальные реализации
 
-2. `CareerSiteSource`
+## Особенность career-site path
 
-Загружает страницы карьерных сайтов компаний через HTTP и
-парсит их.
-Использует `Monitor` для обнаружения формата вакансий на
-странице и `JobScraper` для извлечения конкретных данных.
-Поддерживает обход блокировок.
+Career-site ingestion состоит не из одного класса, а из стека:
 
-3. `LocalFixtureSource`
+- `SourceSpec`
+- optional `site_parser`
+- `monitor`
+- `scraper`
+- `bypass_strategy`
 
-Читает данные из локального JSON-файла.
-Используется исключительно для тестов и локальной разработки
-пайплайнов без сетевых вызовов.
+Поэтому для новых сайтов часто правильнее добавлять parser/monitor/scraper, а
+не новый top-level source type.
 
-4. `RestAPISource`
+## Связанные документы
 
-Обращается напрямую к структурированным API (например,
-Greenhouse, HH.ru).
-Не парсит HTML, а работает с готовым JSON-ответом, что
-делает его самым быстрым и надёжным.
-
-## Как написать свою реализацию
-
-Чтобы добавить новый источник, вам нужно реализовать метод
-`fetch()`, возвращающий асинхронный итератор, и
-зарегистрировать его через декоратор `@register_source`.
-
-Пример создания своего источника для кастомного REST API:
-
-```python from collections.abc import AsyncIterator from job_ftch.application.registry import register_source from job_ftch.domain.models import RawItem import httpx
-
-@register_source("my_custom_api")
-def create_my_source(settings):
-    # Фабрика получает настройки из SourceSpec
-    return MyCustomSource(api_url=settings.source_url)
-
-class MyCustomSource:
-    def __init__(self, api_url: str):
-        self.api_url = api_url
-
-    async def fetch(self) -> AsyncIterator[RawItem]:
-        # В реальном коде здесь нужно использовать Store для курсора
-        async with httpx.AsyncClient() as client:
-            response = await client.get(self.api_url)
-            response.raise_for_status()
-            
-            for item in response.json():
-                yield RawItem(
-                    source_kind="api",
-                    source_name="my_api",
-                    external_id=str(item["id"]),
-                    text=item["description"],
-                )
-```
-
-## Типичные ошибки и что нельзя делать
-
-1. **Загрузка всех данных в память.**
-
-Никогда не собирайте все элементы в большой список перед
-`yield`.
-Это нарушает стриминг и может привести к исчерпанию памяти
-(OOM), если источник вернёт тысячи записей.
-
-2. **Игнорирование Store (курсора).**
-
-Если вы не сохраняете и не читаете курсор из `Store`, при
-каждом перезапуске ваш источник будет вычитывать все
-исторические данные с нуля.
-Это медленно и дорого.
-
-3. **Хранение секретов (credentials) внутри Source или SourceSpec.**
-
-Секреты должны приходить исключительно через
-[AuthProvider](auth_provider.md).
-Конфигурация источника должна быть безопасна для хранения в
-Git.
-
-4. **Возврат пустого RawItem без текста.**
-
-Если поле `text` пустое, последующие узлы пайплайна
-(например, `ExtractionNode`) не смогут извлечь полезную
-информацию и просто удалят элемент.
-
-## Связи с другими сущностями
-
-- [SourceSpec](source_spec.md) — конфигурация, из которой фабрика создаёт Source.
-
-- [Store](store.md) — используется источником для хранения курсора и реализации инкрементального чтения.
-
-- [AuthProvider](auth_provider.md) — используется для получения API-ключей и токенов без захардкоживания их в логике.
-
-- [Stage](stage_node.md) — данные, отдаваемые источником, поступают в узлы обработки.
+- [SourceSpec](source_spec.md)
+- [SourceAssessmentAdapter](source_assessment_adapter.md)
+- [RawItem](raw_item.md)
+- [Store](store.md)
+- [AuthProvider](auth_provider.md)

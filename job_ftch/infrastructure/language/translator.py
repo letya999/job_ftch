@@ -56,7 +56,8 @@ class CTranslate2Translator:
             from huggingface_hub import snapshot_download
 
             revision = _MODEL_REVISIONS.get(hf_model_name)
-            model_dir = snapshot_download(  # nosec B615 — risk accepted, see _MODEL_REVISIONS comment
+            # Model downloads are pinned by commit via _MODEL_REVISIONS.
+            model_dir = snapshot_download(  # type: ignore[call-overload]  # nosec B615
                 repo_id=hf_model_name,
                 local_dir=str(self._cache_dir / hf_model_name.replace("/", "_")),
                 **({"revision": revision} if revision else {}),

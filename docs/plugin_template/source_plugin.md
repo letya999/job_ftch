@@ -1,3 +1,8 @@
+---
+title: "Source Plugin Template"
+description: "Template for a custom Source plugin."
+updated: 2026-07-24
+---
 # Source Plugin Template
 
 Template for a custom Source plugin.

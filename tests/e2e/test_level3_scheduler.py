@@ -13,7 +13,7 @@ from job_ftch.application.scheduler import Scheduler
 from job_ftch.config import Settings
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_scheduler_ticks_and_stops() -> None:
     settings = Settings(schedule_interval_seconds=1)
 
@@ -43,7 +43,7 @@ async def test_scheduler_ticks_and_stops() -> None:
     assert not pid_file.exists()
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_scheduler_signal_stop() -> None:
     # Skip on Windows for real signal testing if needed,
     # but Scheduler handles SIGINT via loop.add_signal_handler which might work in some envs.

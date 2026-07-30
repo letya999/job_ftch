@@ -1,0 +1,9 @@
+# Default owner for all files.
+* @letya999
+
+# Security-sensitive release and automation surfaces.
+/.github/ @letya999
+/.repo-safety/ @letya999
+/scripts/security/ @letya999
+/AGENTS.md @letya999
+/SECURITY.md @letya999

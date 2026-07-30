@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,6 +28,8 @@ from job_ftch.domain import (
 from .serialization import dump_group, dump_job, load_group, load_job
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from job_ftch.config import Settings
 
 
@@ -68,21 +69,36 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         if self._conn is None:
             # ensure dir exists
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._conn = await aiosqlite.connect(self.db_path)
-            # init schema
-            migration_path = Path(__file__).parent / "migrations" / "001_sqlite_jobs.sql"
-            with open(migration_path, encoding="utf-8") as f:
-                schema = f.read()
-            await self._conn.executescript(schema)
+            conn = await aiosqlite.connect(self.db_path)
+            try:
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS jf_migrations (
+                        filename TEXT PRIMARY KEY,
+                        applied_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                    )
+                """)
+                migrations_dir = Path(__file__).parent / "migrations"
+                for path in sorted(migrations_dir.glob("*.sql")):
+                    if "postgres" in path.name:
+                        continue
+                    filename = path.name
+                    async with conn.execute(
+                        "SELECT filename FROM jf_migrations WHERE filename = ?", (filename,)
+                    ) as cur:
+                        row = await cur.fetchone()
+                    if not row:
+                        with open(path, encoding="utf-8") as f:
+                            sql = f.read()
+                        await conn.executescript(sql)
+                        await conn.execute(
+                            "INSERT INTO jf_migrations (filename) VALUES (?)", (filename,)
+                        )
 
-            # Migration 002: blocking_key
-            m2_path = Path(__file__).parent / "migrations" / "002_sqlite_blocking_key.sql"
-            with open(m2_path, encoding="utf-8") as f:
-                m2_sql = f.read()
-            with contextlib.suppress(Exception):  # Already exists
-                await self._conn.executescript(m2_sql)
-
-            await self._conn.commit()
+                await conn.commit()
+                self._conn = conn
+            except Exception:
+                await conn.close()
+                raise
         return self._conn
 
     async def close(self) -> None:
@@ -175,24 +191,15 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
 
     async def create(self, job: JobRecord) -> JobGroup:
         job = _coerce_job_record(job)
-        async with self._lock:
-            conn = await self._get_conn()
-            await conn.execute("BEGIN IMMEDIATE")
-            try:
-                group = create_job_group(job)
-                await self._persist_group(conn, group)
-                await self._persist_job(conn, job, group.group_id)
-
-                # Update stats
-                self.new_groups_created += 1
-                sk = str(job.source_kind)
-                self.by_source_kind_new[sk] = self.by_source_kind_new.get(sk, 0) + 1
-
-                await conn.commit()
-                return group
-            except Exception:
-                await conn.rollback()
-                raise
+        # ``save`` owns the transactional URL/fingerprint lookup. Reusing it
+        # here makes create idempotent across SQLite connections instead of
+        # letting a second writer overwrite the identity index.
+        await self.save(job)
+        group = await self.find_by_url(str(job.canonical_url)) if job.canonical_url else None
+        group = group or await self.find_by_fingerprint(compute_identity_fingerprint(job))
+        if group is None:
+            raise RuntimeError("Job group was not persisted after atomic save")
+        return group
 
     async def merge(self, group_id: str, job: JobRecord, merge_confidence: float = 1.0) -> JobGroup:
         job = _coerce_job_record(job)
@@ -216,6 +223,31 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 sk = str(job.source_kind)
                 self.by_source_kind_merged[sk] = self.by_source_kind_merged.get(sk, 0) + 1
 
+                await conn.commit()
+                return updated_group
+            except Exception:
+                await conn.rollback()
+                raise
+
+    async def replace_member(self, group_id: str, job: JobRecord) -> JobGroup:
+        """Persist post-accept enrichment without counting an identity merge."""
+        job = _coerce_job_record(job)
+        async with self._lock:
+            conn = await self._get_conn()
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                async with conn.execute(
+                    "SELECT raw_json FROM jf_job_groups WHERE group_id = ?", (group_id,)
+                ) as cur:
+                    row = await cur.fetchone()
+                if not row:
+                    raise ValueError(f"Group {group_id} not found.")
+                group = load_group(row[0])
+                updated_group = merge_job_into_group(
+                    group, job, merge_confidence=group.merge_confidence
+                )
+                await self._persist_group(conn, updated_group)
+                await self._persist_job(conn, job, updated_group.group_id)
                 await conn.commit()
                 return updated_group
             except Exception:
@@ -276,7 +308,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 updated_at=excluded.updated_at
             """,
             (
-                job.stable_id,
+                job.job_id,
                 group_id,
                 str(job.source_kind),
                 job.source_name,
@@ -292,12 +324,12 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         )
 
         # update FTS
-        await conn.execute("DELETE FROM jf_jobs_fts WHERE job_id = ?", (job.stable_id,))
+        await conn.execute("DELETE FROM jf_jobs_fts WHERE job_id = ?", (job.job_id,))
         await conn.execute(
             """INSERT INTO jf_jobs_fts (job_id, group_id, title, company, company_canonical, description)
                VALUES (?, ?, ?, ?, ?, ?)""",
             (
-                job.stable_id,
+                job.job_id,
                 group_id,
                 job.title,
                 job.company,
@@ -322,6 +354,12 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         ) as cur:
             rows = await cur.fetchall()
         return [load_job(row[0]) for row in rows]
+
+    async def count_jobs(self) -> int:
+        conn = await self._get_conn()
+        async with conn.execute("SELECT COUNT(*) FROM jf_jobs") as cur:
+            row = await cur.fetchone()
+        return int(row[0] if row else 0)
 
     async def get_group(self, group_id: str) -> JobGroup | None:
         conn = await self._get_conn()
@@ -376,7 +414,7 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                         )
                     else:
                         # 7. otherwise persist updated group and refresh indexes
-                        # Clear old index entries for this group
+                        # Clear new index entries for this group
                         await conn.execute(
                             "DELETE FROM jf_job_group_urls WHERE group_id = ?", (group_id,)
                         )
@@ -427,17 +465,39 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             rows = await cur.fetchall()
             return [load_group(row[0]) for row in rows]
 
-    async def list_groups(self, limit: int = 100) -> list[JobGroup]:
+    async def list_groups(self, limit: int = 100, since: datetime | None = None) -> list[JobGroup]:
         conn = await self._get_conn()
-        async with conn.execute(
-            "SELECT raw_json FROM jf_job_groups ORDER BY updated_at DESC LIMIT ?", (limit,)
-        ) as cur:
+        if since is None:
+            query = "SELECT raw_json FROM jf_job_groups ORDER BY updated_at DESC LIMIT ?"
+            params: tuple[object, ...] = (limit,)
+        else:
+            query = """
+                SELECT raw_json
+                FROM jf_job_groups
+                WHERE json_extract(raw_json, '$.canonical_job.fetched_at') IS NULL
+                   OR json_extract(raw_json, '$.canonical_job.fetched_at') >= ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+            """
+            params = (since.isoformat(), limit)
+        async with conn.execute(query, params) as cur:
             rows = await cur.fetchall()
         return [load_group(row[0]) for row in rows]
 
-    async def count(self) -> int:
+    async def count(self, since: datetime | None = None) -> int:
         conn = await self._get_conn()
-        async with conn.execute("SELECT COUNT(*) FROM jf_job_groups") as cur:
+        if since is None:
+            query = "SELECT COUNT(*) FROM jf_job_groups"
+            params: tuple[object, ...] = ()
+        else:
+            query = """
+                SELECT COUNT(*)
+                FROM jf_job_groups
+                WHERE json_extract(raw_json, '$.canonical_job.fetched_at') IS NULL
+                   OR json_extract(raw_json, '$.canonical_job.fetched_at') >= ?
+            """
+            params = (since.isoformat(),)
+        async with conn.execute(query, params) as cur:
             row = await cur.fetchone()
         return row[0] if row else 0
 
@@ -449,6 +509,8 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 async with conn.execute("SELECT COUNT(*) FROM jf_job_groups") as cur:
                     row = await cur.fetchone()
                     count = row[0] if row else 0
+                await conn.execute("DELETE FROM jf_jobs_fts")
+                await conn.execute("DELETE FROM jf_jobs")
                 await conn.execute("DELETE FROM jf_job_group_urls")
                 await conn.execute("DELETE FROM jf_job_group_fingerprints")
                 await conn.execute("DELETE FROM jf_job_groups")
@@ -490,10 +552,14 @@ class SQLiteJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
 
         # load groups
         placeholders = ",".join("?" * len(group_ids))
-        async with conn.execute(
-            f"SELECT group_id, raw_json FROM jf_job_groups WHERE group_id IN ({placeholders})",  # nosec B608
-            group_ids,
-        ) as cur:
+        group_query = (
+            # Marker count is generated locally; all group IDs remain bound parameters.
+            "SELECT group_id, raw_json FROM jf_job_groups WHERE group_id IN ("  # nosec B608
+            + placeholders
+            + ")"
+        )
+        # Only the number of parameter markers is interpolated; values stay bound.
+        async with conn.execute(group_query, group_ids) as cur:
             grows = await cur.fetchall()
 
         group_map = {row[0]: load_group(row[1]) for row in grows}

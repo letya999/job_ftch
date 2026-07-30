@@ -26,14 +26,14 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def __init__(self, settings: Settings) -> None:
         if not _OPENAI_AVAILABLE:
             raise ImportError("openai is required. Install with: pip install 'job_ftch[openai]'")
-        if not settings.openai_api_key:
+        if settings.openai_api_key is None:
             raise ValueError("openai_api_key is required for OpenAIEmbeddingProvider")
 
         self.model = settings.embedding_model or "text-embedding-3-small"
         self._dimensions = settings.embedding_dimensions
 
         self.client = AsyncOpenAI(
-            api_key=settings.openai_api_key,
+            api_key=settings.openai_api_key.get_secret_value(),
             base_url=settings.openai_base_url,
             timeout=settings.openai_timeout_seconds,
             max_retries=settings.openai_max_retries,

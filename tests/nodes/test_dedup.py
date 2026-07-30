@@ -1,11 +1,14 @@
 import pytest
 
 from job_ftch.application.drops import RawItemDropped
+from job_ftch.application.pipeline import Pipeline
 from job_ftch.domain import (
     DuplicateRejectionReason,
 )
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 from job_ftch.nodes.dedup import DedupNode
+from job_ftch.nodes.sanitize import SanitizeNode
+from job_ftch.sinks.null_sink import NullSink
 
 
 @pytest.fixture
@@ -23,9 +26,7 @@ async def test_dedup_node_passes_new_item(dedup_node, store, make_raw_item):
     item = make_raw_item(external_id="new")
     processed = await dedup_node.process(item)
     assert processed is item
-    # DedupNode remembers keys after processing
-    # Note: it remembers dedup keys, not necessarily 'processed' key (which pipeline handles)
-    # But it does remember content key.
+    # DedupNode remembers durable content keys.
     from job_ftch.domain import dedup_content_key_for_raw_item
 
     assert await store.has_dedup_key(dedup_content_key_for_raw_item(item))
@@ -64,6 +65,9 @@ async def test_dedup_node_store_error_propagates(make_raw_item):
         async def has_processed(self, key: str) -> bool:
             return False
 
+        async def get_dedup_key(self, key: str):
+            raise RuntimeError("store unavailable")
+
         async def list_dedup_keys(self, kind=None):
             return ()
 
@@ -80,3 +84,61 @@ async def test_dedup_node_store_error_propagates(make_raw_item):
     item = make_raw_item()
     with pytest.raises(RuntimeError, match="store unavailable"):
         await node.process(item)
+
+
+@pytest.mark.anyio
+async def test_dedup_node_keeps_cross_source_near_duplicates(dedup_node, make_raw_item):
+    item1 = make_raw_item(
+        external_id="1",
+        source_name="telegram_a",
+        text="Senior AI engineer. Build LLM agents and automation workflows for support.",
+    )
+    await dedup_node.process(item1)
+
+    item2 = make_raw_item(
+        external_id="2",
+        source_name="telegram_b",
+        text="Senior AI engineer. Build LLM agents and automation workflows for support team.",
+    )
+    processed = await dedup_node.process(item2)
+
+    assert processed is item2
+
+
+@pytest.mark.anyio
+async def test_deferred_claim_releases_after_retryable_failure(store, make_raw_item):
+    item = make_raw_item(external_id="retry")
+    node = DedupNode(store, defer_commit=True)
+    assert await node.process(item) is item
+    await node.release_claim(item.stable_id)
+
+    retry = DedupNode(store, defer_commit=True)
+    assert await retry.process(item) is item
+
+
+@pytest.mark.anyio
+async def test_pipeline_failure_after_deferred_dedup_does_not_poison_retry(store, make_raw_item):
+    item = make_raw_item(external_id="pipeline-retry")
+
+    class Source:
+        def fetch(self):
+            async def items():
+                yield item
+
+            return items()
+
+    class Explode:
+        async def process(self, raw):
+            raise RuntimeError("downstream failure")
+
+    pipeline = Pipeline(
+        source=Source(),
+        sanitize_node=SanitizeNode(),
+        nodes=[DedupNode(store, defer_commit=True), Explode()],
+        sink=NullSink(),
+        store=store,
+    )
+    await pipeline.run()
+
+    retry = DedupNode(store, defer_commit=True)
+    assert await retry.process(item) is item

@@ -4,37 +4,48 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import random
-import time
-from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+import uuid
+from contextlib import nullcontext, suppress
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import structlog
+from opentelemetry import trace
+from structlog.contextvars import bind_contextvars, reset_contextvars
 
 from job_ftch.application.auth import resolve_auth_provider
 from job_ftch.application.builder import (
     PipelineBuilder,
+    build_delivery_targets,
+    build_llm,
     build_nodes,
     build_output_sinks,
     build_quarantine_sink,
     build_rejected_sink,
+    build_v2_typed_bindings,
     load_profile_catalog,
+    resolve_settings_pipeline_item_concurrency,
+    resolve_settings_source_fetch_concurrency,
+    resolve_settings_source_preparation_concurrency,
     tenant_to_settings,
 )
+from job_ftch.application.llm_usage import collect_llm_usage, pricing_version
 from job_ftch.application.pipeline import RunSummary, SourceRunStats
 from job_ftch.application.registry import (
     create_embedding_provider,
     create_job_backend,
     create_job_group_store,
     create_llm,
+    create_ontology_store,
     create_search_backend,
     create_store,
     create_vector_backend,
 )
-from job_ftch.application.watermark import IncrementalCursor
+from job_ftch.application.source_assessment import (
+    create_source_assessment_service,
+    load_source_assessment,
+)
 from job_ftch.config import get_settings
 from job_ftch.domain import (
     JobGroup,
@@ -50,27 +61,27 @@ from job_ftch.domain import (
     source_spec_locator,
     source_spec_name,
 )
-from job_ftch.nodes.snapshot_filter import SnapshotFilterNode
+from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from job_ftch.application.contracts import (
-        AuthProvider,
+        BgeMThreeProviderPort,
         JobGroupStore,
         JobPersistenceBackend,
         LLMProvider,
-        MetricsExporter,
         SearchBackend,
         Store,
-        StoreConnector,
         VectorBackend,
     )
     from job_ftch.config import Settings
     from job_ftch.domain.source_spec import SourceSpec
+    from job_ftch.nodes.snapshot_filter import SnapshotFilterNode
 
 logger = structlog.get_logger(__name__)
-_PROCESS_TENANT_LOCKS: dict[str, asyncio.Lock] = {}
+_DEFAULT_LATEST_JOBS_POOL = 200
+_PROFILE_AWARE_LATEST_JOBS_POOL = 1000
 
 
 def _json_default(value: object) -> object:
@@ -97,6 +108,25 @@ def _summary_from_payload(payload: dict[str, Any], *, tenant_id: str | None = No
     if tenant_id is not None:
         summary.tenant_id = tenant_id
     return summary
+
+
+def _parse_optional_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    with suppress(ValueError, TypeError):
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    return None
+
+
+async def _read_runtime_state(runtime: TenantRuntime, key: str) -> str | None:
+    value = await runtime.store.get_run_state(key)
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
 
 
 def _source_health_key(source_id: str) -> str:
@@ -130,6 +160,7 @@ def _update_source_health_payload(
     source_kind: str,
     source_name: str,
     stats: SourceRunStats,
+    started_at: datetime | None = None,
     finished_at: datetime,
     drift_ratio_threshold: float = 0.2,
     min_baseline_threshold: float = 3.0,
@@ -138,7 +169,12 @@ def _update_source_health_payload(
     prev_baseline_emitted = previous.baseline_emitted if previous else 0.0
     previous_success = previous.success_count if previous else 0
     current_emitted = int(stats.emitted)
-    had_failure = stats.failed > 0
+    # Only count as a source-level failure when the source itself crashed (nothing fetched)
+    # or when the majority of fetched items failed — not for incidental item-level errors.
+    _total_processed = stats.fetched + stats.failed
+    had_failure = (stats.fetched == 0 and stats.failed > 0) or (
+        _total_processed > 0 and stats.failed / _total_processed > 0.5
+    )
     degraded = False
     drift_ratio: float | None = None
     if prev_baseline_emitted >= min_baseline_threshold:
@@ -148,12 +184,14 @@ def _update_source_health_payload(
     if had_failure:
         failure_streak = (previous.failure_streak if previous else 0) + 1
         last_success_at = previous.last_success_at if previous else None
+        last_started_at = previous.last_started_at if previous else None
         success_count = previous_success
         next_baseline = prev_baseline_emitted
         if failure_streak >= failure_streak_pause and (not previous or not previous.paused):
             logger.info("source_auto_paused", source_id=source_id, failure_streak=failure_streak)
     else:
         failure_streak = 0
+        last_started_at = started_at.isoformat() if started_at is not None else None
         last_success_at = finished_at.isoformat()
         success_count = previous_success + 1
         next_baseline = (
@@ -167,6 +205,7 @@ def _update_source_health_payload(
         source_kind=source_kind,
         source_name=source_name,
         last_run_at=finished_at.isoformat(),
+        last_started_at=last_started_at,
         last_success_at=last_success_at,
         failure_streak=failure_streak,
         success_count=success_count,
@@ -177,11 +216,23 @@ def _update_source_health_payload(
         baseline_emitted=next_baseline,
         drift_ratio=drift_ratio,
         degraded=degraded,
-        status="degraded"
-        if degraded
-        else ("paused" if failure_streak >= failure_streak_pause else "healthy"),
+        status=(
+            "degraded"
+            if degraded
+            else (
+                "paused"
+                if failure_streak >= failure_streak_pause
+                else ("failing" if had_failure else "healthy")
+            )
+        ),
         paused=failure_streak >= failure_streak_pause,
         skipped_runs=0 if not had_failure else (previous.skipped_runs if previous else 0),
+        last_eviction_at=previous.last_eviction_at if previous else None,
+        eviction_streak=previous.eviction_streak if previous else 0,
+        last_eviction_kind=previous.last_eviction_kind if previous else None,
+        last_error=None,
+        last_error_at=None,
+        last_error_kind=None,
     )
 
 
@@ -192,6 +243,27 @@ def _build_source_listing_payload(
     enabled: bool,
     health: SourceHealth | None,
 ) -> dict[str, Any]:
+    monitor = getattr(spec, "monitor", None)
+    monitor_config = getattr(spec, "monitor_config", {}) or {}
+    browser_required = (
+        spec.type == "browser"
+        or bool(monitor_config.get("render"))
+        or monitor
+        in {
+            "api_sniffer",
+            "browser",
+        }
+    )
+    browser_reason = None
+    browser_setup_hint = None
+    if browser_required:
+        browser_reason = (
+            "render=true"
+            if monitor_config.get("render")
+            else ("browser source" if spec.type == "browser" else f"monitor={monitor}")
+        )
+        browser_setup_hint = "Requires Playwright + Chromium in the runtime image/environment."
+
     source_id = source_spec_identifier(spec)
     payload: dict[str, Any] = {
         "source_id": source_id,
@@ -201,6 +273,11 @@ def _build_source_listing_payload(
         "origin": origin,
         "enabled": enabled,
         "spec": spec.model_dump(mode="json"),
+        "requirements": {
+            "browser_required": browser_required,
+            "browser_reason": browser_reason,
+            "browser_setup_hint": browser_setup_hint,
+        },
     }
     if health is None:
         payload.update(
@@ -217,6 +294,151 @@ def _build_source_listing_payload(
     payload.update(health.model_dump(mode="json"))
     if not enabled:
         payload["status"] = "disabled"
+    return payload
+
+
+def _effective_limit_cap(limit: int | None, cap: int) -> int:
+    return min(limit, cap) if limit is not None else cap
+
+
+def _resolve_source_interval_seconds(runtime: TenantRuntime, spec: SourceSpec) -> int:
+    if spec.interval_seconds:
+        return int(spec.interval_seconds)
+    if runtime.tenant.schedule and runtime.tenant.schedule.interval_seconds:
+        return int(runtime.tenant.schedule.interval_seconds)
+    if runtime.settings.schedule_interval_seconds:
+        return int(runtime.settings.schedule_interval_seconds)
+    return 4 * 60 * 60
+
+
+def _apply_runtime_fetch_window(
+    spec: SourceSpec,
+    *,
+    assessment: object | None,
+    bootstrap_completed_at: datetime | None,
+    last_started_at: datetime | None = None,
+    last_successful_run_at: datetime | None = None,
+    interval_seconds: int,
+    now: datetime,
+) -> SourceSpec:
+    from job_ftch.domain.source_spec import (
+        CareerSiteSpec,
+        RSSFeedSourceSpec,
+        TelegramChannelSpec,
+        TelegramCommentsSpec,
+        TelegramGroupSpec,
+    )
+
+    result = assessment if isinstance(assessment, SourceAssessmentResult) else None
+    freshness = result.freshness if result is not None else None
+    can_use_time_window = bool(
+        freshness
+        and freshness.can_detect_freshness_without_snapshot
+        and (freshness.item_level_dates or freshness.can_filter_since_yesterday)
+    )
+    bootstrap_mode = getattr(spec, "initial_ingest_mode", "auto")
+    bootstrap_limit = int(getattr(spec, "initial_ingest_max_items", 50) or 50)
+    bootstrap_lookback = int(
+        getattr(spec, "initial_ingest_lookback_seconds", 7 * 24 * 60 * 60) or 7 * 24 * 60 * 60
+    )
+
+    def _clear_fetch_limits(update: dict[str, object]) -> None:
+        if isinstance(spec, CareerSiteSpec):
+            update["limit"] = None
+            if not getattr(freshness, "dates_require_detail_scrape", False):
+                update["detail_limit"] = None
+        elif isinstance(spec, (TelegramChannelSpec, TelegramGroupSpec)):
+            update["limit"] = None
+        elif isinstance(spec, TelegramCommentsSpec):
+            update["post_limit"] = None
+            update["comment_limit_per_post"] = None
+
+    def _restore_fetch_limits(update: dict[str, object]) -> None:
+        if isinstance(spec, CareerSiteSpec):
+            update["limit"] = spec.limit
+            update["detail_limit"] = spec.detail_limit
+        elif isinstance(spec, (TelegramChannelSpec, TelegramGroupSpec)):
+            update["limit"] = spec.limit
+        elif isinstance(spec, TelegramCommentsSpec):
+            update["post_limit"] = spec.post_limit
+            update["comment_limit_per_post"] = spec.comment_limit_per_post
+
+    supports_runtime_window = isinstance(
+        spec,
+        (
+            CareerSiteSpec,
+            RSSFeedSourceSpec,
+            TelegramChannelSpec,
+            TelegramCommentsSpec,
+            TelegramGroupSpec,
+        ),
+    )
+    if not supports_runtime_window:
+        return spec
+
+    update: dict[str, object] = {}
+    if bootstrap_completed_at is None:
+        if can_use_time_window and bootstrap_mode in {"auto", "lookback_window"}:
+            _clear_fetch_limits(update)
+            update["freshness_cutoff_utc"] = now - timedelta(seconds=bootstrap_lookback)
+        else:
+            if isinstance(spec, CareerSiteSpec):
+                update["limit"] = bootstrap_limit
+                update["detail_limit"] = bootstrap_limit
+            update["freshness_cutoff_utc"] = None
+        return spec.model_copy(update=update)
+
+    if can_use_time_window:
+        cutoff = (
+            last_started_at
+            or last_successful_run_at
+            or (now - timedelta(seconds=max(interval_seconds, 1)))
+        )
+        if cutoff > now:
+            cutoff = now
+        _clear_fetch_limits(update)
+        update["freshness_cutoff_utc"] = cutoff
+        return spec.model_copy(update=update)
+
+    _restore_fetch_limits(update)
+    update["freshness_cutoff_utc"] = None
+    return spec.model_copy(update=update)
+
+
+async def _attach_source_assessment(
+    runtime: TenantRuntime, payload: dict[str, Any]
+) -> dict[str, Any]:
+    source_id = str(payload["source_id"])
+    result = await load_source_assessment(runtime.store, source_id)
+    if result is None:
+        payload["assessment"] = {"status": "missing"}
+        return payload
+    recommended_monitors: list[str] = []
+    for item in result.evidence:
+        details = item.details if hasattr(item, "details") else {}
+        monitors = details.get("recommended_monitors") if isinstance(details, dict) else None
+        if isinstance(monitors, list) and monitors:
+            recommended_monitors = [str(m) for m in monitors if str(m)]
+            break
+    payload["assessment"] = {
+        "status": "assessed",
+        "confidence": result.freshness.confidence.value,
+        "can_detect_freshness_without_snapshot": (
+            result.freshness.can_detect_freshness_without_snapshot
+        ),
+        "can_filter_since_yesterday": result.freshness.can_filter_since_yesterday,
+        "item_level_dates": result.freshness.item_level_dates,
+        "ordered_by_newest": result.freshness.ordered_by_newest,
+        "page_level_change_only": result.freshness.page_level_change_only,
+        "requires_full_snapshot": result.freshness.requires_full_snapshot,
+        "probe_failed": result.freshness.probe_failed,
+        "probe_blocked": result.freshness.probe_blocked,
+        "rationale": result.freshness.rationale,
+        "recommended_monitors": recommended_monitors,
+        "assessed_at": result.assessed_at.isoformat(),
+        "capabilities": result.capabilities.model_dump(mode="json"),
+        "evidence": [item.model_dump(mode="json") for item in result.evidence],
+    }
     return payload
 
 
@@ -240,406 +462,17 @@ def _merge_effective_sources(
     return merged
 
 
-class TenantStore:
-    """Store wrapper that prefixes every key space with a tenant slug."""
+# Re-exported for backward compatibility. The full implementation moved to
+# `job_ftch.application.tenant_store` as part of the v0.0.4 god-object split.
+import job_ftch.application.tenant_locks as _tenant_locks  # noqa: E402
+import job_ftch.application.tenant_store as _tenant_store  # noqa: E402
+from job_ftch.application.tenant_runtime import TenantRuntime  # noqa: E402, F401
 
-    def __init__(self, tenant_id: str, store: Store) -> None:
-        self._tenant_id = tenant_id
-        self._store = store
-
-    def _key(self, key: str) -> str:
-        return f"{self._tenant_id}:{key}"
-
-    def _run_state_key(
-        self,
-        key: str,
-        *,
-        source_kind: str | None = None,
-        source_name: str | None = None,
-    ) -> str:
-        prefix = self._key(key)
-        if source_kind and source_name:
-            return f"{self._tenant_id}:{source_kind}:{source_name}:{key}"
-        return prefix
-
-    def _snapshot_key(self, source_id: str) -> str:
-        return self._key(f"snapshot:{source_id}:latest")
-
-    async def load_source_snapshot(self, source_id: str) -> dict[str, str]:
-        """Return stable_id -> content_hash mapping from the latest snapshot."""
-        connector = cast("StoreConnector", self._store)
-        raw = await connector.get(self._snapshot_key(source_id))
-        if not raw:
-            return {}
-        try:
-            import json
-
-            data = json.loads(raw)
-            if isinstance(data, dict):
-                return {str(k): str(v) for k, v in data.items()}
-        except Exception:
-            pass
-        return {}
-
-    async def save_source_snapshot(self, source_id: str, snapshot: dict[str, str]) -> None:
-        """Persist the latest snapshot mapping for a source."""
-        connector = cast("StoreConnector", self._store)
-        import json
-
-        await connector.set(self._snapshot_key(source_id), json.dumps(snapshot, sort_keys=True))
-
-    async def has_processed(self, item_id: str) -> bool:
-        connector = cast("StoreConnector", self._store)
-        return bool(await connector.set_contains(self._key("processed"), item_id))
-
-    async def mark_processed(self, item_id: str) -> None:
-        connector = cast("StoreConnector", self._store)
-        await connector.set_add(self._key("processed"), item_id)
-
-    async def has_dedup_key(self, key: str) -> bool:
-        connector = cast("StoreConnector", self._store)
-        return bool(await connector.set_contains(self._key("dedup_keys"), key))
-
-    async def remember_dedup_key(self, record: Any) -> None:
-        connector = cast("StoreConnector", self._store)
-        await connector.set_add(self._key("dedup_keys"), record.key)
-        await connector.set_add(self._key(f"dedup_keys:{record.kind.value}"), record.key)
-        await connector.set(self._key(f"dedup_record:{record.key}"), record.model_dump_json())
-
-    async def clear_dedup_state(self) -> int:
-        """Clear all processed markers and dedup keys for this tenant. Returns count of deleted dedup records."""
-        connector = cast("StoreConnector", self._store)
-        # Clear the processed-item set
-        await connector.clear_set(self._key("processed"))
-        # List dedup keys before clearing
-        dedup_members = await connector.set_members(self._key("dedup_keys"))
-        # Delete individual dedup record KV entries
-        for member in dedup_members:
-            await connector.delete(self._key(f"dedup_record:{member}"))
-        # Clear all dedup set indices
-        await connector.clear_set(self._key("dedup_keys"))
-        for kind in ("url", "fingerprint", "content"):
-            await connector.clear_set(self._key(f"dedup_keys:{kind}"))
-        return len(dedup_members)
-
-    async def list_dedup_keys(self, kind: str | None = None) -> tuple[Any, ...]:
-        connector = cast("StoreConnector", self._store)
-        set_key = self._key("dedup_keys" if kind is None else f"dedup_keys:{kind}")
-        members = await connector.set_members(set_key)
-        results = []
-        from job_ftch.domain import RememberedDedupKey
-
-        for member in sorted(members):
-            raw = await connector.get(self._key(f"dedup_record:{member}"))
-            if raw:
-                results.append(RememberedDedupKey.model_validate_json(raw))
-        return tuple(results)
-
-    async def record_duplicate(self, record: Any) -> None:
-        connector = cast("StoreConnector", self._store)
-        await connector.set_add(self._key("dup_records"), record.item_id)
-        await connector.set(self._key(f"dup_record:{record.item_id}"), record.model_dump_json())
-
-    async def list_duplicate_records(self) -> tuple[Any, ...]:
-        connector = cast("StoreConnector", self._store)
-        members = await connector.set_members(self._key("dup_records"))
-        results = []
-        from job_ftch.domain import DuplicateRecord
-
-        for member in sorted(members):
-            raw = await connector.get(self._key(f"dup_record:{member}"))
-            if raw:
-                results.append(DuplicateRecord.model_validate_json(raw))
-        return tuple(results)
-
-    async def get_run_state(
-        self,
-        key: str,
-        *,
-        source_kind: str | None = None,
-        source_name: str | None = None,
-    ) -> str | None:
-        connector = cast("StoreConnector", self._store)
-        value = await connector.get(
-            self._run_state_key(key, source_kind=source_kind, source_name=source_name)
-        )
-        return None if value is None else str(value)
-
-    async def set_run_state(
-        self,
-        key: str,
-        value: str,
-        *,
-        source_kind: str | None = None,
-        source_name: str | None = None,
-    ) -> None:
-        connector = cast("StoreConnector", self._store)
-        await connector.set(
-            self._run_state_key(key, source_kind=source_kind, source_name=source_name),
-            value,
-        )
-
-    async def get_source_strategy(self, domain: str) -> dict[str, str] | None:
-        return await self._store.get_source_strategy(domain)
-
-    async def save_source_strategy(self, domain: str, monitor: str, bypass: str) -> None:
-        await self._store.save_source_strategy(domain, monitor, bypass)
-
-    def incremental_cursor(self) -> IncrementalCursor:
-        connector = cast("StoreConnector", self._store)
-        return IncrementalCursor(connector)
-
-    async def save_run_summary(self, summary: RunSummary) -> None:
-        connector = cast("StoreConnector", self._store)
-        run_id = summary.source_run_id
-        if not run_id:
-            msg = "RunSummary.source_run_id is required to persist run history."
-            raise ValueError(msg)
-        raw = json.dumps(
-            summary.as_dict(), default=_json_default, ensure_ascii=False, sort_keys=True
-        )
-        await connector.set(self._key(f"run_history:{run_id}"), raw)
-        await connector.set_add(self._key("run_history_ids"), run_id)
-
-    async def get_source_health(self, source_id: str) -> SourceHealth | None:
-        connector = cast("StoreConnector", self._store)
-        raw = await connector.get(self._key(_source_health_key(source_id)))
-        if raw is None:
-            return None
-        try:
-            return SourceHealth.model_validate_json(raw)
-        except (ValueError, TypeError):
-            return None
-
-    async def save_source_health(self, source_id: str, health: SourceHealth) -> None:
-        connector = cast("StoreConnector", self._store)
-        await connector.set(
-            self._key(_source_health_key(source_id)),
-            health.model_dump_json(),
-        )
-        await connector.set_add(self._key("source_health_ids"), source_id)
-
-    async def list_source_health(self) -> list[SourceHealth]:
-        connector = cast("StoreConnector", self._store)
-        source_ids = sorted(await connector.set_members(self._key("source_health_ids")))
-        payloads: list[SourceHealth] = []
-        for source_id in source_ids:
-            payload = await self.get_source_health(source_id)
-            if payload is not None:
-                payloads.append(payload)
-        return payloads
-
-    async def get_runtime_source(self, source_id: str) -> RuntimeSourceRecord | None:
-        connector = cast("StoreConnector", self._store)
-        raw = await connector.get(self._key(_runtime_source_key(source_id)))
-        if raw is None:
-            return None
-        try:
-            return RuntimeSourceRecord.model_validate_json(raw)
-        except (TypeError, ValueError):
-            return None
-
-    async def save_runtime_source(self, record: RuntimeSourceRecord) -> None:
-        connector = cast("StoreConnector", self._store)
-        await connector.set(
-            self._key(_runtime_source_key(record.source_id)),
-            record.model_dump_json(),
-        )
-        await connector.set_add(self._key("runtime_source_ids"), record.source_id)
-
-    async def list_runtime_sources(self) -> list[RuntimeSourceRecord]:
-        connector = cast("StoreConnector", self._store)
-        source_ids = sorted(await connector.set_members(self._key("runtime_source_ids")))
-        records: list[RuntimeSourceRecord] = []
-        for source_id in source_ids:
-            record = await self.get_runtime_source(source_id)
-            if record is not None:
-                records.append(record)
-        return records
-
-    async def clear_runtime_sources(self) -> None:
-        connector = cast("StoreConnector", self._store)
-        source_ids = await connector.set_members(self._key("runtime_source_ids"))
-        await connector.clear_set(self._key("runtime_source_ids"))
-        for source_id in source_ids:
-            await connector.delete(self._key(_runtime_source_key(source_id)))
-
-    async def set_source_disabled(self, source_id: str, disabled: bool) -> None:
-        connector = cast("StoreConnector", self._store)
-        key = self._key(_source_disabled_key(source_id))
-        if disabled:
-            await connector.set(key, "1")
-        else:
-            await connector.delete(key)
-        await connector.set_add(self._key("source_disabled_ids"), source_id)
-
-    async def list_disabled_source_ids(self) -> set[str]:
-        connector = cast("StoreConnector", self._store)
-        disabled_ids = sorted(await connector.set_members(self._key("source_disabled_ids")))
-        result: set[str] = set()
-        for source_id in disabled_ids:
-            if await connector.get(self._key(_source_disabled_key(source_id))) is not None:
-                result.add(source_id)
-        return result
-
-    async def get_candidate_profile(
-        self,
-        user_id: str,
-        profile_id: str,
-    ) -> ManagedCandidateProfile | None:
-        connector = cast("StoreConnector", self._store)
-        raw = await connector.get(self._key(_candidate_profile_key(user_id, profile_id)))
-        if raw is None:
-            return None
-        try:
-            return ManagedCandidateProfile.model_validate_json(raw)
-        except (TypeError, ValueError):
-            return None
-
-    async def save_candidate_profile(self, record: ManagedCandidateProfile) -> None:
-        connector = cast("StoreConnector", self._store)
-        await connector.set(
-            self._key(_candidate_profile_key(record.user_id, record.profile_id)),
-            record.model_dump_json(),
-        )
-        await connector.set_add(
-            self._key(f"candidate_profile_ids:{record.user_id}"),
-            record.profile_id,
-        )
-        await connector.set_add(self._key("candidate_profile_user_ids"), record.user_id)
-
-    async def list_candidate_profiles(self, user_id: str) -> list[ManagedCandidateProfile]:
-        connector = cast("StoreConnector", self._store)
-        profile_ids = sorted(
-            await connector.set_members(self._key(f"candidate_profile_ids:{user_id}"))
-        )
-        records: list[ManagedCandidateProfile] = []
-        for profile_id in profile_ids:
-            record = await self.get_candidate_profile(user_id, profile_id)
-            if record is not None:
-                records.append(record)
-        return records
-
-    async def set_active_candidate_profile(
-        self,
-        user_id: str,
-        profile_id: str,
-    ) -> None:
-        connector = cast("StoreConnector", self._store)
-        current_primary = await self.get_active_candidate_profile_id(user_id)
-        if current_primary and current_primary != profile_id:
-            await connector.set_add(
-                self._key(_active_candidate_profiles_key(user_id)), current_primary
-            )
-        await connector.set(self._key(_active_candidate_profile_key(user_id)), profile_id)
-        await connector.set_add(self._key(_active_candidate_profiles_key(user_id)), profile_id)
-
-    async def get_active_candidate_profile_id(self, user_id: str) -> str | None:
-        connector = cast("StoreConnector", self._store)
-        raw = await connector.get(self._key(_active_candidate_profile_key(user_id)))
-        return None if raw is None else str(raw)
-
-    async def get_active_candidate_profile_ids(self, user_id: str) -> tuple[str, ...]:
-        connector = cast("StoreConnector", self._store)
-        active_ids = sorted(
-            await connector.set_members(self._key(_active_candidate_profiles_key(user_id)))
-        )
-        primary = await self.get_active_candidate_profile_id(user_id)
-        ordered = [item for item in ([primary] if primary else []) + active_ids if item]
-        seen: set[str] = set()
-        result: list[str] = []
-        for item in ordered:
-            if item in seen:
-                continue
-            seen.add(item)
-            result.append(item)
-        return tuple(result)
-
-    async def unset_active_candidate_profile(self, user_id: str, profile_id: str) -> None:
-        connector = cast("StoreConnector", self._store)
-        active_ids = await self.get_active_candidate_profile_ids(user_id)
-        remaining = [item for item in active_ids if item != profile_id]
-        await connector.delete(self._key(_active_candidate_profiles_key(user_id)))
-        for item in remaining:
-            await connector.set_add(self._key(_active_candidate_profiles_key(user_id)), item)
-        primary = await self.get_active_candidate_profile_id(user_id)
-        if primary == profile_id:
-            if remaining:
-                await connector.set(self._key(_active_candidate_profile_key(user_id)), remaining[0])
-            else:
-                await connector.delete(self._key(_active_candidate_profile_key(user_id)))
-
-    async def list_candidate_profile_users(self) -> tuple[str, ...]:
-        connector = cast("StoreConnector", self._store)
-        return tuple(sorted(await connector.set_members(self._key("candidate_profile_user_ids"))))
-
-    async def list_all_active_candidate_profiles(self) -> list[ManagedCandidateProfile]:
-        records: list[ManagedCandidateProfile] = []
-        for user_id in await self.list_candidate_profile_users():
-            for profile_id in await self.get_active_candidate_profile_ids(user_id):
-                record = await self.get_candidate_profile(user_id, profile_id)
-                if record is not None:
-                    records.append(record)
-        return records
-
-    async def get_run_summary(self, run_id: str) -> RunSummary | None:
-        connector = cast("StoreConnector", self._store)
-        raw = await connector.get(self._key(f"run_history:{run_id}"))
-        if raw is None:
-            return None
-        try:
-            return _summary_from_payload(json.loads(raw), tenant_id=self._tenant_id)
-        except (json.JSONDecodeError, TypeError, ValueError) as exc:
-            logger.warning(
-                "run_history_decode_failed",
-                tenant_id=self._tenant_id,
-                run_id=run_id,
-                error=str(exc),
-            )
-            return None
-
-    async def list_run_summaries(self, *, limit: int = 20) -> list[RunSummary]:
-        connector = cast("StoreConnector", self._store)
-        run_ids = await connector.set_members(self._key("run_history_ids"))
-        summaries: list[RunSummary] = []
-        for run_id in run_ids:
-            summary = await self.get_run_summary(run_id)
-            if summary is not None:
-                summaries.append(summary)
-        summaries.sort(key=_summary_sort_key, reverse=True)
-        return summaries[: max(limit, 0)]
-
-    async def reset_namespace(self) -> None:
-        reset = getattr(self._store, "reset_namespace", None)
-        if not callable(reset):
-            msg = f"Store backend {type(self._store).__name__} does not support namespace reset."
-            raise NotImplementedError(msg)
-        await reset(f"{self._tenant_id}:")
-
-    async def close(self) -> None:
-        close = getattr(self._store, "close", None)
-        if callable(close):
-            await close()
-
-
-@dataclass
-class TenantRuntime:
-    tenant: TenantConfig
-    settings: Settings
-    auth_provider: AuthProvider
-    store: TenantStore
-    builder: PipelineBuilder
-    llm_provider: LLMProvider
-    job_group_store: JobGroupStore
-    search_backend: SearchBackend
-    job_backend: JobPersistenceBackend
-    vector_backend: object | None = None
-    embedding_provider: object | None = None
-    metrics_exporter: MetricsExporter | None = None
-    base_sources: tuple[SourceSpec, ...] = field(default_factory=tuple)
-    runtime_sources: dict[str, RuntimeSourceRecord] = field(default_factory=dict)
-    disabled_source_ids: set[str] = field(default_factory=set)
-    sources_loaded: bool = False
+TenantRunAlreadyActiveError = _tenant_locks.TenantRunAlreadyActiveError
+TenantRunLockError = _tenant_locks.TenantRunLockError
+_tenant_run_lock = _tenant_locks.tenant_run_lock
+TenantStore = _tenant_store.TenantStore
+_summary_from_payload = _tenant_store._summary_from_payload
 
 
 class TenantRunner:
@@ -652,45 +485,72 @@ class TenantRunner:
         tenants: Sequence[TenantConfig],
         *,
         base_settings: Settings | None = None,
+        bgem3_provider: BgeMThreeProviderPort | None = None,
     ) -> TenantRunner:
         settings_template = base_settings or get_settings()
         runtimes: dict[str, TenantRuntime] = {}
-        metrics_exporters_by_port: dict[int, MetricsExporter] = {}
         for tenant in tenants:
             tenant_settings = tenant_to_settings(tenant, settings_template)
-            metrics_exporter: MetricsExporter | None = None
-            if tenant_settings.metrics_enabled:
-                metrics_exporter = metrics_exporters_by_port.get(tenant_settings.metrics_port)
-                if metrics_exporter is None:
-                    from job_ftch.infrastructure.metrics.prometheus import (
-                        PrometheusExporter,
-                    )
-
-                    metrics_exporter = PrometheusExporter(
-                        start_server=True,
-                        port=tenant_settings.metrics_port,
-                    )
-                    metrics_exporters_by_port[tenant_settings.metrics_port] = metrics_exporter
             auth = resolve_auth_provider(tenant.auth_provider, settings=tenant_settings)
             base_store = cast("Store", create_store(tenant_settings))
             tenant_store = TenantStore(tenant.tenant_id, base_store)
             job_group_store = cast("JobGroupStore", create_job_group_store(tenant_settings))
             llm = cast("LLMProvider", create_llm(tenant_settings))
             embedding_provider = None
-            if tenant_settings.embedding_provider:
+            # The generic embedding provider is only consumed by the optional
+            # semantic prefilter. Do not load its heavyweight model merely to
+            # start an ingest graph that has the prefilter disabled.
+            if (
+                tenant_settings.embedding_enabled
+                and tenant_settings.embedding_prefilter_enabled
+                and tenant_settings.embedding_provider
+            ):
                 try:
                     embedding_provider = create_embedding_provider(tenant_settings)
-                except Exception:
+                except Exception as exc:  # noqa: BLE001 - optional provider must not block bot startup
+                    import structlog as _sl
+
+                    _sl.get_logger("job_ftch.tenant_runner").warning(
+                        "embedding_provider_init_failed", error=str(exc)
+                    )
                     embedding_provider = None
+            ontology_store = None
+            try:
+                ontology_store = create_ontology_store(tenant_settings)
+            except Exception:
+                ontology_store = None
+            # BGE-M3 provider: instantiated once at startup so the
+            # bot adapter and the pipeline builder share the same
+            # encoder (and therefore the same vector dim). Without
+            # this, the bot's ad-hoc encodings and the pipeline's
+            # encodings could end up at different dims, which would
+            # crash the relevance scorer with a shape mismatch.
+            tenant_bgem3_provider = bgem3_provider
+            if tenant_bgem3_provider is None and getattr(tenant_settings, "bgem3_enabled", False):
+                try:
+                    from job_ftch.infrastructure.embeddings.bgem3 import (
+                        BgeMThreeProvider,
+                    )
+
+                    tenant_bgem3_provider = BgeMThreeProvider(tenant_settings.bgem3_model)
+                except Exception as exc:  # noqa: BLE001
+                    import structlog as _sl
+
+                    _sl.get_logger("job_ftch.tenant_runner").warning(
+                        "bgem3_provider_init_failed",
+                        error=str(exc),
+                    )
+                    tenant_bgem3_provider = None
             catalog = load_profile_catalog(tenant_settings)
-            sanitize_node, nodes = build_nodes(
+            sanitize_node, _snapshot_filter, nodes = build_nodes(
                 tenant_settings,
                 tenant_store,
                 llm,
                 job_group_store,
                 catalog=catalog,
+                bgem3_provider=tenant_bgem3_provider,
             )
-            output_sink, review_sink, posting_sink = build_output_sinks(tenant_settings)
+            output_sink, main_sink, review_sink, posting_sink = build_output_sinks(tenant_settings)
             rejected_counted, rejected_sink = build_rejected_sink(tenant_settings)
             builder = PipelineBuilder()
             builder.sources(tenant.sources)
@@ -700,10 +560,12 @@ class TenantRunner:
             for node in nodes:
                 builder.stage(node)
             builder.sink(output_sink)
+            builder.with_delivery_targets(build_delivery_targets(tenant_settings, posting_sink))
             builder.with_quarantine_sink(build_quarantine_sink(tenant_settings))
             builder.with_rejected_sink(rejected_sink, counted=rejected_counted)
             builder.set_default_max_items(tenant_settings.pipeline_max_items_per_run)
             builder.set_summary_context(
+                output_sink=main_sink,
                 review_sink=review_sink,
                 posting_sink=posting_sink,
                 job_group_store=job_group_store,
@@ -723,16 +585,61 @@ class TenantRunner:
                 search_backend=cast("SearchBackend", create_search_backend(tenant_settings)),
                 job_backend=cast("JobPersistenceBackend", create_job_backend(tenant_settings)),
                 vector_backend=cast("VectorBackend", create_vector_backend(tenant_settings))
-                if tenant_settings.embedding_enabled and tenant_settings.vector_backend
+                if embedding_provider is not None and tenant_settings.vector_backend
                 else None,
                 embedding_provider=embedding_provider,
-                metrics_exporter=metrics_exporter,
+                ontology_store=ontology_store,
+                bgem3_provider=tenant_bgem3_provider,
                 base_sources=tuple(tenant.sources),
             )
+            # Bind the in-memory BGE-M3 shot store to the process
+            # registry so the bot adapter can push user shots into
+            # the same store the pipeline builder reads from. This
+            # is the single line that fixes the "user's shots
+            # ignored at pipeline time" bug.
+            if tenant_bgem3_provider is not None:
+                try:
+                    from job_ftch.infrastructure.relevance import shot_registry
+                    from job_ftch.infrastructure.relevance.shot_anchor import (
+                        InMemoryBgeMThreeShotStore,
+                    )
+
+                    _store = InMemoryBgeMThreeShotStore(provider=tenant_bgem3_provider)
+                    shot_registry.configure(
+                        store=_store,
+                        provider=tenant_bgem3_provider,
+                    )
+                except Exception as exc:  # noqa: BLE001 - non-fatal
+                    import structlog as _sl
+
+                    _sl.get_logger("job_ftch.tenant_runner").warning(
+                        "shot_registry_configure_failed",
+                        error=str(exc),
+                    )
         return cls(runtimes)
 
     def tenant_ids(self) -> list[str]:
         return sorted(self._runtimes)
+
+    def _control_runtime(self) -> TenantRuntime:
+        return self.get_runtime(self.default_tenant_id())
+
+    async def get_selected_tenant_id(self, user_id: str | None) -> str:
+        if not user_id:
+            return self.default_tenant_id()
+        runtime = self._control_runtime()
+        raw = await runtime.store.get_run_state(f"config:telegram_selected_tenant:{user_id}")
+        if raw and raw in self._runtimes:
+            return raw
+        return self.default_tenant_id()
+
+    async def set_selected_tenant_id(self, user_id: str, tenant_id: str) -> str:
+        if tenant_id not in self._runtimes:
+            msg = f"Unknown tenant_id: {tenant_id}"
+            raise KeyError(msg)
+        runtime = self._control_runtime()
+        await runtime.store.set_run_state(f"config:telegram_selected_tenant:{user_id}", tenant_id)
+        return tenant_id
 
     def get_runtime(self, tenant_id: str) -> TenantRuntime:
         runtime = self._runtimes.get(tenant_id)
@@ -744,13 +651,16 @@ class TenantRunner:
     async def _ensure_runtime_sources_loaded(self, runtime: TenantRuntime) -> None:
         if runtime.sources_loaded:
             return
+        await self._reload_runtime_sources(runtime)
+        await self._ensure_dynamic_config_loaded(runtime)
+        runtime.sources_loaded = True
+
+    async def _reload_runtime_sources(self, runtime: TenantRuntime) -> None:
         runtime.runtime_sources = {
             record.source_id: record for record in await runtime.store.list_runtime_sources()
         }
         runtime.disabled_source_ids = await runtime.store.list_disabled_source_ids()
         self._apply_runtime_sources(runtime)
-        await self._ensure_dynamic_config_loaded(runtime)
-        runtime.sources_loaded = True
 
     async def _ensure_dynamic_config_loaded(self, runtime: TenantRuntime) -> None:
         posting_backend = await runtime.store.get_run_state("config:posting_backend")
@@ -778,15 +688,109 @@ class TenantRunner:
                 pass
 
         if updated:
-            output_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
+            output_sink, main_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
             runtime.builder.clear_sinks().sink(output_sink)
+            runtime.builder.with_delivery_targets(
+                build_delivery_targets(runtime.settings, posting_sink)
+            )
             runtime.builder.set_summary_context(
+                output_sink=main_sink,
                 review_sink=review_sink,
                 posting_sink=posting_sink,
                 job_group_store=runtime.job_group_store,
                 profile_name=load_profile_catalog(runtime.settings).catalog_name,
                 output_path=runtime.settings.output_path,
             )
+
+    async def _get_source_bootstrap_completed_at(
+        self, runtime: TenantRuntime, source_id: str
+    ) -> datetime | None:
+        state = await runtime.store.get_source_ingest_state(runtime.tenant.tenant_id, source_id)
+        return state.bootstrap_completed_at if state is not None else None
+
+    async def _mark_source_bootstrap_completed(
+        self, runtime: TenantRuntime, source_id: str, completed_at: datetime
+    ) -> None:
+        await runtime.store.save_source_ingest_state(
+            runtime.tenant.tenant_id,
+            SourceIngestState(
+                source_id=source_id,
+                bootstrap_completed_at=completed_at,
+                updated_at=completed_at,
+            ),
+        )
+
+    async def get_publish_channel(self, tenant_id: str) -> str | None:
+        runtime = self.get_runtime(tenant_id)
+        raw = await runtime.store.get_run_state("config:telegram_publish_entity")
+        return raw if raw else None
+
+    async def get_publish_user_id(self, tenant_id: str) -> str | None:
+        runtime = self.get_runtime(tenant_id)
+        raw = await runtime.store.get_run_state("config:telegram_publish_user_id")
+        return raw if raw else None
+
+    async def set_publish_channel(
+        self,
+        tenant_id: str,
+        channel: str | None,
+        *,
+        user_id: str | None = None,
+    ) -> None:
+        runtime = self.get_runtime(tenant_id)
+        # Bot-owned channel publishing uses Bot API sends in the adapter. Keep the
+        # core Telethon posting sink disabled to avoid duplicate side effects.
+        await runtime.store.set_run_state("config:posting_backend", "none")
+        if channel is None:
+            await runtime.store.set_run_state("config:telegram_publish_entity", "")
+            await runtime.store.set_run_state("config:telegram_publish_user_id", "")
+        else:
+            await runtime.store.set_run_state("config:telegram_publish_entity", channel)
+            await runtime.store.set_run_state("config:telegram_publish_user_id", user_id or "")
+        runtime.sources_loaded = False
+        await self._ensure_runtime_sources_loaded(runtime)
+
+    async def get_schedule_interval(self, tenant_id: str) -> int | None:
+        runtime = self.get_runtime(tenant_id)
+        raw = await runtime.store.get_run_state("config:schedule_interval_seconds")
+        if raw == "off":
+            return None
+        if not raw:
+            if runtime.tenant.schedule is not None:
+                return runtime.tenant.schedule.interval_seconds
+            return None
+        try:
+            return int(raw)
+        except (ValueError, TypeError):
+            return None
+
+    async def set_schedule_interval(self, tenant_id: str, seconds: int | None) -> None:
+        runtime = self.get_runtime(tenant_id)
+        value = str(seconds) if seconds is not None else "off"
+        await runtime.store.set_run_state("config:schedule_interval_seconds", value)
+
+    async def get_bot_scheduler_status(self, tenant_id: str) -> dict[str, Any]:
+        runtime = self.get_runtime(tenant_id)
+        return {
+            "last_attempt_at": await _read_runtime_state(runtime, "bot_scheduler:last_attempt_at"),
+            "last_success_at": await _read_runtime_state(runtime, "bot_scheduler:last_success_at"),
+            "last_error": await _read_runtime_state(runtime, "bot_scheduler:last_error"),
+            "last_run_emitted": await _read_runtime_state(
+                runtime, "bot_scheduler:last_run_emitted"
+            ),
+            "last_publish_attempt_at": await _read_runtime_state(
+                runtime, "bot_scheduler:last_publish_attempt_at"
+            ),
+            "last_publish_success_at": await _read_runtime_state(
+                runtime, "bot_scheduler:last_publish_success_at"
+            ),
+            "last_publish_error": await _read_runtime_state(
+                runtime, "bot_scheduler:last_publish_error"
+            ),
+            "last_publish_sent": await _read_runtime_state(
+                runtime, "bot_scheduler:last_publish_sent"
+            ),
+        }
 
     async def update_posting_config(self, tenant_id: str, channel: str) -> None:
         runtime = self.get_runtime(tenant_id)
@@ -810,22 +814,59 @@ class TenantRunner:
         runtime.sources_loaded = False
         await self._ensure_runtime_sources_loaded(runtime)
 
-    async def _build_runtime_catalog(self, runtime: TenantRuntime) -> Any:
+    async def _build_runtime_catalog(
+        self, runtime: TenantRuntime, *, user_id: str | None = None
+    ) -> tuple[Any, dict[str, str | None]]:
+        """Build runtime catalog with embedded shots and dynamic relevance prompts.
+
+        Returns (catalog, relevance_prompts).
+        BR-4: embed_profile_examples() called to refresh embedding_vector.
+        BR-1: build_relevance_prompt_from_profile() generates dynamic prompts.
+        """
+        from job_ftch.application.profile_inputs import embed_search_profile
+        from job_ftch.application.prompt_builder import build_relevance_prompts_for_catalog
         from job_ftch.domain import ProfileCatalog
 
         active_records = await runtime.store.list_all_active_candidate_profiles()
+        if user_id is not None:
+            active_records = [record for record in active_records if record.user_id == user_id]
         user_profiles = tuple(
             search_profile
             for record in active_records
             for search_profile in record.profile.search_profiles
         )
-        if user_profiles:
-            return ProfileCatalog(
-                catalog_name="user",
-                profiles=user_profiles,
-            )
-        # No user profile data; fall back to an explicit file profile if configured.
-        return load_profile_catalog(runtime.settings)
+
+        if not user_profiles:
+            fallback = load_profile_catalog(runtime.settings)
+            return fallback, {}
+
+        # BR-4: re-embed shots on every run
+        if runtime.embedding_provider:
+            embedded_profiles = []
+            for sp in user_profiles:
+                with suppress(Exception):
+                    sp = await embed_search_profile(sp, runtime.embedding_provider)
+                embedded_profiles.append(sp)
+            user_profiles = tuple(embedded_profiles)
+
+        catalog_name = f"user:{user_id}" if user_id is not None else "user"
+        catalog = ProfileCatalog(catalog_name=catalog_name, profiles=user_profiles)
+
+        # BR-1: generate dynamic relevance prompts from shots
+        relevance_prompts: dict[str, str | None] = {}
+        if runtime.llm_provider and runtime.store:
+            try:
+                relevance_prompts = await build_relevance_prompts_for_catalog(
+                    catalog,
+                    runtime.llm_provider,
+                    runtime.store,
+                )
+            except Exception as exc:
+                structlog.get_logger("job_ftch.tenant_runner").warning(
+                    "relevance_prompts_build_failed", error=str(exc)
+                )
+
+        return catalog, relevance_prompts
 
     async def _build_runtime_builder(
         self,
@@ -833,42 +874,188 @@ class TenantRunner:
         *,
         effective_sources: list[SourceSpec],
         catalog: Any,
+        run_id: str,
+        user_id: str | None = None,
+        relevance_prompts: dict[str, str | None] | None = None,
     ) -> tuple[PipelineBuilder, SnapshotFilterNode]:
-        sanitize_node, nodes = build_nodes(
+        # Load the live ontology from the Postgres/SQLite store
+        # so the builder has both the static fixtures seed and
+        # whatever the LLM has extracted from the user's recent
+        # shots. Without this, the builder only ever saw the seed
+        # and user-added roles like "Senior LLM Engineer" were
+        # invisible to the role-anchors in the parallel scoring
+        # node.
+        from job_ftch.application.builder import (
+            _build_runtime_ontology_payload,
+            merge_derived_ontology,
+        )
+        from job_ftch.application.prompt_builder import build_relevance_prompts_for_catalog
+        from job_ftch.application.search_expansion import expand_career_site_specs
+
+        runtime_derived_ontology: dict[str, Any] = {}
+        if runtime.ontology_store is not None:
+            try:
+                runtime_derived_ontology = await _build_runtime_ontology_payload(
+                    runtime.ontology_store
+                )
+            except Exception as exc:  # noqa: BLE001
+                structlog.get_logger("job_ftch.tenant_runner").warning(
+                    "runtime_ontology_load_failed",
+                    error=str(exc),
+                )
+
+        # V2 graphs construct their typed relevance nodes separately from
+        # build_nodes(). Keep one enriched catalog for both paths; otherwise
+        # only legacy nodes see live anti-patterns and role/skill additions.
+        effective_catalog = merge_derived_ontology(catalog, runtime_derived_ontology)
+
+        # Rewrite bare aggregator sources into keyword-filtered search URLs using
+        # the tenant's target roles. Sources with an explicit query are untouched.
+        effective_sources = expand_career_site_specs(
+            effective_sources,
+            tuple(
+                role
+                for profile in effective_catalog.profiles
+                for role in profile.target_roles
+                if role.strip()
+            ),
+        )
+        if effective_catalog != catalog and runtime.llm_provider and runtime.store:
+            try:
+                relevance_prompts = await build_relevance_prompts_for_catalog(
+                    effective_catalog,
+                    runtime.llm_provider,
+                    runtime.store,
+                )
+            except Exception as exc:  # noqa: BLE001
+                structlog.get_logger("job_ftch.tenant_runner").warning(
+                    "effective_relevance_prompts_build_failed",
+                    error=str(exc),
+                )
+
+        sanitize_node, _snapshot_filter, nodes = build_nodes(
             runtime.settings,
             runtime.store,
             runtime.llm_provider,
             runtime.job_group_store,
-            catalog=catalog,
+            catalog=effective_catalog,
+            tenant_id=runtime.tenant.tenant_id,
+            run_id=run_id,
+            user_id=user_id,
+            ontology_store=runtime.ontology_store,
+            relevance_prompts=relevance_prompts,
+            derived_ontology_override=runtime_derived_ontology,
         )
-        output_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
+        if runtime.settings.pipeline_graph_path is not None:
+            from job_ftch.application.graph import build_v2_executor, compile_graph, load_graph
+            from job_ftch.application.graph.pipeline_stage import GraphPipelineStage
+
+            graph = compile_graph(load_graph(runtime.settings.pipeline_graph_path))
+            expected_hash = runtime.settings.pipeline_graph_expected_hash
+            if expected_hash is not None and graph.graph_hash != expected_hash:
+                raise RuntimeError(
+                    "Configured pipeline graph hash mismatch: "
+                    f"expected {expected_hash}, got {graph.graph_hash} "
+                    f"for {runtime.settings.pipeline_graph_path}"
+                )
+            if runtime.settings.llm_backend == "openai":
+                relevance_settings = runtime.settings.model_copy(
+                    update={"openai_model": runtime.settings.relevance_llm_model}
+                )
+                relevance_llm = build_llm(relevance_settings)
+            else:
+                # Non-OpenAI providers are often injected tenant adapters.
+                # Rebuilding from Settings silently discarded that runtime
+                # provider and made test/custom deployments use heuristics.
+                relevance_llm = runtime.llm_provider
+            typed_bindings = build_v2_typed_bindings(
+                nodes=list(nodes),
+                store=runtime.store,
+                catalog=effective_catalog,
+                relevance_llm=relevance_llm,
+                low_threshold=runtime.settings.llm_relevance_low_threshold,
+                high_threshold=runtime.settings.llm_relevance_high_threshold,
+                max_per_run=runtime.settings.llm_relevance_max_per_run,
+                relevance_prompts=relevance_prompts,
+                tenant_id=runtime.tenant.tenant_id,
+                graph_hash=graph.graph_hash,
+                post_accept_llm=runtime.llm_provider,
+                post_accept_group_store=runtime.job_group_store,
+                post_accept_max_calls=runtime.settings.pipeline_full_extraction_max_calls_per_run,
+                post_accept_target_roles=tuple(
+                    dict.fromkeys(
+                        role
+                        for profile in effective_catalog.profiles
+                        for role in profile.target_roles
+                        if role.strip()
+                    )
+                )[:60],
+                capture_payloads=runtime.settings.tracing_capture_payloads,
+            )
+            executor = build_v2_executor(
+                graph,
+                nodes=list(nodes),
+                sanitize_node=sanitize_node,
+                catalog=effective_catalog,
+                typed_bindings=typed_bindings,
+                tenant_id=runtime.tenant.tenant_id,
+                user_id=user_id,
+                runtime_resources={
+                    "active_store": runtime.store,
+                    "active_llm": relevance_llm,
+                },
+            )
+            nodes = [GraphPipelineStage(executor)]
+        output_sink, main_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
         rejected_counted, rejected_sink = build_rejected_sink(runtime.settings)
-
-        # Load previous snapshots for all sources so we can drop unchanged items.
-        snapshot_by_source: dict[str, dict[str, str]] = {}
-        for spec in effective_sources:
-            sid = source_spec_identifier(spec)
-            snapshot_by_source[sid] = await runtime.store.load_source_snapshot(sid)
-
-        snapshot_filter = SnapshotFilterNode(runtime.store, snapshot_by_source)
+        if _snapshot_filter is None:
+            msg = "build_nodes() must return SnapshotFilterNode when run_id is set"
+            raise RuntimeError(msg)
+        snapshot_filter = _snapshot_filter
 
         builder = PipelineBuilder()
         builder.sources(effective_sources)
         builder.auth(runtime.auth_provider)
         builder.store(runtime.store)
         builder.stage(sanitize_node)
-        builder.stage(snapshot_filter)
+        builder.with_snapshot_filter(
+            run_id, tenant_id=runtime.tenant.tenant_id, snapshot_filter=snapshot_filter
+        )
         for node in nodes:
             builder.stage(node)
         builder.sink(output_sink)
+        builder.with_delivery_targets(build_delivery_targets(runtime.settings, posting_sink))
         builder.with_quarantine_sink(build_quarantine_sink(runtime.settings))
         builder.with_rejected_sink(rejected_sink, counted=rejected_counted)
+        builder.set_source_fetch_concurrency(
+            resolve_settings_source_fetch_concurrency(
+                runtime.settings,
+                source_specs=effective_sources,
+            )
+        )
+        builder.set_source_pool_runtime(
+            dynamic_enabled=runtime.settings.source_pool_dynamic_enabled,
+            soft_deadline_seconds=runtime.settings.source_soft_deadline_seconds,
+            hard_deadline_seconds=runtime.settings.source_hard_deadline_seconds,
+            overflow_concurrency=runtime.settings.source_overflow_concurrency,
+            hard_cancel_grace_seconds=runtime.settings.source_hard_cancel_grace_seconds,
+            adaptive_resize=runtime.settings.source_pool_adaptive_resize,
+            concurrency_max=runtime.settings.source_fetch_concurrency_max,
+        )
+        builder.set_pipeline_item_concurrency(
+            resolve_settings_pipeline_item_concurrency(
+                runtime.settings,
+                source_specs=effective_sources,
+                source_count=len(effective_sources),
+            )
+        )
         builder.set_default_max_items(runtime.settings.pipeline_max_items_per_run)
         builder.set_summary_context(
+            output_sink=main_sink,
             review_sink=review_sink,
             posting_sink=posting_sink,
             job_group_store=runtime.job_group_store,
-            profile_name=catalog.catalog_name,
+            profile_name=effective_catalog.catalog_name,
             output_path=runtime.settings.output_path,
         )
         return builder, snapshot_filter
@@ -881,6 +1068,38 @@ class TenantRunner:
         )
         runtime.builder.sources(effective_sources)
         runtime.tenant = runtime.tenant.model_copy(update={"sources": effective_sources})
+
+    async def _prepare_effective_source(
+        self,
+        runtime: TenantRuntime,
+        spec: SourceSpec,
+        *,
+        assessment_service: Any,
+        health: SourceHealth | None = None,
+        now: datetime,
+    ) -> tuple[str, SourceSpec]:
+        sid = source_spec_identifier(spec)
+        await assessment_service.assess_and_store(
+            spec, runtime.store, ttl_days=runtime.settings.source_assessment_ttl_days
+        )
+        assessment = await load_source_assessment(runtime.store, sid)
+        bootstrap_completed_at = await self._get_source_bootstrap_completed_at(runtime, sid)
+        last_started_at = _parse_optional_datetime(
+            health.last_started_at if health is not None else None
+        )
+        last_successful_run_at = _parse_optional_datetime(
+            health.last_success_at if health is not None else None
+        )
+        effective_spec = _apply_runtime_fetch_window(
+            spec,
+            assessment=assessment,
+            bootstrap_completed_at=bootstrap_completed_at,
+            last_started_at=last_started_at,
+            last_successful_run_at=last_successful_run_at,
+            interval_seconds=_resolve_source_interval_seconds(runtime, spec),
+            now=now,
+        )
+        return sid, effective_spec
 
     async def add_source_spec(
         self,
@@ -908,6 +1127,11 @@ class TenantRunner:
             msg = f"Source already configured: {source_id}"
             raise ValueError(msg)
 
+        assessment_service = create_source_assessment_service()
+        await assessment_service.assess_and_store(
+            spec, runtime.store, ttl_days=runtime.settings.source_assessment_ttl_days
+        )
+
         if source_id in base_ids:
             await runtime.store.set_source_disabled(source_id, False)
             runtime.disabled_source_ids.discard(source_id)
@@ -920,9 +1144,15 @@ class TenantRunner:
                 added_by=added_by,
                 input_value=input_value,
             )
+            try:
+                await runtime.store.save_runtime_source(record)
+                await runtime.store.set_source_disabled(source_id, False)
+            except Exception:
+                with suppress(Exception):
+                    await runtime.store.delete_runtime_source(source_id)
+                await self._reload_runtime_sources(runtime)
+                raise
             runtime.runtime_sources[source_id] = record
-            await runtime.store.save_runtime_source(record)
-            await runtime.store.set_source_disabled(source_id, False)
             runtime.disabled_source_ids.discard(source_id)
 
         self._apply_runtime_sources(runtime)
@@ -942,13 +1172,22 @@ class TenantRunner:
             msg = f"Unknown source_id: {source_id}"
             raise KeyError(msg)
 
+        previous_runtime_record = runtime_record
         if runtime_record is not None:
             runtime_record = runtime_record.model_copy(update={"enabled": False})
+        try:
+            if runtime_record is not None:
+                await runtime.store.save_runtime_source(runtime_record)
+            await runtime.store.set_source_disabled(source_id, True)
+        except Exception:
+            if previous_runtime_record is not None:
+                with suppress(Exception):
+                    await runtime.store.save_runtime_source(previous_runtime_record)
+            await self._reload_runtime_sources(runtime)
+            raise
+        if runtime_record is not None:
             runtime.runtime_sources[source_id] = runtime_record
-            await runtime.store.save_runtime_source(runtime_record)
-
         runtime.disabled_source_ids.add(source_id)
-        await runtime.store.set_source_disabled(source_id, True)
         self._apply_runtime_sources(runtime)
         payloads = await self.list_sources(tenant_id)
         for payload in payloads:
@@ -961,18 +1200,96 @@ class TenantRunner:
         """Clear all runtime sources and disable base config sources."""
         runtime = self.get_runtime(tenant_id)
         await self._ensure_runtime_sources_loaded(runtime)
+        previous_runtime_records = list(runtime.runtime_sources.values())
+        previous_disabled_source_ids = set(runtime.disabled_source_ids)
+        base_source_ids = [source_spec_identifier(spec) for spec in runtime.base_sources]
 
-        await runtime.store.clear_runtime_sources()
+        try:
+            await runtime.store.clear_runtime_sources()
+            for source_id in base_source_ids:
+                await runtime.store.set_source_disabled(source_id, True)
+        except Exception:
+            for record in previous_runtime_records:
+                with suppress(Exception):
+                    await runtime.store.save_runtime_source(record)
+            for source_id in base_source_ids:
+                with suppress(Exception):
+                    await runtime.store.set_source_disabled(
+                        source_id,
+                        source_id in previous_disabled_source_ids,
+                    )
+            await self._reload_runtime_sources(runtime)
+            raise
+
         runtime.runtime_sources.clear()
-
-        for spec in runtime.base_sources:
-            source_id = source_spec_identifier(spec)
-            await runtime.store.set_source_disabled(source_id, True)
+        for source_id in base_source_ids:
             runtime.disabled_source_ids.add(source_id)
 
         self._apply_runtime_sources(runtime)
 
-    async def run_tenant(self, tenant_id: str, *, max_items: int | None = None) -> RunSummary:
+    async def run_tenant(
+        self,
+        tenant_id: str,
+        *,
+        max_items: int | None = None,
+        user_id: str | None = None,
+        source_ids: Sequence[str] | None = None,
+    ) -> RunSummary:
+        """Run acquisition and policy under one correlated trace/run id."""
+        run_id = uuid.uuid4().hex
+        context_tokens = bind_contextvars(tenant_id=tenant_id, source_run_id=run_id)
+        tracer = trace.get_tracer("job_ftch.tenant_runner")
+        try:
+            with tracer.start_as_current_span("ingest.run") as span:
+                span.set_attribute("job_ftch.source_run_id", run_id)
+                span.set_attribute("job_ftch.tenant_id", tenant_id)
+                runtime = self.get_runtime(tenant_id)
+                try:
+                    async with _tenant_run_lock(runtime.settings, tenant_id):
+                        summary = await self._run_tenant_bound(
+                            tenant_id,
+                            run_id=run_id,
+                            max_items=max_items,
+                            user_id=user_id,
+                            source_ids=source_ids,
+                            lock_already_held=True,
+                        )
+                except TenantRunAlreadyActiveError:
+                    logger.info("tenant_run_skipped_already_active", tenant_id=tenant_id)
+                    summary = RunSummary()
+                    summary.tenant_id = tenant_id
+                    summary.source_run_id = run_id
+                    summary.finished_at = datetime.now(UTC)
+                    summary.skipped_already_active = True
+                except TenantRunLockError as exc:
+                    logger.error(
+                        "tenant_run_skipped_lock_error", tenant_id=tenant_id, error=str(exc)
+                    )
+                    summary = RunSummary()
+                    summary.tenant_id = tenant_id
+                    summary.source_run_id = run_id
+                    summary.finished_at = datetime.now(UTC)
+                    summary.failed = 1
+                    summary.drop_reasons["lock_error"] = 1
+                span.set_attribute(
+                    "job_ftch.skipped_already_active", summary.skipped_already_active
+                )
+                span.set_attribute("job_ftch.routing_accepted", summary.emitted)
+                span.set_attribute("job_ftch.failed", summary.failed)
+                return summary
+        finally:
+            reset_contextvars(**context_tokens)
+
+    async def _run_tenant_bound(
+        self,
+        tenant_id: str,
+        *,
+        run_id: str,
+        max_items: int | None = None,
+        user_id: str | None = None,
+        source_ids: Sequence[str] | None = None,
+        lock_already_held: bool = False,
+    ) -> RunSummary:
         runtime = self.get_runtime(tenant_id)
         await self._ensure_runtime_sources_loaded(runtime)
 
@@ -994,16 +1311,35 @@ class TenantRunner:
         all_specs = list(runtime.base_sources) + [
             r.spec for r in runtime.runtime_sources.values() if r.enabled
         ]
+        requested_source_ids = set(source_ids or ())
+        if requested_source_ids:
+            available_source_ids = {
+                source_spec_identifier(spec)
+                for spec in all_specs
+                if source_spec_identifier(spec) not in runtime.disabled_source_ids
+            }
+            missing_source_ids = requested_source_ids - available_source_ids
+            if missing_source_ids:
+                raise ValueError(
+                    f"Requested sources are missing or disabled: {sorted(missing_source_ids)}"
+                )
         # Filter for unique specs by ID (handling overlaps between base and runtime)
         seen_specs: set[str] = set()
         unique_specs: list[SourceSpec] = []
         for spec in all_specs:
             sid = source_spec_identifier(spec)
-            if sid in seen_specs or sid in runtime.disabled_source_ids:
+            if (
+                sid in seen_specs
+                or sid in runtime.disabled_source_ids
+                or (requested_source_ids and sid not in requested_source_ids)
+            ):
                 continue
             seen_specs.add(sid)
             unique_specs.append(spec)
 
+        assessment_service = create_source_assessment_service()
+        runnable_specs: list[SourceSpec] = []
+        planned_source_ids: list[str] = []
         for spec in unique_specs:
             sid = source_spec_identifier(spec)
             health = health_map.get(sid)
@@ -1037,12 +1373,41 @@ class TenantRunner:
                 # Save the updated skipped_runs before probing
                 await runtime.store.save_source_health(sid, health)
 
-            effective_sources.append(spec)
+            runnable_specs.append(spec)
+
+        if runnable_specs:
+            source_preparation_concurrency = resolve_settings_source_preparation_concurrency(
+                runtime.settings,
+                source_specs=runnable_specs,
+            )
+            await runtime.store.set_run_state(
+                "pipeline.source_preparation_concurrency",
+                str(source_preparation_concurrency),
+            )
+            semaphore = asyncio.Semaphore(max(source_preparation_concurrency, 1))
+
+            async def _prepare(spec: SourceSpec) -> tuple[str, SourceSpec]:
+                async with semaphore:
+                    sid = source_spec_identifier(spec)
+                    return await self._prepare_effective_source(
+                        runtime,
+                        spec,
+                        assessment_service=assessment_service,
+                        health=health_map.get(sid),
+                        now=now,
+                    )
+
+            prepared = await asyncio.gather(*(_prepare(spec) for spec in runnable_specs))
+            for sid, effective_spec in prepared:
+                effective_sources.append(effective_spec)
+                planned_source_ids.append(sid)
 
         if not effective_sources:
             # Return an empty summary if no sources are runnable this cycle
             summary = RunSummary()
             summary.tenant_id = tenant_id
+            summary.source_run_id = run_id
+            summary.finish()
             return summary
 
         # Task 4: Jitter before dispatching
@@ -1050,35 +1415,174 @@ class TenantRunner:
             jitter = random.uniform(0.0, runtime.settings.scheduler_jitter_seconds)
             await asyncio.sleep(jitter)
 
-        async with _tenant_run_lock(runtime.settings, tenant_id):
-            catalog = await self._build_runtime_catalog(runtime)
-            builder, snapshot_filter = await self._build_runtime_builder(
-                runtime,
-                effective_sources=effective_sources,
-                catalog=catalog,
+        try:
+            lock_context = (
+                nullcontext()
+                if lock_already_held
+                else _tenant_run_lock(runtime.settings, tenant_id)
             )
-            summary = await builder.run_async(max_items=max_items)
-            await snapshot_filter.save()
+            async with lock_context:
+                try:
+                    await runtime.store.set_run_state("pipeline.run_summary", "")
+                except Exception as exc:
+                    logger.warning(
+                        "tenant_run_summary_state_clear_failed",
+                        tenant_id=tenant_id,
+                        error=str(exc),
+                        exc_info=True,
+                    )
+                with collect_llm_usage() as usage:
+                    catalog, relevance_prompts = await self._build_runtime_catalog(
+                        runtime, user_id=user_id
+                    )
+                    builder, snapshot_filter = await self._build_runtime_builder(
+                        runtime,
+                        effective_sources=effective_sources,
+                        catalog=catalog,
+                        run_id=run_id,
+                        user_id=user_id,
+                        relevance_prompts=relevance_prompts,
+                    )
+                    summary = await builder.run_async(max_items=max_items)
+                summary.llm_usage_requests = usage.requests
+                summary.llm_tokens_in = usage.tokens_in
+                summary.llm_cached_tokens_in = usage.cached_tokens_in
+                summary.llm_tokens_out = usage.tokens_out
+                summary.llm_latency_ms = usage.latency_ms
+                summary.llm_cost_usd = usage.cost_usd
+                summary.llm_cost_is_complete = usage.cost_is_complete
+                summary.llm_cost_pricing_version = pricing_version()
+                summary.llm_cost_unknown_models = sorted(usage.unknown_pricing_models)
+        except TenantRunAlreadyActiveError:
+            logger.info("tenant_run_skipped_already_active", tenant_id=tenant_id)
+            summary = RunSummary()
+            summary.tenant_id = tenant_id
+            summary.source_run_id = run_id
+            summary.finished_at = datetime.now(UTC)
+            return summary
+        except TenantRunLockError as exc:
+            logger.error("tenant_run_skipped_lock_error", tenant_id=tenant_id, error=str(exc))
+            summary = RunSummary()
+            summary.tenant_id = tenant_id
+            summary.source_run_id = run_id
+            summary.finished_at = datetime.now(UTC)
+            summary.failed = 1
+            summary.drop_reasons["lock_error"] = 1
+            return summary
 
         summary.tenant_id = tenant_id
-        await runtime.store.set_run_state(
-            "pipeline.run_summary",
-            json.dumps(
-                summary.as_dict(), default=_json_default, ensure_ascii=False, sort_keys=True
-            ),
+        from job_ftch.infrastructure.observability.openobserve import record_run_metrics
+        from job_ftch.infrastructure.observability.otel_setup import record_final_run_trace
+
+        record_final_run_trace(summary)
+        # Emit the run-terminal log before the exporter flush. record_run_metrics
+        # ends by flushing both the log and meter providers, so a log written
+        # afterwards stays queued in the batch processor and a verifier querying
+        # by run id right after the run finds metrics but no operational log.
+        logger.info(
+            "tenant_run_complete",
+            tenant_id=tenant_id,
+            run_id=summary.source_run_id,
+            graph_hash=summary.graph_hash,
+            fetched=summary.fetched,
+            extracted=summary.extracted,
+            accepted=summary.emitted,
+            review=summary.review,
+            rejected=summary.rejected,
+            deferred=summary.deferred,
+            failed=summary.failed,
+            source_partial=summary.source_partial,
+            source_failures=summary.source_failures,
+            source_outcomes=summary.source_outcomes,
+            llm_requests=summary.llm_usage_requests,
+            llm_cost_usd=summary.llm_cost_usd,
+            llm_cost_is_complete=summary.llm_cost_is_complete,
+            llm_cost_unknown_models=summary.llm_cost_unknown_models,
         )
-        await runtime.store.save_run_summary(summary)
-        await self._update_source_health(runtime, summary)
-        if runtime.metrics_exporter is not None:
-            await runtime.metrics_exporter.observe_run(
-                summary,
-                tenant_id=tenant_id,
-                job_group_total=await runtime.job_group_store.count(),
+        record_run_metrics(summary)
+        try:
+            await runtime.store.set_run_state(
+                "pipeline.run_summary",
+                json.dumps(
+                    summary.as_dict(), default=_json_default, ensure_ascii=False, sort_keys=True
+                ),
             )
+        except Exception as exc:
+            logger.warning(
+                "tenant_run_summary_state_persist_failed",
+                tenant_id=tenant_id,
+                error=str(exc),
+                exc_info=True,
+            )
+        try:
+            await runtime.store.save_run_summary(summary)
+        except Exception as exc:
+            logger.warning(
+                "tenant_run_history_persist_failed",
+                tenant_id=tenant_id,
+                run_id=summary.source_run_id,
+                error=str(exc),
+                exc_info=True,
+            )
+        try:
+            await self._update_source_health(runtime, summary)
+        except Exception as exc:
+            logger.warning(
+                "tenant_source_health_update_failed",
+                tenant_id=tenant_id,
+                run_id=summary.source_run_id,
+                error=str(exc),
+                exc_info=True,
+            )
+        try:
+            await self.refresh_runtime_state_metrics(tenant_id, summary)
+        except Exception as exc:
+            logger.warning(
+                "tenant_runtime_state_metrics_failed",
+                tenant_id=tenant_id,
+                run_id=summary.source_run_id,
+                error=str(exc),
+                exc_info=True,
+            )
+        completed_at = summary.finished_at or datetime.now(UTC)
+        completed_source_ids = {
+            outcome.get("source_id")
+            for outcome in summary.source_outcomes
+            if outcome.get("completion_state") == "completed" and outcome.get("source_id")
+        }
+        for source_id in planned_source_ids:
+            stats = summary.by_source_id.get(source_id)
+            if (
+                stats is not None
+                and stats.failed == 0
+                and source_id in completed_source_ids
+                and await self._get_source_bootstrap_completed_at(runtime, source_id) is None
+            ):
+                try:
+                    await self._mark_source_bootstrap_completed(runtime, source_id, completed_at)
+                except Exception as exc:
+                    logger.warning(
+                        "tenant_source_bootstrap_mark_failed",
+                        tenant_id=tenant_id,
+                        source_id=source_id,
+                        error=str(exc),
+                        exc_info=True,
+                    )
         return summary
 
     async def _update_source_health(self, runtime: TenantRuntime, summary: RunSummary) -> None:
         finished_at = summary.finished_at or datetime.now()
+        started_at = summary.started_at
+        failure_by_id = {
+            item.get("source_id", ""): item
+            for item in getattr(summary, "source_failures", [])
+            if item.get("source_id")
+        }
+        eviction_by_id = {
+            item.get("source_id", ""): item
+            for item in getattr(summary, "source_evictions", [])
+            if item.get("source_id")
+        }
         for source_id, stats in summary.by_source_id.items():
             source_kind, _, source_name = source_id.partition(":")
             previous = await runtime.store.get_source_health(source_id)
@@ -1088,11 +1592,51 @@ class TenantRunner:
                 source_kind=source_kind,
                 source_name=source_name,
                 stats=stats,
+                started_at=started_at,
                 finished_at=finished_at,
                 drift_ratio_threshold=runtime.settings.source_health_drift_ratio,
                 min_baseline_threshold=runtime.settings.source_health_min_baseline,
                 failure_streak_pause=runtime.settings.source_health_failure_streak_pause,
             )
+            failure_payload = failure_by_id.get(source_id)
+            if failure_payload is not None:
+                payload = payload.model_copy(
+                    update={
+                        "last_error": failure_payload.get("error"),
+                        "last_error_kind": "source_fetch_failed",
+                        "last_error_at": finished_at.isoformat(),
+                    }
+                )
+            elif stats.failed == 0 and payload.last_error is not None:
+                payload = payload.model_copy(
+                    update={"last_error": None, "last_error_kind": None, "last_error_at": None}
+                )
+            eviction_payload = eviction_by_id.get(source_id)
+            if eviction_payload is not None:
+                eviction_streak = (previous.eviction_streak if previous else 0) + 1
+                should_pause = (
+                    payload.paused
+                    or eviction_streak >= runtime.settings.source_eviction_pause_threshold
+                )
+                payload = payload.model_copy(
+                    update={
+                        "last_eviction_at": finished_at.isoformat(),
+                        "eviction_streak": eviction_streak,
+                        "last_eviction_kind": eviction_payload.get("eviction_kind"),
+                        "paused": should_pause,
+                        "status": "paused" if should_pause else payload.status,
+                    }
+                )
+                if should_pause and not (previous.paused if previous else False):
+                    logger.info(
+                        "source_eviction_paused",
+                        tenant_id=runtime.tenant.tenant_id,
+                        source_id=source_id,
+                        eviction_streak=eviction_streak,
+                        eviction_kind=eviction_payload.get("eviction_kind"),
+                    )
+            elif payload.eviction_streak != 0:
+                payload = payload.model_copy(update={"eviction_streak": 0})
             await runtime.store.save_source_health(source_id, payload)
             if payload.degraded:
                 logger.warning(
@@ -1103,6 +1647,31 @@ class TenantRunner:
                     current_emitted=payload.last_emitted,
                     drift_ratio=payload.drift_ratio,
                 )
+
+    async def refresh_runtime_state_metrics(self, tenant_id: str, summary: RunSummary) -> None:
+        await self._record_runtime_state_metrics(self.get_runtime(tenant_id), summary)
+
+    async def _record_runtime_state_metrics(
+        self,
+        runtime: TenantRuntime,
+        summary: RunSummary,
+    ) -> None:
+        from job_ftch.infrastructure.observability.openobserve import record_runtime_state_metrics
+
+        scheduler_keys = (
+            "bot_scheduler:last_attempt_at",
+            "bot_scheduler:last_success_at",
+            "bot_scheduler:last_publish_success_at",
+            "bot_scheduler:pending_publish_since",
+            "bot_scheduler:last_publish_error",
+            "bot_scheduler:last_publish_sent",
+        )
+        scheduler_state = {key: await _read_runtime_state(runtime, key) for key in scheduler_keys}
+        record_runtime_state_metrics(
+            summary,
+            source_health=await runtime.store.list_source_health(),
+            scheduler_state=scheduler_state,
+        )
 
     async def run_all(self, *, concurrency: int = 4) -> list[RunSummary]:
         semaphore = asyncio.Semaphore(max(concurrency, 1))
@@ -1165,22 +1734,31 @@ class TenantRunner:
             source_id = source_spec_identifier(spec)
             source_name = source_spec_name(spec)
             payloads.append(
-                _build_source_listing_payload(
-                    spec,
-                    origin="config",
-                    enabled=source_id not in runtime.disabled_source_ids,
-                    health=health_by_id.get(source_id) or health_by_name.get(source_name),
+                await _attach_source_assessment(
+                    runtime,
+                    _build_source_listing_payload(
+                        spec,
+                        origin="config",
+                        enabled=source_id not in runtime.disabled_source_ids,
+                        health=health_by_id.get(source_id) or health_by_name.get(source_name),
+                    ),
                 )
             )
+        config_source_ids = {source_spec_identifier(spec) for spec in runtime.base_sources}
         for source_id in sorted(runtime.runtime_sources):
+            if source_id in config_source_ids:
+                continue
             record = runtime.runtime_sources[source_id]
             source_name = source_spec_name(record.spec)
             payloads.append(
-                _build_source_listing_payload(
-                    record.spec,
-                    origin=record.origin,
-                    enabled=record.enabled and source_id not in runtime.disabled_source_ids,
-                    health=health_by_id.get(source_id) or health_by_name.get(source_name),
+                await _attach_source_assessment(
+                    runtime,
+                    _build_source_listing_payload(
+                        record.spec,
+                        origin=record.origin,
+                        enabled=record.enabled and source_id not in runtime.disabled_source_ids,
+                        health=health_by_id.get(source_id) or health_by_name.get(source_name),
+                    ),
                 )
             )
         payloads.sort(key=lambda item: str(item["source_id"]))
@@ -1198,6 +1776,28 @@ class TenantRunner:
             if profile["profile_id"] == record.profile_id:
                 return profile
         msg = f"Failed to persist candidate profile: {record.profile_id}"
+        raise RuntimeError(msg)
+
+    async def save_and_activate_candidate_profile(
+        self,
+        tenant_id: str,
+        record: ManagedCandidateProfile,
+    ) -> dict[str, Any]:
+        """Persist the profile AND mark it active in one logical step.
+
+        The bot adapter should call this instead of the
+        ``save_candidate_profile`` + ``set_active_candidate_profile``
+        pair. Two-call patterns race on the first ``/run`` — see the
+        docstring on
+        :meth:`TenantStore.save_and_activate_candidate_profile`.
+        """
+        runtime = self.get_runtime(tenant_id)
+        await runtime.store.save_and_activate_candidate_profile(record)
+        profiles = await self.list_candidate_profiles(tenant_id, record.user_id)
+        for profile in profiles:
+            if profile["profile_id"] == record.profile_id:
+                return profile
+        msg = f"Failed to persist and activate candidate profile: {record.profile_id}"
         raise RuntimeError(msg)
 
     async def get_candidate_profile(
@@ -1276,11 +1876,12 @@ class TenantRunner:
         runtime = self.get_runtime(tenant_id)
         if user_id is None:
             return []
-        resolved_profile_ids = (
-            (profile_id,)
-            if profile_id is not None
-            else await runtime.store.get_active_candidate_profile_ids(user_id)
-        )
+        resolved_profile_ids: tuple[str, ...]
+        if profile_id is not None:
+            resolved_profile_ids = (profile_id,)
+        else:
+            primary_profile_id = await runtime.store.get_active_candidate_profile_id(user_id)
+            resolved_profile_ids = (primary_profile_id,) if primary_profile_id is not None else ()
         records: list[ManagedCandidateProfile] = []
         for resolved_profile_id in resolved_profile_ids:
             record = await runtime.store.get_candidate_profile(user_id, resolved_profile_id)
@@ -1332,14 +1933,30 @@ class TenantRunner:
         tenant_id: str,
         user_id: str,
     ) -> bool:
-        """Return True if the user has at least one active candidate profile."""
+        """Return True if the user has any profile with at least one example.
+
+        Previously this strictly required the *active* marker to be
+        set on at least one profile, which made the first ``/run``
+        fail with "Профиль не настроен" if the bot had just saved a
+        profile but the activation write had not yet been observed
+        by ``get_active_candidate_profile_ids``. The check now also
+        accepts a profile with at least one example of *any* kind
+        (resume, vacancy, positive, negative) regardless of activation
+        status. Profiles that genuinely have no examples still return
+        ``False``.
+        """
         runtime = self.get_runtime(tenant_id)
-        active_ids = await runtime.store.get_active_candidate_profile_ids(user_id)
-        if not active_ids:
-            return False
-        for profile_id in active_ids:
-            record = await runtime.store.get_candidate_profile(user_id, profile_id)
-            if record is not None and record.profile.search_profiles:
+        all_records = await runtime.store.list_candidate_profiles(user_id)
+        for record in all_records:
+            if not record.profile.search_profiles:
+                continue
+            sp = record.profile.search_profiles[0]
+            if (
+                sp.positive_example_texts
+                or sp.negative_example_texts
+                or sp.positive_job_example_texts
+                or sp.negative_job_example_texts
+            ):
                 return True
         return False
 
@@ -1428,6 +2045,7 @@ class TenantRunner:
         tenant_id: str,
         *,
         limit: int = 10,
+        since: datetime | None = None,
         user_id: str | None = None,
         profile_id: str | None = None,
         min_score: float | None = None,
@@ -1435,9 +2053,12 @@ class TenantRunner:
         # Rerank a large pool BEFORE truncating, so the top `limit` are the best
         # matches across the whole catalog (not just the most recently updated).
         runtime = self.get_runtime(tenant_id)
-        total = await runtime.job_group_store.count()
-        pool = min(total or limit, max(limit * 10, 200))
-        groups = await runtime.job_group_store.list_groups(limit=pool)
+        total = await runtime.job_group_store.count(since=since)
+        profile_aware = user_id is not None or profile_id is not None
+        base_pool = _PROFILE_AWARE_LATEST_JOBS_POOL if profile_aware else _DEFAULT_LATEST_JOBS_POOL
+        multiplier = 25 if profile_aware else 10
+        pool = min(total or limit, max(limit * multiplier, base_pool))
+        groups = await runtime.job_group_store.list_groups(limit=pool, since=since)
         ranked = await self._rerank_groups_for_profile(
             groups,
             tenant_id=tenant_id,
@@ -1445,7 +2066,7 @@ class TenantRunner:
             profile_id=profile_id,
         )
         jobs = [group.canonical_job for group in ranked]
-        if min_score is not None and any(job.best_score is not None for job in jobs):
+        if min_score is not None:
             jobs = [job for job in jobs if (job.best_score or 0.0) >= min_score]
         return jobs[:limit]
 
@@ -1497,21 +2118,26 @@ class TenantRunner:
 
     async def reset_tenant(self, tenant_id: str) -> None:
         runtime = self.get_runtime(tenant_id)
-        await runtime.store.reset_namespace()
-        runtime.runtime_sources.clear()
-        runtime.disabled_source_ids.clear()
-        runtime.sources_loaded = False
-        self._apply_runtime_sources(runtime)
+        async with _tenant_run_lock(runtime.settings, tenant_id):
+            await runtime.store.reset_namespace()
+            runtime.runtime_sources.clear()
+            runtime.disabled_source_ids.clear()
+            runtime.sources_loaded = False
+            self._apply_runtime_sources(runtime)
 
     async def clear_dedup(self, tenant_id: str) -> int:
         """Clear dedup and processed-item state for a tenant. Returns number of deleted dedup records."""
         runtime = self.get_runtime(tenant_id)
-        return await runtime.store.clear_dedup_state()
+        async with _tenant_run_lock(runtime.settings, tenant_id):
+            return await runtime.store.clear_dedup_state()
 
-    async def clear_all(self, tenant_id: str) -> tuple[int, int, int]:
-        """Clear dedup state, job groups AND vector store. Returns (dedup, groups, vectors)."""
+    async def _clear_all_unlocked(self, tenant_id: str) -> tuple[int, int, int, int]:
         runtime = self.get_runtime(tenant_id)
         dedup = await runtime.store.clear_dedup_state()
+        jobs = 0
+        count_jobs = getattr(runtime.job_backend, "count_jobs", None)
+        if callable(count_jobs):
+            jobs = int(await count_jobs())
         groups = 0
         clear_groups = getattr(runtime.job_group_store, "clear", None)
         if callable(clear_groups):
@@ -1524,80 +2150,61 @@ class TenantRunner:
                 vectors = await clear_vectors()
             except Exception as exc:  # vector store is best-effort, don't fail the whole clear
                 structlog.get_logger(__name__).warning("vector_clear_failed", error=str(exc))
-        return dedup, groups, vectors
+        return dedup, jobs, groups, vectors
+
+    async def clear_all(self, tenant_id: str) -> tuple[int, int, int, int]:
+        """Clear dedup state, jobs, job groups, and vector store."""
+        runtime = self.get_runtime(tenant_id)
+        async with _tenant_run_lock(runtime.settings, tenant_id):
+            return await self._clear_all_unlocked(tenant_id)
+
+    async def clear_run_data(self, tenant_id: str) -> dict[str, int]:
+        """Clear all data that can make a scripted run inherit a previous run."""
+        if len(self.tenant_ids()) != 1:
+            raise RuntimeError(
+                "Scripted clean is single-tenant because job catalog and vector cleanup "
+                "are still global."
+            )
+        runtime = self.get_runtime(tenant_id)
+        async with _tenant_run_lock(runtime.settings, tenant_id):
+            store_counts = await runtime.store.clear_run_artifacts()
+            dedup, jobs, groups, vectors = await self._clear_all_unlocked(tenant_id)
+            return {
+                **store_counts,
+                "dedup_records": dedup,
+                "jobs": jobs,
+                "job_groups": groups,
+                "vectors": vectors,
+            }
 
     async def close(self) -> None:
         closed: set[int] = set()
-        for runtime in self._runtimes.values():
-            for obj in (
-                runtime.store,
-                runtime.search_backend,
-                runtime.job_backend,
-                runtime.job_group_store,
-                runtime.vector_backend,
-            ):
-                if obj is None:
-                    continue
-                ident = id(obj)
-                if ident in closed:
-                    continue
-                close = getattr(obj, "close", None)
-                if callable(close):
-                    await close()
-                closed.add(ident)
-
-
-@asynccontextmanager
-async def _tenant_run_lock(settings: Settings, tenant_id: str) -> Any:
-    lock_dir = settings.store_path.parent / "tenant_locks"
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = lock_dir / f"{tenant_id}.lock"
-    local_lock = _PROCESS_TENANT_LOCKS.setdefault(str(lock_path), asyncio.Lock())
-    deadline = time.monotonic() + 30.0
-
-    def _acquire() -> int:
-        while True:
-            try:
-                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, str(os.getpid()).encode("ascii"))
-                return fd
-            except FileExistsError:
-                if time.monotonic() > deadline:
-                    raise TimeoutError(
-                        f"Could not acquire run lock for {tenant_id} after 30s"
-                    ) from None
-                try:
-                    pid_bytes = lock_path.read_bytes()
-                    stale_pid = int(pid_bytes.strip())
-                except ValueError:
-                    logger.warning("reclaiming_stale_lock", tenant_id=tenant_id)
-                    try:
-                        lock_path.unlink(missing_ok=True)
-                    except PermissionError:
-                        time.sleep(0.1)
-                        continue
-                    continue
-                try:
-                    os.kill(stale_pid, 0)
-                except ProcessLookupError:
-                    logger.warning("reclaiming_stale_lock", tenant_id=tenant_id)
-                    try:
-                        lock_path.unlink(missing_ok=True)
-                    except PermissionError:
-                        time.sleep(0.1)
-                        continue
-                    continue
-                except OSError:
-                    time.sleep(0.1)
-                    continue
-                time.sleep(0.1)
-
-    fd: int | None = None
-    async with local_lock:
         try:
-            fd = await asyncio.to_thread(_acquire)
-            yield
+            for runtime in self._runtimes.values():
+                for obj in (
+                    runtime.store,
+                    runtime.search_backend,
+                    runtime.job_backend,
+                    runtime.job_group_store,
+                    runtime.vector_backend,
+                ):
+                    if obj is None:
+                        continue
+                    ident = id(obj)
+                    if ident in closed:
+                        continue
+                    close = getattr(obj, "close", None)
+                    if callable(close):
+                        await close()
+                    closed.add(ident)
         finally:
-            if fd is not None:
-                os.close(fd)
-                lock_path.unlink(missing_ok=True)
+            # Full teardown: every run for this process is done, so force-kill
+            # any browser/driver descendant the bypass stack orphaned. Only
+            # current-process descendants are targeted, never the user's own
+            # Chrome. Without this a lingering child keeps the interpreter alive
+            # on Windows, where the per-open_page reaper only clears stale leaves.
+            from job_ftch.infrastructure.sources.browser_utils import (
+                terminate_browser_descendants,
+            )
+
+            terminate_browser_descendants()

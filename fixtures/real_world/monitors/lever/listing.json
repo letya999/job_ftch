@@ -1,0 +1,13 @@
+[
+  {
+    "id": "lever-1",
+    "hostedUrl": "https://jobs.lever.co/example/lever-1",
+    "text": "Platform Engineer",
+    "description": "Build distributed systems.",
+    "lists": [{"text": "Requirements", "content": "Python"}],
+    "additional": "Apply online.",
+    "categories": {"allLocations": ["Remote"], "team": "Engineering", "department": "Platform", "commitment": "Full-time"},
+    "workplaceType": "remote",
+    "salaryRange": {"currency": "USD", "min": 130000, "max": 170000, "interval": "year"}
+  }
+]

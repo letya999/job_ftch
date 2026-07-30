@@ -1,69 +1,114 @@
+---
+title: "JobDraft"
+description: "**Слой**: `domain`"
+updated: 2026-07-24
+---
 # JobDraft
 
-**Слой**: domain
+**Слой**: `domain`
 **Файл**: `job_ftch/domain/models.py`
-**Протокол / Базовый класс**: `pydantic.BaseModel`
 
 ## Что это
 
-`JobDraft` — это структурированный "черновик" вакансии, полученный сразу после
-этапа извлечения данных (extraction) с помощью LLM.
-Он содержит поля в том виде,
-в котором они были найдены в тексте (raw fields), и является промежуточным
-звеном перед финальной нормализацией и валидацией.
+`JobDraft` — промежуточный структурированный объект после extraction boundary.
+Это уже не сырой текст, но ещё не финальный публичный контракт.
 
-## Поля
+`JobDraft` создаётся в `ExtractionNode` и затем проходит через валидацию,
+нормализацию и enrichment stages.
 
-| Поле | Тип | Описание |
-| :--- | :--- | :--- |
-| `draft_id` | `str` | Уникальный ID черновика. |
-| `raw_item_id` | `str` | Ссылка на исходный `RawItem.stable_id`. |
-| `source_url` | `HttpUrl` | Ссылка на оригинал вакансии. |
-| `title_raw` | `str` | Заголовок вакансии из текста. |
-| `company_name_raw` | `str` | Название компании из текста. |
-| `description_raw` | `str` | Описание вакансии (обычно очищенный текст). |
-| `work_mode` | `WorkMode` | Формат работы (Remote, Onsite, Hybrid). |
-| `compensation` | `CompensationRange` | Данные о зарплате (минимум, максимум, валюта). |
-| `extraction_status` | `Status` | Статус извлечения (COMPLETE, PARTIAL, FAILED). |
-| `provenance` | `Provenance` | Метаданные о том, какой моделью и когда извлечено. |
+## Что в нём важно
 
-## Когда создаётся / откуда берётся
+`JobDraft` уже содержит:
 
-Создаётся в `ExtractionNode` в результате обработки текста `RawItem` через
-`LLMProvider`.
+- source identity: `source_record_id`, `source_kind`, `source_name`, `source_url`
+- time fields: `fetched_at`, `posted_at`
+- extraction provenance
+- raw extracted fields: `title_raw`, `company_name_raw`, `description_raw`
+- normalized enums и частично структурированные поля
+- review reasons для borderline extraction
 
-## Куда идёт после
+## Группы полей
 
-После создания `JobDraft` проходит через:
-1.  `ExtractionValidationNode` (проверка качества извлечения).
-2.  Узлы нормализации (Title, Company, Location, Compensation).
-3.  `JobValidationNode`, где он превращается в `JobRecord`.
+### Identity and provenance
 
-## Что с ней нельзя делать / инварианты
+- `draft_id`
+- `raw_item_id`
+- `source_record_id`
+- `source_kind`
+- `source_name`
+- `source_url`
+- `canonical_url`
+- `fetched_at`
+- `posted_at`
+- `provenance`
 
-1.  `JobDraft` не является окончательной версией вакансии и не должен
-    попадать в публичные Sinks.
-2.  Поле `description_raw` не может быть пустым.
-3.  Поля нормализованных данных (напр. `role_family`) могут быть пустыми на
-    этом этапе.
+### Core extracted content
 
-## Связанные сущности
+- `title_raw`
+- `company_name_raw`
+- `description_raw`
+- `location_raw`
+- `work_mode`
+- `compensation`
+- `post_type`
+- `ai_relevance`
+- `hiring_intent`
 
-*   `RawItem` — источник данных для черновика.
-*   `LLMProvider` — инструмент, создающий черновик.
-*   `JobRecord` — финальная стадия развития черновика.
+### Role and metadata hints
 
-## Пример
+- `role_family`
+- `role_track`
+- `role_specialization`
+- `seniority`
+- `employment_type`
+- `domain`
+- `industry`
 
-```python
-from job_ftch.domain.models import JobDraft, SourceKind, WorkMode
+### Lists and signals
 
-draft = JobDraft(
-    raw_item_id="hash123",
-    source_kind=SourceKind.TELEGRAM,
-    source_name="dev_jobs",
-    description_raw="Ищем senior python разработчика...",
-    title_raw="Senior Python Developer",
-    work_mode=WorkMode.REMOTE
-)
-```
+- `responsibilities`
+- `requirements_must`
+- `requirements_nice`
+- `skills_explicit`
+- `skills_inferred`
+- `tools_stack`
+- `benefits`
+- `culture_signals`
+- `risk_signals`
+
+### Plan B extension fields
+
+В модели уже есть дополнительные поля для richer extraction:
+
+- `years_experience`
+- `education`
+- `relocation`
+- `visa_support`
+- `domain_knowledge`
+- `soft_skills`
+- `certifications`
+- `leadership_level`
+- `ic_or_manager`
+- `company_type`
+- `team_size_hint`
+- `remote_restrictions`
+
+## Инварианты
+
+- `description_raw` обязателен
+- `raw_item_id` и `source_name` не могут быть пустыми
+- tuple-поля нормализуются и дедуплицируются
+- `draft_id` вычисляется автоматически
+
+## Что дальше
+
+После `ExtractionNode` тип остаётся `JobDraft` до тех пор, пока normalization
+и последующие nodes не доведут данные до `JobRecord`.
+
+`JobDraft` не должен уходить в публичные sinks или долгосрочное job storage.
+
+## Связанные документы
+
+- [RawItem](raw_item.md)
+- [JobRecord](job_record.md)
+- [LLMProvider](llm_provider.md)

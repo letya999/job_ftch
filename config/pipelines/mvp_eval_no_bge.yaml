@@ -1,0 +1,22 @@
+name: mvp_eval_no_bge
+version: "1.0.0"
+metadata:
+  purpose: mvp_control_llm_only
+  benchmark: {dataset: fixtures/dataset/eval_dataset.jsonl, sample: 140, tenant_id: ai_jobs, user_id: "480637186"}
+  runtime:
+    models: {extraction: gpt-4.1-nano, relevance: gpt-4.1-mini}
+    shots: {backend: qdrant, source: user_db_only, collection: profile_shots_bgem3_mvp_v3}
+resources: {profile: active_profile, store: active_store, llm: active_llm, shots: active_shots}
+nodes:
+  - {id: sanitize, node: sanitize, effect: gate}
+  - {id: source_context, node: source_context, effect: observe, after: [sanitize]}
+  - {id: candidate_segmentation, node: candidate_segmentation, effect: observe, after: [source_context]}
+  - {id: dedup, node: dedup, effect: gate, after: [candidate_segmentation]}
+  - {id: extraction, node: extraction, effect: observe, after: [dedup]}
+  - {id: extraction_validation, node: extraction_validation, effect: gate, after: [extraction]}
+  - {id: job_normalization, node: job_normalization, effect: observe, after: [extraction_validation]}
+  - {id: skill_normalization, node: skill_normalization, effect: observe, after: [job_normalization]}
+  - {id: location_work_mode_normalization, node: location_work_mode_normalization, effect: observe, after: [skill_normalization]}
+  - {id: compensation, node: compensation, effect: observe, after: [location_work_mode_normalization]}
+  - {id: llm_relevance, node: llm_relevance, effect: observe, after: [compensation], params: {call_policy: force_all, max_per_run: 500}}
+  - {id: legacy_routing, node: legacy_routing, effect: terminal_decision, after: [llm_relevance], params: {accept_threshold: 0.55, review_threshold: 0.50, quality_override_threshold: 1.0}}

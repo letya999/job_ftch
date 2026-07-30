@@ -1,6 +1,6 @@
 [project]
 name = "job-ftch"
-version = "0.0.3"
+version = "0.0.5"
 description = "Open-source async pipeline for ingesting AI/tech job vacancies from Telegram and career sites"
 readme = "README.md"
 license = { text = "MIT" }
@@ -15,6 +15,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "anyio>=4.13,<5",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "httpx>=0.27",
@@ -25,11 +26,22 @@ dependencies = [
     "structlog>=24.2",
     "defusedxml>=0.7.1",
     "slowapi>=0.1.9",
+    "PyYAML>=6.0",
+    "trafilatura>=2.1.0",
+    "dateparser>=1.2,<2",
+    "filelock>=3.13",
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
-browser = ["playwright>=1.45"]
-stealth = ["playwright-stealth>=2.0.3", "curl-cffi>=0.15.0"]
+browser = ["patchright>=1.49", "cloakbrowser>=0.5.1"]
+camoufox = ["camoufox>=0.5.4"]
+nodriver = ["nodriver>=0.50.2"]
+# curl-cffi impersonation profiles are pinned per release so floating minors
+# cannot silently mutate the JA3/JA4 baseline. Version 0.15.0 is required for
+# PYSEC-2026-2431; its Python 3.12 import regression is handled narrowly in
+# infrastructure/bypass/curl_bypass.py until upstream releases a compatible fix.
+stealth = ["playwright-stealth>=2.0.3", "curl-cffi==0.15.0"]
 openai = ["openai>=1.30", "instructor>=1.4"]
 telegram = ["telethon>=1.36", "aiogram>=3.7"]
 dagster = ["dagster>=1.8"]
@@ -47,16 +59,17 @@ bot = [
     "pdfminer.six>=20231228",
     "PyYAML>=6.0",
 ]
-metrics = ["prometheus-client>=0.20"]
-fastembed = ["fastembed>=0.3"]
+fastembed = ["fastembed>=0.3", "huggingface-hub>=1.24,<2"]
 sqlite = ["aiosqlite>=0.20"]
 postgres = ["asyncpg>=0.31.0"]
-embeddings = ["sentence-transformers>=3.0", "torch>=2.3"]
+embeddings = ["sentence-transformers>=3.0", "torch>=2.3", "huggingface-hub>=1.24,<2"]
 qdrant = ["qdrant-client>=1.18.0"]
 pgvector = ["asyncpg>=0.31.0", "pgvector>=0.3"]
 ollama = ["httpx>=0.27"]
 feeds = ["feedparser>=6.0"]
-site_scrapers = ["jmespath>=1.0", "feedparser>=6.0"]
+site_scrapers = ["jmespath>=1.0", "feedparser>=6.0", "parsel>=1.9,<2"]
+resilience = ["tenacity>=8.2"]
+extraction = ["trafilatura>=1.8", "extruct>=0.16", "lxml>=5.2"]
 realtime = [
     "aiohttp>=3.9.0",
     "websockets>=12.0",
@@ -65,6 +78,16 @@ resume = ["pypdf>=4.0", "python-docx>=1.1", "pdfminer.six>=20231228"]
 language = ["lingua-language-detector>=2.0"]
 translation = ["ctranslate2>=4.0", "sentencepiece>=0.1.99"]
 reranker = ["fastembed>=0.3"]
+bgem3 = [
+    "flagembedding>=1.2.0",
+    "torch>=2.3",
+    "dill>=0.3.8,<0.4",
+    "accelerate>=1.10.1,<1.11",
+    "datasets>=3.6.0,<4",
+    "huggingface-hub>=1.24,<2",
+]
+tracing = ["opentelemetry-exporter-otlp-proto-http>=1.27"]
+langfuse = ["langfuse>=2.0"]
 all = [
     "aiosqlite>=0.20",
     "asyncpg>=0.31.0",
@@ -72,15 +95,22 @@ all = [
     "fastapi>=0.115",
     "fastmcp>=2.4",
     "faststream>=0.5",
-    "playwright>=1.45",
+    "patchright>=1.49",
     "playwright-stealth>=2.0.3",
-    "curl-cffi>=0.15.0",
-    "cloakbrowser>=0.3.31",
+    "curl-cffi==0.15.0",
+    "cloakbrowser>=0.5.1",
+    "camoufox>=0.5.4",
+    "nodriver>=0.50.2",
     "sentence-transformers>=3.0",
     "torch>=2.3",
+    "dill>=0.3.8,<0.4",
+    "accelerate>=1.10.1,<1.11",
+    "datasets>=3.6.0,<4",
+    "huggingface-hub>=1.24,<2",
     "qdrant-client>=1.18.0",
     "pgvector>=0.3",
     "feedparser>=6.0",
+    "parsel>=1.9,<2",
     "aiohttp>=3.9.0",
     "uvicorn>=0.30",
     "websockets>=12.0",
@@ -96,6 +126,10 @@ all = [
     "ctranslate2>=4.0",
     "sentencepiece>=0.1.99",
     "PyYAML>=6.0",
+    "langfuse>=2.0",
+    "tenacity>=8.2",
+    "trafilatura>=1.8",
+    "extruct>=0.16",
 ]
 
 [project.scripts]
@@ -133,18 +167,25 @@ job_ftch = "job_ftch.cli:main"
 # Notification target plugins go here
 
 [project.entry-points."job_ftch.mcp_servers"]
-default = "adapters.mcp.server:create_server"
+default = "job_ftch.adapters.mcp.server:create_server"
 
 [dependency-groups]
 dev = [
     "pre-commit>=3.7",
-    "ruff>=0.4",
-    "mypy>=1.10",
-    "pytest>=8.2",
+    # Pinned exactly: ruff is also the formatter, and two versions disagreed on the
+    # formatting of the same files, so an unpinned floor let a local run "fix" code that
+    # the CI version then rejected. A formatter has to be byte-deterministic; bump this
+    # deliberately, not by accident.
+    "ruff==0.15.16",
+    # Bounded below a major so the type and test verdicts cannot silently diverge between
+    # a developer machine and CI the way ruff did.
+    "mypy>=2.1,<3",
+    "pytest>=9.0,<10",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
     "pytest-benchmark>=4.0",
     "bandit[toml]>=1.7",
+    "pip-audit>=2.10",
     "httpx",
     "hypothesis>=6.100",
     "syrupy>=4.0",
@@ -168,18 +209,27 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # allow assert in tests
-"adapters/**/*.py" = ["TC001"]
+"job_ftch/adapters/**/*.py" = ["TC001"]
 "job_ftch/application/builder.py" = ["TC001", "TC006"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 ignore_missing_imports = true
+explicit_package_bases = true
 # Explicit package roots for flat layout
 mypy_path = "."
 exclude = [
     "^tests/",
+    "^scripts/",
     "^\\.venv/",
+    # Local, gitignored working directories. Without these, `mypy .` (the release
+    # checklist step) fails on scratch files that are not part of the repository.
+    "^scratch/",
+    "^plans/",
+    "^artifacts/",
+    "^results/",
+    "^data/",
 ]
 
 [[tool.mypy.overrides]]
@@ -196,6 +246,9 @@ module = [
     "job_ftch.infrastructure.bypass.curl_bypass",
     "job_ftch.infrastructure.llm.openai_provider",
     "job_ftch.infrastructure.embeddings.openai_provider",
+    "job_ftch.infrastructure.sources.http_retry",
+    "job_ftch.infrastructure.sources.scrapers.maintext",
+    "job_ftch.infrastructure.sources.scrapers.xpath",
 ]
 warn_unused_ignores = false
 
@@ -211,24 +264,31 @@ module = [
 ]
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+module = [
+    "nodriver",
+    "nodriver.*",
+]
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests", "job_ftch/adapters/telegram_bot/tests"]
 addopts = "-v"
 markers = [
-    "unit: pure unit-tests, no I/O, <50ms",
-    "integration: tests with SQLite, filesystem, <5s",
-    "slow: full E2E with TenantRunner, >5s",
-    "llm: requires LLM keys (OPENAI_API_KEY)",
-    "e2e: marks tests as end-to-end (deselect with -m 'not e2e')",
+    "unit: explicitly curated pure unit-test subset; absence does not imply integration I/O",
+    "integration: explicitly curated tests crossing SQLite or filesystem boundaries",
+    "slow: explicitly curated tests expected to take more than five seconds",
+    "e2e: automatically applied to every test under tests/e2e",
     "network: marks tests requiring real network access",
+    "paid_provider: opt-in smoke tests that may incur external CAPTCHA provider cost",
     "telegram: marks tests requiring Telegram credentials",
     "superjob: marks tests requiring SUPERJOB_API_KEY",
 ]
 
 [tool.coverage.run]
 source = ["job_ftch"]
-omit = ["tests/*"]
+omit = ["tests/*", "job_ftch/adapters/telegram_bot/tests/*"]
 
 [tool.bandit]
 exclude_dirs = [".venv", "tests"]

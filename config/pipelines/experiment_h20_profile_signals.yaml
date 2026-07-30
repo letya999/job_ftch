@@ -1,0 +1,17 @@
+extends: experiment_h18_compact_guarded_aggregator.yaml
+name: experiment_h20_profile_signals
+version: "1.0.0"
+metadata:
+  purpose: profile_query_semantics_and_lexical_evidence_without_review_promotion
+  experiment: {id: H20, control: H18}
+nodes:
+  - {id: parallel_scoring, enabled: false}
+  - {id: profile_semantic_evidence, node: profile_semantic_evidence, effect: observe, after: [profile_match]}
+  - {id: lexical_evidence, node: lexical_evidence, effect: observe, after: [profile_semantic_evidence]}
+  - {id: risk, after: [lexical_evidence]}
+  - id: decision_aggregator
+    after: [quality]
+    params:
+      allow_missing_llm_rescue: false
+      allow_reject_rescue: false
+      require_no_profile_conflict: true

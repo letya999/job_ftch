@@ -1,0 +1,8 @@
+extends: historical_best.yaml
+name: experiment_shadow_hard_filter
+version: "1.0.0"
+metadata:
+  purpose: authority_ablation
+  experiment: {variable: node:hard_filter.authority}
+nodes:
+  - {id: hard_filter, authority: shadow}

@@ -1,0 +1,8 @@
+extends: experiment_h13_full_after_decision.yaml
+name: experiment_h25_post_decision_extraction
+version: "1.0.0"
+metadata:
+  purpose: triage_relevance_card_then_full_extraction_after_terminal_decision
+  experiment: {id: H25, control: H11, implementation: H13_typed_approximation}
+  note: typed_graph_requires_triage_job_draft_before_jobrecord_relevance_stage
+  benchmark: {dataset: fixtures/dataset/eval_dataset.jsonl, sample: 140, seed: 42}

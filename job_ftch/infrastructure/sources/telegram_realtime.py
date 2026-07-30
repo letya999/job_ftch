@@ -62,7 +62,15 @@ class TelegramRealtimeSource:
 
         # Fallback to Settings-style env vars when AuthProvider returns nothing
         api_id = int(creds.get("api_id") or settings.telegram_api_id or 0)
-        api_hash = creds.get("api_hash") or settings.telegram_api_hash or ""
+        api_hash = (
+            creds.get("api_hash")
+            or (
+                settings.telegram_api_hash.get_secret_value()
+                if settings.telegram_api_hash is not None
+                else ""
+            )
+            or ""
+        )
 
         auth_id = self.spec.auth_source_id
         if not auth_id:
@@ -74,7 +82,7 @@ class TelegramRealtimeSource:
 
         queue: asyncio.Queue[RawItem] = asyncio.Queue()
 
-        async with TelegramClient(
+        client = TelegramClient(
             str(session_path),
             api_id,
             api_hash,
@@ -83,7 +91,15 @@ class TelegramRealtimeSource:
             request_retries=settings.telegram_request_retries,
             connection_retries=settings.telegram_connection_retries,
             retry_delay=settings.telegram_retry_delay_seconds,
-        ) as client:
+        )
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                from job_ftch.infrastructure.sources.telegram import (
+                    _telegram_session_not_authorized_message,
+                )
+
+                raise RuntimeError(_telegram_session_not_authorized_message(client))
 
             @client.on(events.NewMessage(chats=[self.spec.entity]))  # type: ignore[untyped-decorator]
             async def handler(event: Any) -> None:
@@ -98,7 +114,6 @@ class TelegramRealtimeSource:
                 )
                 await queue.put(item)
 
-            await client.start()
             logger.info("telegram_realtime_started", entity=self.spec.entity)
 
             while not self._stop_event.is_set():
@@ -107,6 +122,8 @@ class TelegramRealtimeSource:
                     yield item
                 except TimeoutError:
                     continue
+        finally:
+            await client.disconnect()
 
 
 @register_source_spec("telegram_realtime")

@@ -1,0 +1,222 @@
+name: parity_baseline
+version: "1"
+description: >
+  Exact mirror of live tenant runtime (tenant_id='ai_jobs', commit 8c87494).
+  25-node graph built by build_nodes() with effective settings from Docker container.
+  bgem3_enabled=false, relevance_backend=keywords, embedding_enabled=true (search-only).
+
+metadata:
+  tenant_id: ai_jobs
+  user_id: "480637186"
+  openai_model: gpt-5.4-nano
+  bgem3_enabled: false
+  relevance_backend: keywords
+  embedding_enabled: true
+  pipeline_jobness_decision_enabled: true
+  pipeline_completeness_gate_enabled: true
+  pipeline_completeness_gate_threshold: 0.8
+  language_detection_enabled: false
+  full_extraction_max_calls_per_run: 100
+  extraction_min_search_relevance: 0.0
+  extraction_min_hiring_intent: 0.0
+  llm_relevance_low_threshold: 0.2
+  llm_relevance_high_threshold: 0.55
+  llm_relevance_max_per_run: 0
+  routing_accept_threshold: 0.55
+
+resources:
+  llm: openai
+  store: postgres
+  ontology_store: postgres
+
+nodes:
+  - id: sanitize
+    node: SanitizeNode
+    execution: sequential
+    effect: gate
+    params: {}
+
+  - id: snapshot_filter
+    node: SnapshotFilterNode
+    after: [sanitize]
+    execution: sequential
+    effect: gate
+    params:
+      tenant_id: ai_jobs
+
+  - id: source_context
+    node: SourceContextNode
+    after: [snapshot_filter]
+    execution: sequential
+    effect: observe
+    params: {}
+
+  - id: ontology_snapshot
+    node: OntologySnapshotNode
+    after: [source_context]
+    execution: sequential
+    effect: observe
+    params: {}
+
+  - id: candidate_segmentation
+    node: CandidateSegmentationNode
+    after: [ontology_snapshot]
+    execution: sequential
+    effect: observe
+    params: {}
+
+  - id: garbage_filter
+    node: GarbageFilterNode
+    after: [candidate_segmentation]
+    execution: sequential
+    effect: gate
+    params: {}
+
+  - id: post_type_classification
+    node: PostTypeClassificationNode
+    after: [garbage_filter]
+    execution: sequential
+    effect: gate
+    params: {}
+
+  - id: hard_filter
+    node: HardFilterNode
+    after: [post_type_classification]
+    execution: sequential
+    effect: gate
+    params: {}
+
+  - id: dedup
+    node: DedupNode
+    after: [hard_filter]
+    execution: sequential
+    effect: gate
+    params:
+      defer_commit: true
+
+  - id: semantic_prefilter
+    node: SemanticPrefilterNode
+    after: [dedup]
+    execution: sequential
+    effect: observe
+    params:
+      relevance_scorer: null
+      relevance_threshold: 0.0
+
+  - id: completeness_gate
+    node: CompletenessGateNode
+    after: [semantic_prefilter]
+    execution: sequential
+    effect: gate
+    params:
+      threshold: 0.8
+
+  - id: extraction
+    node: ExtractionNode
+    after: [completeness_gate]
+    execution: sequential
+    effect: observe
+    params:
+      max_calls: 100
+      scope: core
+      min_search_relevance: 0.0
+      min_hiring_intent: 0.0
+      capture_payloads: false
+
+  - id: extraction_validation
+    node: ExtractionValidationNode
+    after: [extraction]
+    execution: sequential
+    effect: gate
+    params: {}
+
+  - id: title_company_normalization
+    node: TitleCompanyNormalizationNode
+    after: [extraction_validation]
+    execution: sequential
+    effect: observe
+    params: {}
+
+  - id: skill_normalization
+    node: SkillNormalizationNode
+    after: [title_company_normalization]
+    execution: sequential
+    effect: observe
+    params: {}
+
+  - id: location_work_mode_normalization
+    node: LocationWorkModeNormalizationNode
+    after: [skill_normalization]
+    execution: sequential
+    effect: observe
+    params: {}
+
+  - id: compensation_parsing
+    node: CompensationParsingNode
+    after: [location_work_mode_normalization]
+    execution: sequential
+    effect: observe
+    params: {}
+
+  - id: job_lifecycle
+    node: JobLifecycleNode
+    after: [compensation_parsing]
+    execution: sequential
+    effect: observe
+    params: {}
+
+  - id: jobness_decision
+    node: JobnessDecisionNode
+    after: [job_lifecycle]
+    execution: sequential
+    effect: gate
+    params: {}
+
+  - id: multi_profile_match
+    node: MultiProfileMatchNode
+    after: [jobness_decision]
+    execution: sequential
+    effect: observe
+    params: {}
+
+  - id: risk_scoring
+    node: RiskScoringNode
+    after: [multi_profile_match]
+    execution: sequential
+    effect: observe
+    params: {}
+
+  - id: quality_scoring
+    node: QualityScoringNode
+    after: [risk_scoring]
+    execution: sequential
+    effect: observe
+    params: {}
+
+  - id: job_validation
+    node: JobValidationNode
+    after: [quality_scoring]
+    execution: sequential
+    effect: observe
+    params:
+      min_relevance_score: 0.05
+      llm_band_floor: null
+      enforce_policy: false
+
+  - id: evidence_decision
+    node: EvidenceDecisionNode
+    after: [job_validation]
+    execution: sequential
+    effect: terminal_decision
+    authority: terminal
+    params:
+      relevance_accept_belief: 0.75
+      relevance_accept_certainty: 0.60
+
+  - id: job_aggregation
+    node: JobAggregationNode
+    after: [evidence_decision]
+    execution: sequential
+    effect: side_effect
+    params:
+      attach_group_id: true

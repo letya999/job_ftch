@@ -1,0 +1,93 @@
+# Global non-secret runtime policy and tuning.
+# Precedence: explicit init kwargs > process env > dotenv > this YAML > code defaults.
+#
+# Keep machine-/secret-specific values in env:
+# - credentials and tokens
+# - DSNs / service URLs
+# - active backend wiring
+#
+# Keep application policy here:
+# - thresholds
+# - concurrency and budgets
+# - retries and timeouts
+# - model selection
+# - output serialization defaults
+
+pipeline_max_items_per_run:
+source_fetch_concurrency: 8
+# Dynamic source-fetch pool: a source that exceeds the soft deadline is evicted
+# from the fast lane into a bounded overflow pool, so one slow site cannot stall
+# the fast lane while it runs to the hard deadline. See CompositeSource.
+source_pool_dynamic_enabled: true
+source_soft_deadline_seconds: 45.0
+source_hard_deadline_seconds: 120.0
+source_overflow_concurrency: 2
+pipeline_item_concurrency: 4
+pipeline_max_text_length: 8000
+pipeline_max_llm_calls_per_run:
+
+output_jsonl: false
+output_schema_version: job_ftch.job.v1
+quarantine_output_jsonl: true
+quarantine_output_schema_version: job_ftch.quarantine.v1
+review_output_jsonl: true
+review_output_schema_version: job_ftch.review.v1
+rejected_output_jsonl: true
+rejected_output_schema_version: job_ftch.rejected.v1
+
+review_max_quality_score: 0.65
+posting_min_quality_score: 0.8
+routing_accept_threshold: 0.55
+bot_send_limit_per_run: 100
+extraction_min_search_relevance: 0.0
+
+telegram_message_limit: 100
+telegram_comment_post_limit: 20
+telegram_comment_limit_per_post: 50
+telegram_jitter_min_seconds: 1.0
+telegram_jitter_max_seconds: 4.0
+telegram_timeout_seconds: 10.0
+telegram_request_retries: 3
+telegram_connection_retries: 3
+telegram_retry_delay_seconds: 1.0
+telegram_flood_sleep_threshold_seconds: 60
+
+openai_model: gpt-5.4-nano
+relevance_llm_model: gpt-4.1-mini
+openai_timeout_seconds: 30.0
+openai_max_retries: 2
+
+career_site_timeout_seconds: 15.0
+career_site_connect_timeout_seconds: 30.0
+career_site_max_retries: 2
+career_site_retry_delay_seconds: 1.0
+career_site_max_connections: 10
+career_site_max_keepalive_connections: 5
+career_site_detail_concurrency: 8
+
+browser_default_timeout_ms: 30000
+browser_context_timeout_ms: 120000
+browser_challenge_retries: 1
+monitor_timeout_seconds: 15.0
+monitor_max_retries: 3
+rss_timeout_seconds: 30.0
+api_timeout_seconds: 30.0
+ollama_timeout_seconds: 30.0
+fingerprinter_timeout_seconds: 8.0
+
+embedding_prefilter_enabled: false
+embedding_prefilter_model: paraphrase-multilingual-MiniLM-L12-v2
+embedding_provider: openai
+embedding_model: text-embedding-3-small
+embedding_dimensions:
+qdrant_collection: job_ftch_jobs_mvp_v1
+processed_item_ttl_hours: 24
+
+bgem3_enabled: false
+relevance_backend: keywords
+relevance_shot_backend: qdrant
+relevance_shot_source_mode: user_db_only
+relevance_shot_threshold: 0.05
+llm_relevance_low_threshold: 0.2
+llm_relevance_high_threshold: 0.55
+llm_relevance_max_per_run: 500

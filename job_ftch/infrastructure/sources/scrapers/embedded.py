@@ -8,12 +8,13 @@ import structlog
 
 from job_ftch.application.registry import register_scraper
 from job_ftch.domain.site_models import ScrapedPostingPayload
-from job_ftch.infrastructure.sources.nextdata_utils import (
+from job_ftch.infrastructure.sources.embedded_state_utils import (
     extract_field,
     extract_inertia_data,
     extract_next_data,
     extract_nuxt_data,
     extract_phenom_canvas_data,
+    extract_pinia_state,
     extract_react_router_data,
     extract_rsc_data,
     resolve_path,
@@ -63,9 +64,33 @@ def _map_to_payload(raw: dict[str, Any]) -> ScrapedPostingPayload:
     return ScrapedPostingPayload(**kwargs)
 
 
+_JOB_KEYS = {
+    "company",
+    "salary",
+    "location",
+    "locations",
+    "slug",
+    "publishedAt",
+    "postedAt",
+    "datePosted",
+    "employmentType",
+    "jobType",
+}
+
+
 def _find_job_object(data: Any, path: str) -> tuple[str | None, dict[str, Any] | None]:
-    """Recursively search for an object that looks like a job posting."""
+    """Recursively search for an object that looks like a job posting.
+
+    Prioritizes arrays of job-like objects (e.g. Pinia featuredJobs.jobs)
+    over single metadata objects (e.g. SEO blocks with title+description
+    but no company/salary).
+    """
     if isinstance(data, list):
+        # If this is a list of dicts that look like jobs, return the first one
+        if data and isinstance(data[0], dict):
+            first_keys = set(data[0].keys())
+            if _JOB_KEYS.intersection(first_keys):
+                return f"{path}[0]" if path else "[0]", data[0]
         for index, value in enumerate(data):
             new_path = f"{path}[{index}]" if path else f"[{index}]"
             found_path, found_obj = _find_job_object(value, new_path)
@@ -76,14 +101,21 @@ def _find_job_object(data: Any, path: str) -> tuple[str | None, dict[str, Any] |
     if not isinstance(data, dict):
         return None, None
 
-    # Check if this object itself is a job
+    # Check if this object itself is a job (requires title+desc AND job-specific keys)
     keys = set(data.keys())
-    if _TITLE_KEYS.intersection(keys) and _DESC_KEYS.intersection(keys):
+    if (
+        _TITLE_KEYS.intersection(keys)
+        and _DESC_KEYS.intersection(keys)
+        and _JOB_KEYS.intersection(keys)
+    ):
         return path, data
 
-    # Recurse into children
-    for key, val in data.items():
-        if isinstance(val, dict):
+    # Recurse into children, prioritizing keys that look job-related
+    for key in sorted(
+        data.keys(), key=lambda k: 0 if k in ("jobs", "jobList", "listings", "featuredJobs") else 1
+    ):
+        val = data[key]
+        if isinstance(val, dict) or (isinstance(val, list) and val and isinstance(val[0], dict)):
             new_path = f"{path}.{key}" if path else key
             found_path, found_obj = _find_job_object(val, new_path)
             if found_obj:
@@ -109,6 +141,18 @@ def _auto_map_fields(obj: dict[str, Any]) -> dict[str, str]:
         mapping["locations"] = "location"
     elif "locations" in keys:
         mapping["locations"] = "locations"
+    elif "locationSlugs" in keys:
+        mapping["locations"] = "locationSlugs"
+
+    # Map company (nested dict with name, or plain string)
+    if "company" in keys:
+        mapping["metadata.company"] = "company"
+    if "salary" in keys:
+        mapping["metadata.salary"] = "salary"
+    if "skills" in keys:
+        mapping["metadata.skills"] = "skills"
+    if "publishedAt" in keys:
+        mapping["metadata.publishedAt"] = "publishedAt"
 
     return mapping
 
@@ -124,6 +168,7 @@ def can_handle(htmls: list[str]) -> dict[str, Any] | None:
             ("reactrouter", extract_react_router_data),
             ("phenom_canvas", extract_phenom_canvas_data),
             ("rsc", extract_rsc_data),
+            ("pinia", extract_pinia_state),
         ]:
             try:
                 data = extractor(html)
@@ -133,7 +178,10 @@ def can_handle(htmls: list[str]) -> dict[str, Any] | None:
                         fields = _auto_map_fields(obj)
                         if fields:
                             return {"source": source_name, "path": path, "fields": fields}
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "embedded.can_handle.extractor_error", source=source_name, error=str(exc)
+                )
                 continue
     return None
 
@@ -151,6 +199,8 @@ def _extract_source_data(html: str, source: str) -> dict[str, Any] | None:
         return extract_rsc_data(html)
     if source == "phenom_canvas":
         return extract_phenom_canvas_data(html)
+    if source == "pinia":
+        return extract_pinia_state(html)
     return None
 
 
@@ -167,6 +217,7 @@ def parse_html(html: str, config: dict[str, Any]) -> ScrapedPostingPayload | Non
             "reactrouter",
             "rsc",
             "phenom_canvas",
+            "pinia",
         ]
     )
 
@@ -212,7 +263,8 @@ async def scrape(
             resp.raise_for_status()
             html = resp.text
         return parse_html(html, config)
-    except Exception:
+    except Exception as exc:
+        logger.warning("embedded.scrape.failed", url=url, error=str(exc))
         return None
 
 

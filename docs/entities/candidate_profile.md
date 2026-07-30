@@ -1,133 +1,56 @@
-# CandidateProfile (Профиль кандидата)
+---
+title: "CandidateProfile"
+description: "**Слой**: `domain`"
+updated: 2026-07-24
+---
+# CandidateProfile
 
-## Что это такое
+**Слой**: `domain`
+**Файл**: `job_ftch/domain/candidate.py`
 
-`CandidateProfile` — это детальное описание того, что ищет
-конкретный кандидат (пользователь).
-Эта сущность содержит его навыки, желаемые роли, локации, а
-также минимальные пороги совпадения (relevance).
-Профиль активно используется в пайплайне для оценки каждой
-вакансии: подходит ли она этому конкретному человеку?
+## Что это
 
-## Зачем это нужно и ПОЧЕМУ так устроено
+`CandidateProfile` — профиль одного кандидата, который содержит identity,
+optional resume snapshot и один или несколько `SearchProfile`.
 
-Большинство парсеров вакансий просто выкачивают всё подряд,
-а фильтрация ложится на плечи пользователя (через поиск на
-сайте).
-В `job_ftch` фильтрация происходит проактивно внутри самого
-пайплайна.
-Если вакансия абсолютно не подходит кандидату (score <
-порога), она может быть отброшена (drop) еще до того, как
-дойдет до базы данных, экономя место и время.
+Это главный пользовательский input для relevance и matching logic.
 
-Главное дизайн-решение: **один человек — множество поисковых
-профилей**. `CandidateProfile` не является монолитным.
-Он может содержать массив (кортеж) из нескольких
-`SearchProfile`.
-Зачем?
-Программист может искать работу одновременно по двум разным
-направлениям.
-Например:
-1. `SearchProfile_1`: Senior Backend Developer (Python, Go) от $5000, удаленка.
+## Текущая shape
 
-2. `SearchProfile_2`: ML Engineer (PyTorch, LLM) от $6000, только Европа.
-
-Пайплайн прогоняет вакансию через все поисковые профили
-кандидата одновременно.
-
-## Как это работает изнутри (Иерархия объектов)
-
-Структура данных спроектирована как матрешка:
-
-```text ManagedCandidateProfile
-  ├─ user_id: str              # Идентификатор владельца (например, Telegram ID)
-  ├─ profile_id: str           # Уникальное имя профиля
-  ├─ updated_at: datetime      # Время последнего обновления
-  └─ profile: CandidateProfile # Сама полезная нагрузка
-       ├─ identity: CandidateIdentity
-       │    └─ candidate_id, display_name, контактная информация
-       ├─ resume: CandidateResumeSnapshot
-       │    ├─ raw_text: str         # Исходный текст загруженного резюме
-       │    ├─ summary: str          # Краткое AI-описание опыта
-       │    ├─ target_roles: tuple
-       │    └─ skills: tuple[SkillTag]
-       └─ search_profiles: tuple[SearchProfile]  # <--- Ключевой элемент для парсера
-            └─ SearchProfile (один или несколько)
-                 ├─ profile_id, name
-                 ├─ target_roles: tuple[str]             # Желаемые должности
-                 ├─ required_skills: tuple[SkillTag]     # Обязательные навыки (без них дроп)
-                 ├─ preferred_skills: tuple[SkillTag]    # Желательные (повышают score)
-                 ├─ preferred_regions: tuple[str]        # Локации
-                 ├─ relevance_threshold: float           # Порог отсечения (например, 0.7)
-                 ├─ embedding_vector: tuple[float, ...]  # Вектор для семантического префильтра
-                 ├─ positive_example_texts: tuple[str]   # Примеры "крутых" вакансий
-                 └─ negative_example_texts: tuple[str]   # Примеры "плохих" вакансий
+```text
+CandidateProfile
+  - identity
+  - resume | None
+  - search_profiles: tuple[SearchProfile, ...]
 ```
 
-## Как создать профиль (Магия экстракции)
+Инвариант: `search_profiles` не может быть пустым.
 
-Пользователь не заполняет эту сложную структуру вручную.
-В проекте есть утилита в `adapters/profile_inputs.py`,
-которая берет сырой текст резюме и автоматически (с помощью
-языковой модели) формирует `ManagedCandidateProfile`.
+## Почему здесь несколько SearchProfile
 
-```python from job_ftch.application.profile_inputs import build_profile_from_resume_text
+Один кандидат может одновременно искать несколько типов ролей:
 
-# Отдаем просто сырой текст из PDF managed_profile = build_profile_from_resume_text(
-    text="Опытный Python разработчик, 5 лет в ML, работал с FastAPI...",
-    user_id="user_123"
-)
+- backend
+- ML / LLM
+- product / analytics
 
-# Функция эвристически извлекает роли, навыки и создает массив SearchProfile
-```
+Поэтому matching идёт не по одному монолитному профилю, а по набору
+поисковых профилей.
 
-## ProfileCatalog и матчинг в пайплайне
+## Где используется
 
-В пайплайне используется `MultiProfileMatchNode`.
-Чтобы не передавать профили по одному, существует класс
-`ProfileCatalog`.
-Это обертка, которая собирает `SearchProfile` от разных
-кандидатов (полезно в мультитенантном режиме) и быстро
-оценивает вакансию (JobDraft) против них всех.
+- `SemanticPrefilterNode`
+- `MultiProfileMatchNode`
+- runtime profile overlays
+- prompt building и managed shots flows
 
-**Роль Embedding Vector**:
-Поле `embedding_vector` в профиле очень важно.
-Если в проекте подключен `EmbeddingProvider` (например,
-OpenAI Embeddings), то текст резюме превращается в вектор.
-Узел `SemanticPrefilterNode` (который стоит *до* дорогого
-узла извлечения) превращает текст сырой вакансии в вектор и
-сравнивает (косинусное сходство) с вектором профиля.
-Если вектора совершенно не похожи (например, профиль
-Python-разработчика, а вакансия — на повара), вакансия
-дешево дропается без вызова LLM.
+## Важное соседнее понятие
 
-## Типичные ошибки и что нельзя делать
+`ManagedCandidateProfile` — это runtime-managed оболочка вокруг профиля,
+которая добавляет operational metadata и используется в tenant/runtime flows.
 
-1. **Изменять профиль напрямую (без менеджера).**
+## Связанные документы
 
-Профиль задуман как immutable (неизменяемая) сущность.
-Если пользователь загрузил новое резюме, вы должны создать
-новый `ManagedCandidateProfile` с новым `updated_at`, а не
-мутировать старый объект в памяти.
-
-2. **Задавать relevance_threshold слишком высоко.**
-
-LLM-матчинг — это вероятностный процесс.
-Если вы поставите порог 0.99, вы отфильтруете почти все
-валидные вакансии.
-Оптимальные значения обычно лежат в диапазоне 0.65 - 0.80.
-
-3. **Смешивать Identity и SearchProfile.**
-
-Не пытайтесь искать вакансии по имени или контактным данным
-кандидата (`CandidateIdentity`).
-Матчинг должен происходить исключительно на базе
-`SearchProfile` (навыки, роли, локации).
-
-## Связи с другими сущностями
-
-- [Stage](stage_node.md) — профили используются узлами `SemanticPrefilterNode` и `MultiProfileMatchNode`.
-
-- [TenantConfig](tenant_config.md) — тенант может иметь набор профилей для фильтрации контента в свои каналы.
-
-- [EmbeddingProvider](backend.md) — используется для генерации `embedding_vector` из текста резюме.
+- [ProfileCatalog](profile_catalog.md)
+- [JobRecord](job_record.md)
+- [TenantConfig](tenant_config.md)
