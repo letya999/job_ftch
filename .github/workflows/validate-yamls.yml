@@ -23,12 +23,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: |
-          uv pip install jsonschema pyyaml
-
       - name: Run schema validation
         run: |
-          uv run python scripts/validate_yaml_schemas.py 2>&1 | tee .yaml_schema_validation.log
-          echo "exit_code=${PIPESTATUS[0]}"
-          echo "::warning::YAML schema validation mismatches are tracked in .yaml_schema_validation.log (informational for now)."
+          set +e
+          uv run --with jsonschema --with pyyaml python scripts/validate_yaml_schemas.py 2>&1 | tee .yaml_schema_validation.log
+          exit_code=${PIPESTATUS[0]}
+          set -e
+          if [ "$exit_code" -ne 0 ]; then
+            echo "::warning::YAML schema validation mismatches are tracked in .yaml_schema_validation.log (informational for now)."
+          fi
