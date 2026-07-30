@@ -208,13 +208,13 @@ def _visible_description_fallback(html: str | None) -> str | None:
     body_match = re.search(r"<body\b[^>]*>(.*?)</body>", html, re.IGNORECASE | re.DOTALL)
     body = body_match.group(1) if body_match else html
     body = re.sub(
-        r"<(?:script|style|noscript|svg)\b[^>]*>.*?</(?:script|style|noscript|svg)>",
+        r"<\s*(?:script|style|noscript|svg)\b[^>]*>.*?</\s*(?:script|style|noscript|svg)\s*>",
         " ",
         body,
         flags=re.IGNORECASE | re.DOTALL,
     )
     body = re.sub(
-        r"<(?:h1|title)\b[^>]*>.*?</(?:h1|title)>",
+        r"<\s*(?:h1|title)\b[^>]*>.*?</\s*(?:h1|title)\s*>",
         " ",
         body,
         flags=re.IGNORECASE | re.DOTALL,

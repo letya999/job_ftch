@@ -1,0 +1,6 @@
+name: job_ftch CodeQL config
+
+paths-ignore:
+  - tests/**
+  - fixtures/**
+  - scripts/dev/**

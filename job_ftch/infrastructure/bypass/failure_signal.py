@@ -176,7 +176,10 @@ def is_challenge_body(text: str) -> bool:
 
 def _has_substantial_visible_content(text: str) -> bool:
     without_code = re.sub(
-        r"<(?:script|style)\b[^>]*>.*?</(?:script|style)>", " ", text, flags=re.I | re.S
+        r"<\s*(?:script|style)\b[^>]*>.*?</\s*(?:script|style)\s*>",
+        " ",
+        text,
+        flags=re.I | re.S,
     )
     visible = " ".join(re.sub(r"<[^>]+>", " ", without_code).split())
     return len(visible) >= 200

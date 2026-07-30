@@ -113,7 +113,12 @@ def _visible_text_for_board_check(html: str) -> str:
     the untruncated document keeps every `<script>...</script>` pair intact.
     """
     visible = unescape(
-        re.sub(r"<(?:script|style)\b[^>]*>.*?</(?:script|style)>", " ", html, flags=re.I | re.S)
+        re.sub(
+            r"<\s*(?:script|style)\b[^>]*>.*?</\s*(?:script|style)\s*>",
+            " ",
+            html,
+            flags=re.I | re.S,
+        )
     )
     visible = re.sub(r"<[^>]+>", " ", visible)
     return " ".join(visible.split())[:_MAX_HTML_FOR_BOARD_CHECK]

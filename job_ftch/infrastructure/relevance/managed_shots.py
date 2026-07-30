@@ -42,8 +42,8 @@ _provider_cache_lock = threading.Lock()
 def _qdrant_id_for(*parts: str) -> str:
     """Stable UUID for a profile-scoped category and content hash."""
     key = "\u241f".join(parts).encode()
-    digest = hashlib.md5(key, usedforsecurity=False).hexdigest()
-    return str(uuid.UUID(digest))
+    digest = hashlib.sha256(key).digest()
+    return str(uuid.UUID(bytes=digest[:16]))
 
 
 def _try_get_qdrant_provider(settings: Settings) -> Any:

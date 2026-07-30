@@ -1,6 +1,7 @@
 import json
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import urlparse
 
 from job_ftch.application.registry import register_site_parser
 from job_ftch.domain import RawItem, SourceKind
@@ -15,7 +16,9 @@ class MicrosoftParser:
     supports_discover = False
 
     def can_handle(self, spec: CareerSiteSpec, html: str, url: str) -> bool:
-        return "careers.microsoft.com" in url
+        del spec, html
+        host = (urlparse(url).hostname or "").lower()
+        return host == "careers.microsoft.com"
 
     def runtime_defaults(self, url: str) -> None:
         del url
@@ -27,7 +30,7 @@ class MicrosoftParser:
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
         """Fetch listings through the injected runtime client."""
-        from urllib.parse import parse_qsl, urlparse
+        from urllib.parse import parse_qsl
 
         api_url = "https://apply.careers.microsoft.com/api/pcsx/search"
         parsed = urlparse(str(spec.url))

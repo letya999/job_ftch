@@ -142,7 +142,11 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
         return None
 
     html = await fetch_page_text(url, client)
-    if html and (".recruitee.com" in html or "window.recruitee" in html):
+    if html and re.search(r"\b(?:https?://)?[a-z0-9-]+\.recruitee\.com\b", html, re.I):
+        api_base = _api_base_from_url(url)
+        if api_base:
+            return {"api_base": api_base}
+    if html and "window.recruitee" in html:
         api_base = _api_base_from_url(url)
         if api_base:
             return {"api_base": api_base}

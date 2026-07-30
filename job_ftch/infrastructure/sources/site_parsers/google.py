@@ -19,7 +19,13 @@ class GoogleParser(SiteParser):
     has_custom_parse = True
 
     def can_handle(self, spec: CareerSiteSpec, html: str, url: str) -> bool:
-        return "careers.google.com" in url or "google.com/about/careers" in url
+        del spec, html
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        path = parsed.path.rstrip("/")
+        return host == "careers.google.com" or (
+            host in {"google.com", "www.google.com"} and path.startswith("/about/careers")
+        )
 
     async def parse(  # type: ignore[override, misc]
         self, spec: CareerSiteSpec, client: Any

@@ -33,6 +33,13 @@ TITLE_OVERRIDES = {
 }
 
 
+def _stable_path_key(path: Path) -> str:
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
 @lru_cache(maxsize=8192)
 def _is_gitignored(root: str, relative_path: str) -> bool:
     result = subprocess.run(
@@ -88,7 +95,7 @@ def parse_front_matter(path: Path) -> dict[str, object]:
 
 def _iter_target_dirs(root: Path) -> Iterable[Path]:
     yield root
-    for path in sorted(root.rglob("*")):
+    for path in sorted(root.rglob("*"), key=_stable_path_key):
         if not path.is_dir():
             continue
         if _is_ignored_path(path):
@@ -111,7 +118,7 @@ def _summarize_dir(path: Path) -> DirectorySummary:
     child_dirs: list[Path] = []
     markdown_files: list[Path] = []
     other_files: list[Path] = []
-    for child in sorted(path.iterdir()):
+    for child in sorted(path.iterdir(), key=_stable_path_key):
         if child.name == INDEX_NAME:
             continue
         if _is_ignored_path(child):
@@ -233,7 +240,7 @@ def build_indexes(*, check: bool = False) -> tuple[list[Path], list[Path]]:
                     stale.append(existing)
                 else:
                     existing.unlink()
-    return written, sorted(set(stale))
+    return written, sorted(set(stale), key=_stable_path_key)
 
 
 def main() -> None:
