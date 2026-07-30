@@ -135,7 +135,8 @@ def patch_settings(monkeypatch: pytest.MonkeyPatch, qdrant: QdrantClient) -> Ite
 
 def _pid(role: str, text: str) -> str:
     key = f"{role}\u241f{text}".encode()
-    return str(uuid.UUID(hashlib.md5(key, usedforsecurity=False).hexdigest()))
+    digest = hashlib.sha256(key).digest()
+    return str(uuid.UUID(bytes=digest[:16]))
 
 
 # ---------------------------------------------------------------------------
