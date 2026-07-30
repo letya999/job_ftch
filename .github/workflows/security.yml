@@ -20,6 +20,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: TruffleHog
-        uses: trufflesecurity/trufflehog@84a2b33c9f891494db6ebe02f2a55b19cdf38f25 # main
+        uses: trufflesecurity/trufflehog@f2d9ea762e2d5c93f3fcd1b6c9e8586ff91715bd # main
         with:
           extra_args: --results=verified,unknown --exclude-paths=.repo-safety/trufflehog-exclude.txt
