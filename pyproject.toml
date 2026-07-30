@@ -176,7 +176,7 @@ dev = [
     # formatting of the same files, so an unpinned floor let a local run "fix" code that
     # the CI version then rejected. A formatter has to be byte-deterministic; bump this
     # deliberately, not by accident.
-    "ruff==0.15.16",
+    "ruff==0.16.0",
     # Bounded below a major so the type and test verdicts cannot silently diverge between
     # a developer machine and CI the way ruff did.
     "mypy>=2.1,<3",
