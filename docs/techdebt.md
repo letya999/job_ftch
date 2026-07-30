@@ -1,7 +1,7 @@
 ---
 title: "Технический долг"
-description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-030."
-updated: 2026-07-29
+description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-031."
+updated: 2026-07-30
 ---
 # Технический долг
 
@@ -546,3 +546,49 @@ Exit criterion:
   adjacent roles with clean cited evidence can pass;
 - run controlled eval and prove no precision regression below the production
   floor.
+
+## 32. TD-031: Curated dependency update batch after v0.0.5
+
+Status: open. Priority: medium for release hygiene, high before the next
+dependency-refresh release.
+
+After the v0.0.5 release, Dependabot opened a burst of small dependency PRs.
+They should not be merged one by one because each PR repeats the full CI/security
+surface and makes it harder to reason about pinned GitHub Actions, toolchain
+compatibility, and lockfile drift. Close the current bot PRs and re-apply them
+as curated batches when dependency work resumes.
+
+Superseded by the v0.0.5 lockfile and safe to close as stale/no-op:
+
+- #129: `pillow` 12.2.0 -> 12.3.0;
+- #130: `setuptools` 81.0.0 -> 83.0.0;
+- #131: `pypdf` 6.13.2 -> 6.14.2;
+- #132: `pyasn1` 0.6.3 -> 0.6.4.
+
+Re-open as one GitHub Actions/security-tool hardening batch:
+
+- #134: `trufflesecurity/trufflehog` pinned commit update;
+- #140: `actions/setup-python` 6.2.0 -> 7.0.0;
+- #141: `ossf/scorecard-action` 2.4.0 -> 2.4.4;
+- #142: `gitleaks/gitleaks-action` pinned commit update;
+- #143: `actions/checkout` 5 -> 7.
+
+Re-open as one ML/dev dependency compatibility batch:
+
+- #135: `datasets` `<4,>=3.6.0` -> `>=3.6.0,<6`;
+- #136: `dill` `<0.4,>=0.3.8` -> `>=0.3.8,<0.5`;
+- #137: `accelerate` `<1.11,>=1.10.1` -> `>=1.10.1,<1.15`;
+- #138: `ruff` 0.15.16 -> 0.16.0; verify formatter/linter compatibility
+  locally first because this bot PR had failing checks.
+
+Exit criterion:
+
+- recreate the updates manually or let Dependabot recreate them after the
+  current PRs are closed;
+- keep GitHub Actions pinned to verified commit SHAs where policy requires it;
+- for the actions/security batch, run CI, security/secrets, SAST, Scorecard,
+  supply-chain, CodeQL optional, and release-contract gates;
+- for the ML/dev batch, run lint/format, mypy, tests, release-contract, and
+  relevant eval gates;
+- update `docs/tech_stack.md` when widening dependency ranges changes project
+  dependency policy or rationale.
