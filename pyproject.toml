@@ -81,7 +81,7 @@ reranker = ["fastembed>=0.3"]
 bgem3 = [
     "flagembedding>=1.2.0",
     "torch>=2.3",
-    "dill>=0.3.8,<0.4",
+    "dill>=0.3.8,<0.5",
     "accelerate>=1.10.1,<1.11",
     "datasets>=3.6.0,<4",
     "huggingface-hub>=1.24,<2",
@@ -103,7 +103,7 @@ all = [
     "nodriver>=0.50.2",
     "sentence-transformers>=3.0",
     "torch>=2.3",
-    "dill>=0.3.8,<0.4",
+    "dill>=0.3.8,<0.5",
     "accelerate>=1.10.1,<1.11",
     "datasets>=3.6.0,<4",
     "huggingface-hub>=1.24,<2",
