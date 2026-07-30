@@ -6,6 +6,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 
 ## Files On This Level
 
+- [Node Catalog](README.md) - Полный каталог `job_ftch/nodes/*` по текущему состоянию репозитория. (Updated: 2026-07-24)
 - [AcceptTemplatePresentationNode](accept_template_presentation.md) - Zero-cost deterministic presentation только для ACCEPT records. (Updated: 2026-07-27)
 - [JobAggregationNode](aggregation.md) - ACCEPT-only cross-source grouping и JobGroupStore side effect. (Updated: 2026-07-27)
 - [BgeMThreeNode](bge_embed_node.md) - BGE-M3 encoder: dense+sparse vectors in RawItem metadata. (Updated: 2026-07-27)
@@ -56,7 +57,6 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [ProfileSemanticEvidenceNode](profile_semantic_evidence.md) - Semantic margin между BGE vacancy vector и profile intent/anti-intent queries. (Updated: 2026-07-27)
 - [QualityScoringNode и JobValidationNode](quality.md) - Structured quality score и minimum usefulness validation для JobRecord. (Updated: 2026-07-27)
 - [RawJobnessEvidenceNode](raw_jobness.md) - Graph id `raw_jobness`: pre-extraction IS_JOB evidence для RawItem. (Updated: 2026-07-27)
-- [Node Catalog](README.md) - Полный каталог `job_ftch/nodes/*` по текущему состоянию репозитория. (Updated: 2026-07-24)
 - [Generated node reference](reference.md) - Generated reference of registered graph nodes and manifests. (Updated: 2026-07-26)
 - [AIRoleRelevanceNode](relevance.md) - Legacy/custom AI-role relevance gate для Job. (Updated: 2026-07-27)
 - [TF-IDF + Logistic Regression Relevance Prefilter](relevance_prefilter.md) - Trainable TF-IDF/logistic-regression gate used before the LLM relevance judge. (Updated: 2026-07-29)
