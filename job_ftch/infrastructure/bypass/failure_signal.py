@@ -176,7 +176,7 @@ def is_challenge_body(text: str) -> bool:
 
 def _has_substantial_visible_content(text: str) -> bool:
     without_code = re.sub(
-        r"<\s*(?:script|style)\b[^>]*>.*?</\s*(?:script|style)\s*>",
+        r"<\s*(?:script|style)\b[^>]*>.*?<\s*/\s*(?:script|style)\b[^>]*>",
         " ",
         text,
         flags=re.I | re.S,
