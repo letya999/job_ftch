@@ -227,12 +227,14 @@ def _exclusive_file_lock(path: Path) -> Any:
         if os.name == "nt":
             import msvcrt
 
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            msvcrt_api: Any = msvcrt
+
+            msvcrt_api.locking(handle.fileno(), msvcrt_api.LK_LOCK, 1)
             try:
                 yield
             finally:
                 handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                msvcrt_api.locking(handle.fileno(), msvcrt_api.LK_UNLCK, 1)
         else:
             import importlib
 
