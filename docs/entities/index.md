@@ -6,6 +6,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 
 ## Files On This Level
 
+- [Сущности и контракты](README.md) - Ключевые entity-карточки плюс полные карты domain/application модулей. (Updated: 2026-07-28)
 - [Adapters and plugins](adapters_and_plugins.md) - `job_ftch` uses several extension shapes. The names are intentionally (Updated: 2026-07-24)
 - [Application Model Map](application_model_map.md) - Полный индекс `job_ftch/application/*`: composition roots, ports, runtime orchestration, registries и helper modules. (Updated: 2026-07-28)
 - [AuthProvider](auth_provider.md) - **Слой**: `application` (Updated: 2026-07-24)
@@ -26,7 +27,6 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [ProfileCatalog](profile_catalog.md) - **Слой**: `domain` (Updated: 2026-07-24)
 - [Базовые протоколы](protocols.md) - **Слой**: `application` (Updated: 2026-07-24)
 - [RawItem](raw_item.md) - **Слой**: `domain` (Updated: 2026-07-24)
-- [Сущности и контракты](README.md) - Ключевые entity-карточки плюс полные карты domain/application модулей. (Updated: 2026-07-28)
 - [RunSummary](run_summary.md) - **Слой**: `application` (Updated: 2026-07-24)
 - [RuntimeAdapter (Рантайм-адаптеры)](runtime_adapters.md) - Runtime adapter — это внешний слой, который подключает library-first core (Updated: 2026-07-24)
 - [Sink](sink.md) - `Sink` — финальная точка назначения для pipeline output. (Updated: 2026-07-24)
