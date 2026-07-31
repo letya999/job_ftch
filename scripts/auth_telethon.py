@@ -3,8 +3,8 @@ One-time Telethon authentication helper.
 Run this once to create or refresh .runtime/telegram-dev.session before
 starting Docker.
 
-The script loads root dotenv files itself so it works even when the shell
-has not sourced .env.dev.
+The script loads root dotenv files itself (.env, .env.prod, .env.dev, each
+overriding the previous) so it works without sourcing anything first.
 
 Usage:
     python scripts/auth_telethon.py
@@ -26,7 +26,11 @@ from typing import Any
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
-ENV_FILES = (ROOT / ".env", ROOT / ".env.dev")
+# Base first, then the deployment-flavoured files, each overriding the previous.
+# `.env.prod` used to be absent from this list, so on a host configured only
+# with it the helper reported the credentials as unset while they sat in the
+# one file it never opened. `.env.dev` stays last: it is the local override.
+ENV_FILES = (ROOT / ".env", ROOT / ".env.prod", ROOT / ".env.dev")
 ORIGINAL_ENV_KEYS = set(os.environ.keys())
 
 
@@ -55,8 +59,8 @@ def _load_env_file(path: Path, *, override: bool) -> None:
 
 
 def _load_project_env() -> None:
-    _load_env_file(ENV_FILES[0], override=False)
-    _load_env_file(ENV_FILES[1], override=True)
+    for index, path in enumerate(ENV_FILES):
+        _load_env_file(path, override=index > 0)
 
 
 def _read_env(name: str) -> str:
@@ -101,8 +105,16 @@ API_HASH = _read_env("JOB_FTCH_TELEGRAM_API_HASH")
 SESSION_PATH = _read_env("JOB_FTCH_TELEGRAM_SESSION_PATH") or ".runtime/telegram-dev.session"
 
 if not API_ID_STR or not API_HASH:
-    print("Set JOB_FTCH_TELEGRAM_API_ID and JOB_FTCH_TELEGRAM_API_HASH in .env.dev or shell env.")
-    print("The helper now auto-loads root .env and .env.dev, so usually no export is needed.")
+    # Name the files actually inspected. The old message pointed at .env.dev
+    # unconditionally, which reads as "your file is wrong" on a host that never
+    # had one.
+    found = [path for path in ENV_FILES if path.is_file()]
+    missing = [path for path in ENV_FILES if not path.is_file()]
+    print("JOB_FTCH_TELEGRAM_API_ID and JOB_FTCH_TELEGRAM_API_HASH are not set.")
+    print(f"Loaded: {', '.join(p.name for p in found) or 'no dotenv file found'}")
+    if missing:
+        print(f"Not present: {', '.join(p.name for p in missing)}")
+    print("Add both keys to one of those files, or export them in the shell.")
     sys.exit(1)
 
 API_ID = int(API_ID_STR)
