@@ -76,6 +76,29 @@ def _is_unusable_location(value: str | None) -> bool:
     return any(marker in lowered for marker in _NON_PLACE_MARKERS)
 
 
+def _metadata_skills(metadata: dict[str, object]) -> tuple[str, ...]:
+    """Technology tags an API-backed parser already collected.
+
+    Sites that publish a tag list (hirify, Yandex) hand it over as structured
+    data. Nothing consumed it, and switching hirify from scraping the rendered
+    chips to reading its API removed the keyword list the LLM had been picking
+    tools out of - tools_stack coverage on that source fell to zero even though
+    the tags were sitting in metadata all along.
+    """
+    raw = metadata.get("skills")
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    seen: list[str] = []
+    for entry in raw:
+        if isinstance(entry, str) and entry.strip():
+            value = entry.strip()
+            if value.casefold() not in {s.casefold() for s in seen}:
+                seen.append(value)
+    return tuple(seen[:12])
+
+
 def _metadata_language(metadata: dict[str, object]) -> LanguageCode | None:
     """Language detected upstream by LanguageDetectionNode/LanguageContextNode."""
     raw = metadata.get("detected_language")
@@ -220,7 +243,9 @@ class FullExtractionNode:
                 "requirements_nice": extracted.requirements_nice or job.requirements_nice,
                 "skills_explicit": extracted.skills_explicit or job.skills_explicit,
                 "skills_inferred": extracted.skills_inferred or job.skills_inferred,
-                "tools_stack": extracted.tools_stack or job.tools_stack,
+                "tools_stack": (
+                    extracted.tools_stack or job.tools_stack or _metadata_skills(job.metadata)
+                ),
                 "benefits": extracted.benefits or job.benefits,
                 "culture_signals": extracted.culture_signals or job.culture_signals,
                 "domain_knowledge": extracted.domain_knowledge or job.domain_knowledge,
