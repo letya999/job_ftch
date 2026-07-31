@@ -249,3 +249,69 @@ async def test_generate_text_does_not_invoke_instructor_create_under_load(
         assert out == "hello world"
     assert instructor_client.create.await_count == 0
     assert raw_client.chat.completions.create.await_count == 20
+
+
+# ---------------------------------------------------------------------------
+# Field-language contract of the extraction prompt.
+#
+# The prompt used to carry a blanket "translate role names and skill names to
+# English" line directly under a rule saying free-form fields keep the source
+# language. The model resolved that contradiction by translating everything,
+# so Russian postings reached publication with English requirements and the
+# card rendered mixed-language labels. These tests pin the contract that
+# replaced it.
+# ---------------------------------------------------------------------------
+
+CANONICALIZED_FIELDS = (
+    "skills_explicit",
+    "skills_inferred",
+    "tools_stack",
+    "role_family",
+    "role_track",
+)
+
+VERBATIM_FIELDS = (
+    "description",
+    "responsibilities",
+    "requirements_must",
+    "requirements_nice",
+    "benefits",
+    "culture_signals",
+)
+
+
+def _extract_prompt(monkeypatch: pytest.MonkeyPatch) -> str:
+    _install_instructor_and_openai(monkeypatch)
+    from job_ftch.infrastructure.llm import openai_provider
+
+    return openai_provider._EXTRACT_SYSTEM_PROMPT
+
+
+def test_ontology_matched_fields_are_named_for_canonicalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompt = _extract_prompt(monkeypatch)
+    canonical_section = prompt.split("Keep verbatim")[0]
+    for field in CANONICALIZED_FIELDS:
+        assert field in canonical_section, f"{field} must be listed as canonicalized"
+
+
+def test_reader_facing_fields_are_named_as_verbatim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompt = _extract_prompt(monkeypatch)
+    verbatim_section = prompt.split("Keep verbatim")[1]
+    for field in VERBATIM_FIELDS:
+        assert field in verbatim_section, f"{field} must be listed as kept verbatim"
+
+
+def test_no_blanket_translation_instruction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The regression itself: an unscoped translate directive."""
+    prompt = _extract_prompt(monkeypatch).lower()
+    assert "translate role names and skill names to english" not in prompt
+
+
+def test_free_form_language_rule_still_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Canonicalization must not have displaced the source-language rule."""
+    prompt = _extract_prompt(monkeypatch)
+    assert "Respond in the language of the input text" in prompt
