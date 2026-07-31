@@ -637,38 +637,29 @@ Exit criterion:
 
 ## 34. TD-033: hirify detail-страница отдаёт только чипы, не тело вакансии
 
-Status: open. Priority: high, затрагивает все 12 вакансий источника `hirify_me`.
+Status: closed 2026-07-31. Реализовано в `site_parsers/hirify.py`
+(`parse()` + `/api/vacancies/{id}`), тесты в `tests/test_hirify_site_parser.py`.
 
-`https://hirify.me/jobs/668118-product-owner-ai-platform` содержит полную прозу:
-обязанности («Вести backlog конкретного сервиса платформы ИИ», декомпозиция
-инициатив, участие в Agile-церемониях) и требования (3+ года в роли PO/аналитика,
-Jira, user story и acceptance criteria, DoR/DoD). В хранилище у этой записи
-`description` длиной 254 символа, состоящий из обвязки карточки и тегов:
+Была: `description` длиной 254 символа из обвязки карточки и тегов, потому что
+Nuxt-SPA не отдаёт прозу в разметке, а first-party API использовался только для
+discovery. Следствие — `requirements_must` вырождался в список тегов,
+`tools_stack` в один `jira`, компания терялась.
 
-    Product Owner (AI) Show contacts Work format remote (only Russia) Work type
-    fulltime Grade middle/senior Country Russia agile ai jira use case user story
-    safe russian acceptance criteria Vacancy posted on Hirify directly from the
-    HR/hiring manager Report
+Стало: `parse()` берёт листинг, затем тело каждой вакансии из
+`/api/vacancies/{id}` (поле `text`), плюс структурные поля — компания, зарплата,
+регионы, формат работы, грейд, специализация, теги. На живом прогоне тела
+311-3024 символа, в среднем 1878.
 
-Следствие: `requirements_must` вырождается в список тегов, `tools_stack` — в один
-`jira`, компания теряется (`missing_company`). Карточка формально корректна, но
-бедна, потому что беден вход.
+Фоллбек трёхуровневый: листинговый API -> `discover()` (HTML-ссылки, API через
+браузер, скролл) с добором тела через detail-эндпоинт -> пустой `parse()`, после
+которого `CareerSiteSource` уходит в generic-краул. Поэтому у парсера намеренно
+не выставлены `confirmed_empty_on_empty` и `terminal_on_empty` — иначе последний
+уровень был бы подавлен; это закреплено тестом.
 
-Причина: `site_parsers/hirify.py` использует первоисточник `/api/vacancies`
-только на этапе discovery — чтобы собрать канонические `/jobs/...` URL. Тело
-затем забирается generic-путём (`md.adapter: generic-career-site`) с Nuxt-SPA,
-где проза рендерится на клиенте, поэтому в текст попадает лишь то, что видно в
-разметке. При этом `detail_vacancy_confirmed: True` и `fastpath_completeness:
-0.55` — сигналы полноты не заметили отсутствия тела.
+Осталось открытым из исходного пункта:
 
-Exit criterion:
-
-- брать тело вакансии из того же first-party API, что уже используется для
-  discovery, либо из `window.__NUXT__` state, а не из отрендеренных чипов;
-- зафиксировать форму ответа API в fixture и покрыть парсер тестом на реальной
-  вакансии с прозой;
-- сделать так, чтобы `fastpath_completeness` понижался, когда описание состоит
-  преимущественно из служебных строк карточки («Show contacts», «Report»,
-  «Vacancy posted on»), — сейчас такой вход проходит как полный;
-- перепроверить остальные источники на тот же класс дефекта: SPA-страница с
+- `fastpath_completeness` по-прежнему не понижается, когда описание состоит из
+  служебных строк карточки («Show contacts», «Report», «Vacancy posted on»);
+  такой вход всё ещё проходит как полный;
+- остальные источники не проверены на тот же класс дефекта: SPA-страница с
   first-party API, используемым только для discovery.
