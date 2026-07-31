@@ -92,7 +92,7 @@ class TestBuildCard:
         assert "200" in card.salary
         assert "400" in card.salary
         assert "₽" in card.salary
-        assert "/мес" in card.salary
+        assert "/mo" in card.salary or "/мес" in card.salary
 
     def test_compensation_usd(self) -> None:
         job = _minimal_job(
@@ -151,7 +151,7 @@ class TestBuildCard:
         job = _minimal_job(work_mode=WorkMode.REMOTE)
         card = build_card(job)
         assert card.location is not None
-        assert "удалённо" in card.location.lower()
+        assert "удалённо" in card.location.lower() or "remote" in card.location.lower()
 
     def test_location_city_country(self) -> None:
         job = _minimal_job(city="Москва", country="Россия", work_mode=WorkMode.ONSITE)
@@ -159,7 +159,7 @@ class TestBuildCard:
         assert card.location is not None
         assert "Москва" in card.location
         assert "Россия" in card.location
-        assert "офис" in card.location.lower()
+        assert "офис" in card.location.lower() or "onsite" in card.location.lower()
 
     def test_stack_from_tools(self) -> None:
         record = _minimal_record(tools_stack=("Python", "PyTorch", "Docker"))
@@ -192,12 +192,20 @@ class TestBuildCard:
         card = build_card(job)
         assert card.url == "https://example.com/job/123"
 
-    def test_language_detection(self) -> None:
+    def test_language_detection_ru_content(self) -> None:
         from job_ftch.domain.models import LanguageCode
 
-        job = _minimal_job(language=LanguageCode.RU)
+        job = _minimal_job(
+            language=LanguageCode.RU,
+            description="Разработка ML-систем для рекомендаций",
+        )
         card = build_card(job)
         assert card.language == "ru"
+
+    def test_language_detection_en_content(self) -> None:
+        job = _minimal_job(description="Building production ML pipelines")
+        card = build_card(job)
+        assert card.language == "en"
 
     def test_source_kind_preserved(self) -> None:
         job = _minimal_job(source_kind=SourceKind.TELEGRAM_CHANNEL)

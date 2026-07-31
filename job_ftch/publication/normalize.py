@@ -35,13 +35,19 @@ CURRENCY_SYMBOLS: dict[str, str] = {
     "CHF": "CHF",
 }
 
-PERIOD_LABELS: dict[str, str] = {
-    "hour": "/час",
-    "day": "/день",
-    "week": "/нед",
-    "month": "/мес",
-    "year": "/год",
-    "project": "/проект",
+PERIOD_LABELS: dict[str, dict[str, str]] = {
+    "hour": {"ru": "/час", "en": "/hr"},
+    "day": {"ru": "/день", "en": "/day"},
+    "week": {"ru": "/нед", "en": "/wk"},
+    "month": {"ru": "/мес", "en": "/mo"},
+    "year": {"ru": "/год", "en": "/yr"},
+    "project": {"ru": "/проект", "en": "/project"},
+}
+
+WORK_MODE_LABELS: dict[str, dict[str, str]] = {
+    "remote": {"ru": "удалённо", "en": "remote"},
+    "hybrid": {"ru": "гибрид", "en": "hybrid"},
+    "onsite": {"ru": "офис", "en": "onsite"},
 }
 
 
@@ -49,7 +55,7 @@ def _fmt_amount(amount: int) -> str:
     return f"{amount:,}".replace(",", " ")
 
 
-def format_compensation(job: Job | JobRecord) -> str | None:
+def format_compensation(job: Job | JobRecord, lang: str = "ru") -> str | None:
     comp = getattr(job, "compensation", None)
     if comp is None:
         return None
@@ -61,16 +67,20 @@ def format_compensation(job: Job | JobRecord) -> str | None:
 
     sym = CURRENCY_SYMBOLS.get(comp.currency, comp.currency)
 
+    from_word = "от" if lang == "ru" else "from"
+    to_word = "до" if lang == "ru" else "up to"
+
     if lo is not None and hi is not None:
         rng = _fmt_amount(lo) if lo == hi else f"{_fmt_amount(lo)}–{_fmt_amount(hi)}"
     elif lo is not None:
-        rng = f"от {_fmt_amount(lo)}"
+        rng = f"{from_word} {_fmt_amount(lo)}"
     else:
-        rng = f"до {_fmt_amount(hi)}"  # type: ignore[arg-type]
+        rng = f"{to_word} {_fmt_amount(hi)}"  # type: ignore[arg-type]
 
     period = ""
     if comp.period and hasattr(comp.period, "value") and comp.period.value != "unknown":
-        period = PERIOD_LABELS.get(comp.period.value, f"/{comp.period.value}")
+        labels = PERIOD_LABELS.get(comp.period.value, {})
+        period = labels.get(lang, labels.get("en", f"/{comp.period.value}"))
 
     gross_mark = ""
     if comp.gross is True:
@@ -81,7 +91,7 @@ def format_compensation(job: Job | JobRecord) -> str | None:
     return f"{rng} {sym}{period}{gross_mark}".strip()
 
 
-def format_location(job: Job | JobRecord) -> str | None:
+def format_location(job: Job | JobRecord, lang: str = "ru") -> str | None:
     parts: list[str] = []
     city = getattr(job, "city", None)
     country = getattr(job, "country", None)
@@ -97,12 +107,8 @@ def format_location(job: Job | JobRecord) -> str | None:
 
     wm_str = work_mode.value if work_mode and hasattr(work_mode, "value") else ""
     if wm_str and wm_str != "unknown":
-        wm_labels = {
-            "remote": "удалённо",
-            "hybrid": "гибрид",
-            "onsite": "офис",
-        }
-        parts.append(wm_labels.get(wm_str, wm_str))
+        labels = WORK_MODE_LABELS.get(wm_str, {})
+        parts.append(labels.get(lang, labels.get("en", wm_str)))
 
     return " · ".join(parts) if parts else None
 
@@ -120,9 +126,64 @@ def resolve_card_url(job: Job | JobRecord) -> str | None:
     return url_str if any(url_str.startswith(s) for s in safe_schemes) else None
 
 
+TELEGRAM_HOSTS = frozenset({"t.me", "telegram.me"})
+
+
 def pick_source_label(job: Job | JobRecord) -> str | None:
+    """Footer label: the origin domain, so readers see where a job came from.
+
+    Telegram links keep their channel segment (``t.me/ml_jobs_kz``) - the bare
+    host would collapse every channel into one indistinguishable label.
+    Falls back to ``source_name`` when there is no usable URL.
+    """
+    url = resolve_card_url(job)
+    if url:
+        from urllib.parse import urlparse
+
+        try:
+            parsed = urlparse(url if "//" in url else f"https://{url}")
+            host = (parsed.hostname or "").removeprefix("www.")
+            if host in TELEGRAM_HOSTS:
+                channel = parsed.path.strip("/").split("/")[0]
+                if channel:
+                    return f"{host}/{channel}"
+            if host:
+                return host
+        except ValueError:
+            pass
     name = getattr(job, "source_name", None)
     return name.strip() if name else None
+
+
+def detect_content_language(job: Job | JobRecord) -> str:
+    """Detect language of the card content from requirements and description.
+
+    Uses requirements_must as the primary signal (that's what gets prefixed),
+    falls back to description. If both are ambiguous, trusts job.language.
+    """
+    lang_attr = getattr(job, "language", None)
+    base_lang = lang_attr.value if lang_attr and hasattr(lang_attr, "value") else "en"
+    if base_lang == "unknown":
+        base_lang = "en"
+
+    reqs = getattr(job, "requirements_must", None) or ()
+    req_text = " ".join(str(r) for r in reqs[:5])
+    desc_text = (getattr(job, "description", "") or "")[:500]
+    sample = req_text if req_text else desc_text
+    if not sample:
+        return base_lang
+
+    cyrillic = sum(1 for c in sample if "Ѐ" <= c <= "ӿ")
+    latin = sum(1 for c in sample if "a" <= c.lower() <= "z")
+    total = cyrillic + latin
+    if total == 0:
+        return base_lang
+    ratio = cyrillic / total
+    if ratio > 0.3:
+        return "ru"
+    if ratio < 0.05:
+        return "en"
+    return base_lang
 
 
 def summarise_requirements(job: Job | JobRecord) -> str | None:

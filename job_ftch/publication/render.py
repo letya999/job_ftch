@@ -52,14 +52,16 @@ def render_card(
             continue
         lines.append(line)
 
-    footer = _render_footer(card, layout)
-    if footer:
-        lines.append("")
-        lines.append(footer)
+    body = _strip_banlist("\n".join(lines), layout.banlist)
+    footer = _strip_banlist(_render_footer(card, layout), layout.banlist)
 
-    text = "\n".join(lines)
-    text = _strip_banlist(text, layout.banlist)
-    return _safe_truncate(text, caps.max_len)
+    # The footer carries the source link and must survive intact - truncating
+    # mid-anchor produces markup Telegram rejects outright. Only the body is
+    # trimmed, against the budget left after reserving the footer.
+    if not footer:
+        return _safe_truncate(body, caps.max_len)
+    trimmed = _safe_truncate(body, max(caps.max_len - len(footer) - 2, 0))
+    return f"{trimmed}\n\n{footer}" if trimmed else footer
 
 
 def _resolve_field(field_name: str, card: PublicationCard) -> str | None:
@@ -68,6 +70,12 @@ def _resolve_field(field_name: str, card: PublicationCard) -> str | None:
         return None
     s = str(val).strip()
     return s if s else None
+
+
+def _pick_prefix(block: BlockSpec, lang: str) -> str | None:
+    if lang != "ru" and block.prefix_en:
+        return block.prefix_en
+    return block.prefix
 
 
 def _render_block(
@@ -92,8 +100,9 @@ def _render_block(
     if block.max_len:
         text = _truncate_word(text, block.max_len)
 
-    if block.prefix:
-        text = f"{escape(block.prefix) if caps.html else block.prefix}{text}"
+    prefix = _pick_prefix(block, card.language)
+    if prefix:
+        text = f"{escape(prefix) if caps.html else prefix}{text}"
 
     if block.style == "bold" and caps.html:
         text = f"<b>{text}</b>"
@@ -123,11 +132,14 @@ def _render_conditions(
 def _render_footer(card: PublicationCard, layout: CardLayout) -> str:
     footer = layout.footer
     url = card.url
+    lang = card.language
 
     source_label = card.source_name or ""
-    link_label = footer.link_labels.get(
+
+    labels = footer.link_labels_en if lang != "ru" and footer.link_labels_en else footer.link_labels
+    link_label = labels.get(
         card.source_kind or "default",
-        footer.link_labels.get("default", "открыть"),
+        labels.get("default", "open"),
     )
 
     if url:
@@ -143,10 +155,12 @@ def _render_footer(card: PublicationCard, layout: CardLayout) -> str:
         parts.append(escape(source_label))
     if link:
         parts.append(link)
-    if auto_mark:
-        parts.append(escape(auto_mark))
 
-    return " · ".join(parts)
+    line = " · ".join(parts)
+    if auto_mark:
+        line = line + "\n" + auto_mark if line else auto_mark
+
+    return line
 
 
 def _strip_banlist(text: str, banlist: tuple[str, ...]) -> str:

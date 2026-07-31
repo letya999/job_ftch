@@ -62,6 +62,8 @@ class TestGoldenCards:
         assert "Нужно:" in text
         assert "Стек:" in text
         assert "открыть вакансию" in text
+        assert "hh.ru" in text
+        assert "job_ftch" in text
         assert not text.startswith("🔵")
         assert "<i>" not in text
 
@@ -110,7 +112,7 @@ class TestGoldenCards:
         )
         text = _render(job)
         assert "<b>Python Developer</b>" in text
-        assert "HH.ru" in text  # source_name in footer is fine
+        assert "hh.ru" in text  # domain in footer
 
     def test_usd_salary(self) -> None:
         """USD salary should use $ symbol."""
@@ -131,7 +133,7 @@ class TestGoldenCards:
         )
         text = _render(job)
         assert "$" in text
-        assert "/год" in text
+        assert "/yr" in text
 
     def test_kzt_salary(self) -> None:
         """KZT salary should use ₸ symbol."""
@@ -155,16 +157,16 @@ class TestGoldenCards:
         assert "₸" in text
         assert "Almaty" in text
 
-    def test_with_stack_and_requirements(self) -> None:
-        """Full card with tools_stack and requirements."""
+    def test_with_stack_and_requirements_ru(self) -> None:
+        """Full card with Russian requirements uses Russian labels."""
         job = JobRecord(
             raw_item_id="sr-1",
             source_kind=SourceKind.CAREER_SITE,
             source_name="Habr Career",
             title="MLOps Engineer",
             company="VK",
-            description="MLOps role",
-            requirements_must=("Docker", "K8s", "CI/CD pipelines"),
+            description="Разработка MLOps платформы",
+            requirements_must=("Опыт с Docker", "Знание K8s", "Настройка CI/CD"),
             tools_stack=("Docker", "Kubernetes", "Airflow", "MLflow"),
             work_mode=WorkMode.HYBRID,
             city="Москва",
@@ -174,6 +176,23 @@ class TestGoldenCards:
         assert "Docker" in text
         assert "Стек:" in text
         assert "Kubernetes" in text
+
+    def test_with_stack_and_requirements_en(self) -> None:
+        """Full card with English requirements uses English labels."""
+        job = JobRecord(
+            raw_item_id="sr-2",
+            source_kind=SourceKind.CAREER_SITE,
+            source_name="Remote Jobs",
+            title="MLOps Engineer",
+            company="Stripe",
+            description="MLOps role at scale",
+            requirements_must=("Docker experience", "K8s", "CI/CD pipelines"),
+            tools_stack=("Docker", "Kubernetes", "Airflow", "MLflow"),
+            work_mode=WorkMode.REMOTE,
+        )
+        text = _render(job)
+        assert "Required:" in text
+        assert "Stack:" in text
 
     def test_skills_fallback_when_no_stack(self) -> None:
         """Stack from skills_explicit when tools_stack is empty."""
@@ -191,7 +210,7 @@ class TestGoldenCards:
             ),
         )
         text = _render(job)
-        assert "Стек:" in text
+        assert "Stack:" in text
         assert "Python" in text
 
     def test_control_bot_profile(self) -> None:
@@ -223,7 +242,7 @@ class TestGoldenCards:
         )
         text = _render(job)
         assert "<b>Computer Vision Engineer</b>" in text
-        assert "открыть пост" in text
+        assert "open post" in text
 
     def test_no_url(self) -> None:
         """Job without URL - footer should not have a link."""

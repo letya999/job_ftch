@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from job_ftch.domain import Job, JobRecord
 
 from job_ftch.publication.normalize import (
+    detect_content_language,
     format_compensation,
     format_location,
     pick_source_label,
@@ -54,8 +55,9 @@ def build_card(job: Job | JobRecord) -> PublicationCard:
         else (company_raw or "").strip()[:100] or None
     )
 
-    location = format_location(job)
-    salary = format_compensation(job)
+    content_lang = detect_content_language(job)
+    location = format_location(job, lang=content_lang)
+    salary = format_compensation(job, lang=content_lang)
     url = resolve_card_url(job)
 
     presentable = getattr(job, "presentable", None)
@@ -68,10 +70,7 @@ def build_card(job: Job | JobRecord) -> PublicationCard:
     key_requirements = summarise_requirements(job)
     stack = summarise_stack(job)
 
-    lang_attr = getattr(job, "language", None)
-    language = lang_attr.value if lang_attr and hasattr(lang_attr, "value") else "en"
-    if language == "unknown":
-        language = "en"
+    language = content_lang
 
     source_kind_attr = getattr(job, "source_kind", None)
     source_kind = (
