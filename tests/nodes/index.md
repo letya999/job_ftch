@@ -20,6 +20,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_extraction_prompt_boundary.py](test_extraction_prompt_boundary.py)
 - [test_extraction_search_relevance.py](test_extraction_search_relevance.py)
 - [test_extraction_structured_fast_path.py](test_extraction_structured_fast_path.py)
+- [test_extraction_unknown_post_type.py](test_extraction_unknown_post_type.py)
 - [test_filter_profiles.py](test_filter_profiles.py)
 - [test_full_extraction.py](test_full_extraction.py)
 - [test_garbage_filter.py](test_garbage_filter.py)

@@ -285,12 +285,10 @@ class Pipeline[PipelineInput, PipelineOutput]:
             raise ValueError("Delivery target IDs must be unique")
         self._logger = structlog.get_logger("job_ftch.pipeline")
         self._tracer = trace.get_tracer("job_ftch.pipeline")
-        self._worker_stats = StatsBase()
 
     async def run(self, max_items: int | None = None) -> RunSummary:
         settings = get_settings()
         summary = RunSummary()
-        self._worker_stats = StatsBase()
         summary.source_run_id = self._source_run_id or uuid4().hex
         await self._recover_pending_outbox()
         await self._set_run_state("pipeline.started_at", summary.started_at.isoformat())
@@ -570,30 +568,11 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 str(getattr(source_kind, "value", source_kind) or ""),
             )
             try:
-                if (
-                    settings.pipeline_max_llm_calls_per_run is not None
-                    and self._worker_stats.llm_calls_used >= settings.pipeline_max_llm_calls_per_run
-                ):
-                    self._worker_stats.source_limited = True
-                    result.update(
-                        outcome="dropped_node",
-                        drop_stage="pipeline",
-                        drop_reason="budget_exhausted",
-                    )
-                    return result
-                if (
-                    settings.pipeline_max_browser_navigations_per_run is not None
-                    and self._worker_stats.browser_navigations_attempted
-                    >= settings.pipeline_max_browser_navigations_per_run
-                ):
-                    self._worker_stats.source_limited = True
-                    result.update(
-                        outcome="dropped_node",
-                        drop_stage="pipeline",
-                        drop_reason="budget_exhausted",
-                    )
-                    return result
-
+                # The per-run LLM budget is enforced by an atomic AsyncCallBudget
+                # shared into the LLM node, which reserves a unit immediately before
+                # each call (see builder.run_llm_budget). The old guard here counted
+                # calls only after node.process() returned, so several concurrent
+                # workers could all pass it at the limit and overshoot the cap.
                 if isinstance(item, RawItem):
                     await self._record_observation(item, settings)
                 if processed_key is not None and await self._store.has_processed(processed_key):
@@ -631,23 +610,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
                         node_span.set_attribute("job_ftch.node", failure_stage)
                         node_span.set_attribute("job_ftch.node_index", idx)
 
-                        # capture stats before node runs
-                        llm_before = (
-                            getattr(node, "stats", {}).get("llm_relevance_calls", 0)
-                            if isinstance(getattr(node, "stats", None), dict)
-                            else getattr(getattr(node, "stats", None), "llm_relevance_calls", 0)
-                        )
-
                         next_item = await node.process(current)
-
-                        # capture stats after node runs
-                        llm_after = (
-                            getattr(node, "stats", {}).get("llm_relevance_calls", 0)
-                            if isinstance(getattr(node, "stats", None), dict)
-                            else getattr(getattr(node, "stats", None), "llm_relevance_calls", 0)
-                        )
-                        if llm_after > llm_before:
-                            self._worker_stats.llm_calls_used += llm_after - llm_before
 
                         if next_item is None:
                             result["outcome"] = "dropped_node"

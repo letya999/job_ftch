@@ -16,7 +16,7 @@ from job_ftch.domain import (
     Seniority,
     WorkMode,
 )
-from job_ftch.nodes.extraction import ExtractionNode
+from job_ftch.nodes.extraction import ExtractionNode, _fallback_work_mode_from_metadata
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import LLMProvider
@@ -53,6 +53,50 @@ def _first_metadata_location(metadata: dict[str, object]) -> str | None:
     if isinstance(single, str) and single.strip():
         return single.strip()
     return None
+
+
+# Fragments that mean the value describes an office or a transit stop rather
+# than naming a settlement: "офис рядом с м. Кутузовская" is where the desk is,
+# not where the job is.
+_NON_PLACE_MARKERS = ("офис", "office", "метро", "станци", "м. ")
+
+
+def _is_unusable_location(value: str | None) -> bool:
+    """True when a location cannot stand on its own as a place on the card.
+
+    Covers the two ways extraction fails here: a bare country code ("RU", "RФ")
+    and an office/transit description picked out of a benefits list.
+    """
+    if not value or not value.strip():
+        return True
+    text = value.strip()
+    if len(text) <= 3:
+        return True
+    lowered = text.casefold()
+    return any(marker in lowered for marker in _NON_PLACE_MARKERS)
+
+
+def _metadata_skills(metadata: dict[str, object]) -> tuple[str, ...]:
+    """Technology tags an API-backed parser already collected.
+
+    Sites that publish a tag list (hirify, Yandex) hand it over as structured
+    data. Nothing consumed it, and switching hirify from scraping the rendered
+    chips to reading its API removed the keyword list the LLM had been picking
+    tools out of - tools_stack coverage on that source fell to zero even though
+    the tags were sitting in metadata all along.
+    """
+    raw = metadata.get("skills")
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    seen: list[str] = []
+    for entry in raw:
+        if isinstance(entry, str) and entry.strip():
+            value = entry.strip()
+            if value.casefold() not in {s.casefold() for s in seen}:
+                seen.append(value)
+    return tuple(seen[:12])
 
 
 def _metadata_language(metadata: dict[str, object]) -> LanguageCode | None:
@@ -125,12 +169,30 @@ class FullExtractionNode:
             "full_extraction_backend": self._extractor._llm.__class__.__name__,
         }
 
-        # Identity-shaped fields the delivery card actually renders. The LLM
-        # result wins, then anything acquisition already parsed into metadata,
-        # then whatever triage produced.
+        # Identity-shaped fields the delivery card actually renders. For title
+        # and company the LLM wins: metadata often holds listing-page noise.
         title = extracted.title or job.title
         company = extracted.company or job.company
-        location = extracted.location or job.location or _first_metadata_location(job.metadata)
+
+        # Location: metadata is consulted only when the extracted value cannot
+        # stand as a place. Neither source is reliably better - the LLM lifted
+        # "офис рядом с м. Кутузовская" out of a Sberbank benefits list and
+        # answered a bare "RU" on a habr posting, while site metadata sometimes
+        # carries the search scope rather than the job's own location and once
+        # put a German town in Moscow. So a usable extracted place is kept, and
+        # metadata only rescues the cases that are not places at all.
+        location = extracted.location or job.location
+        if _is_unusable_location(location):
+            location = _first_metadata_location(job.metadata) or location
+
+        # Same reasoning for work mode: several sites publish schema.org's
+        # TELECOMMUTE marker in JSON-LD while never stating the mode in prose,
+        # so a posting that is plainly remote reached the card as "unknown".
+        work_mode = extracted.work_mode
+        if work_mode is None or work_mode is WorkMode.UNKNOWN:
+            work_mode = job.work_mode
+        if work_mode is WorkMode.UNKNOWN:
+            work_mode = _fallback_work_mode_from_metadata(job.metadata)
         language = job.language
         if extracted.language is not LanguageCode.UNKNOWN:
             language = extracted.language
@@ -162,9 +224,7 @@ class FullExtractionNode:
                 "company": company,
                 "location": location,
                 "language": language,
-                "work_mode": extracted.work_mode
-                if extracted.work_mode is not None and extracted.work_mode is not WorkMode.UNKNOWN
-                else job.work_mode,
+                "work_mode": work_mode,
                 "seniority": extracted.seniority
                 if extracted.seniority is not Seniority.UNKNOWN
                 else job.seniority,
@@ -183,7 +243,9 @@ class FullExtractionNode:
                 "requirements_nice": extracted.requirements_nice or job.requirements_nice,
                 "skills_explicit": extracted.skills_explicit or job.skills_explicit,
                 "skills_inferred": extracted.skills_inferred or job.skills_inferred,
-                "tools_stack": extracted.tools_stack or job.tools_stack,
+                "tools_stack": (
+                    extracted.tools_stack or job.tools_stack or _metadata_skills(job.metadata)
+                ),
                 "benefits": extracted.benefits or job.benefits,
                 "culture_signals": extracted.culture_signals or job.culture_signals,
                 "domain_knowledge": extracted.domain_knowledge or job.domain_knowledge,

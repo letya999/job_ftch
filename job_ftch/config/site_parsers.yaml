@@ -107,7 +107,9 @@ parsers:
   - name: hirify
     domain_pattern: "^https?://(?:www\\.)?hirify\\.me(?:/|$)"
     has_custom_parse: true
-    supports_discover: true
+    # parse() pulls the body from /api/vacancies/{id}; the rendered SPA exposes
+    # only card chrome and tag chips.
+    supports_discover: false
     include_if_detail_page: true
   - name: indeed
     domain_pattern: "^https?://(?:www\\.)?indeed\\.com(?:/|$)"

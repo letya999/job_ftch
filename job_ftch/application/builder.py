@@ -1796,6 +1796,26 @@ def build_nodes(
         ]
     )
 
+    # Per-run LLM cap: one atomic budget shared into the LLM node so the unit is
+    # reserved before the call, not counted after it. Relevance is the only node
+    # this run cap applies to (the previous post-hoc guard also counted relevance
+    # calls only), so the effective ceiling is min(run cap, per-node cap) and both
+    # limits are honoured. Left None when unset, keeping the per-node cap in force.
+    run_llm_budget = (
+        AsyncCallBudget(
+            min(settings.pipeline_max_llm_calls_per_run, settings.llm_relevance_max_per_run)
+        )
+        if settings.pipeline_max_llm_calls_per_run is not None
+        else None
+    )
+    if settings.pipeline_max_browser_navigations_per_run is not None:
+        # Browser navigations happen in the source/fetch layer, not in the item
+        # workers, so this run cap is not enforced here yet. Surface it instead of
+        # pretending it is a hard ceiling.
+        structlog.get_logger("job_ftch.builder").warning(
+            "browser_navigation_budget_not_enforced",
+            configured=settings.pipeline_max_browser_navigations_per_run,
+        )
     llm_relevance_node = LLMRelevanceClassificationNode(
         llm=llm,
         store=store,
@@ -1803,6 +1823,7 @@ def build_nodes(
         low_threshold=settings.llm_relevance_low_threshold,
         high_threshold=settings.llm_relevance_high_threshold,
         max_per_run=settings.llm_relevance_max_per_run,
+        budget=run_llm_budget,
         relevance_prompts=relevance_prompts,
         tenant_id=tenant_id,
     )

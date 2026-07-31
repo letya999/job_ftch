@@ -11,6 +11,7 @@ from job_ftch.domain import (
     LanguageCode,
     MatchDecision,
     Seniority,
+    WorkMode,
 )
 from job_ftch.nodes.extraction import CoreExtractedJobFields, ExtractedJobFields, ExtractionNode
 from job_ftch.nodes.full_extraction import FullExtractionNode
@@ -159,3 +160,124 @@ async def test_full_extraction_keeps_partial_when_company_missing(make_job_recor
     assert enriched.review_reasons[0] == "partial_extraction"
     assert "missing_company" in enriched.review_reasons
     assert "missing_location" not in enriched.review_reasons
+
+
+@pytest.mark.anyio
+async def test_office_description_falls_back_to_metadata(make_job_record) -> None:
+    """A Sberbank posting listed "комфортный современный офис рядом с
+    м. Кутузовская" among its benefits; the LLM read that as the location while
+    metadata, parsed from the site's own API, held "г Москва"."""
+    llm = _FieldLLM(location="офис рядом с м. Кутузовская")
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        location=None,
+        metadata={"locations": ["г Москва"]},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.location == "г Москва"
+
+
+@pytest.mark.anyio
+async def test_bare_country_code_falls_back_to_metadata(make_job_record) -> None:
+    """A habr posting answered "RU" - a country code is not a place."""
+    llm = _FieldLLM(location="RU")
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        location=None,
+        metadata={"locations": ["Москва, Россия"]},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.location == "Москва, Россия"
+
+
+@pytest.mark.anyio
+async def test_usable_extracted_location_is_not_overridden(make_job_record) -> None:
+    """Metadata is not reliably better: on hh.ru it carries the search scope,
+    and one record would have relocated a German town to Moscow."""
+    llm = _FieldLLM(location="Bonnatal, Germany")
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        location=None,
+        metadata={"locations": ["Москва, Московская область, RU"]},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.location == "Bonnatal, Germany"
+
+
+@pytest.mark.anyio
+async def test_llm_location_used_when_metadata_has_none(make_job_record) -> None:
+    """Prose stays the primary source; sites without structured geo still work."""
+    llm = _FieldLLM(location="Berlin, DE")
+    job = make_job_record(routing_decision=MatchDecision.ACCEPT, location=None, metadata={})
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.location == "Berlin, DE"
+
+
+@pytest.mark.anyio
+async def test_work_mode_recovered_from_schema_org_telecommute(make_job_record) -> None:
+    """Several sites publish jobLocationType in JSON-LD and say nothing in prose."""
+    llm = _FieldLLM(work_mode=WorkMode.UNKNOWN)
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        work_mode=WorkMode.UNKNOWN,
+        metadata={"job_location_type": "TELECOMMUTE"},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.work_mode is WorkMode.REMOTE
+
+
+@pytest.mark.anyio
+async def test_llm_work_mode_outranks_metadata(make_job_record) -> None:
+    """Metadata is the recovery path for work mode, not an override."""
+    llm = _FieldLLM(work_mode=WorkMode.HYBRID)
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        work_mode=WorkMode.UNKNOWN,
+        metadata={"job_location_type": "TELECOMMUTE"},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.work_mode is WorkMode.HYBRID
+
+
+@pytest.mark.anyio
+async def test_tools_stack_falls_back_to_metadata_tags(make_job_record) -> None:
+    """Switching hirify to its API removed the on-page keyword list the LLM had
+    been reading tools out of, and tools_stack coverage for that source fell to
+    zero - while the tags sat unused in metadata."""
+    llm = _FieldLLM(tools_stack=())
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        tools_stack=(),
+        metadata={"skills": ["python", "fastapi", "python", "docker"]},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.tools_stack == ("python", "fastapi", "docker")
+
+
+@pytest.mark.anyio
+async def test_extracted_tools_stack_wins_over_metadata_tags(make_job_record) -> None:
+    """The fallback must stay additive: a real extraction is never replaced."""
+    llm = _FieldLLM(tools_stack=("pytorch", "langgraph"))
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        tools_stack=(),
+        metadata={"skills": ["php"]},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.tools_stack == ("pytorch", "langgraph")

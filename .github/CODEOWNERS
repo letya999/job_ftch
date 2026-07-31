@@ -2,8 +2,9 @@
 * @letya999
 
 # Security-sensitive release and automation surfaces.
+# Security scripts and policy now live under .repo-safety/ (ai-repo-safety
+# canonical layout); the /.repo-safety/ rule covers them.
 /.github/ @letya999
 /.repo-safety/ @letya999
-/scripts/security/ @letya999
 /AGENTS.md @letya999
 /SECURITY.md @letya999

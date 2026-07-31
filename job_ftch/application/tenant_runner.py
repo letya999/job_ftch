@@ -165,15 +165,30 @@ def _update_source_health_payload(
     drift_ratio_threshold: float = 0.2,
     min_baseline_threshold: float = 3.0,
     failure_streak_pause: int = 3,
+    majority_failure_ratio: float = 0.5,
 ) -> SourceHealth:
     prev_baseline_emitted = previous.baseline_emitted if previous else 0.0
     previous_success = previous.success_count if previous else 0
     current_emitted = int(stats.emitted)
     # Only count as a source-level failure when the source itself crashed (nothing fetched)
     # or when the majority of fetched items failed — not for incidental item-level errors.
-    _total_processed = stats.fetched + stats.failed
+    #
+    # `failed` is a subset of `fetched`: every pulled observation increments `fetched`
+    # first, and an item that later errors also increments `failed`. The item-failure
+    # ratio is therefore failed/fetched, never failed/(fetched+failed) — the latter
+    # double-counts the failed items in the denominator and can never cross 0.5, so the
+    # majority branch was effectively unreachable.
+    if stats.failed > stats.fetched:
+        # Counters are meant to satisfy failed <= fetched. A violation means an upstream
+        # accounting bug; surface it instead of letting it skew the ratio silently.
+        logger.warning(
+            "source_health_counter_invariant_violated",
+            source_id=source_id,
+            fetched=stats.fetched,
+            failed=stats.failed,
+        )
     had_failure = (stats.fetched == 0 and stats.failed > 0) or (
-        _total_processed > 0 and stats.failed / _total_processed > 0.5
+        stats.fetched > 0 and stats.failed / stats.fetched > majority_failure_ratio
     )
     degraded = False
     drift_ratio: float | None = None
