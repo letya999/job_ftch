@@ -34,7 +34,7 @@ class TestRenderCard:
         assert "Acme Corp" in text
         assert "200 000" in text
         assert "Berlin" in text
-        assert "открыть вакансию" in text
+        assert "open vacancy" in text
         assert "HH.ru" in text
 
     def test_no_leading_emoji(self) -> None:
@@ -55,20 +55,20 @@ class TestRenderCard:
     def test_stack_rendered(self) -> None:
         layout = load_layout()
         text = render_card(_card(), layout, profile="channel")
-        assert "Стек:" in text
+        assert "Stack:" in text
         assert "Python" in text
 
     def test_requirements_rendered(self) -> None:
         layout = load_layout()
         text = render_card(_card(), layout, profile="channel")
-        assert "Нужно:" in text
+        assert "Required:" in text
         assert "3+ years ML" in text
 
     def test_empty_optional_fields_omitted(self) -> None:
         layout = load_layout()
         text = render_card(_card(summary=None, key_requirements=None, stack=None), layout)
-        assert "Стек:" not in text
-        assert "Нужно:" not in text
+        assert "Stack:" not in text
+        assert "Required:" not in text
         assert "<b>Senior ML Engineer</b>" in text
 
     def test_footer_link_telegram(self) -> None:
@@ -77,7 +77,7 @@ class TestRenderCard:
             _card(source_kind="telegram_channel", url="https://t.me/channel/123"),
             layout,
         )
-        assert "открыть пост" in text
+        assert "open post" in text
 
     def test_banlist_stripped(self) -> None:
         layout = load_layout()
@@ -107,6 +107,33 @@ class TestRenderCard:
         layout = load_layout()
         text = render_card(_card(), layout, profile="channel")
         assert "\n\n" in text
+
+    def test_russian_card_labels(self) -> None:
+        layout = load_layout()
+        ru_card = _card(
+            language="ru",
+            key_requirements="5+ лет ML, PyTorch",
+            stack="Python · PyTorch",
+        )
+        text = render_card(ru_card, layout, profile="channel")
+        assert "Нужно:" in text
+        assert "Стек:" in text
+        assert "открыть вакансию" in text
+
+    def test_auto_mark_in_footer(self) -> None:
+        layout = load_layout()
+        text = render_card(_card(), layout, profile="channel")
+        assert "job_ftch" in text
+        assert "github.com/letya999/job" in text
+
+    def test_footer_survives_truncation(self) -> None:
+        """An oversized body must not eat into the footer's anchor markup."""
+        layout = load_layout()
+        text = render_card(_card(role="A" * 200, summary="B" * 300), layout)
+        assert text.count("<a ") == text.count("</a>")
+        assert text.endswith("</a>")
+        assert "github.com/letya999/job" in text
+        assert "https://example.com/job/42" in text
 
 
 class TestSinkCapabilities:

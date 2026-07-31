@@ -16,22 +16,29 @@ blocks:
     omit_if_empty: true
   - field: key_requirements
     prefix: "Нужно: "
+    prefix_en: "Required: "
     max_len: 160
     omit_if_empty: true
   - field: stack
     prefix: "Стек: "
+    prefix_en: "Stack: "
     join: " · "
     max_len: 200
     omit_if_empty: true
 
 footer:
   template: "{source_label} {link}"
-  auto_mark: ""
+  auto_mark: '🤖 <a href="https://github.com/letya999/job">job_ftch</a>'
   link_labels:
     career_site: "открыть вакансию"
     telegram_channel: "открыть пост"
     telegram_group: "открыть пост"
     default: "открыть"
+  link_labels_en:
+    career_site: "open vacancy"
+    telegram_channel: "open post"
+    telegram_group: "open post"
+    default: "open"
 
 formatting:
   leading_emoji: false
