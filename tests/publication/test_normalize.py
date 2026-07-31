@@ -193,6 +193,31 @@ class TestPickSourceLabel:
         job = _job(source_name="AI Jobs RU")
         assert pick_source_label(job) == "AI Jobs RU"
 
+    def test_telegram_invite_hash_not_published(self) -> None:
+        """A private invite token must never reach a public post."""
+        job = _job(canonical_url="https://t.me/+LHksX9WA9cs4YTQy")
+        assert pick_source_label(job) == "t.me"
+
+    def test_telegram_joinchat_not_published(self) -> None:
+        job = _job(canonical_url="https://t.me/joinchat/AAAAAE0tMzM")
+        assert pick_source_label(job) == "t.me"
+
+    def test_telegram_private_channel_id_not_published(self) -> None:
+        job = _job(canonical_url="https://t.me/c/1234567890/42")
+        assert pick_source_label(job) == "t.me"
+
+    def test_telegram_handle_trailing_punctuation_trimmed(self) -> None:
+        job = _job(canonical_url="https://t.me/ai_engineer_jobs.")
+        assert pick_source_label(job) == "t.me/ai_engineer_jobs"
+
+    def test_subdomain_preserved(self) -> None:
+        job = _job(canonical_url="https://almaty.hh.kz/vacancy/123")
+        assert pick_source_label(job) == "almaty.hh.kz"
+
+    def test_port_and_path_ignored(self) -> None:
+        job = _job(canonical_url="https://jobs.example.com:8443/a/b?x=1#f")
+        assert pick_source_label(job) == "jobs.example.com"
+
 
 class TestDetectContentLanguage:
     def test_russian_requirements(self) -> None:

@@ -6,7 +6,9 @@ Currency symbols come from a configurable table, not hardcoded.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from job_ftch.domain import Job, JobRecord
@@ -128,25 +130,36 @@ def resolve_card_url(job: Job | JobRecord) -> str | None:
 
 TELEGRAM_HOSTS = frozenset({"t.me", "telegram.me"})
 
+# Telegram public usernames: 5-32 chars, letter-initial, [A-Za-z0-9_].
+# Anything else in that slot is not a public handle: a leading "+" or a
+# joinchat route carries a private invite token, and a numeric channel
+# route carries an internal id. Publishing either would put a joinable
+# secret into a public post, so only a real handle is ever surfaced.
+_TG_PUBLIC_HANDLE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{4,31}$")
+
+# Reserved first segments that are routes, not channel handles.
+_TG_RESERVED = frozenset(
+    {"joinchat", "c", "s", "addstickers", "addtheme", "proxy", "socks", "share"}
+)
+
 
 def pick_source_label(job: Job | JobRecord) -> str | None:
     """Footer label: the origin domain, so readers see where a job came from.
 
-    Telegram links keep their channel segment (``t.me/ml_jobs_kz``) - the bare
-    host would collapse every channel into one indistinguishable label.
+    Telegram links keep their channel handle (``t.me/ml_jobs_kz``) - the bare
+    host would collapse every channel into one indistinguishable label. Private
+    invite links carry no publishable handle and fall back to the host.
     Falls back to ``source_name`` when there is no usable URL.
     """
     url = resolve_card_url(job)
     if url:
-        from urllib.parse import urlparse
-
         try:
             parsed = urlparse(url if "//" in url else f"https://{url}")
             host = (parsed.hostname or "").removeprefix("www.")
             if host in TELEGRAM_HOSTS:
-                channel = parsed.path.strip("/").split("/")[0]
-                if channel:
-                    return f"{host}/{channel}"
+                handle = parsed.path.strip("/").split("/")[0].rstrip(".,;:!?)")
+                if _TG_PUBLIC_HANDLE.match(handle) and handle.lower() not in _TG_RESERVED:
+                    return f"{host}/{handle}"
             if host:
                 return host
         except ValueError:
