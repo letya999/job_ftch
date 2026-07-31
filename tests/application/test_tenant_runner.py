@@ -1361,6 +1361,71 @@ def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
     assert failed_payload.failure_streak == 1
 
 
+def _health_from(stats: SourceRunStats, previous: SourceHealth | None = None) -> SourceHealth:
+    return _update_source_health_payload(
+        previous,
+        source_id="career_site:acme",
+        source_kind="career_site",
+        source_name="acme",
+        stats=stats,
+        finished_at=datetime(2026, 6, 13, tzinfo=UTC),
+    )
+
+
+def test_majority_item_failure_marks_run_failing() -> None:
+    """fetched=10, failed=8 is a majority failure (0.8 > 0.5), not a success."""
+    health = _health_from(SourceRunStats(fetched=10, failed=8))
+
+    assert health.failure_streak == 1
+    assert health.status == "failing"
+
+
+def test_minority_item_failure_stays_healthy() -> None:
+    """fetched=10, failed=2 is below the majority threshold and remains healthy."""
+    health = _health_from(SourceRunStats(fetched=10, failed=2, emitted=8))
+
+    assert health.failure_streak == 0
+    assert health.status == "healthy"
+
+
+def test_source_level_failure_when_nothing_fetched() -> None:
+    """fetched=0, failed=1 is a source-level crash, counted as a failure."""
+    health = _health_from(SourceRunStats(fetched=0, failed=1))
+
+    assert health.failure_streak == 1
+    assert health.status == "failing"
+
+
+def test_failure_streak_pauses_then_healthy_probe_resets_once() -> None:
+    """Three consecutive majority failures pause; one healthy probe fully resets."""
+    failing = SourceRunStats(fetched=10, failed=8)
+    health = _health_from(failing)
+    assert health.failure_streak == 1 and not health.paused
+
+    health = _health_from(failing, previous=health)
+    assert health.failure_streak == 2 and not health.paused
+
+    health = _health_from(failing, previous=health)
+    assert health.failure_streak == 3 and health.paused and health.status == "paused"
+
+    healthy = _health_from(SourceRunStats(fetched=10, failed=1, emitted=9), previous=health)
+    assert healthy.failure_streak == 0
+    assert not healthy.paused
+    assert healthy.status == "healthy"
+
+
+def test_inconsistent_counters_do_not_silently_pass() -> None:
+    """failed > fetched violates the invariant: it is flagged, and still fails the run."""
+    import structlog
+
+    with structlog.testing.capture_logs() as logs:
+        health = _health_from(SourceRunStats(fetched=2, failed=5))
+
+    assert health.failure_streak == 1
+    assert health.status == "failing"
+    assert any(entry["event"] == "source_health_counter_invariant_violated" for entry in logs)
+
+
 @pytest.mark.asyncio
 async def test_tenants_cli_lineage_outputs_json(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
