@@ -85,7 +85,7 @@ jobs:
           uv run python scripts/run_ci_checks.py test
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         if: always()
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
