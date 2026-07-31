@@ -9,7 +9,6 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [dev index](dev/index.md)
 - [eval index](eval/index.md)
 - [publication index](publication/index.md)
-- [security index](security/index.md)
 - [shots index](shots/index.md)
 
 ## Files On This Level
