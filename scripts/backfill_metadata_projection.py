@@ -8,10 +8,15 @@ list - while metadata held "г Москва". Work mode consulted no metadata at
 and the resolver ignored schema.org's `jobLocationType`, so postings publishing
 TELECOMMUTE in JSON-LD were stored as unknown.
 
-The node now prefers metadata for both fields, but stored records keep whatever
-was written at the time and `Pipeline.run` skips anything already processed.
-This backfill re-applies the projection in place. It is deterministic - no LLM
-call - and only touches `location` and `work_mode`.
+Tags were the third case: sites that publish one hand it over as structured
+data, nothing consumed it, and moving hirify from scraping rendered chips to
+reading its API removed the keyword list the LLM had been picking tools out of,
+dropping tools_stack coverage on that source to zero.
+
+The node now covers all three, but stored records keep whatever was written at
+the time and `Pipeline.run` skips anything already processed. This backfill
+re-applies the projection in place. It is deterministic - no LLM call - and
+touches only `location`, `work_mode` and an empty `tools_stack`.
 
 Usage:
     python scripts/backfill_metadata_projection.py --dry-run
@@ -31,7 +36,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from job_ftch.nodes.extraction import _fallback_work_mode_from_metadata
-from job_ftch.nodes.full_extraction import _first_metadata_location, _is_unusable_location
+from job_ftch.nodes.full_extraction import (
+    _first_metadata_location,
+    _is_unusable_location,
+    _metadata_skills,
+)
 
 
 def load_env(path: Path) -> None:
@@ -62,6 +71,13 @@ def repairs_for(record: dict[str, Any]) -> dict[str, str]:
         recovered = _fallback_work_mode_from_metadata(metadata)
         if recovered.value != "unknown":
             changes["work_mode"] = recovered.value
+
+    # Purely additive: API-supplied tags only fill a stack the extraction left
+    # empty. Sources whose tag list the LLM already read keep their own answer.
+    if not record.get("tools_stack"):
+        tags = _metadata_skills(metadata)
+        if tags:
+            changes["tools_stack"] = list(tags)
 
     return changes
 
@@ -99,6 +115,7 @@ async def main() -> None:
                 "job_id": row["job_id"],
                 "location": record.get("location"),
                 "work_mode": record.get("work_mode"),
+                "tools_stack": record.get("tools_stack"),
             }
         )
         if args.apply:

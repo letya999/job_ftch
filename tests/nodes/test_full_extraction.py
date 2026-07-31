@@ -249,3 +249,35 @@ async def test_llm_work_mode_outranks_metadata(make_job_record) -> None:
     enriched = await FullExtractionNode(llm).process(job)
 
     assert enriched.work_mode is WorkMode.HYBRID
+
+
+@pytest.mark.anyio
+async def test_tools_stack_falls_back_to_metadata_tags(make_job_record) -> None:
+    """Switching hirify to its API removed the on-page keyword list the LLM had
+    been reading tools out of, and tools_stack coverage for that source fell to
+    zero - while the tags sat unused in metadata."""
+    llm = _FieldLLM(tools_stack=())
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        tools_stack=(),
+        metadata={"skills": ["python", "fastapi", "python", "docker"]},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.tools_stack == ("python", "fastapi", "docker")
+
+
+@pytest.mark.anyio
+async def test_extracted_tools_stack_wins_over_metadata_tags(make_job_record) -> None:
+    """The fallback must stay additive: a real extraction is never replaced."""
+    llm = _FieldLLM(tools_stack=("pytorch", "langgraph"))
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        tools_stack=(),
+        metadata={"skills": ["php"]},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.tools_stack == ("pytorch", "langgraph")
