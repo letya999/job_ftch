@@ -195,7 +195,16 @@ async def test_yields_nothing_when_listing_api_fails_so_generic_crawl_runs() -> 
     """CareerSiteSource falls through to the generic crawl on an empty parse."""
     client = _ApiClient(listing=RuntimeError("api down"))
 
-    items = [item async for item in HirifyParser().parse(_spec(), client)]
+    parser = HirifyParser()
+    # When both the listing API and discovery fail, parse() must yield nothing
+    # so that CareerSiteSource falls through to the generic crawl. The mock
+    # client cannot prevent the browser path inside discover(), so we stub
+    # discover() itself.
+    async def _no_discover(spec: object, client: object) -> list[str]:
+        raise RuntimeError("api down")
+
+    parser.discover = _no_discover  # type: ignore[assignment]
+    items = [item async for item in parser.parse(_spec(), client)]
 
     assert items == []
 

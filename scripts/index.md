@@ -8,6 +8,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 
 - [dev index](dev/index.md)
 - [eval index](eval/index.md)
+- [publication index](publication/index.md)
 - [security index](security/index.md)
 - [shots index](shots/index.md)
 
@@ -18,6 +19,8 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [audit_empty_results.py](audit_empty_results.py)
 - [auth_telethon.py](auth_telethon.py)
 - [auto_label_dataset.py](auto_label_dataset.py)
+- [backfill_extraction_language.py](backfill_extraction_language.py)
+- [backfill_metadata_projection.py](backfill_metadata_projection.py)
 - [bench_bypass_tiers.py](bench_bypass_tiers.py)
 - [bench_jobspy_vs_native.py](bench_jobspy_vs_native.py)
 - [bootstrap_dev.py](bootstrap_dev.py)
