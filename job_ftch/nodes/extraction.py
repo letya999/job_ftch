@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from opentelemetry import trace
@@ -42,6 +43,9 @@ if TYPE_CHECKING:
 # LLM-classified post types that are not hireable vacancies and must be dropped
 # after extraction even if the fast pre-classifier let them through.
 _NON_JOB_POST_TYPES = frozenset({PostType.CANDIDATE_SEEKING, PostType.ANNOUNCEMENT, PostType.SPAM})
+# What ExtractedJobFields substitutes when the model returns no hiring_intent.
+# A declined answer must not read as a passing score.
+_NEUTRAL_HIRING_INTENT = 0.5
 _TITLE_METADATA_KEYS = ("title", "job_title", "role")
 _COMPANY_METADATA_KEYS = ("company", "company_name", "employer", "organization", "org", "service")
 _URL_METADATA_KEYS = ("job_url", "canonical_url", "apply_url", "origin_url")
@@ -305,6 +309,7 @@ def _has_strong_vacancy_structure(text: str) -> bool:
 _WORK_MODE_METADATA_TOKENS: dict[WorkMode, tuple[str, ...]] = {
     WorkMode.REMOTE: (
         "remote",
+        "telecommute",  # schema.org JobPosting.jobLocationType
         "удалённо",
         "удаленно",
         "удалён",
@@ -324,24 +329,32 @@ _WORK_MODE_METADATA_TOKENS: dict[WorkMode, tuple[str, ...]] = {
 }
 
 
-def _fallback_work_mode_from_metadata(item: RawItem) -> WorkMode:
+_WORK_MODE_METADATA_KEYS = ("work_modes", "job_location_type")
+
+
+def _fallback_work_mode_from_metadata(metadata: Mapping[str, object]) -> WorkMode:
     """Read work_mode from structured source metadata (Yandex ``work_modes``,
-    Greenhouse ``location``, etc.) when the heuristic and text-fallback have
-    no answer. Empty/missing values return ``UNKNOWN``."""
-    raw = item.metadata.get("work_modes")
+    schema.org ``jobLocationType``, etc.) when the heuristic and text-fallback
+    have no answer. Empty/missing values return ``UNKNOWN``.
+
+    ``job_location_type`` carries schema.org's TELECOMMUTE marker, which several
+    career sites publish in JSON-LD while stating the mode nowhere in the prose.
+    """
     candidates: list[str] = []
-    if isinstance(raw, list):
-        for entry in raw:
-            if isinstance(entry, str):
-                candidates.append(entry)
-            elif isinstance(entry, dict):
-                for dk in ("name", "title", "label", "value"):
-                    dv = entry.get(dk)
-                    if isinstance(dv, str):
-                        candidates.append(dv)
-                        break
-    elif isinstance(raw, str):
-        candidates.append(raw)
+    for key in _WORK_MODE_METADATA_KEYS:
+        raw = metadata.get(key)
+        if isinstance(raw, list):
+            for entry in raw:
+                if isinstance(entry, str):
+                    candidates.append(entry)
+                elif isinstance(entry, dict):
+                    for dk in ("name", "title", "label", "value"):
+                        dv = entry.get(dk)
+                        if isinstance(dv, str):
+                            candidates.append(dv)
+                            break
+        elif isinstance(raw, str):
+            candidates.append(raw)
     for candidate in candidates:
         normalized = candidate.casefold().strip()
         for work_mode, tokens in _WORK_MODE_METADATA_TOKENS.items():
@@ -462,7 +475,7 @@ class ExtractionNode:
             if extracted.work_mode is not None and extracted.work_mode is not WorkMode.UNKNOWN
             else (
                 _fallback_work_mode(description, location)
-                or _fallback_work_mode_from_metadata(item)
+                or _fallback_work_mode_from_metadata(item.metadata)
             )
         )
         if not description:
@@ -516,21 +529,38 @@ class ExtractionNode:
                 ),
                 item=item,
             )
-        if (
-            self._min_hiring_intent > 0.0
-            and not degraded
-            and resolved_post_type is PostType.JOB_POSTING
-            and extracted.hiring_intent < self._min_hiring_intent
-        ):
-            raise RawItemDropped(
-                reason=JobValidationRejectionReason.JOB_OUT_OF_SCOPE,
-                details=(
-                    f"LLM hiring_intent={extracted.hiring_intent:.2f} below "
-                    f"min={self._min_hiring_intent:.2f}. "
-                    "Detected news/digest/non-hiring announcement."
-                ),
-                item=item,
+        if self._min_hiring_intent > 0.0 and not degraded:
+            # UNKNOWN used to slip between both guards: it is not in
+            # _NON_JOB_POST_TYPES, so it was never dropped, and this gate only
+            # looked at JOB_POSTING, so it was never scored. A chat message
+            # ("LLM-инженер, я так понимаю, это не вайбкодер?") classified
+            # UNKNOWN therefore reached delivery as a vacancy.
+            #
+            # When the model cannot name the post kind, the hiring signal has to
+            # carry it, and the neutral default is not evidence. An informal post
+            # the model reads as actively hiring still passes - that is the case
+            # worth keeping, since real vacancies do get posted conversationally.
+            uncommitted = resolved_post_type is PostType.UNKNOWN
+            threshold = (
+                max(self._min_hiring_intent, _NEUTRAL_HIRING_INTENT)
+                if uncommitted
+                else self._min_hiring_intent
             )
+            below = (
+                extracted.hiring_intent <= threshold
+                if uncommitted
+                else extracted.hiring_intent < threshold
+            )
+            if resolved_post_type in (PostType.JOB_POSTING, PostType.UNKNOWN) and below:
+                raise RawItemDropped(
+                    reason=JobValidationRejectionReason.JOB_OUT_OF_SCOPE,
+                    details=(
+                        f"LLM hiring_intent={extracted.hiring_intent:.2f} at or below "
+                        f"threshold={threshold:.2f} for post_type={resolved_post_type.value}. "
+                        "Detected news/digest/discussion or non-hiring announcement."
+                    ),
+                    item=item,
+                )
         review_reasons: list[str] = []
         extraction_status = (
             JobExtractionStatus.PARTIAL if degraded else JobExtractionStatus.COMPLETE
@@ -639,7 +669,7 @@ class ExtractionNode:
             fetched_at=item.fetched_at,
             posted_at=item.created_at,
             location_raw=_fallback_location(item),
-            work_mode=_fallback_work_mode_from_metadata(item),
+            work_mode=_fallback_work_mode_from_metadata(item.metadata),
             extraction_status=JobExtractionStatus.PARTIAL,
             post_type=_preclassified_post_type(item),
             review_reasons=(JobReviewReason.PARTIAL_EXTRACTION.value, "budget_deferred"),
@@ -704,7 +734,7 @@ class ExtractionNode:
                     description=item.text,
                     canonical_url=str(_fallback_url(item)) if _fallback_url(item) else None,
                     location=_fallback_location(item),
-                    work_mode=_fallback_work_mode_from_metadata(item),
+                    work_mode=_fallback_work_mode_from_metadata(item.metadata),
                     post_type=post_type,
                     hiring_intent=1.0 if post_type is PostType.JOB_POSTING else 0.1,
                     search_relevance=1.0,
