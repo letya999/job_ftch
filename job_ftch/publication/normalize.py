@@ -165,7 +165,7 @@ def format_compensation(job: Job | JobRecord) -> str | None:
     elif lo is not None:
         rng = f"от {_fmt_amount(lo)}"
     else:
-        rng = f"до {_fmt_amount(hi)}"  # type: ignore[arg-type]
+        rng = f"до {_fmt_amount(hi)}"
 
     period = ""
     if comp.period and hasattr(comp.period, "value") and comp.period.value != "unknown":

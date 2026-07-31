@@ -1,7 +1,7 @@
 """
 One-time Telethon authentication helper.
-Run this once to create or refresh .runtime/telegram-dev.session before
-starting Docker.
+Run this once to create or refresh the local Telethon session used by CLI runs.
+A containerised bot keeps its own session inside its .runtime volume.
 
 Credentials come from exactly one dotenv file, named with --env-file. Without
 the flag the first of .env, .env.prod, .env.dev that exists is used, and the
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import os
 import sys
 import webbrowser
@@ -162,9 +163,13 @@ def _code_prompt() -> str:
 
 
 def _password_prompt() -> str:
-    password = input("2FA password (if enabled): ").strip()
+    # getpass, not input: the password was previously echoed to the terminal,
+    # so it survived in scrollback and in anything the operator copied out.
+    # Unlike the phone code it is long-lived, which makes that exposure costly.
+    password = getpass.getpass("2FA password: ").strip()
     if not password:
-        raise RuntimeError("2FA password is required for this login flow.")
+        print("Two-step verification is enabled on this account, so a password is required.")
+        sys.exit(1)
     return password
 
 
@@ -370,7 +375,12 @@ async def main() -> None:
 
     username = f"@{me.username}" if getattr(me, "username", None) else "(no username)"
     print(f"Authenticated as: {me.first_name} (id={me.id}, {username})")
-    print("\nDone. You can now run: docker compose up -d --build")
+    print(f"\nDone. This session authorizes runs that read {session_path}.")
+    print("Per-source copies under source-sessions/ refresh from it on the next run.")
+    print(
+        "A containerised bot keeps its own session in its .runtime volume and is "
+        "unaffected by this file; re-authorize inside the container to renew that one."
+    )
 
 
 if __name__ == "__main__":
