@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from opentelemetry import trace
@@ -37,6 +36,8 @@ from job_ftch.domain import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from job_ftch.application.contracts import LLMProvider
     from job_ftch.application.run_budget import AsyncCallBudget
 
