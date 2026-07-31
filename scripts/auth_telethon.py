@@ -3,11 +3,13 @@ One-time Telethon authentication helper.
 Run this once to create or refresh .runtime/telegram-dev.session before
 starting Docker.
 
-The script loads root dotenv files itself (.env, .env.prod, .env.dev, each
-overriding the previous) so it works without sourcing anything first.
+Credentials come from exactly one dotenv file, named with --env-file. Without
+the flag the first of .env, .env.prod, .env.dev that exists is used, and the
+chosen file is printed. Values already exported in the shell always win.
 
 Usage:
     python scripts/auth_telethon.py
+    python scripts/auth_telethon.py --env-file .env.prod
     python scripts/auth_telethon.py --reset-session
 """
 
@@ -22,22 +24,19 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from html import escape
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
-# Base first, then the deployment-flavoured files, each overriding the previous.
-# `.env.prod` used to be absent from this list, so on a host configured only
-# with it the helper reported the credentials as unset while they sat in the
-# one file it never opened. `.env.dev` stays last: it is the local override.
-ENV_FILES = (ROOT / ".env", ROOT / ".env.prod", ROOT / ".env.dev")
+# Exactly one dotenv file is read. Merging several made it impossible to tell
+# which file a credential came from; `--env-file` names it outright, and this
+# list is only the search order when the flag is omitted.
+DEFAULT_ENV_CANDIDATES = (".env", ".env.prod", ".env.dev")
 ORIGINAL_ENV_KEYS = set(os.environ.keys())
 
 
-def _load_env_file(path: Path, *, override: bool) -> None:
-    if not path.is_file():
-        return
-
+def _load_env_file(path: Path) -> None:
+    """Apply one dotenv file. Values already in the shell environment win."""
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -45,11 +44,7 @@ def _load_env_file(path: Path, *, override: bool) -> None:
 
         key, value = line.split("=", 1)
         key = key.strip()
-        if not key:
-            continue
-        if key in ORIGINAL_ENV_KEYS:
-            continue
-        if not override and key in os.environ:
+        if not key or key in ORIGINAL_ENV_KEYS:
             continue
 
         value = value.strip()
@@ -58,9 +53,19 @@ def _load_env_file(path: Path, *, override: bool) -> None:
         os.environ[key] = value
 
 
-def _load_project_env() -> None:
-    for index, path in enumerate(ENV_FILES):
-        _load_env_file(path, override=index > 0)
+def _resolve_env_file(explicit: Path | None) -> Path | None:
+    """The single dotenv file to use, or None to rely on the shell alone."""
+    if explicit is not None:
+        path = explicit if explicit.is_absolute() else ROOT / explicit
+        if not path.is_file():
+            print(f"Env file not found: {path}")
+            sys.exit(1)
+        return path
+    for name in DEFAULT_ENV_CANDIDATES:
+        candidate = ROOT / name
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _read_env(name: str) -> str:
@@ -70,6 +75,17 @@ def _read_env(name: str) -> str:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Telethon session auth helper")
+    parser.add_argument(
+        "--env-file",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "dotenv file to read credentials from, relative to the repo root. "
+            f"Only this file is read. Default: first of {', '.join(DEFAULT_ENV_CANDIDATES)} "
+            "that exists."
+        ),
+    )
     parser.add_argument(
         "--reset-session",
         action="store_true",
@@ -98,26 +114,42 @@ def _backup_session_file(session_path: Path) -> Path | None:
     return backup_path
 
 
-_load_project_env()
+class Credentials(NamedTuple):
+    api_id: int
+    api_hash: str
+    session_path: Path
+    env_file: Path | None
 
-API_ID_STR = _read_env("JOB_FTCH_TELEGRAM_API_ID")
-API_HASH = _read_env("JOB_FTCH_TELEGRAM_API_HASH")
-SESSION_PATH = _read_env("JOB_FTCH_TELEGRAM_SESSION_PATH") or ".runtime/telegram-dev.session"
 
-if not API_ID_STR or not API_HASH:
-    # Name the files actually inspected. The old message pointed at .env.dev
-    # unconditionally, which reads as "your file is wrong" on a host that never
-    # had one.
-    found = [path for path in ENV_FILES if path.is_file()]
-    missing = [path for path in ENV_FILES if not path.is_file()]
-    print("JOB_FTCH_TELEGRAM_API_ID and JOB_FTCH_TELEGRAM_API_HASH are not set.")
-    print(f"Loaded: {', '.join(p.name for p in found) or 'no dotenv file found'}")
-    if missing:
-        print(f"Not present: {', '.join(p.name for p in missing)}")
-    print("Add both keys to one of those files, or export them in the shell.")
-    sys.exit(1)
+def _resolve_credentials(explicit_env_file: Path | None) -> Credentials:
+    """Read credentials from one dotenv file, or from the shell when none applies."""
+    env_file = _resolve_env_file(explicit_env_file)
+    if env_file is not None:
+        _load_env_file(env_file)
 
-API_ID = int(API_ID_STR)
+    api_id_str = _read_env("JOB_FTCH_TELEGRAM_API_ID")
+    api_hash = _read_env("JOB_FTCH_TELEGRAM_API_HASH")
+    session = _read_env("JOB_FTCH_TELEGRAM_SESSION_PATH") or ".runtime/telegram-dev.session"
+
+    if not api_id_str or not api_hash:
+        # Name the file actually read. The old message pointed at .env.dev
+        # unconditionally, which reads as "your file is wrong" on a host that
+        # never had one.
+        source = f"read {env_file.name}" if env_file else "no dotenv file found"
+        print("JOB_FTCH_TELEGRAM_API_ID and JOB_FTCH_TELEGRAM_API_HASH are not set.")
+        print(f"Credentials source: {source}")
+        print("Add both keys there, pass --env-file PATH, or export them in the shell.")
+        sys.exit(1)
+
+    try:
+        api_id = int(api_id_str)
+    except ValueError:
+        print(f"JOB_FTCH_TELEGRAM_API_ID must be an integer, got {api_id_str!r}.")
+        sys.exit(1)
+
+    return Credentials(api_id, api_hash, Path(session), env_file)
+
+
 QR_HTML_PATH = ROOT / ".runtime" / "telegram-login-qr.html"
 
 
@@ -293,12 +325,14 @@ async def main() -> None:
         print("telethon not installed. Run: pip install telethon")
         sys.exit(1)
 
-    session_path = Path(SESSION_PATH)
+    credentials = _resolve_credentials(args.env_file)
+    session_path = credentials.session_path
     session_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"Using project env files: {', '.join(str(path) for path in ENV_FILES)}")
+    source = credentials.env_file.name if credentials.env_file else "shell environment only"
+    print(f"Credentials source: {source}")
     print(f"Session path: {session_path}")
-    print(f"Using api_id={API_ID}")
+    print(f"Using api_id={credentials.api_id}")
 
     if args.reset_session:
         backup_path = _backup_session_file(session_path)
@@ -307,7 +341,7 @@ async def main() -> None:
         else:
             print("No existing session file to back up.")
 
-    client = TelegramClient(str(session_path), API_ID, API_HASH)
+    client = TelegramClient(str(session_path), credentials.api_id, credentials.api_hash)
     await client.connect()
     try:
         if args.qr_login:
