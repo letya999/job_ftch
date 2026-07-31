@@ -663,3 +663,47 @@ discovery. Следствие — `requirements_must` вырождался в с
   такой вход всё ещё проходит как полный;
 - остальные источники не проверены на тот же класс дефекта: SPA-страница с
   first-party API, используемым только для discovery.
+
+## 35. TD-034: Идемпотентность outbox по всем destination (issue #145)
+
+Status: open. Priority: high. Прямой блокер из prod-readiness аудита
+(«outbox lie»). Отложено сознательно 2026-07-31: это рефакторинг критического
+пути доставки, его нельзя безопасно вносить в релизную ветку
+`feature/telegram-publish-polish` вместе с точечными фиксами.
+
+ADR-053 обещает, что каждый sink получает детерминированный idempotency key и
+что повтор не дублирует Telegram/файл/БД. Текущий рантайм этого не гарантирует:
+
+- `Pipeline._enqueue_outbox` создаёт durable-записи только для
+  `_delivery_targets`;
+- `Pipeline._emit_outbox_targets` эмитит primary `_sink` ДО обработки этих
+  записей, то есть основной side effect вне state-машины outbox;
+- `DeliveryTarget.deliver` получает только item, без persisted idempotency key
+  или outbox-конверта;
+- `recover_pending_outbox` сначала вызывает внешний target, потом помечает
+  строку delivered — окно между успехом и commit не закрыто.
+
+Достижимые сбои:
+
+- частичный fan-out: primary sink ок, target A ок, target B падает, item
+  ретраится, primary sink срабатывает повторно (нет durable per-destination
+  записи);
+- краш/сбой записи состояния после внешнего успеха: `target.deliver` прошёл,
+  процесс упал до `mark_outbox_delivered()`, recovery шлёт тот же target снова,
+  а он не может дедуплицировать по outbox-ключу, которого нет в его контракте.
+
+Exit criterion:
+
+- каждый side-effecting destination, включая текущий primary sink, за одной
+  durable per-destination outbox-абстракцией;
+- неизменяемый delivery-конверт с как минимум `idempotency_key`, `outbox_id`,
+  `decision_version` и payload передаётся в destination;
+- destination, которые это умеют, делают атомарную проверку/запись по ключу;
+  для остальных явно документировать at-least-once;
+- одна запись/переход состояния на destination; `emit()` в памяти не считается
+  durable-доказательством;
+- удалённый из конфигурации target оставляет наблюдаемую pending/blocked запись,
+  а не молча теряется;
+- регрессионные тесты по 5 сценариям из issue #145 (частичный fan-out,
+  crash-before-commit, два recovery-воркера, удалённый target, обратная
+  совместимость single-destination).
