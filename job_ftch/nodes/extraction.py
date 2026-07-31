@@ -682,7 +682,7 @@ class ExtractionNode:
         """Create the typed policy payload without spending an extraction call."""
         location = _fallback_location(item)
         work_mode = _fallback_work_mode(item.text, location) or _fallback_work_mode_from_metadata(
-            item
+            item.metadata
         )
         metadata = {
             **item.metadata,
