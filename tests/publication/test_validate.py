@@ -10,6 +10,7 @@ from job_ftch.publication.validate import validate_card
 def _card(**overrides: object) -> PublicationCard:
     defaults: dict[str, object] = {
         "role": "ML Engineer",
+        "company": "Acme Corp",
         "url": "https://example.com/job/1",
         "source_name": "TestSource",
     }
@@ -68,3 +69,39 @@ class TestValidateCard:
             layout,
         )
         assert len(outcome.warnings) == 0
+
+
+class TestVacancySubstanceGate:
+    """A chat message about jobs has a topic but no employer, place, money or
+    requirements. Upstream routing accepted such posts; this is the last gate
+    before a public channel."""
+
+    def test_chat_message_rejected(self) -> None:
+        layout = load_layout()
+        card = _card(
+            role="LLM-инженер, я так понимаю, это не вайбкодер, верно?",
+            company=None,
+            stack="machine learning · large language models",
+        )
+        outcome = validate_card(card, layout)
+        assert outcome.ok is False
+        assert outcome.reject_reason == "no_vacancy_substance"
+
+    def test_stack_alone_is_not_substance(self) -> None:
+        layout = load_layout()
+        outcome = validate_card(_card(company=None, stack="python · pytorch"), layout)
+        assert outcome.ok is False
+
+    def test_requirements_alone_is_substance(self) -> None:
+        """Postings that name no employer still qualify if they state requirements."""
+        layout = load_layout()
+        outcome = validate_card(_card(company=None, key_requirements="3+ years Python"), layout)
+        assert outcome.ok is True
+
+    def test_geo_alone_is_substance(self) -> None:
+        layout = load_layout()
+        assert validate_card(_card(company=None, geo="Москва"), layout).ok is True
+
+    def test_salary_alone_is_substance(self) -> None:
+        layout = load_layout()
+        assert validate_card(_card(company=None, salary="200 000 ₽/мес"), layout).ok is True

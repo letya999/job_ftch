@@ -1,27 +1,35 @@
 version: 1
 
+# Labelled rows with an explicit placeholder: a reader can tell the posting
+# omitted a field instead of wondering why the line is absent.
 blocks:
   - field: role
     style: bold
     max_len: 90
+  - spacer: true
   - field: company
-    omit_if_empty: true
-  - field: conditions
-    join: " · "
-    order: [location, salary]
-    max_len: 120
+    prefix: "Компания: "
+    placeholder: "не указана"
+  - field: geo
+    prefix: "Гео: "
+    max_len: 90
+    placeholder: "не указано"
+  - field: work_format
+    prefix: "Формат: "
+    placeholder: "не указан"
+  - field: salary
+    prefix: "Условия: "
+    placeholder: "не указаны"
   - spacer: true
   - field: summary
     max_len: 180
     omit_if_empty: true
   - field: key_requirements
     prefix: "Нужно: "
-    prefix_en: "Required: "
     max_len: 160
     omit_if_empty: true
   - field: stack
     prefix: "Стек: "
-    prefix_en: "Stack: "
     join: " · "
     max_len: 200
     omit_if_empty: true
@@ -34,11 +42,6 @@ footer:
     telegram_channel: "открыть пост"
     telegram_group: "открыть пост"
     default: "открыть"
-  link_labels_en:
-    career_site: "open vacancy"
-    telegram_channel: "open post"
-    telegram_group: "open post"
-    default: "open"
 
 formatting:
   leading_emoji: false

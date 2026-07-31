@@ -70,7 +70,7 @@ class TestBuildCard:
         card = build_card(job)
         assert card.role == "Senior ML Engineer"
         assert card.company == "Acme Corp"
-        assert "Berlin" in (card.location or "")
+        assert "Berlin" in (card.geo or "")
         assert card.source_name == "TestSource"
 
     def test_fake_company_filtered(self) -> None:
@@ -145,21 +145,23 @@ class TestBuildCard:
         )
         card = build_card(job)
         assert card.salary is not None
-        assert "gross" in card.salary
+        assert "до вычета" in card.salary
 
-    def test_location_remote(self) -> None:
-        job = _minimal_job(work_mode=WorkMode.REMOTE)
-        card = build_card(job)
-        assert card.location is not None
-        assert "удалённо" in card.location.lower() or "remote" in card.location.lower()
+    def test_work_format_remote(self) -> None:
+        card = build_card(_minimal_job(work_mode=WorkMode.REMOTE))
+        assert card.work_format == "удалённо"
+        assert card.geo is None
 
-    def test_location_city_country(self) -> None:
+    def test_geo_and_work_format_are_separate(self) -> None:
         job = _minimal_job(city="Москва", country="Россия", work_mode=WorkMode.ONSITE)
         card = build_card(job)
-        assert card.location is not None
-        assert "Москва" in card.location
-        assert "Россия" in card.location
-        assert "офис" in card.location.lower() or "onsite" in card.location.lower()
+        assert card.geo == "Москва, Россия"
+        assert card.work_format == "офис"
+
+    def test_geo_from_free_text_location(self) -> None:
+        """Career-site parsers fill `location`, not city/country."""
+        card = build_card(_minimal_job(location="Moscow; Saint Petersburg"))
+        assert card.geo == "Москва, Санкт-Петербург"
 
     def test_stack_from_tools(self) -> None:
         record = _minimal_record(tools_stack=("Python", "PyTorch", "Docker"))

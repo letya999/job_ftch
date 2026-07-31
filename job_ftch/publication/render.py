@@ -72,12 +72,6 @@ def _resolve_field(field_name: str, card: PublicationCard) -> str | None:
     return s if s else None
 
 
-def _pick_prefix(block: BlockSpec, lang: str) -> str | None:
-    if lang != "ru" and block.prefix_en:
-        return block.prefix_en
-    return block.prefix
-
-
 def _render_block(
     block: BlockSpec,
     card: PublicationCard,
@@ -92,17 +86,19 @@ def _render_block(
 
     raw = _resolve_field(block.field or "", card)
     if raw is None:
-        if block.omit_if_empty:
+        # An explicit "not stated" row is more informative than a missing line:
+        # the reader can tell the posting omitted it rather than wonder.
+        if block.placeholder and not block.omit_if_empty:
+            raw = block.placeholder
+        else:
             return None
-        return None
 
     text = escape(raw) if caps.html else raw
     if block.max_len:
         text = _truncate_word(text, block.max_len)
 
-    prefix = _pick_prefix(block, card.language)
-    if prefix:
-        text = f"{escape(prefix) if caps.html else prefix}{text}"
+    if block.prefix:
+        text = f"{escape(block.prefix) if caps.html else block.prefix}{text}"
 
     if block.style == "bold" and caps.html:
         text = f"<b>{text}</b>"
@@ -132,14 +128,11 @@ def _render_conditions(
 def _render_footer(card: PublicationCard, layout: CardLayout) -> str:
     footer = layout.footer
     url = card.url
-    lang = card.language
 
     source_label = card.source_name or ""
-
-    labels = footer.link_labels_en if lang != "ru" and footer.link_labels_en else footer.link_labels
-    link_label = labels.get(
+    link_label = footer.link_labels.get(
         card.source_kind or "default",
-        labels.get("default", "open"),
+        footer.link_labels.get("default", "открыть"),
     )
 
     if url:
