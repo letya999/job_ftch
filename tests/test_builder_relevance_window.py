@@ -131,3 +131,56 @@ def test_build_nodes_keeps_capable_presenter_in_post_accept_lane() -> None:
     )
 
     assert not any(type(node).__name__ == "PresentableTextNode" for node in nodes)
+
+
+def _relevance_node(nodes: list[Any]) -> Any:
+    return next(node for node in nodes if type(node).__name__ == "LLMRelevanceClassificationNode")
+
+
+def test_build_nodes_wires_atomic_run_llm_budget_into_relevance() -> None:
+    """A configured per-run LLM cap becomes a shared AsyncCallBudget on the node.
+
+    The effective ceiling is min(run cap, per-node cap) so neither limit is lost.
+    """
+    from job_ftch.application.run_budget import AsyncCallBudget
+
+    settings = Settings.model_validate(
+        {
+            "llm_backend": "heuristic",
+            "llm_relevance_max_per_run": 10,
+            "pipeline_max_llm_calls_per_run": 2,
+        }
+    )
+
+    _, _, nodes = build_nodes(
+        settings,
+        store=MagicMock(),
+        llm=cast("LLMProvider", HeuristicLLMProvider()),
+        job_group_store=MagicMock(),
+        catalog=ProfileCatalog(),
+    )
+
+    budget = _relevance_node(nodes)._budget
+    assert isinstance(budget, AsyncCallBudget)
+    assert budget.limit == 2  # min(run cap 2, per-node cap 10)
+
+
+def test_build_nodes_leaves_relevance_budget_unset_without_run_cap() -> None:
+    """Without a per-run cap the node keeps its own counter-based limit (budget None)."""
+    settings = Settings.model_validate(
+        {
+            "llm_backend": "heuristic",
+            "llm_relevance_max_per_run": 10,
+            "pipeline_max_llm_calls_per_run": None,
+        }
+    )
+
+    _, _, nodes = build_nodes(
+        settings,
+        store=MagicMock(),
+        llm=cast("LLMProvider", HeuristicLLMProvider()),
+        job_group_store=MagicMock(),
+        catalog=ProfileCatalog(),
+    )
+
+    assert _relevance_node(nodes)._budget is None

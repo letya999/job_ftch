@@ -9,13 +9,13 @@ repos:
 
       - id: forbid-sensitive-files
         name: forbid sensitive files
-        entry: python scripts/security/forbid_sensitive_files.py
+        entry: python .repo-safety/scripts/forbid_sensitive_files.py
         language: system
         pass_filenames: false
 
       - id: scan-mcp-config
         name: scan MCP config safety
-        entry: python scripts/security/scan_mcp_config.py
+        entry: python .repo-safety/scripts/scan_mcp_config.py
         language: system
         pass_filenames: false
 

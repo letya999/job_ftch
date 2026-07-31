@@ -161,9 +161,9 @@ async def test_telegram_posting_sink_formats_presentable_job() -> None:
 
     await sink.emit(job)
 
-    assert "📍 Remote" in client.sent[0][1]
-    assert "💰 $100k" in client.sent[0][1]
-    assert "#python #ml" in client.sent[0][1]
+    text = client.sent[0][1]
+    assert "LLM Platform Engineer" in text
+    assert "Example Corp" in text
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,9 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
+_PROMPT_VERSION = "v2"
+_SCHEMA_VERSION = "1"
+
 
 def _format_compensation(item: JobRecord) -> str | None:
     comp = item.compensation
@@ -146,7 +149,8 @@ class PresentableTextNode:
             return item.model_copy(update={"presentable": _template_present(item)})
 
         source_id = item.source_record_id or item.job_id or "unknown"
-        cache_key = f"presentable:{source_id}"
+        lang = item.language.value if item.language and hasattr(item.language, "value") else "en"
+        cache_key = f"presentable:{source_id}:{_PROMPT_VERSION}:{_SCHEMA_VERSION}:{lang}"
         cached = await self._store.get_run_state(cache_key)
         if cached:
             try:

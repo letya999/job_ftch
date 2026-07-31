@@ -1,0 +1,100 @@
+version: 1
+
+# Labelled rows with an explicit placeholder: a reader can tell the posting
+# omitted a field instead of wondering why the line is absent.
+blocks:
+  - field: role
+    style: bold
+    max_len: 90
+  - spacer: true
+  - field: company
+    prefix: "Компания: "
+    placeholder: "не указана"
+  - field: geo
+    prefix: "Гео: "
+    max_len: 90
+    placeholder: "не указано"
+  - field: work_format
+    prefix: "Формат: "
+    placeholder: "не указан"
+  - field: salary
+    prefix: "Условия: "
+    placeholder: "не указаны"
+  - spacer: true
+  - field: summary
+    max_len: 180
+    omit_if_empty: true
+  - field: key_requirements
+    prefix: "Нужно: "
+    max_len: 160
+    omit_if_empty: true
+  - field: stack
+    prefix: "Стек: "
+    join: " · "
+    max_len: 200
+    omit_if_empty: true
+
+footer:
+  template: "{source_label} {link}"
+  auto_mark: '🤖 <a href="https://github.com/letya999/job">job_ftch</a>'
+  link_labels:
+    career_site: "открыть вакансию"
+    telegram_channel: "открыть пост"
+    telegram_group: "открыть пост"
+    default: "открыть"
+
+formatting:
+  leading_emoji: false
+  italic: false
+  currency_symbols:
+    RUB: "₽"
+    USD: "$"
+    EUR: "€"
+    GBP: "£"
+    KZT: "₸"
+    UAH: "₴"
+    BYN: "Br"
+    GEL: "₾"
+    TRY: "₺"
+    PLN: "zł"
+    CZK: "Kč"
+    ILS: "₪"
+    JPY: "¥"
+    CNY: "¥"
+    INR: "₹"
+    BRL: "R$"
+    CAD: "C$"
+    AUD: "A$"
+    CHF: "CHF"
+    SGD: "S$"
+    AED: "AED"
+
+banlist:
+  - "Войти и откликнуться"
+  - "Show contacts"
+  - "Report"
+  - "Навыки:"
+  - "Квалификация:"
+  - "Специализации:"
+  - "Откликнуться"
+  - "Показать контакты"
+  - "Saved searches"
+  - "Отклик без резюме"
+
+profiles:
+  channel:
+    capabilities: [html, link_in_footer]
+    feedback: false
+  control_bot:
+    capabilities: [html, inline_keyboard]
+    feedback: true
+
+pacing:
+  window_seconds: 14400       # 4 hours
+  target_per_window: 12
+  burst_min: 2
+  burst_max: 4
+  gap_min_seconds: 120        # 2 min
+  gap_max_seconds: 1500       # 25 min
+  spread_fraction: 0.6
+  msg_throttle_seconds: 3.5

@@ -60,8 +60,8 @@ def main() -> int:
     py = python_executable()
     failures = 0
     checks: list[tuple[list[str], bool]] = [
-        ([py, "scripts/security/forbid_sensitive_files.py", "--all"], True),
-        ([py, "scripts/security/scan_mcp_config.py"], True),
+        ([py, ".repo-safety/scripts/forbid_sensitive_files.py", "--all"], True),
+        ([py, ".repo-safety/scripts/scan_mcp_config.py"], True),
         (["gitleaks", "git", ".", "--redact", "--exit-code", "1"], False),
     ]
     if git_has_commits():

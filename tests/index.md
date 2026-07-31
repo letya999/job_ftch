@@ -17,6 +17,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [integration index](integration/index.md)
 - [nodes index](nodes/index.md)
 - [packaging index](packaging/index.md)
+- [publication index](publication/index.md)
 - [scripts index](scripts/index.md)
 - [sinks index](sinks/index.md)
 - [unit index](unit/index.md)
