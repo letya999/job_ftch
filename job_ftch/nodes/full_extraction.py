@@ -55,6 +55,27 @@ def _first_metadata_location(metadata: dict[str, object]) -> str | None:
     return None
 
 
+# Fragments that mean the value describes an office or a transit stop rather
+# than naming a settlement: "офис рядом с м. Кутузовская" is where the desk is,
+# not where the job is.
+_NON_PLACE_MARKERS = ("офис", "office", "метро", "станци", "м. ")
+
+
+def _is_unusable_location(value: str | None) -> bool:
+    """True when a location cannot stand on its own as a place on the card.
+
+    Covers the two ways extraction fails here: a bare country code ("RU", "RФ")
+    and an office/transit description picked out of a benefits list.
+    """
+    if not value or not value.strip():
+        return True
+    text = value.strip()
+    if len(text) <= 3:
+        return True
+    lowered = text.casefold()
+    return any(marker in lowered for marker in _NON_PLACE_MARKERS)
+
+
 def _metadata_language(metadata: dict[str, object]) -> LanguageCode | None:
     """Language detected upstream by LanguageDetectionNode/LanguageContextNode."""
     raw = metadata.get("detected_language")
@@ -130,12 +151,16 @@ class FullExtractionNode:
         title = extracted.title or job.title
         company = extracted.company or job.company
 
-        # Location inverts that order. Metadata comes from the site's own JSON-LD
-        # or API and names an actual place; the LLM is inferring from prose and
-        # picks up whatever looks locational, which on a Sberbank posting meant
-        # lifting "офис рядом с м. Кутузовская" out of the benefits list while
-        # metadata held "г Москва". Structured wins, prose is the fallback.
-        location = _first_metadata_location(job.metadata) or extracted.location or job.location
+        # Location: metadata is consulted only when the extracted value cannot
+        # stand as a place. Neither source is reliably better - the LLM lifted
+        # "офис рядом с м. Кутузовская" out of a Sberbank benefits list and
+        # answered a bare "RU" on a habr posting, while site metadata sometimes
+        # carries the search scope rather than the job's own location and once
+        # put a German town in Moscow. So a usable extracted place is kept, and
+        # metadata only rescues the cases that are not places at all.
+        location = extracted.location or job.location
+        if _is_unusable_location(location):
+            location = _first_metadata_location(job.metadata) or location
 
         # Same reasoning for work mode: several sites publish schema.org's
         # TELECOMMUTE marker in JSON-LD while never stating the mode in prose,

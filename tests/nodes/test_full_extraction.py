@@ -163,13 +163,10 @@ async def test_full_extraction_keeps_partial_when_company_missing(make_job_recor
 
 
 @pytest.mark.anyio
-async def test_metadata_location_outranks_llm_prose_guess(make_job_record) -> None:
-    """Structured site data beats an inference drawn from the posting's prose.
-
-    A Sberbank posting listed "комфортный современный офис рядом с м. Кутузовская"
-    among its benefits; the LLM read that as the location while metadata, parsed
-    from the site's own API, held "г Москва". The card showed the metro line.
-    """
+async def test_office_description_falls_back_to_metadata(make_job_record) -> None:
+    """A Sberbank posting listed "комфортный современный офис рядом с
+    м. Кутузовская" among its benefits; the LLM read that as the location while
+    metadata, parsed from the site's own API, held "г Москва"."""
     llm = _FieldLLM(location="офис рядом с м. Кутузовская")
     job = make_job_record(
         routing_decision=MatchDecision.ACCEPT,
@@ -183,8 +180,39 @@ async def test_metadata_location_outranks_llm_prose_guess(make_job_record) -> No
 
 
 @pytest.mark.anyio
+async def test_bare_country_code_falls_back_to_metadata(make_job_record) -> None:
+    """A habr posting answered "RU" - a country code is not a place."""
+    llm = _FieldLLM(location="RU")
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        location=None,
+        metadata={"locations": ["Москва, Россия"]},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.location == "Москва, Россия"
+
+
+@pytest.mark.anyio
+async def test_usable_extracted_location_is_not_overridden(make_job_record) -> None:
+    """Metadata is not reliably better: on hh.ru it carries the search scope,
+    and one record would have relocated a German town to Moscow."""
+    llm = _FieldLLM(location="Bonnatal, Germany")
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        location=None,
+        metadata={"locations": ["Москва, Московская область, RU"]},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.location == "Bonnatal, Germany"
+
+
+@pytest.mark.anyio
 async def test_llm_location_used_when_metadata_has_none(make_job_record) -> None:
-    """Prose stays the fallback; sites without structured geo must still work."""
+    """Prose stays the primary source; sites without structured geo still work."""
     llm = _FieldLLM(location="Berlin, DE")
     job = make_job_record(routing_decision=MatchDecision.ACCEPT, location=None, metadata={})
 
