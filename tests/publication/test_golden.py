@@ -58,7 +58,7 @@ class TestGoldenCards:
         assert "Яндекс" in text
         assert "Москва" in text
         assert "₽" in text
-        assert "gross" in text
+        assert "до вычета" in text
         assert "Нужно:" in text
         assert "Стек:" in text
         assert "открыть вакансию" in text
@@ -79,7 +79,7 @@ class TestGoldenCards:
         )
         text = _render(job)
         assert "<b>ML Engineer</b>" in text
-        assert "удалённо" in text
+        assert "Формат: удалённо" in text
         assert "AI Jobs RU" in text
 
     def test_no_salary(self) -> None:
@@ -133,7 +133,7 @@ class TestGoldenCards:
         )
         text = _render(job)
         assert "$" in text
-        assert "/yr" in text
+        assert "/год" in text
 
     def test_kzt_salary(self) -> None:
         """KZT salary should use ₸ symbol."""
@@ -155,7 +155,7 @@ class TestGoldenCards:
         )
         text = _render(job)
         assert "₸" in text
-        assert "Almaty" in text
+        assert "Алматы" in text
 
     def test_with_stack_and_requirements_ru(self) -> None:
         """Full card with Russian requirements uses Russian labels."""
@@ -178,7 +178,7 @@ class TestGoldenCards:
         assert "Kubernetes" in text
 
     def test_with_stack_and_requirements_en(self) -> None:
-        """Full card with English requirements uses English labels."""
+        """English content keeps its words; the labels around it stay Russian."""
         job = JobRecord(
             raw_item_id="sr-2",
             source_kind=SourceKind.CAREER_SITE,
@@ -191,8 +191,8 @@ class TestGoldenCards:
             work_mode=WorkMode.REMOTE,
         )
         text = _render(job)
-        assert "Required:" in text
-        assert "Stack:" in text
+        assert "Нужно:" in text
+        assert "Стек:" in text
 
     def test_skills_fallback_when_no_stack(self) -> None:
         """Stack from skills_explicit when tools_stack is empty."""
@@ -210,7 +210,7 @@ class TestGoldenCards:
             ),
         )
         text = _render(job)
-        assert "Stack:" in text
+        assert "Стек:" in text
         assert "Python" in text
 
     def test_control_bot_profile(self) -> None:
@@ -242,7 +242,7 @@ class TestGoldenCards:
         )
         text = _render(job)
         assert "<b>Computer Vision Engineer</b>" in text
-        assert "open post" in text
+        assert "открыть пост" in text
 
     def test_no_url(self) -> None:
         """Job without URL - footer should not have a link."""
@@ -275,3 +275,44 @@ class TestGoldenCards:
         text = _render(job)
         assert "300 000" in text
         assert "–" not in text
+
+
+class TestLabelledRows:
+    """Every card shows the same four rows, stating explicitly when a posting
+    omitted one, so a reader can tell absence from oversight."""
+
+    def test_missing_fields_are_stated(self) -> None:
+        job = Job(
+            raw_item_id="bare-1",
+            source_kind=SourceKind.TELEGRAM_CHANNEL,
+            source_name="AI Jobs",
+            title="ML Engineer",
+            description="Ищем ML-инженера",
+            city="Москва",
+        )
+        text = _render(job)
+        assert "Компания: не указана" in text
+        assert "Гео: Москва" in text
+        assert "Формат: не указан" in text
+        assert "Условия: не указаны" in text
+
+    def test_all_rows_present_when_populated(self) -> None:
+        job = JobRecord(
+            raw_item_id="full-1",
+            source_kind=SourceKind.CAREER_SITE,
+            source_name="hh",
+            title="ML Engineer",
+            company="Яндекс",
+            description="Разработка ML-систем",
+            city="Москва",
+            work_mode=WorkMode.HYBRID,
+            compensation=CompensationRange(
+                currency="RUB", min_amount=300000, period=CompensationPeriod.MONTH
+            ),
+        )
+        text = _render(job)
+        assert "Компания: Яндекс" in text
+        assert "Гео: Москва" in text
+        assert "Формат: гибрид" in text
+        assert "Условия: от 300 000 ₽/мес" in text
+        assert "не указан" not in text

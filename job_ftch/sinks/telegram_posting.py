@@ -5,10 +5,14 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
 
+import structlog
+
 from job_ftch.publication.card import build_card
 from job_ftch.publication.layout import CardLayout, load_layout
 from job_ftch.publication.render import render_card
 from job_ftch.publication.validate import validate_card
+
+logger = structlog.get_logger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -34,11 +38,23 @@ async def _client_session(
     yield client
 
 
-def _render_job(job: Job, layout: CardLayout, profile: str = "channel") -> str:
+def _render_job(job: Job, layout: CardLayout, profile: str = "channel") -> str | None:
+    """Render a job for the channel, or None when it must not be published.
+
+    A rejected card used to fall back to a bare bold title, which published the
+    very items validation had just refused - a chat message about jobs went out
+    as a headline with nothing under it. A reject now means skip.
+    """
     pub_card = build_card(job)
     outcome = validate_card(pub_card, layout)
     if not outcome.ok:
-        return f"<b>{job.title or 'Job posting'}</b>"
+        logger.info(
+            "publication_card_rejected",
+            reason=outcome.reject_reason,
+            job_id=getattr(job, "job_id", None),
+            source_name=getattr(job, "source_name", None),
+        )
+        return None
     return render_card(pub_card, layout, profile=profile)
 
 
@@ -67,8 +83,10 @@ class TelegramPostingSink:
 
     async def emit(self, item: Job) -> None:
         if self._notify_mode == "instant":
+            text = _render_job(item, self._layout, self._profile)
+            if text is None:
+                return
             async with _client_session(self._client, own_client=self._own_client) as client:
-                text = _render_job(item, self._layout, self._profile)
                 await client.send_message(self._entity, text, link_preview=False)
         else:
             self._pending_jobs.append(item)

@@ -37,27 +37,118 @@ CURRENCY_SYMBOLS: dict[str, str] = {
     "CHF": "CHF",
 }
 
-PERIOD_LABELS: dict[str, dict[str, str]] = {
-    "hour": {"ru": "/час", "en": "/hr"},
-    "day": {"ru": "/день", "en": "/day"},
-    "week": {"ru": "/нед", "en": "/wk"},
-    "month": {"ru": "/мес", "en": "/mo"},
-    "year": {"ru": "/год", "en": "/yr"},
-    "project": {"ru": "/проект", "en": "/project"},
+# Controlled vocabulary. These are channel chrome, not posting content, so
+# they stay in one language regardless of the posting's own - a feed that says
+# "офис" on one card and "onsite" on the next reads as broken. Posting content
+# (title, requirements, stack) keeps its source language.
+PERIOD_LABELS: dict[str, str] = {
+    "hour": "/час",
+    "day": "/день",
+    "week": "/нед",
+    "month": "/мес",
+    "year": "/год",
+    "project": "/проект",
 }
 
-WORK_MODE_LABELS: dict[str, dict[str, str]] = {
-    "remote": {"ru": "удалённо", "en": "remote"},
-    "hybrid": {"ru": "гибрид", "en": "hybrid"},
-    "onsite": {"ru": "офис", "en": "onsite"},
+WORK_MODE_LABELS: dict[str, str] = {
+    "remote": "удалённо",
+    "hybrid": "гибрид",
+    "onsite": "офис",
 }
+
+# Separators site parsers leave in a free-text location field.
+_GEO_SPLIT = re.compile(r"\s*[;,/|&]\s*|\s+[-–—]\s+")
+
+# "г Москва", "пос. Северный" - settlement-type prefixes carry no information.
+_SETTLEMENT_PREFIX = re.compile(r"^(?:г|гор|пос|пгт|с|д|ст)\.?\s+", re.IGNORECASE)
+# "Russia (UTC+3)" - parenthetical notes are never part of the place name.
+_PAREN_NOTE = re.compile(r"\s*\([^)]*\)")
+
+# Work-mode words leak into the location field on several sites. The card has a
+# dedicated "Формат" row, so repeating them here is noise at best and, for
+# "Удалённая работа", a non-place masquerading as one.
+_GEO_NOISE = frozenset(
+    {
+        "office",
+        "офис",
+        "remote",
+        "hybrid",
+        "onsite",
+        "удалённо",
+        "удаленно",
+        "удалённая работа",
+        "удаленная работа",
+        "гибрид",
+        "разные локации",
+        "не указано",
+        "n/a",
+    }
+)
+
+# One place, one spelling. Sources write "Москва, RU", "Moscow, Russia" and
+# "г Москва" for the same city; a feed showing all three reads as three places.
+# Unknown values pass through untouched - this table is a normaliser, not a gate.
+_GEO_ALIASES = {
+    "ru": "Россия",
+    "рф": "Россия",
+    "rф": "Россия",  # latin R + cyrillic Ф, seen in live data
+    "russia": "Россия",
+    "russian federation": "Россия",
+    "moscow": "Москва",
+    "saint petersburg": "Санкт-Петербург",
+    "st petersburg": "Санкт-Петербург",
+    "spb": "Санкт-Петербург",
+    "novosibirsk": "Новосибирск",
+    "yekaterinburg": "Екатеринбург",
+    "ekaterinburg": "Екатеринбург",
+    "kazan": "Казань",
+    "kz": "Казахстан",
+    "kazakhstan": "Казахстан",
+    "almaty": "Алматы",
+    "astana": "Астана",
+    "by": "Беларусь",
+    "belarus": "Беларусь",
+    "minsk": "Минск",
+    "germany": "Германия",
+    "serbia": "Сербия",
+    "belgrade": "Белград",
+    "georgia": "Грузия",
+    "tbilisi": "Тбилиси",
+    "armenia": "Армения",
+    "yerevan": "Ереван",
+    "cyprus": "Кипр",
+    "united kingdom": "Великобритания",
+    "uk": "Великобритания",
+    "united states": "США",
+    "usa": "США",
+    "us": "США",
+    "worldwide": "по всему миру",
+    "europe": "Европа",
+}
+
+
+def _normalise_geo_chunk(chunk: str) -> str | None:
+    chunk = _PAREN_NOTE.sub("", chunk).strip(" .,")
+    if not chunk:
+        return None
+    chunk = _SETTLEMENT_PREFIX.sub("", chunk).strip()
+    lowered = chunk.lower()
+    if lowered in _GEO_NOISE:
+        return None
+    if lowered in _GEO_ALIASES:
+        return _GEO_ALIASES[lowered]
+    # "офис на станции м. Курская" - drop the mode word, keep the address.
+    for noise in _GEO_NOISE:
+        if lowered.startswith(noise + " "):
+            return _normalise_geo_chunk(chunk[len(noise) :])
+    return chunk or None
 
 
 def _fmt_amount(amount: int) -> str:
     return f"{amount:,}".replace(",", " ")
 
 
-def format_compensation(job: Job | JobRecord, lang: str = "ru") -> str | None:
+def format_compensation(job: Job | JobRecord) -> str | None:
     comp = getattr(job, "compensation", None)
     if comp is None:
         return None
@@ -69,50 +160,57 @@ def format_compensation(job: Job | JobRecord, lang: str = "ru") -> str | None:
 
     sym = CURRENCY_SYMBOLS.get(comp.currency, comp.currency)
 
-    from_word = "от" if lang == "ru" else "from"
-    to_word = "до" if lang == "ru" else "up to"
-
     if lo is not None and hi is not None:
         rng = _fmt_amount(lo) if lo == hi else f"{_fmt_amount(lo)}–{_fmt_amount(hi)}"
     elif lo is not None:
-        rng = f"{from_word} {_fmt_amount(lo)}"
+        rng = f"от {_fmt_amount(lo)}"
     else:
-        rng = f"{to_word} {_fmt_amount(hi)}"  # type: ignore[arg-type]
+        rng = f"до {_fmt_amount(hi)}"  # type: ignore[arg-type]
 
     period = ""
     if comp.period and hasattr(comp.period, "value") and comp.period.value != "unknown":
-        labels = PERIOD_LABELS.get(comp.period.value, {})
-        period = labels.get(lang, labels.get("en", f"/{comp.period.value}"))
+        period = PERIOD_LABELS.get(comp.period.value, f"/{comp.period.value}")
 
     gross_mark = ""
     if comp.gross is True:
-        gross_mark = " gross"
+        gross_mark = " до вычета"
     elif comp.gross is False:
-        gross_mark = " net"
+        gross_mark = " на руки"
 
     return f"{rng} {sym}{period}{gross_mark}".strip()
 
 
-def format_location(job: Job | JobRecord, lang: str = "ru") -> str | None:
-    parts: list[str] = []
-    city = getattr(job, "city", None)
-    country = getattr(job, "country", None)
+def format_geo(job: Job | JobRecord) -> str | None:
+    """Where the job is, from whichever field the parser actually filled.
+
+    Site parsers populate the free-text ``location`` ("Moscow; Saint Petersburg;
+    Belgrade") far more often than the structured ``city``/``country`` pair, and
+    reading only the latter dropped the geo from most career-site cards.
+    """
+    sources = [
+        (getattr(job, "city", None) or "").strip(),
+        (getattr(job, "country", None) or "").strip(),
+    ]
+    if not any(sources):
+        sources = [(getattr(job, "location", None) or "").strip()]
+
+    # Each of these can itself hold a list - a `country` of
+    # "United Kingdom, United States" is normal - so always split.
+    seen: list[str] = []
+    for source in sources:
+        for chunk in _GEO_SPLIT.split(source):
+            normalised = _normalise_geo_chunk(chunk) if chunk else None
+            if normalised and normalised.casefold() not in {s.casefold() for s in seen}:
+                seen.append(normalised)
+    return ", ".join(seen[:3]) if seen else None
+
+
+def format_work_mode(job: Job | JobRecord) -> str | None:
     work_mode = getattr(job, "work_mode", None)
-
-    if city:
-        parts.append(city.strip())
-    if country and country.strip().lower() not in (
-        (city or "").strip().lower(),
-        "",
-    ):
-        parts.append(country.strip())
-
-    wm_str = work_mode.value if work_mode and hasattr(work_mode, "value") else ""
-    if wm_str and wm_str != "unknown":
-        labels = WORK_MODE_LABELS.get(wm_str, {})
-        parts.append(labels.get(lang, labels.get("en", wm_str)))
-
-    return " · ".join(parts) if parts else None
+    value = work_mode.value if work_mode and hasattr(work_mode, "value") else ""
+    if not value or value == "unknown":
+        return None
+    return WORK_MODE_LABELS.get(value, value)
 
 
 def resolve_card_url(job: Job | JobRecord) -> str | None:

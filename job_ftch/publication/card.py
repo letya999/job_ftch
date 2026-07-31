@@ -16,7 +16,8 @@ if TYPE_CHECKING:
 from job_ftch.publication.normalize import (
     detect_content_language,
     format_compensation,
-    format_location,
+    format_geo,
+    format_work_mode,
     pick_source_label,
     resolve_card_url,
     summarise_requirements,
@@ -29,7 +30,8 @@ class PublicationCard(BaseModel):
 
     role: str = Field(min_length=1, max_length=200)
     company: str | None = None
-    location: str | None = None
+    geo: str | None = None
+    work_format: str | None = None
     salary: str | None = None
     summary: str | None = Field(default=None, max_length=300)
     key_requirements: str | None = Field(default=None, max_length=300)
@@ -56,8 +58,9 @@ def build_card(job: Job | JobRecord) -> PublicationCard:
     )
 
     content_lang = detect_content_language(job)
-    location = format_location(job, lang=content_lang)
-    salary = format_compensation(job, lang=content_lang)
+    geo = format_geo(job)
+    work_format = format_work_mode(job)
+    salary = format_compensation(job)
     url = resolve_card_url(job)
 
     presentable = getattr(job, "presentable", None)
@@ -87,7 +90,8 @@ def build_card(job: Job | JobRecord) -> PublicationCard:
     return PublicationCard(
         role=title,
         company=company,
-        location=location,
+        geo=geo,
+        work_format=work_format,
         salary=salary,
         summary=summary,
         key_requirements=key_requirements,

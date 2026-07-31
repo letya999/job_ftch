@@ -12,7 +12,8 @@ from job_ftch.domain.models import (
 from job_ftch.publication.normalize import (
     detect_content_language,
     format_compensation,
-    format_location,
+    format_geo,
+    format_work_mode,
     pick_source_label,
 )
 
@@ -92,7 +93,7 @@ class TestFormatCompensation:
         )
         result = format_compensation(job)
         assert result is not None
-        assert "gross" in result
+        assert "до вычета" in result
 
     def test_net_marker(self) -> None:
         job = _job(
@@ -106,7 +107,7 @@ class TestFormatCompensation:
         )
         result = format_compensation(job)
         assert result is not None
-        assert "net" in result
+        assert "на руки" in result
 
     def test_no_compensation(self) -> None:
         job = _job()
@@ -136,41 +137,102 @@ class TestFormatCompensation:
         assert "₸" in result
 
 
-class TestFormatLocation:
-    def test_remote_only(self) -> None:
-        job = _job(work_mode=WorkMode.REMOTE)
-        result = format_location(job)
-        assert result is not None
-        assert "удалённо" in result
-
+class TestFormatGeo:
     def test_city_and_country(self) -> None:
         job = _job(city="Москва", country="Россия")
-        result = format_location(job)
-        assert result is not None
-        assert "Москва" in result
-        assert "Россия" in result
-
-    def test_city_country_onsite(self) -> None:
-        job = _job(city="Berlin", country="Germany", work_mode=WorkMode.ONSITE)
-        result = format_location(job)
-        assert result is not None
-        assert "Berlin" in result
-        assert "офис" in result
-
-    def test_no_location_data(self) -> None:
-        job = _job()
-        result = format_location(job)
-        assert result is None
+        assert format_geo(job) == "Москва, Россия"
 
     def test_city_same_as_country_no_duplicate(self) -> None:
         job = _job(city="Singapore", country="Singapore")
-        result = format_location(job)
-        assert result is not None
-        assert result.count("Singapore") == 1
+        assert format_geo(job) == "Singapore"
 
-    def test_english_labels(self) -> None:
-        job = _job(work_mode=WorkMode.REMOTE)
-        assert format_location(job, lang="en") == "remote"
+    def test_falls_back_to_free_text_location(self) -> None:
+        """Site parsers fill `location` far more often than city/country."""
+        job = _job(location="Moscow; Saint Petersburg; Belgrade")
+        assert format_geo(job) == "Москва, Санкт-Петербург, Белград"
+
+    def test_free_text_comma_separated(self) -> None:
+        job = _job(location="Moscow, Minsk")
+        assert format_geo(job) == "Москва, Минск"
+
+    def test_free_text_single_city(self) -> None:
+        job = _job(location="Москва")
+        assert format_geo(job) == "Москва"
+
+    def test_structured_fields_win_over_free_text(self) -> None:
+        job = _job(city="Berlin", location="Somewhere else")
+        assert format_geo(job) == "Berlin"
+
+    def test_free_text_deduplicated_and_capped(self) -> None:
+        job = _job(location="Moscow; Moscow; Kazan; Perm; Omsk")
+        assert format_geo(job) == "Москва, Казань, Perm"
+
+    def test_no_geo_data(self) -> None:
+        assert format_geo(_job()) is None
+
+
+class TestGeoNormalisation:
+    """Sources spell one place many ways. A feed showing "Москва, RU",
+    "Moscow, Russia" and "г Москва" reads as three different places."""
+
+    def test_country_code_expanded(self) -> None:
+        assert format_geo(_job(location="Москва, RU")) == "Москва, Россия"
+
+    def test_english_names_normalised(self) -> None:
+        assert format_geo(_job(location="Moscow, Russia")) == "Москва, Россия"
+
+    def test_settlement_prefix_stripped(self) -> None:
+        assert format_geo(_job(location="г Москва")) == "Москва"
+        assert format_geo(_job(location="г. Екатеринбург")) == "Екатеринбург"
+
+    def test_all_spellings_converge(self) -> None:
+        forms = ["Москва, RU", "Moscow, Russia", "Москва, Россия", "г Москва, РФ"]
+        assert {format_geo(_job(location=f)) for f in forms} == {"Москва, Россия"}
+
+    def test_cyrillic_latin_typo_in_country(self) -> None:
+        """Live data contains "RФ" - latin R with a cyrillic Ф."""
+        assert format_geo(_job(location="RФ")) == "Россия"
+
+    def test_parenthetical_note_dropped(self) -> None:
+        assert format_geo(_job(location="Russia (UTC+3)")) == "Россия"
+
+    def test_work_mode_words_dropped_from_geo(self) -> None:
+        """The card has a dedicated Формат row; repeating it here is noise."""
+        assert format_geo(_job(location="Astana, Office")) == "Астана"
+
+    def test_pure_work_mode_yields_no_geo(self) -> None:
+        assert format_geo(_job(location="Удалённая работа (офис гибридный)")) is None
+
+    def test_leading_mode_word_stripped_address_kept(self) -> None:
+        assert format_geo(_job(location="офис на станции м. Курская")) == "на станции м. Курская"
+
+    def test_country_field_may_hold_a_list(self) -> None:
+        assert format_geo(_job(country="United Kingdom, United States")) == "Великобритания, США"
+
+    def test_unknown_place_passes_through(self) -> None:
+        """The table normalises; it must not drop places it does not know."""
+        assert format_geo(_job(location="Bonnatal, Germany")) == "Bonnatal, Германия"
+
+
+class TestFormatWorkMode:
+    def test_remote(self) -> None:
+        assert format_work_mode(_job(work_mode=WorkMode.REMOTE)) == "удалённо"
+
+    def test_hybrid(self) -> None:
+        assert format_work_mode(_job(work_mode=WorkMode.HYBRID)) == "гибрид"
+
+    def test_onsite(self) -> None:
+        assert format_work_mode(_job(work_mode=WorkMode.ONSITE)) == "офис"
+
+    def test_unknown_returns_none(self) -> None:
+        assert format_work_mode(_job()) is None
+
+    def test_label_language_is_uniform(self) -> None:
+        """Controlled vocabulary never follows the posting language: a feed
+        mixing 'офис' and 'onsite' reads as broken."""
+        ru = _job(work_mode=WorkMode.ONSITE, description="Разработка ML-систем")
+        en = _job(work_mode=WorkMode.ONSITE, description="Building ML systems")
+        assert format_work_mode(ru) == format_work_mode(en) == "офис"
 
 
 class TestPickSourceLabel:

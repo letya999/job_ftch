@@ -22,12 +22,25 @@ class ValidationOutcome:
     reject_reason: str | None = None
 
 
+# A posting states at least one of these. A chat message about jobs does not:
+# it has a topic (so a stack can be inferred) but no employer, no place, no
+# money and no requirements. Upstream routing accepted such messages with
+# review_reasons already set to missing_company/missing_location, so this is
+# the last gate before they reach a public channel.
+_SUBSTANCE_FIELDS = ("company", "geo", "salary", "key_requirements")
+
+
 def validate_card(card: PublicationCard, layout: CardLayout) -> ValidationOutcome:
     outcome = ValidationOutcome()
 
     if not card.role or not card.role.strip():
         outcome.ok = False
         outcome.reject_reason = "missing_role"
+        return outcome
+
+    if not any((getattr(card, name, None) or "").strip() for name in _SUBSTANCE_FIELDS):
+        outcome.ok = False
+        outcome.reject_reason = "no_vacancy_substance"
         return outcome
 
     for phrase in layout.banlist:

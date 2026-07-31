@@ -50,14 +50,16 @@ class TestLoadLayout:
     def test_blocks_have_expected_fields(self) -> None:
         layout = load_layout()
         field_names = [b.field for b in layout.blocks if b.field]
-        assert "role" in field_names
-        assert "conditions" in field_names
+        for expected in ("role", "company", "geo", "work_format", "salary"):
+            assert expected in field_names
 
-    def test_conditions_block_has_order(self) -> None:
+    def test_labelled_rows_declare_a_placeholder(self) -> None:
+        """Every always-shown row needs text for the empty case."""
         layout = load_layout()
-        cond = next(b for b in layout.blocks if b.field == "conditions")
-        assert "location" in cond.order
-        assert "salary" in cond.order
+        for block in layout.blocks:
+            if block.field in ("company", "geo", "work_format", "salary"):
+                assert block.placeholder, f"{block.field} has no placeholder"
+                assert block.prefix, f"{block.field} has no label"
 
     def test_block_spec_defaults(self) -> None:
         block = BlockSpec()
