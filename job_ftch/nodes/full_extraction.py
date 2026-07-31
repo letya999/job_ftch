@@ -16,7 +16,7 @@ from job_ftch.domain import (
     Seniority,
     WorkMode,
 )
-from job_ftch.nodes.extraction import ExtractionNode
+from job_ftch.nodes.extraction import ExtractionNode, _fallback_work_mode_from_metadata
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import LLMProvider
@@ -125,12 +125,26 @@ class FullExtractionNode:
             "full_extraction_backend": self._extractor._llm.__class__.__name__,
         }
 
-        # Identity-shaped fields the delivery card actually renders. The LLM
-        # result wins, then anything acquisition already parsed into metadata,
-        # then whatever triage produced.
+        # Identity-shaped fields the delivery card actually renders. For title
+        # and company the LLM wins: metadata often holds listing-page noise.
         title = extracted.title or job.title
         company = extracted.company or job.company
-        location = extracted.location or job.location or _first_metadata_location(job.metadata)
+
+        # Location inverts that order. Metadata comes from the site's own JSON-LD
+        # or API and names an actual place; the LLM is inferring from prose and
+        # picks up whatever looks locational, which on a Sberbank posting meant
+        # lifting "офис рядом с м. Кутузовская" out of the benefits list while
+        # metadata held "г Москва". Structured wins, prose is the fallback.
+        location = _first_metadata_location(job.metadata) or extracted.location or job.location
+
+        # Same reasoning for work mode: several sites publish schema.org's
+        # TELECOMMUTE marker in JSON-LD while never stating the mode in prose,
+        # so a posting that is plainly remote reached the card as "unknown".
+        work_mode = extracted.work_mode
+        if work_mode is None or work_mode is WorkMode.UNKNOWN:
+            work_mode = job.work_mode
+        if work_mode is WorkMode.UNKNOWN:
+            work_mode = _fallback_work_mode_from_metadata(job.metadata)
         language = job.language
         if extracted.language is not LanguageCode.UNKNOWN:
             language = extracted.language
@@ -162,9 +176,7 @@ class FullExtractionNode:
                 "company": company,
                 "location": location,
                 "language": language,
-                "work_mode": extracted.work_mode
-                if extracted.work_mode is not None and extracted.work_mode is not WorkMode.UNKNOWN
-                else job.work_mode,
+                "work_mode": work_mode,
                 "seniority": extracted.seniority
                 if extracted.seniority is not Seniority.UNKNOWN
                 else job.seniority,
