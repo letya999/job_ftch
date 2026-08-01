@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-import sys
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -60,8 +58,28 @@ def _run(command: tuple[str, ...]) -> None:
 
 def _run_smoke_commands() -> None:
     _run(("uv", "run", "pre-commit", "validate-config", ".repo-safety/pre-commit-config.yaml"))
-    _run(("uv", "run", "pre-commit", "run", "-c", ".repo-safety/pre-commit-config.yaml", "--all-files"))
-    _run(("opengrep", "scan", "--config", ".repo-safety/opengrep", "--exclude", ".repo-safety/opengrep", "."))
+    _run(
+        (
+            "uv",
+            "run",
+            "pre-commit",
+            "run",
+            "-c",
+            ".repo-safety/pre-commit-config.yaml",
+            "--all-files",
+        )
+    )
+    _run(
+        (
+            "opengrep",
+            "scan",
+            "--config",
+            ".repo-safety/opengrep",
+            "--exclude",
+            ".repo-safety/opengrep",
+            ".",
+        )
+    )
 
 
 def main() -> int:

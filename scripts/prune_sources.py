@@ -37,12 +37,24 @@ def _host(url: str) -> str:
     return netloc[4:] if netloc.startswith("www.") else netloc
 
 
+def _key(url: str) -> tuple[str, str]:
+    """Dedup key: host + normalised path (query ignored).
+
+    Grouping by host alone would merge genuinely distinct pages on shared hosts
+    (e.g. career.habr.com/vacancies vs career.habr.com/companies/rwb/vacancies),
+    so the path is part of the key; only the query - which expansion regenerates -
+    is dropped.
+    """
+    parsed = urlparse(url)
+    return _host(url), parsed.path.rstrip("/").lower()
+
+
 def _rank(source: dict) -> tuple:
-    """Canonical-source order: base config first, then barest URL, then id."""
+    """Canonical-source order: config source first, then barest URL, then id."""
     url = str(source.get("spec", {}).get("url", ""))
     parsed = urlparse(url)
     return (
-        0 if source.get("origin") == "base" else 1,
+        0 if source.get("origin") in ("config", "base") else 1,
         1 if parsed.query else 0,
         len(parsed.path),
         str(source.get("source_id", "")),
@@ -58,14 +70,14 @@ async def _run(args: argparse.Namespace) -> int:
 
     sources = await runner.list_sources(args.tenant)
     career = [s for s in sources if s.get("source_kind") == "career_site"]
-    by_host: dict[str, list[dict]] = defaultdict(list)
+    by_key: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for source in career:
-        by_host[_host(str(source.get("spec", {}).get("url", "")))].append(source)
+        by_key[_key(str(source.get("spec", {}).get("url", "")))].append(source)
 
     disabled = 0
     survivors: list[dict] = []
     try:
-        for host, group in sorted(by_host.items()):
+        for key, group in sorted(by_key.items()):
             enabled = [s for s in group if s.get("enabled")]
             if len(enabled) <= 1:
                 survivors.extend(enabled)
@@ -73,7 +85,7 @@ async def _run(args: argparse.Namespace) -> int:
             enabled.sort(key=_rank)
             keep, *drop = enabled
             survivors.append(keep)
-            print(f"HOST {host}: keep {keep['source_id']} ({keep['origin']})")
+            print(f"{key[0]}{key[1]}: keep {keep['source_id']} ({keep['origin']})")
             for source in drop:
                 url = source.get("spec", {}).get("url", "")
                 if args.dry_run:
@@ -106,7 +118,7 @@ async def _run(args: argparse.Namespace) -> int:
 
     print(
         f"\nSUMMARY tenant={args.tenant} career_sources={len(career)} "
-        f"hosts={len(by_host)} disabled={disabled} "
+        f"hosts={len(by_key)} disabled={disabled} "
         f"survivors={len(survivors)} dry_run={args.dry_run}"
     )
     return 0
