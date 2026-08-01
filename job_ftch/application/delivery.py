@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import Sink
-    from job_ftch.domain import JobRecord
+    from job_ftch.domain import DeliveryEnvelope, JobRecord
 
 
 class SinkDeliveryTarget:
@@ -22,3 +22,10 @@ class SinkDeliveryTarget:
 
     async def deliver(self, item: JobRecord) -> None:
         await self._sink.emit(item)
+
+    async def deliver_envelope(self, envelope: DeliveryEnvelope, item: JobRecord) -> None:
+        emit_envelope = getattr(self._sink, "emit_envelope", None)
+        if callable(emit_envelope):
+            await emit_envelope(envelope, item)
+            return
+        await self.deliver(item)

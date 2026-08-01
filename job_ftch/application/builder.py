@@ -249,10 +249,9 @@ def _resolve_shot_load_plans(
 class PipelineBuilder:
     """Builds pipelines programmatically for library and adapter use."""
 
-    def __init__(self) -> None:
-        from job_ftch.config import get_settings
-
-        settings = get_settings()
+    def __init__(self, settings: Settings | None = None) -> None:
+        settings = settings or get_settings()
+        self._settings = settings
         self._source_specs: list[SourceSpec] = []
         self._source_instance: Source[RawItem] | None = None
         self._auth_provider: AuthProvider | None = None
@@ -289,7 +288,7 @@ class PipelineBuilder:
         self._snapshot_fail_open = settings.snapshot_fail_open
 
     def clone(self) -> PipelineBuilder:
-        cloned = self.__class__()
+        cloned = self.__class__(settings=self._settings)
         cloned._source_specs = list(self._source_specs)
         cloned._source_instance = self._source_instance
         cloned._auth_provider = self._auth_provider
@@ -526,6 +525,7 @@ class PipelineBuilder:
             delivery_targets=self._delivery_targets,
             decision_version=self._decision_version,
             tenant_id=self._tenant_id,
+            settings=self._settings,
         )
 
     async def run_async(self, *, max_items: int | None = None) -> RunSummary:
@@ -835,7 +835,7 @@ def configure(path: str | Path) -> PipelineBuilder:
     output_sink, main_sink, review_sink, posting_sink = build_output_sinks(settings, store=store)
     rejected_counted, rejected_sink = build_rejected_sink(settings, store=store)
 
-    builder = PipelineBuilder()
+    builder = PipelineBuilder(settings=settings)
     builder.sources(tenant.sources)
     builder.auth(auth)
     builder.store(store)
@@ -2046,7 +2046,11 @@ async def run_pipeline_from_settings(settings: Settings) -> RunSummary:
     from job_ftch.application.tenant_store import TenantStore
 
     if not isinstance(store, TenantStore):
-        store = TenantStore(settings.tenant_id or "default", store)
+        store = TenantStore(
+            settings.tenant_id or "default",
+            store,
+            processed_item_ttl_hours=settings.processed_item_ttl_hours,
+        )
     try:
         job_group_store = cast(JobGroupStore, await create_job_group_store_with_fallback(settings))
         llm = build_llm(settings)
@@ -2072,7 +2076,7 @@ async def run_pipeline_from_settings(settings: Settings) -> RunSummary:
         )
         rejected_counted, rejected_sink = build_rejected_sink(settings, store=store)
         builder = (
-            PipelineBuilder()
+            PipelineBuilder(settings=settings)
             .with_runtime_source(build_source(settings, store=store))
             .store(store)
             .stage(sanitize_node)

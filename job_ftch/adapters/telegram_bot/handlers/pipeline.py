@@ -11,6 +11,7 @@ import structlog
 from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import Message
+from aiohttp.abc import AbstractResolver, ResolveResult
 from opentelemetry import context as otel_context
 from opentelemetry import trace
 from structlog.contextvars import bind_contextvars, reset_contextvars
@@ -43,6 +44,78 @@ logger = structlog.get_logger(__name__)
 router = Router(name="pipeline")
 _BOT_PUBLISH_FETCH_MULTIPLIER = 20
 _BOT_PUBLISH_FETCH_FLOOR = 100
+_TELEGRAM_LIVENESS_HOSTS = frozenset({"t.me", "telegram.me"})
+
+
+def _is_blocked_ip(ip_str: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return True
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _resolve_allowed_addresses(hostname: str | None, port: int) -> tuple[ResolveResult, ...]:
+    if not hostname:
+        return ()
+    try:
+        infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError, ValueError):
+        # Unresolvable host -> treat as not-alive (caller returns False), don't connect.
+        return ()
+
+    resolved: list[ResolveResult] = []
+    for family, _socktype, proto, _canonname, sockaddr in infos:
+        ip_str = str(sockaddr[0])
+        if _is_blocked_ip(ip_str):
+            return ()
+        resolved.append(
+            {
+                "hostname": hostname,
+                "host": ip_str,
+                "port": int(sockaddr[1]) if len(sockaddr) > 1 else port,
+                "family": family,
+                "proto": proto,
+                "flags": 0,
+            }
+        )
+    return tuple(resolved)
+
+
+class _PinnedHostResolver(AbstractResolver):
+    """aiohttp resolver that prevents a second DNS lookup from changing the peer IP."""
+
+    def __init__(self, hostname: str, addresses: tuple[ResolveResult, ...]) -> None:
+        self._hostname = hostname
+        self._addresses = addresses
+
+    async def resolve(
+        self,
+        host: str,
+        port: int = 0,
+        family: socket.AddressFamily = socket.AF_INET,
+    ) -> list[ResolveResult]:
+        del port, family
+        if host != self._hostname:
+            raise OSError("unexpected host during pinned URL liveness resolution")
+        return list(self._addresses)
+
+    async def close(self) -> None:
+        return None
+
+
+def _is_telegram_liveness_url(parsed: object) -> bool:
+    hostname = getattr(parsed, "hostname", None)
+    if not hostname:
+        return False
+    return str(hostname).rstrip(".").lower() in _TELEGRAM_LIVENESS_HOSTS
 
 
 def _host_resolves_to_blocked_ip(hostname: str | None) -> bool:
@@ -51,29 +124,7 @@ def _host_resolves_to_blocked_ip(hostname: str | None) -> bool:
     Used as an SSRF guard before issuing outbound liveness requests against URLs that
     originate from untrusted scraped content.
     """
-    if not hostname:
-        return True
-    try:
-        infos = socket.getaddrinfo(hostname, None)
-    except (socket.gaierror, UnicodeError, ValueError):
-        # Unresolvable host -> treat as not-alive (caller returns False), don't connect.
-        return True
-    for info in infos:
-        ip_str = info[4][0]
-        try:
-            ip = ipaddress.ip_address(ip_str)
-        except ValueError:
-            return True
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
-            return True
-    return False
+    return not _resolve_allowed_addresses(hostname, 0)
 
 
 async def _url_is_alive(url: str | None) -> bool:
@@ -86,17 +137,24 @@ async def _url_is_alive(url: str | None) -> bool:
     if not url:
         return False
     url_str = str(url)
-    # Telegram links can't be HEAD-checked without auth, assume alive
-    if "t.me" in url_str or "telegram.me" in url_str:
-        return True
     parsed = urlparse(url_str)
+    # Telegram links can't be HEAD-checked without auth, assume alive.
+    if _is_telegram_liveness_url(parsed):
+        return True
     if parsed.scheme not in ("http", "https"):
         return False
-    if _host_resolves_to_blocked_ip(parsed.hostname):
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
         return False
+    addresses = _resolve_allowed_addresses(parsed.hostname, port)
+    if not addresses or not parsed.hostname:
+        return False
+    resolver = _PinnedHostResolver(parsed.hostname, addresses)
+    connector = aiohttp.TCPConnector(resolver=resolver, use_dns_cache=False)
     try:
         async with (
-            aiohttp.ClientSession() as session,
+            aiohttp.ClientSession(connector=connector) as session,
             session.head(
                 url_str,
                 timeout=aiohttp.ClientTimeout(total=3),
@@ -108,6 +166,8 @@ async def _url_is_alive(url: str | None) -> bool:
             # strong enough to hide an already accepted pipeline result.
             return resp.status not in {404, 410}
     except Exception:
+        with contextlib.suppress(Exception):
+            await connector.close()
         # Delivery is fail-open: a transient DNS/timeout must not become a
         # second policy gate after DecisionNode accepted the vacancy.
         return True

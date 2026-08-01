@@ -510,7 +510,11 @@ class TenantRunner:
             tenant_settings = tenant_to_settings(tenant, settings_template)
             auth = resolve_auth_provider(tenant.auth_provider, settings=tenant_settings)
             base_store = cast("Store", create_store(tenant_settings))
-            tenant_store = TenantStore(tenant.tenant_id, base_store)
+            tenant_store = TenantStore(
+                tenant.tenant_id,
+                base_store,
+                processed_item_ttl_hours=tenant_settings.processed_item_ttl_hours,
+            )
             job_group_store = cast("JobGroupStore", create_job_group_store(tenant_settings))
             llm = cast("LLMProvider", create_llm(tenant_settings))
             embedding_provider = None
@@ -573,7 +577,7 @@ class TenantRunner:
             rejected_counted, rejected_sink = build_rejected_sink(
                 tenant_settings, store=tenant_store
             )
-            builder = PipelineBuilder()
+            builder = PipelineBuilder(settings=tenant_settings)
             builder.sources(tenant.sources)
             builder.auth(auth)
             builder.store(tenant_store)
@@ -1046,7 +1050,7 @@ class TenantRunner:
             raise RuntimeError(msg)
         snapshot_filter = _snapshot_filter
 
-        builder = PipelineBuilder()
+        builder = PipelineBuilder(settings=runtime.settings)
         builder.sources(effective_sources)
         builder.auth(runtime.auth_provider)
         builder.store(runtime.store)

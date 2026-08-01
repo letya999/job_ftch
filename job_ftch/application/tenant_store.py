@@ -116,9 +116,16 @@ def _summary_from_payload(payload: dict[str, Any], *, tenant_id: str | None = No
 class TenantStore:
     """Store wrapper that prefixes every key space with a tenant slug."""
 
-    def __init__(self, tenant_id: str, store: Store) -> None:
+    def __init__(
+        self,
+        tenant_id: str,
+        store: Store,
+        *,
+        processed_item_ttl_hours: int | None = 24,
+    ) -> None:
         self._tenant_id = tenant_id
         self._store = store
+        self._processed_item_ttl_hours = processed_item_ttl_hours
 
     def _key(self, key: str) -> str:
         return f"{self._tenant_id}:{key}"
@@ -296,13 +303,13 @@ class TenantStore:
         await self._store.save_source_ingest_state(self._tenant_id, state)
 
     async def has_processed(self, item_id: str) -> bool:
-        from job_ftch.config import get_settings
-
         connector = cast("StoreConnector", self._store)
-        ttl_hours = get_settings().processed_item_ttl_hours
         timestamp = await connector.get(self._key(_processed_timestamp_key(item_id)))
         if timestamp is not None:
-            return _is_processed_timestamp_fresh(str(timestamp), ttl_hours)
+            return _is_processed_timestamp_fresh(
+                str(timestamp),
+                self._processed_item_ttl_hours,
+            )
         return bool(await connector.set_contains(self._key("processed"), item_id))
 
     async def record_observation(self, entry: ObservationLedgerEntry) -> ObservationLedgerEntry:

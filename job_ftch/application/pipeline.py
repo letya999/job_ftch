@@ -37,7 +37,7 @@ from job_ftch.application.outbox import recover_pending_outbox
 from job_ftch.application.rejections import RawItemRejected
 from job_ftch.application.resolver import DeferredResolverQueue
 from job_ftch.application.run_budget import AsyncCallBudget
-from job_ftch.config import get_settings
+from job_ftch.config import Settings, get_settings
 from job_ftch.domain import (
     Job,
     JobExtractionStatus,
@@ -52,13 +52,19 @@ from job_ftch.domain import (
     processed_key_for_raw_item,
 )
 from job_ftch.domain.observation import ObservationLedgerEntry, content_hash_for_raw_item
-from job_ftch.domain.outbox import OutboxRecord, OutboxState, delivery_idempotency_key
+from job_ftch.domain.outbox import (
+    OutboxRecord,
+    OutboxState,
+    delivery_envelope_from_record,
+    delivery_idempotency_key,
+)
 from job_ftch.nodes.sanitize import SanitizeNode
 
 PipelineInput = TypeVar("PipelineInput")
 PipelineOutput = TypeVar("PipelineOutput")
 
 _NODE_DROP_REASON = "node_returned_none"
+_PRIMARY_SINK_TARGET_ID = "primary:sink"
 
 
 def _drop_reason(result: dict[str, Any]) -> str:
@@ -264,6 +270,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         delivery_targets: Sequence[DeliveryTarget[JobRecord]] = (),
         decision_version: str = "pipeline-v1",
         tenant_id: str = "default",
+        settings: Settings | None = None,
     ) -> None:
         if not (
             isinstance(sanitize_node, SanitizeNode)
@@ -289,9 +296,12 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self._item_concurrency = max(1, pipeline_item_concurrency)
         self._source_run_id = source_run_id
         self._active_source_run_id: str | None = source_run_id
+        self._settings = settings
         self._delivery_targets = {target.target_id: target for target in delivery_targets}
         if len(self._delivery_targets) != len(delivery_targets):
             raise ValueError("Delivery target IDs must be unique")
+        if _PRIMARY_SINK_TARGET_ID in self._delivery_targets:
+            raise ValueError(f"Delivery target ID {_PRIMARY_SINK_TARGET_ID!r} is reserved")
         self._decision_version = decision_version
         self._tenant_id = tenant_id
         self._settlement = DedupSettlementCoordinator(collect_settlement_participants(self._nodes))
@@ -299,7 +309,8 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self._tracer = trace.get_tracer("job_ftch.pipeline")
 
     async def run(self, max_items: int | None = None) -> RunSummary:
-        settings = get_settings()
+        settings = self._settings or get_settings()
+        self._decision_version = str(getattr(settings, "pipeline_decision_version", "pipeline-v1"))
         summary = RunSummary()
         summary.source_run_id = self._source_run_id or uuid4().hex
         self._active_source_run_id = summary.source_run_id
@@ -1119,15 +1130,13 @@ class Pipeline[PipelineInput, PipelineOutput]:
         outcome = SettlementOutcome.COMMIT if commit else SettlementOutcome.RELEASE
         await self._settlement.settle(str(item_id), outcome)
 
-    async def _enqueue_outbox(
-        self, item: object, delivery: object
-    ) -> tuple[tuple[str, str, OutboxState], ...]:
+    async def _enqueue_outbox(self, item: object, delivery: object) -> tuple[OutboxRecord, ...]:
         if not isinstance(item, RawItem) or not isinstance(delivery, JobRecord):
             return ()
         content_hash = content_hash_for_raw_item(item)
         payload = delivery.model_dump(mode="json") if hasattr(delivery, "model_dump") else {}
-        targets: list[tuple[str, str, OutboxState]] = []
-        for target_id in self._delivery_targets:
+        targets: list[OutboxRecord] = []
+        for target_id in (_PRIMARY_SINK_TARGET_ID, *self._delivery_targets):
             key = delivery_idempotency_key(
                 content_hash=content_hash,
                 decision_version=self._decision_version,
@@ -1146,21 +1155,40 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     delivery_payload=payload,
                 )
             )
-            targets.append((persisted.idempotency_key, target_id, persisted.state))
+            targets.append(persisted)
         return tuple(targets)
 
-    async def _emit_outbox_targets(
-        self, delivery: object, targets: tuple[tuple[str, str, OutboxState], ...]
-    ) -> None:
-        await self._sink.emit(cast("PipelineOutput", delivery))
-        for outbox_key, target_id, state in targets:
-            if state is OutboxState.DELIVERED:
+    async def _emit_outbox_targets(self, delivery: object, targets: tuple[OutboxRecord, ...]) -> None:
+        if not targets:
+            await self._sink.emit(cast("PipelineOutput", delivery))
+            return
+        for record in targets:
+            if record.state is OutboxState.DELIVERED:
                 continue
-            target = self._delivery_targets.get(target_id)
-            if target is None:
-                raise RuntimeError(f"Outbox target {target_id!r} is no longer configured")
-            await target.deliver(cast("JobRecord", delivery))
-            await self._store.mark_outbox_delivered(outbox_key)
+            await self._deliver_outbox_record(record, fallback_item=delivery)
+            await self._store.mark_outbox_delivered(record.idempotency_key)
+
+    async def _deliver_outbox_record(self, record: OutboxRecord, *, fallback_item: object) -> None:
+        try:
+            item = JobRecord.model_validate(record.delivery_payload)
+        except Exception:
+            item = cast("JobRecord", fallback_item)
+        envelope = delivery_envelope_from_record(record)
+        if record.sink_name == _PRIMARY_SINK_TARGET_ID:
+            emit_envelope = getattr(self._sink, "emit_envelope", None)
+            if callable(emit_envelope):
+                await emit_envelope(envelope, item)
+                return
+            await self._sink.emit(cast("PipelineOutput", item))
+            return
+        target = self._delivery_targets.get(record.sink_name)
+        if target is None:
+            raise RuntimeError(f"Outbox target {record.sink_name!r} is no longer configured")
+        deliver_envelope = getattr(target, "deliver_envelope", None)
+        if callable(deliver_envelope):
+            await deliver_envelope(envelope, item)
+            return
+        await target.deliver(item)
 
     async def _recover_pending_outbox(self) -> None:
         """Replay only the still-pending leaf target for each durable record."""
@@ -1174,10 +1202,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 raise ValueError(
                     f"Outbox payload for {record.idempotency_key} is not a JobRecord"
                 ) from exc
-            target = self._delivery_targets.get(record.sink_name)
-            if target is None:
-                raise RuntimeError(f"Outbox target {record.sink_name!r} is no longer configured")
-            await target.deliver(item)
+            await self._deliver_outbox_record(record, fallback_item=item)
 
         owner_id = uuid4().hex
 
