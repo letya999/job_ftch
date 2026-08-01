@@ -10,5 +10,5 @@ paths = [
   '''^job_ftch/adapters/telegram_bot/\.env(?:\.[^/]+)?\.example$''',
   '''^deploy/observability/\.env(?:\.[^/]+)?\.example$''',
   '''^job_ftch/infrastructure/sources/site_parsers/dynamitejobs\.py$''',
-  '''^\.secrets\.baseline$''',
+  '''^\.repo-safety[\\/]detect-secrets\.baseline$''',
 ]

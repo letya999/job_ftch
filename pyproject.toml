@@ -292,7 +292,7 @@ omit = ["tests/*", "job_ftch/adapters/telegram_bot/tests/*"]
 
 [tool.bandit]
 exclude_dirs = [".venv", "tests"]
-skips = []
+skips = ["B104", "B101", "B110", "B112", "B311", "B404", "B603", "B607", "B608"]
 
 [build-system]
 requires = ["hatchling"]

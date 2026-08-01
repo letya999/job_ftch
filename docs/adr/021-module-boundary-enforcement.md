@@ -22,7 +22,7 @@ runtime-адаптеры.
   - `job_ftch.application` импортирует только stdlib, `pydantic`, `job_ftch.domain.*`,
     `job_ftch.application.*`.
   - `job_ftch.nodes` не импортирует `job_ftch.infrastructure.*` и `job_ftch.adapters.*`.
-- Скрипт запускается в CI и через `.pre-commit-config.yaml`.
+- Скрипт запускается в CI и через `.repo-safety/pre-commit-config.yaml`.
 
 ## Consequences
 
