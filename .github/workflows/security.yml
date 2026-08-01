@@ -19,6 +19,7 @@ jobs:
         uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .repo-safety/gitleaks.toml
       - name: TruffleHog
         uses: trufflesecurity/trufflehog@a0fc8c812ac0389707c68603d185691c920b250a # main
         with:
