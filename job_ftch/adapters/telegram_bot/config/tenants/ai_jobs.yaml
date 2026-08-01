@@ -28,44 +28,37 @@ sources:
     entity: ai_engineers_guild
     limit: 100
     source_name: ai_engineers_guild
+  # One bare entry URL per host. Search queries are generated on the fly from the
+  # tenant's target roles by expand_career_site_specs (Tier-2 parser build_search_urls
+  # for hh/habr/geekjob/hirify/superjob, Tier-1 on-site search form for the rest).
+  # Do NOT hardcode ?text=/?q=/?keywords= here: it pins a stale query and disables
+  # that dynamic expansion.
   - type: career_site
     url: https://geekjob.ru/vacancies
     source_name: geekjob_ru
     limit: 50
   - type: career_site
-    url: https://hh.ru/search/vacancy?text=machine+learning&area=113
-    source_name: hh_ru_ml
+    url: https://hh.ru/search/vacancy
+    source_name: hh_ru
     limit: 50
   - type: career_site
-    url: https://hh.ru/search/vacancy?text=LLM+engineer&area=113
-    source_name: hh_ru_llm
+    url: https://hh.kz/search/vacancy
+    source_name: hh_kz
     limit: 50
   - type: career_site
-    url: https://hh.ru/search/vacancy?text=AI+engineer&area=113
-    source_name: hh_ru_ai_eng
+    url: https://yandex.ru/jobs/vacancies
+    source_name: yandex_jobs
     limit: 50
   - type: career_site
-    url: https://hh.ru/search/vacancy?text=MLOps&area=113
-    source_name: hh_ru_mlops
-    limit: 50
-  - type: career_site
-    url: https://hh.kz/search/vacancy?text=machine+learning
-    source_name: hh_kz_ml
-    limit: 50
-  - type: career_site
-    url: https://yandex.ru/jobs/vacancies?text=machine+learning
-    source_name: yandex_jobs_ml
-    limit: 50
-  - type: career_site
-    url: https://www.superjob.ru/vacancy/search/?keywords=machine+learning
-    source_name: superjob_ru_ml
+    url: https://www.superjob.ru/vacancy/search/
+    source_name: superjob_ru
     limit: 50
   - type: career_site
     url: https://rabota.sber.ru/search
     source_name: rabota_sber_ru
     limit: 50
   - type: career_site
-    url: https://www.tbank.ru/career/vacancies/it/?tcareer_it_profession=ml
+    url: https://www.tbank.ru/career/vacancies/it/
     source_name: tbank_it
     limit: 50
   - type: career_site
@@ -77,16 +70,8 @@ sources:
     source_name: avito_careers
     limit: 50
   - type: career_site
-    url: https://career.habr.com/vacancies?q=machine+learning
-    source_name: habr_career_ml
-    limit: 50
-  - type: career_site
-    url: https://career.habr.com/vacancies/data_scientist
-    source_name: habr_career_ds
-    limit: 50
-  - type: career_site
-    url: https://career.habr.com/vacancies?q=LLM
-    source_name: habr_career_llm
+    url: https://career.habr.com/vacancies
+    source_name: habr_career
     limit: 50
   - type: career_site
     url: https://kolesa.group/career/job

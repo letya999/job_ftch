@@ -1,5 +1,5 @@
 schema_version: production-pipeline-recipe/v1
-updated: '2026-07-29'
+updated: '2026-08-01'
 name: ai_jobs_mvp_precision_recipe
 tenant_id: ai_jobs
 profile_owner_user_id: '480637186'
@@ -36,7 +36,7 @@ oss_reproduction:
   test_user_telegram_id: 100000001
   test_user_tenant_id: ai_jobs
   tenant_fixture: fixtures/bootstrap/tenant_ai_jobs.yaml
-  tenant_fixture_source_count: 22
+  tenant_fixture_source_count: 17
   sources_fixture: fixtures/sources/ai_jobs.json
   controlled_dataset: fixtures/dataset/eval_dataset_fixed140_locked_v1.jsonl
   prefilter_training_dataset: fixtures/dataset/eval_dataset.jsonl
@@ -104,33 +104,28 @@ controlled_eval:
     cost_is_complete: true
 
 live_run:
-  description: Telegram /run equivalent over 22 live sources; metrics are manual labels over terminal decision set only.
+  description: Telegram /run equivalent over 17 live sources; metrics are manual labels over terminal decision set only.
   command: >-
     uv run python scripts/run_bot_ingest.py --tenant ai_jobs --runtime prod
     --configs-dir job_ftch/adapters/telegram_bot/config/tenants
-    --report-path artifacts/release/prod_run_live_22_clean_YYYYMMDD.json
+    --report-path artifacts/release/prod_run_live_17_clean_YYYYMMDD.json
   local_postgres_note: source preparation is intentionally serialized in prod/dev runtime to avoid host-to-docker asyncpg connect timeouts on local Postgres.
   sources_fixture: fixtures/sources/ai_jobs.json
-  sources_fixture_sha256: 518e5917a6d2a2df1b667ce6648ab3d842131c621eb6d291775882350f36a29c  # pragma: allowlist secret -- sources fixture content hash
-  source_count: 22
+  sources_fixture_sha256: 4102fcb84e9cf40855a1879eb002f22912710db796b95dd0be4615e07e2e0ec2  # pragma: allowlist secret -- sources fixture content hash
+  source_count: 17
   source_ids:
     - career_site:avito_careers
     - career_site:geekjob_ru
-    - career_site:habr_career_ds
-    - career_site:habr_career_llm
-    - career_site:habr_career_ml
-    - career_site:hh_kz_ml
-    - career_site:hh_ru_ai_eng
-    - career_site:hh_ru_llm
-    - career_site:hh_ru_ml
-    - career_site:hh_ru_mlops
+    - career_site:habr_career
+    - career_site:hh_kz
+    - career_site:hh_ru
     - career_site:hirify_me
     - career_site:kolesa_group
     - career_site:rabota_sber_ru
-    - career_site:superjob_ru_ml
+    - career_site:superjob_ru
     - career_site:tbank_it
     - career_site:vk_careers
-    - career_site:yandex_jobs_ml
+    - career_site:yandex_jobs
     - telegram_channel:forproducts
     - telegram_channel:gleb_pro_ai
     - telegram_channel:ml_jobs_kz
