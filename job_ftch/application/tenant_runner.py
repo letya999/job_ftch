@@ -178,9 +178,11 @@ def _update_source_health_payload(
     # ratio is therefore failed/fetched, never failed/(fetched+failed) — the latter
     # double-counts the failed items in the denominator and can never cross 0.5, so the
     # majority branch was effectively unreachable.
-    if stats.failed > stats.fetched:
-        # Counters are meant to satisfy failed <= fetched. A violation means an upstream
-        # accounting bug; surface it instead of letting it skew the ratio silently.
+    if stats.fetched > 0 and stats.failed > stats.fetched:
+        # Item-level failures are a subset of fetched, so failed <= fetched must hold
+        # once anything was fetched. `fetched == 0 and failed > 0` is a normal
+        # source-level failure (the source crashed before pulling items), not an
+        # accounting bug, so only a non-zero fetched with failed > fetched is surfaced.
         logger.warning(
             "source_health_counter_invariant_violated",
             source_id=source_id,

@@ -1,7 +1,7 @@
 ---
 title: "Рецепт production-пайплайна"
 description: "Зафиксированный рецепт ai_jobs: тестовый пользователь, тенант, источники, датасет, граф, настройки, метрики и регрессионные проверки."
-updated: 2026-07-29
+updated: 2026-08-01
 ---
 # Рецепт production-пайплайна
 
@@ -17,7 +17,7 @@ updated: 2026-07-29
 | Тестовый пользователь | `fixtures/bootstrap/test_user.json` |
 | OSS tenant fixture | `fixtures/bootstrap/tenant_ai_jobs.yaml` |
 | Live tenant config | `job_ftch/adapters/telegram_bot/config/tenants/ai_jobs.yaml` |
-| Источники | `fixtures/sources/ai_jobs.json`, 22 источника |
+| Источники | `fixtures/sources/ai_jobs.json`, 17 источников |
 | Датасет controlled eval | `fixtures/dataset/eval_dataset_fixed140_locked_v1.jsonl` |
 | Датасет обучения prefilter | `fixtures/dataset/eval_dataset.jsonl` |
 | Граф | `config/pipelines/evidence_v2_compact_prefilter.yaml` |
@@ -29,10 +29,11 @@ updated: 2026-07-29
 
 Для open source воспроизводимости используйте fixture-пару
 `fixtures/bootstrap/test_user.json` + `fixtures/bootstrap/tenant_ai_jobs.yaml`.
-Она указывает на тестового пользователя и явно содержит те же 22 источника,
+Она указывает на тестового пользователя и явно содержит те же 17 источников,
 что и `fixtures/sources/ai_jobs.json`. Live tenant config тоже содержит эти
-22 источника, чтобы production `/run` был наполняемым сразу после заполнения
-секретов и профиля пользователя.
+17 источников, чтобы production `/run` был наполняемым сразу после заполнения
+секретов и профиля пользователя. Career-site источники хранятся как bare entry
+URLs; runtime expansion каждый запуск строит актуальные per-role search URLs.
 
 ## Как воспроизвести controlled eval
 
@@ -116,7 +117,7 @@ uv run python scripts/eval/promote_champion_recipe.py `
 
 Эта команда повторяет Telegram `/run` через `TenantRunner`, но не отправляет
 сообщения в Telegram. Она отвечает на вопрос “что даст production на живых
-22 источниках сейчас?”.
+17 источниках сейчас?”.
 
 Перед первым live-запуском проверьте, что tenant, runtime, storage и профиль
 готовы:
@@ -134,7 +135,7 @@ uv run python scripts/run_bot_ingest.py `
   --tenant ai_jobs `
   --runtime prod `
   --configs-dir job_ftch/adapters/telegram_bot/config/tenants `
-  --report-path artifacts/release/prod_run_live_22_clean_YYYYMMDD.json
+  --report-path artifacts/release/prod_run_live_17_clean_YYYYMMDD.json
 ```
 
 Для recipe-замера не передавайте `--no-clean`: скрипт должен очистить run data

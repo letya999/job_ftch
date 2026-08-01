@@ -1,7 +1,7 @@
 ---
 title: "Source Setup"
 description: "Prefer declarative source setup through `SourceSpec` entries inside a tenant YAML file."
-updated: 2026-07-28
+updated: 2026-08-01
 ---
 # Source Setup
 
@@ -15,7 +15,7 @@ Use env-only source selection for quick local runs, not as the main installation
 For searching AI engineers, vibe-coders, AI automation engineers, AI product builders,
 and AI managers across Russia and Kazakhstan, use the canonical fixture:
 
-**`fixtures/sources/ai_jobs.json`** — 22 sources (5 Telegram/group + 17 career-site searches/boards),
+**`fixtures/sources/ai_jobs.json`** — 17 sources (5 Telegram/group + 12 career-site bare entry URLs),
 committed to the repository. See [Source Coverage Matrix](coverage_matrix.md#default-fixture--ai-engineers--vibe-coders--ai-automation--ai-managers-cis)
 for the full table and a smoke-test recipe.
 
@@ -30,6 +30,10 @@ This is the authoritative starting point for:
 - eval runs that target the AI/LLM engineering market in CIS
 - ingest smoke tests before pushing to production
 - manual pipeline verification after changes to the relevance or extraction layer
+
+Career-site entries are intentionally bare per host/path. Runtime expansion
+generates per-role search URLs on each run instead of storing stale `?text=`,
+`?q=` or `?keywords=` queries in the fixture.
 
 For another profession, do not reuse this source/profile recipe as-is. Build a
 profession-specific tenant onboarding package first:

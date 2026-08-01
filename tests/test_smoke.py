@@ -2,6 +2,7 @@
 
 import importlib
 import os
+import subprocess
 
 from pytest import MonkeyPatch
 
@@ -46,3 +47,10 @@ def test_config_loads(monkeypatch: MonkeyPatch) -> None:
     assert s.source_backend == "local_fixture"
     assert s.sink_backend == "json_file"
     assert s.log_level == "INFO"
+
+
+def test_repo_safety_layout_contract() -> None:
+    subprocess.run(
+        ["python", "scripts/verify_repo_safety_layout.py"],
+        check=True,
+    )

@@ -31,6 +31,7 @@
 - NO: "WIP", "update", "fix stuff", "changes", emojis in subject line
 
 ## Before submitting PR
+- `uv run pre-commit run -c .repo-safety/pre-commit-config.yaml --all-files` passes
 - `uv run ruff check .` passes
 - `uv run ruff format --check .` passes
 - `uv run mypy .` passes
@@ -70,6 +71,7 @@ Write ADR in `docs/adr/` before implementing significant changes.
 - Примеры: `feat(sources): add telegram channel source`, `fix(dedup): handle None url gracefully`
 
 ## Перед отправкой PR
+- `uv run pre-commit run -c .repo-safety/pre-commit-config.yaml --all-files` проходит
 - `uv run ruff check .` проходит
 - `uv run ruff format --check .` проходит
 - `uv run mypy .` проходит
