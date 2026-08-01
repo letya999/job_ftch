@@ -26,37 +26,27 @@ sources:
     entity: ai_engineers_guild
     limit: 100
     source_name: ai_engineers_guild
+  # Bare entry URL per host; target-role search is generated on the fly by
+  # expand_career_site_specs. Do not hardcode ?text=/?q=/?keywords= here.
   - type: career_site
     url: https://geekjob.ru/vacancies
     source_name: geekjob_ru
     limit: 50
   - type: career_site
-    url: https://hh.ru/search/vacancy?text=machine+learning&area=113
-    source_name: hh_ru_ml
+    url: https://hh.ru/search/vacancy
+    source_name: hh_ru
     limit: 50
   - type: career_site
-    url: https://hh.ru/search/vacancy?text=LLM+engineer&area=113
-    source_name: hh_ru_llm
+    url: https://hh.kz/search/vacancy
+    source_name: hh_kz
     limit: 50
   - type: career_site
-    url: https://hh.ru/search/vacancy?text=AI+engineer&area=113
-    source_name: hh_ru_ai_eng
+    url: https://yandex.ru/jobs/vacancies
+    source_name: yandex_jobs
     limit: 50
   - type: career_site
-    url: https://hh.ru/search/vacancy?text=MLOps&area=113
-    source_name: hh_ru_mlops
-    limit: 50
-  - type: career_site
-    url: https://hh.kz/search/vacancy?text=machine+learning
-    source_name: hh_kz_ml
-    limit: 50
-  - type: career_site
-    url: https://yandex.ru/jobs/vacancies?text=machine+learning
-    source_name: yandex_jobs_ml
-    limit: 50
-  - type: career_site
-    url: https://www.superjob.ru/vacancy/search/?keywords=machine+learning
-    source_name: superjob_ru_ml
+    url: https://www.superjob.ru/vacancy/search/
+    source_name: superjob_ru
     limit: 50
   - type: career_site
     url: https://rabota.sber.ru/search
@@ -75,16 +65,8 @@ sources:
     source_name: avito_careers
     limit: 50
   - type: career_site
-    url: https://career.habr.com/vacancies?q=machine+learning
-    source_name: habr_career_ml
-    limit: 50
-  - type: career_site
-    url: https://career.habr.com/vacancies/data_scientist
-    source_name: habr_career_ds
-    limit: 50
-  - type: career_site
-    url: https://career.habr.com/vacancies?q=LLM
-    source_name: habr_career_llm
+    url: https://career.habr.com/vacancies
+    source_name: habr_career
     limit: 50
   - type: career_site
     url: https://kolesa.group/career/job

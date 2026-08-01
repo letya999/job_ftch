@@ -1,7 +1,7 @@
 ---
 title: "Релизный чеклист"
 description: "Исполняемый релизный чеклист: локальные gates, docs/config parity, production recipe и deploy contract."
-updated: 2026-07-28
+updated: 2026-08-01
 ---
 # Релизный чеклист
 
@@ -23,7 +23,7 @@ ai-repo-safety scan --target .
 - production graph: `config/pipelines/evidence_v2_compact_prefilter.yaml`;
 - hash в `config/runtime.prod.yaml` совпадает с recipe.
 - live tenant `job_ftch/adapters/telegram_bot/config/tenants/ai_jobs.yaml`
-  содержит те же 22 source ids, что и `fixtures/sources/ai_jobs.json`.
+  содержит те же 17 source ids, что и `fixtures/sources/ai_jobs.json`.
 
 ## 2. Локальные gates
 

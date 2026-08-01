@@ -1,7 +1,7 @@
 ---
 title: "Source Coverage Matrix"
 description: "Operational guidance for the heavy career-site boards that were the main"
-updated: 2026-07-27
+updated: 2026-08-01
 ---
 # Source Coverage Matrix
 
@@ -16,8 +16,9 @@ strategy per board so operators do not have to reverse-engineer it from logs.
 the pipeline against CIS-region roles: AI engineers, LLM engineers, vibe-coders,
 AI automation engineers, AI product builders, and AI managers.
 
-The fixture was expanded to 22 sources on 2026-07-29 to widen `hh.ru` and
-`Habr Career` query coverage.
+The fixture was normalised to 17 sources on 2026-08-01: one bare entry URL per
+career-site host/path, with per-role search generated at runtime by source
+expansion.
 
 Load programmatically:
 
@@ -36,22 +37,17 @@ sources = load_sources(Path("fixtures/sources/ai_jobs.json"))
 | 4 | `gleb_pro_ai` | telegram_channel | `@gleb_pro_ai` | AI engineering community |
 | 5 | `ai_engineers_guild` | telegram_group | `@ai_engineers_guild` | AI engineers, 700+ members |
 | 6 | `geekjob_ru` | career_site | geekjob.ru/vacancies | RU tech market |
-| 7 | `hh_ru_ml` | career_site | hh.ru (ML search, area=113) | RU nationwide |
-| 8 | `hh_ru_llm` | career_site | hh.ru (LLM search, area=113) | RU nationwide |
-| 9 | `hh_ru_ai_eng` | career_site | hh.ru (AI engineer search, area=113) | RU nationwide |
-| 10 | `hh_ru_mlops` | career_site | hh.ru (MLOps search, area=113) | RU nationwide |
-| 11 | `hh_kz_ml` | career_site | hh.kz (ML search) | KZ nationwide |
-| 12 | `yandex_jobs_ml` | career_site | yandex.ru/jobs | RU Big Tech |
-| 13 | `superjob_ru_ml` | career_site | superjob.ru | RU nationwide |
-| 14 | `rabota_sber_ru` | career_site | rabota.sber.ru | RU — Sberbank group |
-| 15 | `tbank_it` | career_site | tbank.ru/career/it | RU — T-Bank |
-| 16 | `vk_careers` | career_site | team.vk.company/vacancy | RU Big Tech |
-| 17 | `avito_careers` | career_site | career.avito.com/vacancies | RU — Avito |
-| 18 | `habr_career_ml` | career_site | career.habr.com (ML search) | RU tech market |
-| 19 | `habr_career_ds` | career_site | career.habr.com (Data Scientist) | RU tech market |
-| 20 | `habr_career_llm` | career_site | career.habr.com (LLM search) | RU tech market |
-| 21 | `kolesa_group` | career_site | kolesa.group/career/job | KZ — Kolesa Group |
-| 22 | `hirify_me` | career_site | hirify.me/jobs-in-russia | Russia AI/ML engineering market |
+| 7 | `hh_ru` | career_site | hh.ru/search/vacancy | RU nationwide |
+| 8 | `hh_kz` | career_site | hh.kz/search/vacancy | KZ nationwide |
+| 9 | `yandex_jobs` | career_site | yandex.ru/jobs/vacancies | RU Big Tech |
+| 10 | `superjob_ru` | career_site | superjob.ru/vacancy/search | RU nationwide |
+| 11 | `rabota_sber_ru` | career_site | rabota.sber.ru/search | RU — Sberbank group |
+| 12 | `tbank_it` | career_site | tbank.ru/career/vacancies/it | RU — T-Bank |
+| 13 | `vk_careers` | career_site | team.vk.company/vacancy | RU Big Tech |
+| 14 | `avito_careers` | career_site | career.avito.com/vacancies | RU — Avito |
+| 15 | `habr_career` | career_site | career.habr.com/vacancies | RU tech market |
+| 16 | `kolesa_group` | career_site | kolesa.group/career/job | KZ — Kolesa Group |
+| 17 | `hirify_me` | career_site | hirify.me/jobs-in-russia | Russia AI/ML engineering market |
 
 ### Smoke test with this fixture
 

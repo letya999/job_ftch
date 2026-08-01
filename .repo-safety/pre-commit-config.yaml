@@ -24,6 +24,8 @@ repos:
     hooks:
       - id: gitleaks
         name: gitleaks - detect hardcoded secrets
+        args:
+          - '--config=.repo-safety/gitleaks.toml'
 
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
@@ -31,7 +33,9 @@ repos:
       - id: detect-secrets
         args:
           - '--baseline'
-          - '.secrets.baseline'
+          - '.repo-safety/detect-secrets.baseline'
+          - '--exclude-files'
+          - '^\.repo-safety[\\/]detect-secrets\.baseline$'
           # These versioned artifacts intentionally contain SHA-256 content
           # identities on nearly every line; entropy detection is not useful
           # for them. Gitleaks and the sensitive-file guard still scan them.
