@@ -4,6 +4,48 @@ All notable changes to job_ftch are documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2026-08-01
+
+Релиз добивает фактический production-путь публикации и приводит source set к
+динамической модели поиска. Главный пользовательский эффект: Telegram-бот теперь
+отправляет тот же YAML-формат карточек, который был добавлен в `0.0.6`, а
+career-site источники больше не пинят устаревающие поисковые query прямо в
+tenant config.
+
+### Добавлено
+
+- **Регрессионный тест sender layout**: bot senders проверяются на новый
+  YAML-рендер карточек по умолчанию, чтобы публикационный путь не откатывался в
+  legacy formatter молча.
+- **Source maintenance tooling**: добавлены batch import и host/path-dedup prune
+  скрипты для tenant/runtime sources, включая dry-run, disable duplicates и
+  повторную source assessment пробу выживших источников.
+- **Repo-safety layout validator**: локальные safety-конфиги и baseline
+  проверяются отдельным smoke-тестом и входят в security gate.
+
+### Изменено
+
+- **Production source set нормализован до 17 источников**: `hh.ru`, `hh.kz`,
+  `career.habr.com` и другие карьерные сайты представлены одним bare entry URL
+  на хост, а per-role search генерируется runtime-экспандером на каждом запуске.
+- **Recipe/fixtures parity**: live tenant config, bootstrap tenant fixture,
+  `fixtures/sources/ai_jobs.json` и production recipe снова описывают один и тот
+  же 17-source набор.
+- **Repo-safety конфиги перенесены под `.repo-safety/`**: renovate, gitleaks,
+  detect-secrets и pre-commit layout приведены к канонической структуре, а
+  security workflow получил соответствующие пути.
+
+### Исправлено
+
+- **Telegram bot senders используют YAML layout по умолчанию**: `TelegramCardSender`
+  и `ReplyCardSender` теперь грузят `load_layout()` так же, как sink; fallback в
+  legacy renderer остаётся только для невалидных карточек и логируется.
+- **Tenant warning по source counters** больше не срабатывает на source-level
+  failures, которые не обязаны увеличивать item counters.
+- **Prune ranking** предпочитает config-origin bare sources runtime-дубликатам и
+  дедуплицирует по `host+path`, чтобы не отключать отдельные employer/job boards
+  на том же домене.
+
 ## [0.0.6] - 2026-07-31
 
 Публикационный слой плюс надёжность и укрепление цепочки поставок. Релиз

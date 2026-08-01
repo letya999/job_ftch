@@ -1,5 +1,5 @@
 schema_version: production-pipeline-recipe/v1
-updated: '2026-07-29'
+updated: '2026-08-01'
 name: ai_jobs_mvp_precision_recipe
 tenant_id: ai_jobs
 profile_owner_user_id: '480637186'
@@ -104,11 +104,11 @@ controlled_eval:
     cost_is_complete: true
 
 live_run:
-  description: Telegram /run equivalent over 22 live sources; metrics are manual labels over terminal decision set only.
+  description: Telegram /run equivalent over 17 live sources; metrics are manual labels over terminal decision set only.
   command: >-
     uv run python scripts/run_bot_ingest.py --tenant ai_jobs --runtime prod
     --configs-dir job_ftch/adapters/telegram_bot/config/tenants
-    --report-path artifacts/release/prod_run_live_22_clean_YYYYMMDD.json
+    --report-path artifacts/release/prod_run_live_17_clean_YYYYMMDD.json
   local_postgres_note: source preparation is intentionally serialized in prod/dev runtime to avoid host-to-docker asyncpg connect timeouts on local Postgres.
   sources_fixture: fixtures/sources/ai_jobs.json
   sources_fixture_sha256: 4102fcb84e9cf40855a1879eb002f22912710db796b95dd0be4615e07e2e0ec2  # pragma: allowlist secret -- sources fixture content hash
