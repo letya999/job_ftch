@@ -1,0 +1,63 @@
+# CIS source enrichment batch for tenant ai_jobs (AI-automation + job-search profile).
+# Focus: RU / KZ / UZ primary, BY secondary. Aggregators + top employers (fintech,
+# telecom, big tech/product, AI startups). Consumed by scripts/import_sources.py,
+# which turns each URL into a typed SourceSpec and registers it through
+# TenantRunner.add_source_spec (runs source assessment, then persists to the store).
+# Already-configured sources are skipped idempotently by source_id.
+urls:
+  # --- RU aggregators ---
+  - https://hh.ru/search/vacancy
+  - https://career.habr.com/vacancies
+  - https://getmatch.ru/vacancies
+  - https://geekjob.ru/vacancies
+  - https://hirehi.ru/
+  - https://trudvsem.ru/vacancy/search
+  - https://www.superjob.ru/vakansii/
+  # --- KZ aggregators ---
+  - https://hh.kz/search/vacancy
+  - https://astanahub.com/vacancy/
+  - https://www.enbek.kz/ru/search/vacancy
+  - https://rabota.kz/
+  - https://jumys.kaspi.kz/rabota/vakansii/
+  - https://kazahstan.gorodrabot.kz/
+  - https://qyzmet.kz/
+  # --- RU fintech ---
+  - https://sber.rabota.ru/
+  - https://www.tbank.ru/career/vacancies/it/
+  - https://job.alfabank.ru/vacancies/digital
+  - https://rabota.vtb.ru/career-it/
+  - https://www.gazprombank.tech/vacancies/
+  - https://hr.tochka.com/vacancies/it/
+  # --- RU telecom ---
+  - https://job.mts.ru/
+  - https://job.beeline.ru/vacancies
+  - https://job.megafon.ru/
+  - https://company.rt.ru/career/vacancy/
+  - https://careers.t2.ru/
+  # --- RU big tech / product / AI ---
+  - https://yandex.ru/jobs/vacancies
+  - https://team.vk.company/vacancy/
+  - https://www.avito.ru/company/job/vacancies
+  - https://career.ozon.ru/
+  - https://career.habr.com/companies/rwb/vacancies
+  - https://career.x5.tech/
+  - https://cloud.ru/career/vacancies
+  - https://job.2gis.ru/vacancies
+  - https://careers.kaspersky.ru/ru/vacancies
+  - https://careers.just-ai.com/
+  - https://airi.net/ru/hr/
+  # --- KZ employers ---
+  - https://job.kaspi.kz/search
+  - https://career.forte.kz/ru
+  - https://www.bcc.kz/career/vacancies/
+  - https://halykbank.kz/
+  - https://people.beeline.kz/
+  - https://jobs.kcell.kz/
+  - https://job.tele2.kz/
+  - https://careers.indrive.com/vacancies/
+  - https://careers.higgsfield.kz/
+  - https://kolesa.group/career/job
+  - https://plata.careers/vacancy
+  - https://btsdigital.kz/ru/career
+  - https://documentolog.com/en/vacancies
+  - https://www.epam.com/careers/locations/kazakhstan

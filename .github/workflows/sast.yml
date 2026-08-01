@@ -39,4 +39,4 @@ jobs:
           sudo mv opengrep /usr/local/bin/opengrep
           opengrep --version
       - name: Run repository safety rules
-        run: opengrep --config .repo-safety/opengrep .
+        run: opengrep --config .repo-safety/opengrep --exclude .repo-safety/opengrep .

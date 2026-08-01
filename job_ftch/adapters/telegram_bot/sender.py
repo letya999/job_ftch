@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import structlog
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 
 from job_ftch.adapters.telegram_bot.formatter import format_vacancy_card
 from job_ftch.application.channel_publisher import FatalTargetError, TransientSendError
 from job_ftch.publication.card import build_card
-from job_ftch.publication.layout import CardLayout
+from job_ftch.publication.layout import CardLayout, load_layout
 from job_ftch.publication.render import render_card
 from job_ftch.publication.validate import validate_card
 
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 
     from job_ftch.domain import Job
 
+logger = structlog.get_logger(__name__)
+
 
 def _translate(error: Exception) -> Exception:
     """Map aiogram failures onto the transport-neutral publisher contract."""
@@ -35,14 +38,34 @@ def _translate(error: Exception) -> Exception:
     return error
 
 
+def _render_with_layout(job: Job, layout: CardLayout, profile: str) -> str:
+    """Render the YAML card, degrading to the legacy card on any failure.
+
+    A card that cannot be built or fails validation must not drop the job: fall
+    back to ``format_vacancy_card`` and log, so the failure is visible instead of
+    silently swallowed the way the missing-layout default used to swallow it.
+    """
+    try:
+        card = build_card(job)
+        if not validate_card(card, layout).ok:
+            logger.warning("card_validation_failed", job=str(getattr(job, "title", "")))
+            return format_vacancy_card(job)
+        return render_card(card, layout, profile=profile)
+    except Exception as exc:  # noqa: BLE001 - never lose a job over a render error
+        logger.warning("card_render_failed", error=str(exc))
+        return format_vacancy_card(job)
+
+
 class TelegramCardSender:
     """Publishes a card to an arbitrary chat or channel id.
 
     ``markup_for`` lets the caller attach per-job buttons - the reader feedback control -
     without this transport knowing what they mean. Returning None keeps the plain card.
 
-    When ``layout`` is provided the new YAML-driven renderer is used; otherwise
-    falls back to the legacy ``format_vacancy_card``.
+    The YAML-driven renderer (``config/publication/card.yaml``) is loaded by
+    default, matching ``TelegramPostingSink``; pass an explicit ``layout`` to
+    override it. ``_render`` still degrades to the legacy card only if a layout
+    cannot be resolved or a card fails validation.
     """
 
     def __init__(
@@ -55,7 +78,7 @@ class TelegramCardSender:
     ) -> None:
         self._bot = bot
         self._markup_for = markup_for
-        self._layout = layout
+        self._layout = layout or load_layout()
         self._profile = profile
 
     async def send(self, target: str, job: Job) -> None:
@@ -72,13 +95,7 @@ class TelegramCardSender:
             raise _translate(error) from error
 
     def _render(self, job: Job) -> str:
-        if self._layout is None:
-            return format_vacancy_card(job)
-        pub_card = build_card(job)
-        outcome = validate_card(pub_card, self._layout)
-        if not outcome.ok:
-            return format_vacancy_card(job)
-        return render_card(pub_card, self._layout, profile=self._profile)
+        return _render_with_layout(job, self._layout, self._profile)
 
 
 class ReplyCardSender:
@@ -96,7 +113,7 @@ class ReplyCardSender:
         profile: str = "control_bot",
     ) -> None:
         self._message = message
-        self._layout = layout
+        self._layout = layout or load_layout()
         self._profile = profile
 
     async def send(self, _target: str, job: Job) -> None:
@@ -111,10 +128,4 @@ class ReplyCardSender:
             raise _translate(error) from error
 
     def _render(self, job: Job) -> str:
-        if self._layout is None:
-            return format_vacancy_card(job)
-        pub_card = build_card(job)
-        outcome = validate_card(pub_card, self._layout)
-        if not outcome.ok:
-            return format_vacancy_card(job)
-        return render_card(pub_card, self._layout, profile=self._profile)
+        return _render_with_layout(job, self._layout, self._profile)
