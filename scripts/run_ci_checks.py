@@ -41,9 +41,7 @@ COMMANDS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("bandit", "-r", "job_ftch", "scripts/check_module_boundaries.py", "-ll"),
         ("pip-audit", "--ignore-vuln", "GHSA-w596-868m-8v6m"),
     ),
-    "repo-safety": (
-        (sys.executable, "scripts/verify_repo_safety_layout.py"),
-    ),
+    "repo-safety": ((sys.executable, "scripts/verify_repo_safety_layout.py"),),
     "core-import": (
         (
             sys.executable,

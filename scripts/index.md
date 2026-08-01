@@ -81,3 +81,4 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [verify_browser_runtime.py](verify_browser_runtime.py)
 - [verify_model_runtime.py](verify_model_runtime.py)
 - [verify_observability_run.py](verify_observability_run.py)
+- [verify_repo_safety_layout.py](verify_repo_safety_layout.py)
