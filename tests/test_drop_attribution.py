@@ -12,6 +12,7 @@ import pytest
 
 from job_ftch.adapters.telegram_bot.handlers.pipeline import _split_drop_buckets
 from job_ftch.application.pipeline import Pipeline, _drop_reason
+from job_ftch.application.run_report import split_drop_buckets
 from job_ftch.domain.models import RawItem, SourceKind
 from job_ftch.nodes.sanitize import SanitizeNode
 from job_ftch.sinks.json_file import JsonFileSink
@@ -81,6 +82,39 @@ def test_split_drop_buckets_separates_seen_from_non_vacancy() -> None:
     assert already_seen == 215
     assert non_vacancy == 13
     assert other == 4
+
+
+@pytest.mark.unit
+def test_split_drop_buckets_counts_raw_seen_and_duplicate_reasons_as_seen() -> None:
+    already_seen, non_vacancy, other = _split_drop_buckets(
+        {
+            "already_seen": 682,
+            "duplicate_content": 909,
+            "duplicate_url": 2,
+            "duplicate_near_match": 1,
+            "low_relevance_prefilter": 21,
+        }
+    )
+    assert already_seen == 1594
+    assert non_vacancy == 0
+    assert other == 21
+
+
+@pytest.mark.unit
+def test_runtime_drop_buckets_separate_low_relevance_from_other_drops() -> None:
+    buckets = split_drop_buckets(
+        {
+            "already_seen": 10,
+            "node_returned_none:garbage": 3,
+            "low_relevance_prefilter": 2,
+            "source_hard_deadline_exceeded": 1,
+        }
+    )
+
+    assert buckets.already_seen == 10
+    assert buckets.non_vacancy == 3
+    assert buckets.low_relevance == 2
+    assert buckets.other == 1
 
 
 @pytest.mark.unit

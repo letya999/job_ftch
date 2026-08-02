@@ -807,6 +807,12 @@ class TenantRunner:
             "last_publish_sent": await _read_runtime_state(
                 runtime, "bot_scheduler:last_publish_sent"
             ),
+            "last_publish_skipped_at": await _read_runtime_state(
+                runtime, "bot_scheduler:last_publish_skipped_at"
+            ),
+            "last_publish_skipped_reason": await _read_runtime_state(
+                runtime, "bot_scheduler:last_publish_skipped_reason"
+            ),
         }
 
     async def update_posting_config(self, tenant_id: str, channel: str) -> None:

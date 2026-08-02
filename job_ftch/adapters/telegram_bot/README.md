@@ -8,6 +8,8 @@ the shared runtime image.
 ## What it does
 
 - On-demand pipeline execution to discover and filter jobs.
+- Tenant scheduler execution with channel publishing.
+- Private owner reports after every completed scheduled run.
 - Resume upload and per-source management.
 
 ### Commands
@@ -22,9 +24,33 @@ the shared runtime image.
   текстовый список показывает все источники целиком.
 - `/run` — Запустить поиск сейчас
 - `/clear` — Очистить историю
+- `/schedule` — Настроить частоту автозапуска и посмотреть последний scheduler status
+- `/channel` — Настроить канал публикации вакансий
 - `/feedback` — Обратная связь на опубликованные вакансии (только админ)
 
-*Note: The scheduler is a separate CLI mode (`job-ftch scheduler`). The bot only runs on-demand via `/run`.*
+### Scheduled runs
+
+The production bot process owns the tenant scheduler loop. A scheduled run uses
+the configured publish owner's profile (`publish_user_id`) so it follows the
+same profile-aware filtering as manual `/run`.
+
+After every completed scheduled run, the bot sends a private report to the
+publish owner chat, not to the public channel. The report reuses the shared
+runtime report buckets used by `/run`:
+
+- `Уже видели` — snapshot/dedup/already-seen drops, including duplicate content.
+- `Не-вакансии` — explicit non-vacancy/content-policy drops.
+- `Низкая релевантность` — relevance-prefilter drops.
+- `Прочие дропы` — remaining controlled drops and operational source drops.
+
+If a run emits zero jobs and there is no pending publish retry window, channel
+publication is skipped deliberately. The scheduler persists that as:
+
+- `bot_scheduler:last_publish_skipped_at`
+- `bot_scheduler:last_publish_skipped_reason`
+
+`/schedule` shows these fields so a successful no-output run does not look like
+a silent publishing failure.
 
 ### Обратная связь на вакансии
 

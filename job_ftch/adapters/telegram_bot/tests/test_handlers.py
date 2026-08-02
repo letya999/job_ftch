@@ -256,6 +256,8 @@ async def test_cmd_schedule_shows_last_scheduler_status() -> None:
             "last_publish_success_at": "2026-06-30T10:06:00+00:00",
             "last_publish_error": "channel forbidden",
             "last_publish_sent": "2",
+            "last_publish_skipped_at": "2026-06-30T14:05:00+00:00",
+            "last_publish_skipped_reason": "no_new_jobs",
         }
     )
 
@@ -269,6 +271,7 @@ async def test_cmd_schedule_shows_last_scheduler_status() -> None:
     assert "Последняя попытка:" in text
     assert "Найдено в последнем auto-run: 7" in text
     assert "Опубликовано в канал: 2" in text
+    assert "Последняя публикация пропущена: no_new_jobs" in text
     assert "Ошибка run: run failed" in text
     assert "Ошибка публикации: channel forbidden" in text
 
@@ -871,6 +874,56 @@ async def test_run_pipeline_reports_persistence_contract_violation() -> None:
     assert "приняты пайплайном, но не появились в выдаче" in status_text
     assert "/clear" not in status_text
     assert runner.latest_jobs.await_count == 1
+
+
+async def test_run_pipeline_reports_seen_items_and_recent_auto_publish() -> None:
+    from job_ftch.adapters.telegram_bot.handlers.pipeline import run_pipeline_for_chat
+
+    runner = MagicMock()
+    runner.get_selected_tenant_id = AsyncMock(return_value="test_tenant")
+    runner.has_candidate_profile_data = AsyncMock(return_value=True)
+    runner.get_bot_scheduler_status = AsyncMock(
+        return_value={
+            "last_publish_sent": "22",
+            "last_publish_success_at": "2026-08-01T20:06:56.774182+00:00",
+        }
+    )
+    runner.run_tenant = AsyncMock(
+        return_value=MagicMock(
+            source_run_id="run-123",
+            graph_hash="graph-456",
+            fetched=1446,
+            extracted=3,
+            duplicates=0,
+            dropped=1612,
+            emitted=0,
+            failed=0,
+            drop_reasons={
+                "already_seen": 682,
+                "duplicate_content": 909,
+                "low_relevance_prefilter": 21,
+            },
+            source_failures=[],
+            llm_cost_usd=0.002192,
+            llm_usage_requests=3,
+            llm_cost_is_complete=True,
+        )
+    )
+
+    status_msg = MagicMock(edit_text=AsyncMock())
+    message = MagicMock()
+    message.from_user.id = 123
+    message.answer = AsyncMock(return_value=status_msg)
+
+    await run_pipeline_for_chat(message, runner, MagicMock())
+
+    status_text = status_msg.edit_text.call_args_list[-1].args[0]
+    assert "👁 Уже видели:       1591" in status_text
+    assert "📉 Низкая релевантность: 21" in status_text
+    assert "Почти всё уже есть в базе" in status_text
+    assert "автопубликация уже проходила" in status_text
+    assert "отправлено 22" in status_text
+    assert "2026-08-01 20:06:56.774182+00:00" in status_text
 
 
 def test_publish_candidate_fetch_limit_uses_wide_pool() -> None:
