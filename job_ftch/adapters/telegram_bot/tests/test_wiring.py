@@ -9,6 +9,7 @@ the optional ``telegram`` extra (aiogram) is not installed.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path  # noqa: TC003
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -203,6 +204,127 @@ async def test_scheduler_loop_uses_publish_owner_profile(
 
 
 @pytest.mark.asyncio
+async def test_scheduler_retries_run_left_incomplete_by_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_sleep(_seconds: float) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr("job_ftch.adapters.telegram_bot.main.asyncio.sleep", fake_sleep)
+
+    now = datetime.now(UTC)
+    store_state: dict[str, str] = {
+        "bot_scheduler:last_attempt_at": (now - timedelta(seconds=30)).isoformat(),
+        "bot_scheduler:last_success_at": (now - timedelta(seconds=60)).isoformat(),
+    }
+
+    async def _get_state(key: str) -> str | None:
+        return store_state.get(key)
+
+    async def _set_state(key: str, value: str) -> None:
+        store_state[key] = value
+
+    store = MagicMock()
+    store.get_run_state = MagicMock(side_effect=_get_state)
+    store.set_run_state = MagicMock(side_effect=_set_state)
+    runner = MagicMock()
+    runner.get_runtime.return_value = SimpleNamespace(
+        settings=SimpleNamespace(bot_send_limit_per_run=15), store=store
+    )
+    runner.tenant_ids.return_value = ["tenant"]
+    runner.get_schedule_interval = AsyncMock(return_value=3600)
+    runner.get_publish_channel = AsyncMock(return_value="@out")
+    runner.get_publish_user_id = AsyncMock(return_value="123")
+    runner.has_candidate_profile_data = AsyncMock(return_value=True)
+    runner.run_tenant = AsyncMock(return_value=SimpleNamespace(emitted=0))
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+
+    with pytest.raises(asyncio.CancelledError):
+        await _run_scheduler_loop(runner, bot)
+
+    runner.run_tenant.assert_awaited_once_with("tenant", user_id="123")
+
+
+@pytest.mark.asyncio
+async def test_scheduler_recovers_pending_publish_before_next_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_sleep(_seconds: float) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr("job_ftch.adapters.telegram_bot.main.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "job_ftch.adapters.telegram_bot.sender.format_vacancy_card", lambda _job: "card"
+    )
+
+    async def _send_card(_self: object, _target: str, _job: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "job_ftch.adapters.telegram_bot.main.TelegramCardSender.send", _send_card
+    )
+
+    async def _publish(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            sent=1,
+            skipped_already_published=0,
+            error=None,
+            had_transient_failure=False,
+        )
+
+    monkeypatch.setattr("job_ftch.adapters.telegram_bot.main.publish_jobs", _publish)
+
+    store_state: dict[str, str] = {
+        "bot_scheduler:last_attempt_at": "2099-01-01T00:00:00+00:00",
+        "bot_scheduler:last_success_at": "2099-01-01T00:01:00+00:00",
+        "bot_scheduler:pending_publish_since": "2026-08-02T16:00:00+00:00",
+        "bot_scheduler:last_publish_attempt_at": "2026-08-02T16:01:00+00:00",
+    }
+
+    async def _get_state(key: str) -> str | None:
+        return store_state.get(key)
+
+    async def _set_state(key: str, value: str) -> None:
+        store_state[key] = value
+
+    store = MagicMock()
+    store.get_run_state = MagicMock(side_effect=_get_state)
+    store.set_run_state = MagicMock(side_effect=_set_state)
+    runner = MagicMock()
+    runner.get_runtime.return_value = SimpleNamespace(
+        settings=SimpleNamespace(bot_send_limit_per_run=15), store=store
+    )
+    runner.tenant_ids.return_value = ["tenant"]
+    runner.get_schedule_interval = AsyncMock(return_value=3600)
+    runner.get_publish_channel = AsyncMock(return_value="@out")
+    runner.get_publish_user_id = AsyncMock(return_value="123")
+    runner.has_candidate_profile_data = AsyncMock(return_value=True)
+    runner.run_tenant = AsyncMock()
+    runner.latest_jobs = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                group_id="group-1",
+                post_type=PostType.JOB_POSTING,
+                routing_decision=MatchDecision.ACCEPT,
+                quality_score=1.0,
+                best_score=0.9,
+            )
+        ]
+    )
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+
+    with pytest.raises(asyncio.CancelledError):
+        await _run_scheduler_loop(runner, bot)
+
+    runner.run_tenant.assert_not_called()
+    runner.latest_jobs.assert_awaited_once()
+    assert store_state["bot_scheduler:pending_publish_since"] == ""
+    assert store_state["bot_scheduler:last_publish_sent"] == "1"
+
+
+@pytest.mark.asyncio
 async def test_scheduler_loop_does_not_warn_when_jobs_are_grouped_for_publish(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -388,7 +510,7 @@ async def test_scheduler_loop_resets_stale_publish_state_on_failed_run(
 
     async def fake_sleep(_seconds: float) -> None:
         calls["sleep"] += 1
-        if calls["sleep"] > 1:
+        if calls["sleep"] > 0:
             raise asyncio.CancelledError
 
     monkeypatch.setattr("job_ftch.adapters.telegram_bot.main.asyncio.sleep", fake_sleep)
@@ -483,6 +605,9 @@ async def test_scheduler_loop_drains_pending_publish_window_on_zero_emit_run(
         if seconds >= 60:
             iteration["outer"] += 1
             store_state.pop("bot_scheduler:last_attempt_at", None)
+            store_state["bot_scheduler:last_publish_attempt_at"] = (
+                "2020-01-01T00:00:00+00:00"
+            )
             if iteration["outer"] >= 2:
                 raise asyncio.CancelledError
 
@@ -561,9 +686,10 @@ async def test_scheduler_loop_drains_pending_publish_window_on_zero_emit_run(
         await _run_scheduler_loop(runner, bot)
 
     assert send_attempts["count"] == 6
-    assert len(owner_reports) == 2
+    assert len(owner_reports) == 1
+    runner.run_tenant.assert_awaited_once()
     assert store_state["bot_scheduler:pending_publish_since"] == ""
-    assert store_state["bot_scheduler:last_run_emitted"] == "0"
+    assert store_state["bot_scheduler:last_run_emitted"] == "2"
     assert store_state["bot_scheduler:last_publish_sent"] == "2"
 
 

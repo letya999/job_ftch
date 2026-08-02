@@ -37,6 +37,24 @@ _DEFAULT_TRANSIENT_ATTEMPTS = 2
 # Substrings that mean the target itself is unusable. Retrying or continuing
 # the batch against such a target only burns rate limit.
 _FATAL_TARGET_MARKERS = ("forbidden", "not a member", "kicked", "chat not found", "bot was blocked")
+_RETRYABLE_SEND_MARKERS = (
+    "connection",
+    "connect call failed",
+    "timed out",
+    "timeout",
+    "temporarily unavailable",
+    "server disconnected",
+    "502",
+    "503",
+    "504",
+)
+_RETRYABLE_SEND_TYPES = {
+    "ClientConnectorError",
+    "ClientConnectionError",
+    "ClientOSError",
+    "ConnectionError",
+    "TimeoutError",
+}
 
 
 class TransientSendError(Exception):
@@ -62,9 +80,8 @@ class PublishOutcome:
     sent: int = 0
     skipped_already_published: int = 0
     error: str | None = None
-    # True only for rate-limit exhaustion, so callers can decide whether to keep
-    # a retry window open. A permanently bad card must never pin the window, or
-    # every cycle re-sends the whole batch.
+    # True for rate-limit exhaustion or transport outages, so callers can keep
+    # a retry window open. The publish ledger makes retries idempotent.
     had_transient_failure: bool = False
     target_unusable: bool = False
     delivered: list[Job] = field(default_factory=list)
@@ -73,6 +90,14 @@ class PublishOutcome:
 def _is_fatal_target_error(error: BaseException) -> bool:
     text = str(error).lower()
     return any(marker in text for marker in _FATAL_TARGET_MARKERS)
+
+
+def _is_retryable_send_error(error: BaseException) -> bool:
+    """Recognize transport outages that must keep the delivery window open."""
+    if any(cls.__name__ in _RETRYABLE_SEND_TYPES for cls in type(error).__mro__):
+        return True
+    text = str(error).lower()
+    return any(marker in text for marker in _RETRYABLE_SEND_MARKERS)
 
 
 async def publish_jobs(
@@ -138,6 +163,8 @@ async def publish_jobs(
                     outcome.target_unusable = True
                     logger.warning("publish_target_unusable", target=target, error=str(send_err))
                     return outcome
+                if _is_retryable_send_error(send_err):
+                    outcome.had_transient_failure = True
                 # A single malformed card must not cancel the rest of the batch.
                 logger.warning("publish_job_failed", target=target, error=str(send_err))
                 break

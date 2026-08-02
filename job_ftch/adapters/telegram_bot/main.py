@@ -36,6 +36,10 @@ from job_ftch.application.run_report import (
     render_runtime_run_footer,
     render_runtime_run_report_text,
 )
+from job_ftch.application.scheduler_journal import (
+    ensure_scheduler_slot,
+    update_scheduler_slot,
+)
 from job_ftch.application.vacancy_feedback import is_feedback_enabled
 
 if TYPE_CHECKING:
@@ -92,6 +96,147 @@ async def _maybe_await(value: object) -> object:
     if asyncio.isfuture(value) or asyncio.iscoroutine(value):
         return await value
     return value
+
+
+def _parse_scheduler_timestamp(raw: object) -> datetime | None:
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+async def _recover_pending_scheduler_publish(
+    runner: TenantRunner,
+    bot: Bot,
+    *,
+    tenant_id: str,
+    publish_channel: str,
+    publish_user_id: object,
+    slot_id: str | None = None,
+) -> bool:
+    """Retry a durable publish window without waiting for the next ingest run."""
+    from job_ftch.adapters.telegram_bot.handlers.pipeline import (
+        job_passes_bot_publish_gates,
+        publish_candidate_fetch_limit,
+    )
+
+    runtime = runner.get_runtime(tenant_id)
+    store = runtime.store
+    pending_raw = await _maybe_await(store.get_run_state("bot_scheduler:pending_publish_since"))
+    publish_since = _parse_scheduler_timestamp(pending_raw)
+    if publish_since is None:
+        if slot_id:
+            await update_scheduler_slot(
+                store, slot_id, publish_state="failed", publish_error="invalid pending window"
+            )
+        await _maybe_await(
+            store.set_run_state(
+                "bot_scheduler:last_publish_error",
+                "invalid pending_publish_since; manual inspection required",
+            )
+        )
+        return False
+
+    if slot_id:
+        await update_scheduler_slot(
+            store,
+            slot_id,
+            publish_state="running",
+            last_publish_attempt_at=datetime.now(UTC).isoformat(),
+        )
+    await _maybe_await(
+        store.set_run_state("bot_scheduler:last_publish_attempt_at", datetime.now(UTC).isoformat())
+    )
+    send_limit = getattr(getattr(runtime, "settings", None), "bot_send_limit_per_run", 15)
+    jobs = await runner.latest_jobs(
+        tenant_id,
+        limit=publish_candidate_fetch_limit(send_limit),
+        since=publish_since,
+        user_id=publish_user_id,
+    )
+    eligible = [job for job in jobs if job_passes_bot_publish_gates(job)]
+    if not eligible:
+        error = "pending publish candidates are missing"
+        if slot_id:
+            await update_scheduler_slot(
+                store,
+                slot_id,
+                publish_state="failed",
+                publish_error=error,
+                last_publish_attempt_at=datetime.now(UTC).isoformat(),
+            )
+        await _maybe_await(store.set_run_state("bot_scheduler:last_publish_error", error))
+        logger.error(
+            "scheduler_pending_publish_candidates_missing",
+            tenant_id=tenant_id,
+            since=publish_since.isoformat(),
+        )
+        return False
+
+    outcome = await publish_jobs(
+        eligible,
+        target=publish_channel,
+        sender=TelegramCardSender(
+            bot,
+            markup_for=build_feedback_markup
+            if await is_feedback_enabled(store, tenant_id)
+            else None,
+        ),
+        store=store,
+        send_limit=send_limit,
+        sleep=asyncio.sleep,
+    )
+    remaining = max(0, len(eligible) - outcome.sent - outcome.skipped_already_published)
+    if remaining:
+        await _maybe_await(
+            store.set_run_state(
+                "bot_scheduler:pending_publish_since", publish_since.isoformat()
+            )
+        )
+    else:
+        await _maybe_await(store.set_run_state("bot_scheduler:pending_publish_since", ""))
+    await _maybe_await(store.set_run_state("bot_scheduler:last_publish_sent", str(outcome.sent)))
+    if outcome.error or remaining:
+        if slot_id:
+            await update_scheduler_slot(
+                store,
+                slot_id,
+                publish_state="failed",
+                publish_error=outcome.error or f"{remaining} publish candidate(s) remain",
+                last_publish_sent=outcome.sent,
+            )
+        await _maybe_await(
+            store.set_run_state(
+                "bot_scheduler:last_publish_error",
+                outcome.error or f"{remaining} publish candidate(s) remain",
+            )
+        )
+    else:
+        if slot_id:
+            await update_scheduler_slot(
+                store,
+                slot_id,
+                publish_state="succeeded",
+                published_at=datetime.now(UTC).isoformat(),
+                publish_error="",
+                last_publish_sent=outcome.sent,
+            )
+        await _maybe_await(
+            store.set_run_state("bot_scheduler:last_publish_success_at", datetime.now(UTC).isoformat())
+        )
+        await _maybe_await(store.set_run_state("bot_scheduler:last_publish_error", ""))
+    logger.info(
+        "scheduler_pending_publish_recovered",
+        tenant_id=tenant_id,
+        channel=publish_channel,
+        sent=outcome.sent,
+        remaining=remaining,
+        error=outcome.error,
+    )
+    return remaining == 0
 
 
 async def _send_scheduler_run_report(
@@ -202,9 +347,19 @@ async def _warn_on_dev_like_publish_settings(runner: TenantRunner) -> None:
 async def configure_bot(bot: Bot, config: TelegramBotConfig | None = None) -> None:
     """Apply Bot API configuration needed at startup."""
     commands = _build_bot_commands()
-    await bot.set_my_description(BOT_DESCRIPTION)
-    await bot.set_my_short_description(BOT_SHORT_DESCRIPTION)
-    await bot.set_my_commands(commands)
+    try:
+        await bot.set_my_description(BOT_DESCRIPTION)
+    except Exception as exc:
+        logger.warning("telegram_bot_description_config_failed", error=str(exc))
+    try:
+        await bot.set_my_short_description(BOT_SHORT_DESCRIPTION)
+    except Exception as exc:
+        logger.warning("telegram_bot_short_description_config_failed", error=str(exc))
+    try:
+        await bot.set_my_commands(commands)
+    except Exception as exc:
+        logger.warning("telegram_bot_commands_config_failed", error=str(exc))
+        return
     logger.info(
         "telegram_bot_commands_registered",
         command_count=len(commands),
@@ -301,8 +456,31 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         last_run = (
                             parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
                         )
-                if last_run is not None and (now - last_run).total_seconds() < interval:
+                store = runner.get_runtime(tenant_id).store
+                pending_raw = await _maybe_await(
+                    store.get_run_state("bot_scheduler:pending_publish_since")
+                )
+                pending_publish = isinstance(pending_raw, str) and bool(pending_raw)
+                last_success = _parse_scheduler_timestamp(
+                    await _maybe_await(store.get_run_state("bot_scheduler:last_success_at"))
+                )
+                incomplete_run = last_run is not None and (
+                    last_success is None or last_success < last_run
+                )
+                pending_since = _parse_scheduler_timestamp(pending_raw)
+                scheduler_slot = await ensure_scheduler_slot(
+                    store,
+                    now=now,
+                    interval_seconds=int(interval),
+                    legacy_last_attempt=last_run,
+                    recovery_marker=(pending_since or last_run or now)
+                    if (pending_publish or incomplete_run)
+                    else None,
+                    publish_pending=pending_publish,
+                )
+                if scheduler_slot is None:
                     continue
+                scheduler_slot_id = str(scheduler_slot["slot_id"])
 
                 try:
                     publish_channel = await runner.get_publish_channel(tenant_id)
@@ -351,6 +529,26 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     )
                     continue
 
+                if pending_publish:
+                    last_publish_attempt = _parse_scheduler_timestamp(
+                        await _maybe_await(
+                            store.get_run_state("bot_scheduler:last_publish_attempt_at")
+                        )
+                    )
+                    retry_ready = last_publish_attempt is None or (
+                        now - last_publish_attempt
+                    ).total_seconds() >= 60
+                    if retry_ready:
+                        await _recover_pending_scheduler_publish(
+                            runner,
+                            bot,
+                            tenant_id=tenant_id,
+                            publish_channel=str(publish_channel),
+                            publish_user_id=publish_user_id,
+                            slot_id=scheduler_slot_id,
+                        )
+                    continue
+
                 # Run with the channel owner's profile so scheduled publishing matches
                 # the same profile-aware filtering as manual /run.
                 t_start = datetime.now(UTC)
@@ -360,6 +558,13 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         runner.get_runtime(tenant_id).store.set_run_state(
                             "bot_scheduler:last_attempt_at", t_start.isoformat()
                         )
+                    )
+                    await update_scheduler_slot(
+                        store,
+                        scheduler_slot_id,
+                        run_state="running",
+                        run_attempts=int(scheduler_slot.get("run_attempts", 0) or 0) + 1,
+                        run_started_at=t_start.isoformat(),
                     )
                     await _maybe_await(
                         runner.get_runtime(tenant_id).store.set_run_state(
@@ -390,6 +595,13 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     run_result = await runner.run_tenant(tenant_id, user_id=publish_user_id)
                 except Exception as run_err:
                     try:
+                        await update_scheduler_slot(
+                            store,
+                            scheduler_slot_id,
+                            run_state="failed",
+                            run_error=str(run_err),
+                            run_finished_at=datetime.now(UTC).isoformat(),
+                        )
                         await _maybe_await(
                             runner.get_runtime(tenant_id).store.set_run_state(
                                 "bot_scheduler:last_error", str(run_err)
@@ -411,9 +623,24 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                 # Nothing ran (tenant lock held elsewhere): do not record a success
                 # timestamp, or the scheduler would look healthy while idling.
                 if getattr(run_result, "skipped_already_active", False) is True:
+                    await update_scheduler_slot(
+                        store,
+                        scheduler_slot_id,
+                        run_state="pending",
+                        run_error="tenant already has an active run",
+                    )
                     logger.info("scheduler_skipped_locked_tenant", tenant_id=tenant_id)
                     continue
                 try:
+                    run_finished_at = datetime.now(UTC).isoformat()
+                    await update_scheduler_slot(
+                        store,
+                        scheduler_slot_id,
+                        run_state="succeeded",
+                        run_id=str(getattr(run_result, "source_run_id", "") or ""),
+                        run_finished_at=run_finished_at,
+                        run_error="",
+                    )
                     await _maybe_await(
                         runner.get_runtime(tenant_id).store.set_run_state(
                             "bot_scheduler:last_success_at", datetime.now(UTC).isoformat()
@@ -457,6 +684,13 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     has_pending_publish = isinstance(pending_raw, str) and bool(pending_raw)
                     if emitted == 0 and not has_pending_publish:
                         publish_skipped_reason = "новых вакансий 0"
+                        await update_scheduler_slot(
+                            store,
+                            scheduler_slot_id,
+                            publish_state="succeeded",
+                            publish_reason="no_new_jobs",
+                            published_at=datetime.now(UTC).isoformat(),
+                        )
                         await _maybe_await(
                             runner.get_runtime(tenant_id).store.set_run_state(
                                 "bot_scheduler:last_publish_skipped_at",
@@ -487,6 +721,22 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                                 pending_since = pending_since.replace(tzinfo=UTC)
                             publish_since = min(publish_since, pending_since)
 
+                    if emitted > 0:
+                        # Persist the delivery intent before reading candidates or
+                        # contacting Telegram. A crash in either gap is recoverable.
+                        await _maybe_await(
+                            store.set_run_state(
+                                "bot_scheduler:pending_publish_since", publish_since.isoformat()
+                            )
+                        )
+                        await update_scheduler_slot(
+                            store,
+                            scheduler_slot_id,
+                            publish_state="pending",
+                            publish_since=publish_since.isoformat(),
+                            publish_error="",
+                        )
+
                     jobs = await runner.latest_jobs(
                         tenant_id,
                         limit=publish_candidate_fetch_limit(send_limit),
@@ -501,6 +751,14 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     # ``emitted`` counts accepted job records, while ``latest_jobs`` returns the
                     # publish surface after grouping.  Comparing those counts directly produces
                     # false losses, e.g. 23 accepted jobs merged into 22 publishable cards.
+                    if emitted > 0:
+                        # Write the delivery intent before querying or contacting Telegram.
+                        # A process crash in either gap must be recoverable on the next start.
+                        await _maybe_await(
+                            store.set_run_state(
+                                "bot_scheduler:pending_publish_since", publish_since.isoformat()
+                            )
+                        )
                     if emitted > 0 and persisted_candidates == 0:
                         logger.warning(
                             "bot_delivery_partial_loss",
@@ -519,6 +777,22 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                             persisted_candidates=persisted_candidates,
                             eligible_to_send=eligible_to_send,
                         )
+                        publish_error = "accepted jobs are not materialized for publication"
+                        await update_scheduler_slot(
+                            store,
+                            scheduler_slot_id,
+                            publish_state="failed",
+                            publish_error=publish_error,
+                        )
+                        await _maybe_await(
+                            store.set_run_state(
+                                "bot_scheduler:pending_publish_since", t_start.isoformat()
+                            )
+                        )
+                        await _maybe_await(
+                            store.set_run_state("bot_scheduler:last_publish_error", publish_error)
+                        )
+                        continue
 
                     await _maybe_await(
                         store.set_run_state(
@@ -545,10 +819,16 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     chan_count = publish_outcome.sent
                     publish_error = publish_outcome.error or ""
                     had_flood_failure = publish_outcome.had_transient_failure
-                    # Extend the retry window only for retryable (flood) failures.
-                    # Permanently-bad cards must NOT pin the window, or every cycle
-                    # would re-send the whole batch (duplicates).
-                    if had_flood_failure:
+                    remaining = max(
+                        0,
+                        eligible_to_send
+                        - chan_count
+                        - publish_outcome.skipped_already_published,
+                    )
+                    # Keep the window open for every unsent candidate. This covers
+                    # network outages as well as flood waits; the publish ledger
+                    # prevents already delivered cards from being duplicated.
+                    if had_flood_failure or remaining:
                         await _maybe_await(
                             store.set_run_state(
                                 "bot_scheduler:pending_publish_since",
@@ -562,11 +842,29 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     await _maybe_await(
                         store.set_run_state("bot_scheduler:last_publish_sent", str(chan_count))
                     )
-                    if publish_error:
+                    if publish_error or remaining:
+                        await update_scheduler_slot(
+                            store,
+                            scheduler_slot_id,
+                            publish_state="failed",
+                            publish_error=publish_error or f"{remaining} publish candidate(s) remain",
+                            last_publish_sent=chan_count,
+                        )
                         await _maybe_await(
-                            store.set_run_state("bot_scheduler:last_publish_error", publish_error)
+                            store.set_run_state(
+                                "bot_scheduler:last_publish_error",
+                                publish_error or f"{remaining} publish candidate(s) remain",
+                            )
                         )
                     else:
+                        await update_scheduler_slot(
+                            store,
+                            scheduler_slot_id,
+                            publish_state="succeeded",
+                            published_at=datetime.now(UTC).isoformat(),
+                            publish_error="",
+                            last_publish_sent=chan_count,
+                        )
                         await _maybe_await(
                             store.set_run_state(
                                 "bot_scheduler:last_publish_success_at",
@@ -590,6 +888,12 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                 except Exception as pub_err:
                     publish_error = str(pub_err)
                     try:
+                        await update_scheduler_slot(
+                            store,
+                            scheduler_slot_id,
+                            publish_state="failed",
+                            publish_error=str(pub_err),
+                        )
                         await _maybe_await(
                             runner.get_runtime(tenant_id).store.set_run_state(
                                 "bot_scheduler:last_publish_error", str(pub_err)

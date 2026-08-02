@@ -55,6 +55,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_runtime_ontology_priority.py](test_runtime_ontology_priority.py)
 - [test_runtime_sources.py](test_runtime_sources.py)
 - [test_scheduler.py](test_scheduler.py)
+- [test_scheduler_journal.py](test_scheduler_journal.py)
 - [test_search_expansion.py](test_search_expansion.py)
 - [test_shadow.py](test_shadow.py)
 - [test_shot_sync_qdrant.py](test_shot_sync_qdrant.py)

@@ -52,6 +52,24 @@ publication is skipped deliberately. The scheduler persists that as:
 `/schedule` shows these fields so a successful no-output run does not look like
 a silent publishing failure.
 
+Recovery semantics:
+
+- `last_attempt_at` is written before ingest, while `last_success_at` is written
+  only after ingest completes. On restart, an attempt without a newer success is
+  treated as incomplete and is retried even when its interval has not elapsed.
+- A non-empty `bot_scheduler:pending_publish_since` is a durable delivery intent.
+  It is written before candidate lookup/Telegram calls, so a crash between the
+  run and the first send is recoverable. The scheduler drains this window before
+  starting another ingest run.
+- The window is cleared only when every eligible candidate is either delivered
+  or already present in the publish ledger. Connection, timeout, flood-limit, and
+  partial-send failures keep it pending for the next scheduler iteration.
+- `bot_scheduler:journal` keeps a bounded history of schedule slots. A slot is
+  complete only after both `run_state=succeeded` and `publish_state=succeeded`;
+  incomplete slots are replayed before creating a later slot. The fixed
+  `bot_scheduler:next_due_at` marker prevents a laptop shutdown from silently
+  moving the schedule forward.
+
 ### Обратная связь на вакансии
 
 Админ выбирает режим через `/feedback`:
