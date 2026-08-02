@@ -8,8 +8,9 @@ plugin with job cards in `.job-card` elements. Can also access REST API at
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
+import httpx
 import structlog
 from selectolax.lexbor import LexborHTMLParser
 
@@ -17,6 +18,7 @@ from job_ftch.application.registry import register_site_parser
 from job_ftch.domain import SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
+from job_ftch.infrastructure.sources.site_parsers.helpers import is_challenge_response
 
 logger = structlog.get_logger(__name__)
 
@@ -62,6 +64,13 @@ class EuremotejobsParser:
 
         # Fall back to HTML parsing
         response = await client.get(spec.url, follow_redirects=True)
+        if response.status_code >= 400 or is_challenge_response(response.text):
+            response.raise_for_status()
+            raise httpx.HTTPStatusError(
+                "Challenge response while fetching euremotejobs listing",
+                request=response.request,
+                response=response,
+            )
         html = response.text
         items = self._parse_from_html(html, spec.url, source_name, limit)
         for item in items:
@@ -71,9 +80,11 @@ class EuremotejobsParser:
         self, url: str, source_name: str, limit: int, client: Any
     ) -> list[RawItem]:
         """Try to parse jobs via WordPress REST API."""
+        parsed = urlparse(url)
+        base_url = f"{parsed.scheme or 'https'}://{parsed.netloc}".rstrip("/")
         api_urls = [
-            f"{url.rstrip('/')}/wp-json/wp/v2/job_listing?per_page={limit}",
-            f"{url.rstrip('/')}/wp-json/jobs/v1/listings?per_page={limit}",
+            f"{base_url}/wp-json/wp/v2/job_listing?per_page={limit}",
+            f"{base_url}/wp-json/jobs/v1/listings?per_page={limit}",
         ]
         for api_url in api_urls:
             try:

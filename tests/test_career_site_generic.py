@@ -760,3 +760,136 @@ async def test_monitor_receives_runtime_bypass_strategy(monkeypatch):
 
     assert items == []
     assert captured["bypass"] is source.bypass_strategy
+
+
+@pytest.mark.asyncio
+async def test_monitor_config_can_select_monitor(monkeypatch):
+    spec = CareerSiteSpec(
+        type="career_site",
+        url="https://example.com/jobs",
+        source_name="example",
+        monitor_config={"monitor": "api_sniffer"},
+    )
+
+    captured = {}
+
+    class _FakeMonitor:
+        async def discover(self, spec, monitor_http):  # type: ignore[no-untyped-def]
+            del spec, monitor_http
+            return {"urls": []}
+
+    class _FakeEntry:
+        def factory(self, spec, monitor_http, auth):  # type: ignore[no-untyped-def]
+            del spec, monitor_http, auth
+            return _FakeMonitor()
+
+    def _resolve_monitor(name):  # type: ignore[no-untyped-def]
+        captured["name"] = name
+        return _FakeEntry()
+
+    source = CareerSiteSource(
+        spec=spec,
+        http_client=FakeHttpClient({"https://example.com/jobs": FakeResponse("<html></html>")}),
+        auth=MagicMock(),
+    )
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.career_site_source.resolve_monitor",
+        _resolve_monitor,
+    )
+
+    items = [item async for item in source.fetch()]
+
+    assert items == []
+    assert captured["name"] == "api_sniffer"
+
+
+@pytest.mark.asyncio
+async def test_force_monitor_overrides_explicit_spec_monitor(monkeypatch):
+    spec = CareerSiteSpec(
+        type="career_site",
+        url="https://example.com/jobs",
+        source_name="example",
+        monitor="dom",
+        monitor_config={"force_monitor": "api_sniffer", "force_monitor_fallbacks": ["dom"]},
+    )
+
+    captured = {}
+
+    class _FakeMonitor:
+        async def discover(self, spec, monitor_http):  # type: ignore[no-untyped-def]
+            del spec, monitor_http
+            return {"urls": []}
+
+    class _FakeEntry:
+        def factory(self, spec, monitor_http, auth):  # type: ignore[no-untyped-def]
+            del spec, monitor_http, auth
+            return _FakeMonitor()
+
+    def _resolve_monitor(name):  # type: ignore[no-untyped-def]
+        captured.setdefault("names", []).append(name)
+        return _FakeEntry()
+
+    source = CareerSiteSource(
+        spec=spec,
+        http_client=FakeHttpClient({"https://example.com/jobs": FakeResponse("<html></html>")}),
+        auth=MagicMock(),
+    )
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.career_site_source.resolve_monitor",
+        _resolve_monitor,
+    )
+
+    items = [item async for item in source.fetch()]
+
+    assert items == []
+    assert captured["names"] == ["api_sniffer", "dom"]
+
+
+@pytest.mark.asyncio
+async def test_runtime_defaults_can_request_bypass_capability(monkeypatch):
+    spec = CareerSiteSpec(
+        type="career_site",
+        url="https://example.com/jobs",
+        source_name="example",
+        monitor="dom",
+        monitor_config={
+            "bypass_capability": "cloudflare_challenge",
+            "bypass_capability_reason": "protected_browser_defaults",
+        },
+    )
+    requested = []
+
+    def _request_capability(self, action, *, reason):  # type: ignore[no-untyped-def]
+        del self
+        requested.append((action, reason))
+        return False
+
+    class _FakeMonitor:
+        async def discover(self, spec, monitor_http):  # type: ignore[no-untyped-def]
+            del spec, monitor_http
+            return {"urls": []}
+
+    class _FakeEntry:
+        def factory(self, spec, monitor_http, auth):  # type: ignore[no-untyped-def]
+            del spec, monitor_http, auth
+            return _FakeMonitor()
+
+    monkeypatch.setattr(
+        AdaptiveBypassManager,
+        "request_capability",
+        _request_capability,
+    )
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.career_site_source.resolve_monitor",
+        lambda name: _FakeEntry(),
+    )
+
+    source = CareerSiteSource(
+        spec=spec,
+        http_client=FakeHttpClient({"https://example.com/jobs": FakeResponse("<html></html>")}),
+        auth=MagicMock(),
+    )
+    items = [item async for item in source.fetch()]
+
+    assert items == []
+    assert requested == [("cloudflare_challenge", "protected_browser_defaults")]

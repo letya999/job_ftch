@@ -28,6 +28,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_physical_context.py](test_physical_context.py)
 - [test_preflight_route_gates.py](test_preflight_route_gates.py)
 - [test_proxy_bypass.py](test_proxy_bypass.py)
+- [test_proxy_pool.py](test_proxy_pool.py)
 - [test_proxy_ssrf.py](test_proxy_ssrf.py)
 - [test_referrer_chain.py](test_referrer_chain.py)
 - [test_robots_policy.py](test_robots_policy.py)

@@ -257,11 +257,18 @@ class AdaptiveBypassManager:
                 self.current_tier_index = self._tiers.index(recommended)
                 self._ensure_strategy()
                 logger.info("bypass_preflight_engine_selected", engine=recommended)
-        if getattr(preflight, "network", "direct") == "proxy" and bool(
-            getattr(context, "proxy_available", False)
-        ):
-            self._route_state = self._route_state.transition(network=NetworkRoute.PROXY)
-            logger.info("bypass_preflight_network_selected", network="proxy")
+        if getattr(preflight, "network", "direct") == "proxy":
+            if bool(getattr(context, "residential_proxy_available", False)):
+                self._route_state = self._route_state.transition(
+                    network=NetworkRoute.RESIDENTIAL_PROXY,
+                    session=SessionMode.STICKY,
+                )
+                logger.info("bypass_preflight_network_selected", network="residential_proxy")
+            elif bool(getattr(context, "proxy_available", False)):
+                logger.info(
+                    "bypass_preflight_generic_proxy_ignored",
+                    reason="generic_proxy_route_disabled",
+                )
         self._sync_context_route()
 
     def _sync_context_route(self) -> None:
@@ -482,22 +489,9 @@ class AdaptiveBypassManager:
         """Move along the network axis without changing the engine."""
         if not self.adaptive_enabled or not self._budget.allow_proxy_rotation():
             return False
-        if self._route_state.network is NetworkRoute.PROXY:
-            return self._activate_residential_proxy()
         if self.uses_proxy:
             return False
-        if not bool(getattr(self._context, "proxy_available", False)):
-            return self._activate_residential_proxy()
-        self._session_cookies.clear()
-        self._budget.note_proxy_rotation()
-        self._route_state = self._route_state.transition(
-            network=NetworkRoute.PROXY,
-            session=SessionMode.FRESH,
-        )
-        self._sync_context_route()
-        self._escalations_total += 1
-        logger.info("bypass_network_transition", engine=self.current_name, network="proxy")
-        return True
+        return self._activate_residential_proxy()
 
     def _activate_residential_proxy(self) -> bool:
         """Escalate from datacenter to residential proxy."""

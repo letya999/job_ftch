@@ -375,26 +375,57 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> Mo
         # Auto-routing if no items found on the landing page
         if not payloads and not urls:
             try:
-                locator = page.locator(
-                    "a:has-text('вакансии'), a:has-text('Вакансии'), a:has-text('vacancies'), a:has-text('Vacancies'), a:has-text('Vakansiyalar'), a:has-text('Cariere'), a[href*='/vacancies'], a[href*='/vacancy'], a[href*='/vakansiya'], a[href*='/cariere'], a[href*='/jobs'], a[href*='/job'], a[href*='/search'], a[href*='/openings'], a[href*='/career']"
-                ).first
-                if await locator.count() > 0:
-                    href = await locator.get_attribute("href")
-                    if href:
-                        log.info("api_sniffer_auto_route", url=board_url, route=href)
-                        await locator.click(timeout=5000)
-                        try:
-                            await page.wait_for_load_state(
-                                "networkidle", timeout=get_settings().browser_default_timeout_ms
-                            )
-                        except Exception:
-                            await sleep_with_source_deadline(settle_seconds)
+                href = await page.evaluate(
+                    """() => {
+                        const selectors = [
+                            "a[href*='/vacancies']",
+                            "a[href*='/vacancy']",
+                            "a[href*='/vakansiya']",
+                            "a[href*='/cariere']",
+                            "a[href*='/jobs']",
+                            "a[href*='/job']",
+                            "a[href*='/search']",
+                            "a[href*='/openings']",
+                            "a[href*='/career']"
+                        ];
+                        const textHints = [
+                            "вакансии",
+                            "vacancies",
+                            "vakansiyalar",
+                            "cariere",
+                            "jobs",
+                            "openings",
+                            "career"
+                        ];
+                        for (const selector of selectors) {
+                            const el = document.querySelector(selector);
+                            if (el && el.href) return el.href;
+                        }
+                        for (const el of document.querySelectorAll("a[href]")) {
+                            const text = (el.textContent || "").toLowerCase();
+                            if (textHints.some((hint) => text.includes(hint))) {
+                                return el.href || el.getAttribute("href");
+                            }
+                        }
+                        return null;
+                    }"""
+                )
+                if isinstance(href, str) and href:
+                    route = urljoin(board_url, href)
+                    log.info("api_sniffer_auto_route", url=board_url, route=route)
+                    await page.goto(route, wait_until=config.get("wait", "domcontentloaded"))
+                    try:
+                        await page.wait_for_load_state(
+                            "networkidle", timeout=get_settings().browser_default_timeout_ms
+                        )
+                    except Exception:
+                        await sleep_with_source_deadline(settle_seconds)
 
-                        # Re-collect newly captured payloads
-                        await collector.drain()
-                        for captured in collector.payloads:
-                            payloads.update(_collect_payloads(captured.data, board_url))
-                            urls.update(_collect_urls(captured.data, board_url))
+                    # Re-collect newly captured payloads
+                    await collector.drain()
+                    for captured in collector.payloads:
+                        payloads.update(_collect_payloads(captured.data, board_url))
+                        urls.update(_collect_urls(captured.data, board_url))
             except Exception as exc:
                 log.warning("api_sniffer_failed", error=str(exc))
 

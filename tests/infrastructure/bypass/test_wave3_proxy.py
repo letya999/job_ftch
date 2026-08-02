@@ -2,12 +2,32 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import TYPE_CHECKING
+
 import pytest
 
 from job_ftch.infrastructure.bypass.proxy_bypass import (
     GatewayProxyProvider,
     ProxyCostTracker,
+    is_proxy_rescue_domain_allowed,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+
+@pytest.fixture(autouse=True)
+def _settings_test_defaults(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("JOB_FTCH_LLM_BACKEND", "heuristic")
+    monkeypatch.setenv("JOB_FTCH_JOB_BACKEND", "sqlite")
+    monkeypatch.setenv("JOB_FTCH_SEARCH_BACKEND", "sqlite")
+    monkeypatch.setenv("JOB_FTCH_PROXY_RESCUE_ALLOW_DOMAINS", "")
+    monkeypatch.setenv("JOB_FTCH_PROXY_RESCUE_DENY_DOMAINS", "")
+    yield
+    import job_ftch.config
+
+    job_ftch.config.get_settings.cache_clear()
 
 
 class TestGatewayProxyProvider:
@@ -114,6 +134,54 @@ class TestGatewayProxyProvider:
         assert len(gw.active_sessions) == 2
         assert "a.com" in gw.active_sessions
         assert "b.com" in gw.active_sessions
+
+    def test_dataimpulse_url_format(self) -> None:
+        gw = GatewayProxyProvider(
+            provider="dataimpulse",
+            gateway="http://gw.dataimpulse.com:823",
+            user="login",
+            password="pass",
+            default_country="ru",
+            sticky_ttl_seconds=1800,
+        )
+        url = gw.get_proxy_url(domain="career.habr.com")
+        assert url.startswith("http://login__cr.ru;")
+        assert ";sessid." in url
+        assert ";sessttl.30:pass@gw.dataimpulse.com:823" in url
+
+    def test_dataimpulse_sticky_session_same_domain(self) -> None:
+        gw = GatewayProxyProvider(
+            provider="dataimpulse",
+            gateway="http://gw.dataimpulse.com:823",
+            user="login",
+            password="pass",
+            default_country="ru",
+        )
+        url1 = gw.get_proxy_url(domain="careers.higgsfield.kz")
+        url2 = gw.get_proxy_url(domain="careers.higgsfield.kz")
+        assert url1 == url2
+
+
+class TestProxyRescueDomainPolicy:
+    def test_allowlist_accepts_subdomains(self) -> None:
+        assert is_proxy_rescue_domain_allowed(
+            "jobs.career.habr.com",
+            allow_domains=("career.habr.com",),
+        )
+
+    def test_denylist_wins_over_allowlist(self) -> None:
+        assert not is_proxy_rescue_domain_allowed(
+            "rabota.sber.ru",
+            allow_domains=("sber.ru",),
+            deny_domains=("rabota.sber.ru",),
+        )
+
+    def test_wildcard_denylist(self) -> None:
+        assert not is_proxy_rescue_domain_allowed(
+            "bank.gov.ru",
+            allow_domains=("gov.ru",),
+            deny_domains=("*.gov.ru",),
+        )
 
 
 class TestProxyCostTracker:
@@ -279,6 +347,91 @@ class TestStrictGeoBinding:
         )
         url = gw.get_proxy_url(domain="test.com")
         assert "-country-us-" in url
+
+
+class TestResidentialProxyRescueRouting:
+    def test_gateway_is_available_to_bypass_context(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("JOB_FTCH_PROXY_PROVIDER", "dataimpulse")
+        monkeypatch.setenv("JOB_FTCH_PROXY_GATEWAY", "http://gw.dataimpulse.com:823")
+        monkeypatch.setenv("JOB_FTCH_PROXY_USER", "login")
+        monkeypatch.setenv("JOB_FTCH_PROXY_PASS", "pass")
+        monkeypatch.setenv("JOB_FTCH_PROXY_COUNTRY_DEFAULT", "ru")
+        monkeypatch.setenv("JOB_FTCH_PROXY_STICKY_TTL_SECONDS", "1800")
+        monkeypatch.setenv("JOB_FTCH_PROXY_RESCUE_ALLOW_DOMAINS", "career.habr.com")
+
+        import importlib
+
+        import job_ftch.config
+        import job_ftch.infrastructure.bypass.proxy_bypass as mod
+
+        importlib.reload(job_ftch.config)
+        job_ftch.config.get_settings.cache_clear()
+        mod._cost_tracker = None
+
+        from job_ftch.infrastructure.bypass.context import BypassContext
+        from job_ftch.infrastructure.bypass.proxy_bypass import ResidentialProxyBypass
+
+        bypass = ResidentialProxyBypass()
+        context = BypassContext(
+            persona=SimpleNamespace(),
+            preflight=SimpleNamespace(tier="direct", reason="test"),
+            domain="career.habr.com",
+            residential_proxy=bypass,
+        )
+        context.set_effective_route(tier="residential_proxy", network="residential_proxy")
+
+        assert context.residential_proxy_available
+        assert "__cr.ru;" in (context.current_proxy_url or "")
+        assert bypass.get_proxy_for(domain="career.habr.com", country="RU") is not None
+
+    def test_rescue_policy_skips_denied_domain(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("JOB_FTCH_PROXY_PROVIDER", "dataimpulse")
+        monkeypatch.setenv("JOB_FTCH_PROXY_GATEWAY", "http://gw.dataimpulse.com:823")
+        monkeypatch.setenv("JOB_FTCH_PROXY_USER", "login")
+        monkeypatch.setenv("JOB_FTCH_PROXY_PASS", "pass")
+        monkeypatch.setenv("JOB_FTCH_PROXY_COUNTRY_DEFAULT", "ru")
+        monkeypatch.setenv("JOB_FTCH_PROXY_RESCUE_ALLOW_DOMAINS", "career.habr.com,tbank.ru")
+        monkeypatch.setenv("JOB_FTCH_PROXY_RESCUE_DENY_DOMAINS", "tbank.ru,rabota.sber.ru")
+
+        import importlib
+
+        import job_ftch.config
+        import job_ftch.infrastructure.bypass.proxy_bypass as mod
+
+        importlib.reload(job_ftch.config)
+        job_ftch.config.get_settings.cache_clear()
+        mod._cost_tracker = None
+
+        from job_ftch.infrastructure.bypass.proxy_bypass import ResidentialProxyBypass
+
+        bypass = ResidentialProxyBypass()
+        kwargs = bypass.apply_browser_args({"_domain_hint": "tbank.ru"})
+        assert "proxy" not in kwargs
+
+    def test_browser_proxy_uses_split_credentials(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("JOB_FTCH_PROXY_PROVIDER", "dataimpulse")
+        monkeypatch.setenv("JOB_FTCH_PROXY_GATEWAY", "http://gw.dataimpulse.com:823")
+        monkeypatch.setenv("JOB_FTCH_PROXY_USER", "login")
+        monkeypatch.setenv("JOB_FTCH_PROXY_PASS", "pass")
+        monkeypatch.setenv("JOB_FTCH_PROXY_COUNTRY_DEFAULT", "ru")
+        monkeypatch.setenv("JOB_FTCH_PROXY_RESCUE_ALLOW_DOMAINS", "career.habr.com")
+
+        import importlib
+
+        import job_ftch.config
+        import job_ftch.infrastructure.bypass.proxy_bypass as mod
+
+        importlib.reload(job_ftch.config)
+        job_ftch.config.get_settings.cache_clear()
+        mod._cost_tracker = None
+
+        from job_ftch.infrastructure.bypass.proxy_bypass import ResidentialProxyBypass
+
+        bypass = ResidentialProxyBypass()
+        kwargs = bypass.apply_browser_args({"_domain_hint": "career.habr.com"})
+        assert kwargs["proxy"]["server"] == "http://gw.dataimpulse.com:823"
+        assert kwargs["proxy"]["username"].startswith("login__cr.ru;")
+        assert kwargs["proxy"]["password"] == "pass"
 
 
 class TestCaptchaProxyPassthrough:

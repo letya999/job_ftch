@@ -98,7 +98,8 @@ def test_run_many_materializes_fanout_candidates_and_keeps_independent_outcomes(
     assert [report.status for report in reports] == ["ACCEPT", "REJECT"]
 
 
-def test_run_many_commits_deferred_dedup_claim_after_terminal_outcome() -> None:
+def test_run_many_does_not_settle_claims_itself() -> None:
+    """Executor no longer owns settlement - caller settles via coordinator."""
     graph = GraphCompiler().compile(
         GraphSpec(
             "claims",
@@ -131,11 +132,13 @@ def test_run_many_commits_deferred_dedup_claim_after_terminal_outcome() -> None:
 
     asyncio.run(executor.run_many(Raw("claim-1")))
 
-    assert claim.committed == ["claim-1"]
+    # Executor leaves settlement to the caller.
+    assert claim.committed == []
     assert claim.released == []
 
 
-def test_run_many_releases_deferred_dedup_claim_on_graph_failure() -> None:
+def test_run_many_does_not_settle_on_failure() -> None:
+    """On graph failure, executor propagates the exception without settling."""
     graph = GraphCompiler().compile(
         GraphSpec(
             "claims-failure",
@@ -174,7 +177,7 @@ def test_run_many_releases_deferred_dedup_claim_on_graph_failure() -> None:
         raise AssertionError("graph failure must propagate")
 
     assert claim.committed == []
-    assert claim.released == ["claim-2"]
+    assert claim.released == []
 
 
 def test_graph_fanout_settles_child_dedup_claims() -> None:
@@ -212,13 +215,9 @@ def test_graph_fanout_settles_child_dedup_claims() -> None:
 
     asyncio.run(executor.run_many(Raw("parent-1")))
 
-    # The Split node returns Candidate("a") and Candidate("b").
-    # `materialize_raw_item` makes them into Raw("a") and Raw("b") in our test stub.
-    # So both "a" and "b" should pass through dedup and have their claims committed.
-    # Plus, the `parent-1` also entered the graph. But `DedupNode` runs AFTER split, so only "a" and "b" get claims.
-    # But wait, our `executor` tracks ALL items that entered `_run_from`. So it will call `commit_claim("parent-1")`,
-    # `commit_claim("a")`, and `commit_claim("b")`!
-    assert sorted(claim.committed) == ["a", "b", "parent-1"]
+    # Executor no longer owns settlement. Claims are uncommitted until the
+    # caller (Pipeline or eval harness) settles explicitly.
+    assert claim.committed == []
     assert claim.released == []
 
 
@@ -262,5 +261,6 @@ def test_graph_fanout_releases_child_dedup_claims_on_failure() -> None:
     else:
         raise AssertionError("graph failure must propagate")
 
+    # Executor no longer owns settlement; caller handles release on failure.
     assert claim.committed == []
-    assert sorted(claim.released) == ["a", "parent-1"]
+    assert claim.released == []

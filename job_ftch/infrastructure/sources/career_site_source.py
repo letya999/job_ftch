@@ -92,6 +92,11 @@ class ZeroYieldReason(StrEnum):
     FRESHNESS_FILTERED = "freshness_filtered"
     PRE_DEDUP_ALL_SEEN = "pre_dedup_all_seen"
     BOARD_GONE = "board_gone"
+    WAF_CHALLENGE = "waf_challenge"
+    PROVIDER_TUNNEL_DENIED = "provider_tunnel_denied"
+    SOFT_403_WITH_CONTENT = "soft_403_with_content"
+    STALE_URL = "stale_url"
+    PARSER_GAP = "parser_gap"
 
 
 @dataclass
@@ -176,6 +181,51 @@ def _is_protected_source_error(exc: BaseException) -> bool:
             return True
         current = current.__cause__ or current.__context__
     return False
+
+
+def _has_substantial_html_content(body: bytes | None) -> bool:
+    if not body:
+        return False
+    text = body.decode("utf-8", errors="ignore")
+    without_code = re.sub(
+        r"<\s*(?:script|style)\b[^>]*>.*?<\s*/\s*(?:script|style)\b[^>]*>",
+        " ",
+        text,
+        flags=re.I | re.S,
+    )
+    visible = " ".join(re.sub(r"<[^>]+>", " ", without_code).split())
+    return len(visible) >= 200
+
+
+def _classified_zero_reason(
+    exc: BaseException | None,
+    *,
+    status_code: int | None = None,
+    response_body: bytes | None = None,
+) -> ZeroYieldReason:
+    error_text = str(exc or "").casefold()
+    if "err_tunnel_connection_failed" in error_text or "tunnel connection failed" in error_text:
+        return ZeroYieldReason.PROVIDER_TUNNEL_DENIED
+    if status_code in {403, 498, 499} and _has_substantial_html_content(response_body):
+        return ZeroYieldReason.SOFT_403_WITH_CONTENT
+    if status_code in {404, 410}:
+        return ZeroYieldReason.STALE_URL
+    if response_body:
+        from job_ftch.infrastructure.bypass.failure_signal import (
+            FailureKind,
+            HeuristicFailureSignal,
+        )
+
+        outcome = HeuristicFailureSignal().classify_detailed(
+            status_code=status_code,
+            body=response_body,
+            error=exc,
+        )
+        if outcome.kind in {FailureKind.CAPTCHA, FailureKind.CHALLENGE}:
+            return ZeroYieldReason.WAF_CHALLENGE
+    if status_code in {401, 403, 429, 498, 499}:
+        return ZeroYieldReason.WAF_CHALLENGE
+    return ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
 
 
 def _looks_like_spa_shell(html: str | None) -> bool:
@@ -548,6 +598,12 @@ class CareerSiteSource(Source["RawItem"]):
                 tier=current_tier,
                 failure_kind=failure_kind,
             )
+            if status_code in {401, 403, 429, 498, 499} or _is_protected_source_error(exc):
+                self.stats.zero_reason = _classified_zero_reason(
+                    exc,
+                    status_code=status_code,
+                    response_body=response_body,
+                )
             return False
 
         from job_ftch.infrastructure.bypass.failure_signal import (
@@ -587,6 +643,14 @@ class CareerSiteSource(Source["RawItem"]):
                 next_tier=self.bypass_strategy.current_name,
             )
             return True
+        if escalatable:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            body = getattr(getattr(exc, "response", None), "content", None)
+            self.stats.zero_reason = _classified_zero_reason(
+                exc,
+                status_code=status,
+                response_body=body,
+            )
         return False
 
     async def _init_strategy(self) -> tuple[str, dict[str, Any] | None, Any, str]:
@@ -640,6 +704,17 @@ class CareerSiteSource(Source["RawItem"]):
                 bind_context(self._bypass_ctx)
         except Exception:
             self._bypass_ctx = None
+        capability = self.spec.monitor_config.get("bypass_capability")
+        if isinstance(capability, str) and capability.strip():
+            self._request_bypass_capability(
+                capability.strip(),
+                reason=str(
+                    self.spec.monitor_config.get(
+                        "bypass_capability_reason",
+                        "site_runtime_defaults",
+                    )
+                ),
+            )
 
         return domain, cached_strategy, original_http, initial_bypass
 
@@ -721,11 +796,20 @@ class CareerSiteSource(Source["RawItem"]):
                             # public listing data when unauthenticated.  A
                             # generic crawl after their dedicated parser adds
                             # noise and must not be mistaken for an empty site.
-                            self.stats.zero_reason = ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+                            self.stats.zero_reason = (
+                                self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+                            )
                             self._parser_failure_is_terminal = True
                             return
                         break  # Parsed but found 0 items, break out of bypass loop
                 except Exception as exc:
+                    from job_ftch.infrastructure.sources.monitors.shared import BoardGoneError
+
+                    if isinstance(exc, BoardGoneError):
+                        logger.info("site_parser_board_gone", url=self.spec.url)
+                        self.stats.zero_reason = ZeroYieldReason.BOARD_GONE
+                        self._parser_failure_is_terminal = True
+                        break
                     response = (
                         getattr(exc, "response", None)
                         if isinstance(exc, httpx.HTTPStatusError)
@@ -749,7 +833,9 @@ class CareerSiteSource(Source["RawItem"]):
                             yield partial_item
                         return
                     if _is_protected_source_error(exc):
-                        self.stats.zero_reason = ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+                        self.stats.zero_reason = (
+                            self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+                        )
                         # A known site parser has exhausted its own bypass path.
                         # Falling through to generic discovery only turns a clear
                         # protected-source outcome into an unbounded unrelated crawl.
@@ -790,7 +876,17 @@ class CareerSiteSource(Source["RawItem"]):
         cached_strategy: dict[str, Any] | None,
         monitor_config: dict[str, Any],
     ) -> tuple[list[str], dict[str, Any]]:
-        initial_monitor_name = self.spec.monitor or (
+        forced_monitor = self.spec.monitor_config.get("force_monitor")
+        configured_monitor = self.spec.monitor_config.get("monitor")
+        initial_monitor_name = (
+            forced_monitor
+            if isinstance(forced_monitor, str) and forced_monitor.strip()
+            else None
+        ) or self.spec.monitor or (
+            configured_monitor
+            if isinstance(configured_monitor, str) and configured_monitor.strip()
+            else None
+        ) or (
             cached_strategy.get("monitor") if cached_strategy else "auto"
         )
         resolved_initial_monitor_name = str(initial_monitor_name or "auto")
@@ -835,7 +931,13 @@ class CareerSiteSource(Source["RawItem"]):
                     monitors_to_try.append(fallback)
         else:
             monitors_to_try = [resolved_initial_monitor_name]
-            if not self.spec.monitor and cached_strategy:
+            if isinstance(forced_monitor, str) and forced_monitor.strip():
+                raw_fallbacks = self.spec.monitor_config.get("force_monitor_fallbacks", ["dom"])
+                if isinstance(raw_fallbacks, list):
+                    for fallback in raw_fallbacks:
+                        if isinstance(fallback, str) and fallback not in monitors_to_try:
+                            monitors_to_try.append(fallback)
+            elif not self.spec.monitor and cached_strategy:
                 for fallback in ["api_sniffer", "dom"]:
                     if fallback not in monitors_to_try:
                         monitors_to_try.append(fallback)
@@ -930,7 +1032,9 @@ class CareerSiteSource(Source["RawItem"]):
                         # rather than treating challenge links as candidates.
                         if await self._try_escalate_bypass(exc):
                             continue
-                        self.stats.zero_reason = ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+                        self.stats.zero_reason = (
+                            self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+                        )
                         return
                     if isinstance(exc, BoardGoneError):
                         logger.info("monitor_board_gone", name=current_monitor_name, url=exc.url)
@@ -944,7 +1048,9 @@ class CareerSiteSource(Source["RawItem"]):
                     body = response.content if response is not None else None
                     if await self._try_escalate_bypass(exc, response=response, response_body=body):
                         continue
-                    self.stats.zero_reason = ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+                    self.stats.zero_reason = (
+                        self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+                    )
                     if _is_protected_source_error(exc):
                         # All available bypass tiers have rejected this listing.
                         # Trying the remaining generic monitors only repeats the
@@ -1128,7 +1234,9 @@ class CareerSiteSource(Source["RawItem"]):
                 break
 
         if self._challenge_bypass_exhausted():
-            self.stats.zero_reason = ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+            self.stats.zero_reason = (
+                self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+            )
         elif self.stats.zero_reason not in {
             ZeroYieldReason.ALL_SCRAPERS_FAILED,
             ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT,
@@ -1823,7 +1931,7 @@ class CareerSiteSource(Source["RawItem"]):
         # request suppression only; it must not change a protected source into
         # ``all_scrapers_failed`` merely because it exposed fewer detail URLs
         # than the circuit-breaker threshold.
-        self.stats.zero_reason = ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+        self.stats.zero_reason = self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
         if (
             self.stats.detail_protection_failures
             < get_settings().career_site_protection_failure_limit
@@ -1831,7 +1939,7 @@ class CareerSiteSource(Source["RawItem"]):
             return
         self._detail_protection_circuit_open = True
         self.stats.protection_circuit_open = True
-        self.stats.zero_reason = ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+        self.stats.zero_reason = self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
         logger.warning(
             "detail_protection_circuit_open",
             url=self.spec.url,

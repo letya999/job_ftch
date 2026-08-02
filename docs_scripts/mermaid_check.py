@@ -46,7 +46,8 @@ def main() -> int:
                 src.write_text(block, encoding="utf-8")
                 result = subprocess.run(
                     ["mmdc", "-i", str(src), "-o", str(out)],
-                    capture_output=True, text=True,
+                    capture_output=True,
+                    text=True,
                 )
                 checked += 1
                 if result.returncode != 0:

@@ -37,8 +37,14 @@ STRUCTURE_EXEMPT = [".work"]
 # Заготовки с суффиксом .template проверяются наравне с рабочими: разворачивать
 # шаблон с битыми ссылками внутри нечестно.
 ROOT_DOCS = [
-    "README.md", "AGENTS.md", "CLAUDE.md", "SECURITY.md", "QUICKSTART.md",
-    "README.template.md", "AGENTS.template.md", "CLAUDE.template.md",
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "SECURITY.md",
+    "QUICKSTART.md",
+    "README.template.md",
+    "AGENTS.template.md",
+    "CLAUDE.template.md",
     "QUICKSTART.template.md",
 ]
 
@@ -50,10 +56,27 @@ INDEX_THRESHOLD = 4
 MAX_DESCRIPTION_LEN = 200
 
 MERMAID_TYPES = {
-    "flowchart", "graph", "sequenceDiagram", "classDiagram", "stateDiagram",
-    "stateDiagram-v2", "erDiagram", "journey", "gantt", "pie", "mindmap",
-    "timeline", "gitGraph", "quadrantChart", "C4Context", "C4Container",
-    "C4Component", "C4Dynamic", "sankey-beta", "block-beta", "xychart-beta",
+    "flowchart",
+    "graph",
+    "sequenceDiagram",
+    "classDiagram",
+    "stateDiagram",
+    "stateDiagram-v2",
+    "erDiagram",
+    "journey",
+    "gantt",
+    "pie",
+    "mindmap",
+    "timeline",
+    "gitGraph",
+    "quadrantChart",
+    "C4Context",
+    "C4Container",
+    "C4Component",
+    "C4Dynamic",
+    "sankey-beta",
+    "block-beta",
+    "xychart-beta",
 }
 
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n", re.S)
@@ -177,7 +200,9 @@ class Linter:
             fields = yaml.safe_load(m.group(1)) or {}
         except yaml.YAMLError as exc:
             self.error(
-                path, 2, "FM007",
+                path,
+                2,
+                "FM007",
                 f"frontmatter не разбирается как YAML: {str(exc).splitlines()[0]}. "
                 f"Значения со спецсимволами берутся в кавычки",
             )
@@ -192,7 +217,9 @@ class Linter:
             self.error(path, 2, "FM003", f"нет обязательных полей: {', '.join(sorted(missing))}")
         if extra:
             self.error(
-                path, 2, "FM004",
+                path,
+                2,
+                "FM004",
                 f"лишние поля: {', '.join(sorted(extra))}. "
                 f"Разрешены только title, description и updated",
             )
@@ -202,7 +229,9 @@ class Linter:
             self.descriptions[path] = description
             if len(description) > MAX_DESCRIPTION_LEN:
                 self.warn(
-                    path, 2, "FM005",
+                    path,
+                    2,
+                    "FM005",
                     f"description длиной {len(description)} символов, порог {MAX_DESCRIPTION_LEN}",
                 )
             if not description.endswith("."):
@@ -227,7 +256,9 @@ class Linter:
             self.error(path, 3, "FR003", f"updated в будущем: {value}")
         elif age > self.max_age:
             self.warn(
-                path, 3, "FR004",
+                path,
+                3,
+                "FR004",
                 f"не проверялся {age} дней, порог {self.max_age}. Сверь с кодом и обнови дату",
             )
 
@@ -249,7 +280,9 @@ class Linter:
                 resolved = (path.parent / target).resolve()
                 if not resolved.exists():
                     self.error(
-                        path, line_no, "LN001",
+                        path,
+                        line_no,
+                        "LN001",
                         f"ссылка ведёт в никуда: {match.group(2)}",
                     )
                     continue
@@ -284,13 +317,16 @@ class Linter:
         if anchor.lower() not in slugs:
             self.warn(path, line_no, "LN002", f"якорь не найден в целевом файле: {raw}")
 
-    def check_annotation(self, path: Path, line_no: int, item: str,
-                         match: re.Match[str], target: Path) -> None:
+    def check_annotation(
+        self, path: Path, line_no: int, item: str, match: re.Match[str], target: Path
+    ) -> None:
         """Ссылка сопровождается описанием того, что внутри и когда это читать."""
-        tail = item[match.end():]
+        tail = item[match.end() :]
         if not tail.startswith(":"):
             self.error(
-                path, line_no, "AN001",
+                path,
+                line_no,
+                "AN001",
                 f"ссылка в индексе без аннотации: {match.group(2)}. "
                 f"Формат: `[путь](относительный): описание. Читать когда ...`",
             )
@@ -304,7 +340,9 @@ class Linter:
         expected = self.descriptions.get(target)
         if expected and not annotations_agree(annotation, expected):
             self.warn(
-                path, line_no, "AN003",
+                path,
+                line_no,
+                "AN003",
                 f"аннотация разошлась с description целевого файла.\n"
                 f"    в индексе: {annotation[:80]}\n"
                 f"    в файле:   {expected[:80]}",
@@ -320,7 +358,7 @@ class Linter:
         """
         # Frontmatter пропускаем: там служебные поля, а не текст для читателя.
         m = FRONTMATTER_RE.match(text)
-        skip_until = text[:m.end()].count("\n") if m else 0
+        skip_until = text[: m.end()].count("\n") if m else 0
 
         for line_no, line in iter_lines_outside_fences(text):
             if line_no <= skip_until:
@@ -336,7 +374,9 @@ class Linter:
                 continue
             if cyr / (cyr + lat) < MIN_CYRILLIC_RATIO:
                 self.error(
-                    path, line_no, "RU001",
+                    path,
+                    line_no,
+                    "RU001",
                     "строка не на русском. Документация ведётся на русском, "
                     "латиница остаётся только в путях, командах и идентификаторах",
                 )
@@ -359,20 +399,23 @@ class Linter:
             meta = read_frontmatter(target)
             rel = target.relative_to(index.parent).as_posix()
             rows.append(
-                f"| [{label}]({rel}) | {meta.get('description', '')} | "
-                f"{meta.get('updated', '')} |"
+                f"| [{label}]({rel}) | {meta.get('description', '')} | {meta.get('updated', '')} |"
             )
         return rows
 
     def render_table(self, index: Path) -> str:
         rows = self.index_rows(index) or ["| - | пока пусто | - |"]
-        return "\n".join([
-            TABLE_START, "",
-            "| Документ | О чём | Сверено |",
-            "| -------- | ----- | ------- |",
-            *rows, "",
-            TABLE_END,
-        ])
+        return "\n".join(
+            [
+                TABLE_START,
+                "",
+                "| Документ | О чём | Сверено |",
+                "| -------- | ----- | ------- |",
+                *rows,
+                "",
+                TABLE_END,
+            ]
+        )
 
     def sync_index_tables(self) -> None:
         """Таблица содержимого собирается из frontmatter детей, а не пишется руками.
@@ -401,10 +444,14 @@ class Linter:
                 if text[start:end].strip() == fresh.strip():
                     continue
                 if self.fix:
-                    index.write_text(text[:start] + fresh + text[end:], encoding="utf-8", newline="\n")
+                    index.write_text(
+                        text[:start] + fresh + text[end:], encoding="utf-8", newline="\n"
+                    )
                 else:
                     self.error(
-                        index, 1, "IX005",
+                        index,
+                        1,
+                        "IX005",
                         "таблица содержимого разошлась с папкой. Запусти just fix",
                     )
 
@@ -418,18 +465,21 @@ class Linter:
         if path.name != "index.md":
             return
         m = FRONTMATTER_RE.match(text)
-        body = text[m.end():] if m else text
+        body = text[m.end() :] if m else text
         start = body.find(TABLE_START)
         if start == -1:
             return
         head = body[:start]
         extra = [
-            line for line in head.split(chr(10))
+            line
+            for line in head.split(chr(10))
             if line.strip() and not line.lstrip().startswith("#")
         ]
         if extra:
             self.error(
-                path, 1, "IX006",
+                path,
+                1,
+                "IX006",
                 f"в индексе есть текст помимо заголовка и таблицы: {extra[0][:60]}. "
                 f"Правила зоны живут в docs/documentation, а не здесь",
             )
@@ -449,11 +499,14 @@ class Linter:
                     continue
                 if len(docs) > INDEX_THRESHOLD or subdirs:
                     reason = (
-                        f"{len(docs)} документов" if len(docs) > INDEX_THRESHOLD
+                        f"{len(docs)} документов"
+                        if len(docs) > INDEX_THRESHOLD
                         else f"{len(subdirs)} вложенных папок"
                     )
                     self.error(
-                        directory / "index.md", 1, "IX001",
+                        directory / "index.md",
+                        1,
+                        "IX001",
                         f"нет index.md, хотя в папке {reason}",
                     )
 
@@ -469,7 +522,9 @@ class Linter:
             kind = first.split()[0].rstrip(";") if first.split() else ""
             if kind not in MERMAID_TYPES:
                 self.error(
-                    path, line_no, "MM002",
+                    path,
+                    line_no,
+                    "MM002",
                     f"неизвестный тип диаграммы: {kind!r}. Блок не отрендерится",
                 )
             unbalanced = sum(line.count("[") - line.count("]") for line in content)
@@ -487,7 +542,9 @@ class Linter:
         for line_no, line in iter_lines_outside_fences(text):
             if CHECKBOX_RE.match(line):
                 self.error(
-                    path, line_no, "ST001",
+                    path,
+                    line_no,
+                    "ST001",
                     "чек-лист в docs/. Состояние задач живёт в .work/, а не в документации",
                 )
                 return
@@ -496,7 +553,9 @@ class Linter:
         for line_no, line in iter_lines_outside_fences(text):
             if PLACEHOLDER_RE.search(line):
                 self.error(
-                    path, line_no, "PH001",
+                    path,
+                    line_no,
+                    "PH001",
                     "незаполненный плейсхолдер из шаблона",
                 )
                 return
@@ -543,7 +602,12 @@ def iter_fences(text: str):
             i += 1
             while i < len(lines):
                 closing = FENCE_RE.match(lines[i])
-                if closing and closing.group(2)[0] == fence[0] and len(closing.group(2)) >= len(fence) and not closing.group(3):
+                if (
+                    closing
+                    and closing.group(2)[0] == fence[0]
+                    and len(closing.group(2)) >= len(fence)
+                    and not closing.group(3)
+                ):
                     break
                 body.append(lines[i])
                 i += 1
@@ -637,12 +701,13 @@ def main() -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--template", action="store_true",
-                        help="режим шаблона: плейсхолдеры {{...}} допустимы")
-    parser.add_argument("--max-age", type=int, default=180,
-                        help="порог протухания updated в днях")
-    parser.add_argument("--fix", action="store_true",
-                        help="пересобрать таблицы содержимого в index.md")
+    parser.add_argument(
+        "--template", action="store_true", help="режим шаблона: плейсхолдеры {{...}} допустимы"
+    )
+    parser.add_argument("--max-age", type=int, default=180, help="порог протухания updated в днях")
+    parser.add_argument(
+        "--fix", action="store_true", help="пересобрать таблицы содержимого в index.md"
+    )
     parser.add_argument("--format", choices=["text", "github"], default="text")
     args = parser.parse_args()
 

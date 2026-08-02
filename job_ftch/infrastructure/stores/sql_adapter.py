@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import abc
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from job_ftch.application.contracts import DedupReservation
 
 from job_ftch.domain import (
     DuplicateRecord,
@@ -181,6 +184,19 @@ class SQLStoreAdapter(abc.ABC):
 
     async def release_dedup_claim(self, key: str, owner_id: str) -> None:
         await self._execute(self._SQL_DEDUP_CLAIM_RELEASE, (key, owner_id))
+
+    async def compare_and_reserve(
+        self, keys: tuple[str, ...], owner_id: str, *, ttl_seconds: int
+    ) -> DedupReservation:
+        from job_ftch.application.contracts import DedupReservation
+
+        for key in keys:
+            acquired = await self.acquire_dedup_claim(key, owner_id, ttl_seconds=ttl_seconds)
+            if not acquired:
+                for prev_key in keys[: keys.index(key)]:
+                    await self.release_dedup_claim(prev_key, owner_id)
+                return DedupReservation(acquired=False, conflicting_key=key)
+        return DedupReservation(acquired=True, reserved_keys=keys)
 
     async def record_observation(self, entry: ObservationLedgerEntry) -> ObservationLedgerEntry:
         existing = await self.get_observation(

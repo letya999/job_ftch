@@ -40,6 +40,15 @@ Runtime YAML читается через `JOB_FTCH_RUNTIME_CONFIG_PATH`; compose
 задаёт цепочку `config/runtime.yaml`, env-specific root runtime и
 `job_ftch/adapters/telegram_bot/runtime*.yaml`.
 
+## Residential proxy rescue
+
+Residential proxies are a paid rescue tier, not the default route for every
+career site. The root `.env*.example` files contain a DataImpulse RU gateway
+profile (`gw.dataimpulse.com:823`) with 1 GB total per-process budget,
+0.05 GB per-domain budget, allow-domains for Habr/Higgsfield/EPAM rescue sources, and
+deny-domains for banking/government targets. Real `JOB_FTCH_PROXY_USER` and
+`JOB_FTCH_PROXY_PASS` values must live only in local/compose env files.
+
 ## Практическое правило
 
 - Секреты, токены, DSN и URL ищите в `.env*.example`.

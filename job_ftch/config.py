@@ -5,9 +5,10 @@ from __future__ import annotations
 import functools
 import os
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from pydantic_settings.sources import (
     PydanticBaseSettingsSource,
     YamlConfigSettingsSource,
@@ -159,6 +160,7 @@ class Settings(BaseSettings):
     routing_reranker_accept_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     routing_reranker_review_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     pipeline_decision_version: str = Field(default="pipeline-v1", min_length=1)
+    dedup_cache_max_entries: int = Field(default=10_000, ge=100, le=1_000_000)
     evidence_policy_path: Path = Path("config/evidence_policy.yaml")
     # Optional schema-v2 YAML authority. None keeps the schema-v1 compatibility
     # path until tenant-level parity has been verified.
@@ -257,6 +259,8 @@ class Settings(BaseSettings):
     proxy_sticky_ttl_seconds: int = Field(default=600, ge=30, le=3600)
     proxy_gb_budget: float = Field(default=0.0, ge=0.0)
     proxy_per_domain_gb_budget: float = Field(default=0.0, ge=0.0)
+    proxy_rescue_allow_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    proxy_rescue_deny_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
     proxy_strict_geo: bool = False
     robots_enforce: bool = False
     session_memory_enabled: bool = False
@@ -268,7 +272,7 @@ class Settings(BaseSettings):
     fingerprinter_timeout_seconds: float = Field(default=8.0, gt=0.0, le=300.0)
     store_path: Path = Path(".runtime/job_ftch.db")
     store_dsn: SecretStr | None = None
-    http_proxy_list: list[str] = Field(default_factory=list)
+    http_proxy_list: Annotated[list[str], NoDecode] = Field(default_factory=list)
     store_pool_min: int = Field(default=2, gt=0)
     store_pool_max: int = Field(default=10, gt=0)
     store_fallback_on_error: bool = True
@@ -439,7 +443,12 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("http_proxy_list", mode="before")
+    @field_validator(
+        "http_proxy_list",
+        "proxy_rescue_allow_domains",
+        "proxy_rescue_deny_domains",
+        mode="before",
+    )
     @classmethod
     def parse_comma_separated_list(cls, value: object) -> list[str]:
         if not value:

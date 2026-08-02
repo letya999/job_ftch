@@ -1,7 +1,7 @@
 ---
 title: "Технический долг"
-description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-033."
-updated: 2026-07-31
+description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-044."
+updated: 2026-08-02
 ---
 # Технический долг
 
@@ -66,9 +66,9 @@ updated: 2026-07-31
 
 ### Performance и quality hardening
 
-- Candidate fanout child processing sequential внутри worker.
-- Graph executor fanout sequential recursive.
-- Full-pipeline benchmark/perf release gate слабый.
+- Candidate fanout child processing sequential внутри worker. Поднято до TD-035.
+- Graph executor fanout sequential recursive. Поднято до TD-035.
+- Full-pipeline benchmark/perf release gate слабый. Поднято до TD-039.
 - Eval/perf gates частично ручные.
 - Static-check docs и CI не должны расходиться (`mypy .` vs `mypy job_ftch`).
 - KZT/₸ salary parsing.
@@ -706,4 +706,281 @@ Exit criterion:
   а не молча теряется;
 - регрессионные тесты по 5 сценариям из issue #145 (частичный fan-out,
   crash-before-commit, два recovery-воркера, удалённый target, обратная
-  совместимость single-destination).
+  совместимость single-destination);
+- ledger и outbox используют один `decision_version`. Сейчас
+  `Pipeline._enqueue_outbox` (`job_ftch/application/pipeline.py:1128,1137`)
+  жёстко подставляет `"pipeline-v1"`, а `_record_observation` (`:1237`) берёт
+  значение из settings. Из-за этого поднятие `pipeline_decision_version` меняет
+  ledger, но не idempotency key outbox, и replay под новой политикой молча
+  схлопывается по старому ключу вместо повторной доставки. Хардкод убирается
+  волной 2 плана `PLAN_dedup_terminal_lifecycle.md`; здесь пункт остаётся как
+  инвариант, который обязан проверяться тестом после полного перевода
+  destination на outbox-конверт.
+
+## 36. TD-035: Fan-out concurrency budget
+
+Status: open. Priority: high. Это живой production-путь, а не гипотетический.
+
+`CandidateSegmentationNode` объявлен как `is_fan_out_stage = True`
+(`job_ftch/nodes/candidate_segmentation.py:21`) и стоит четвёртым узлом в
+production-графе (`config/pipelines/evidence_v2.yaml`, id `segmentation`).
+Обработка кандидатов идёт строго последовательно в двух местах:
+
+- `GraphExecutor._run_from` (`job_ftch/application/graph/executor.py:250-259`)
+  рекурсивно обходит кандидатов по одному;
+- `Pipeline._finalize_item_result` (`job_ftch/application/pipeline.py:843-852`)
+  финализирует детей по одному.
+
+Следствие: пост с N вакансиями обрабатывается в N раз дольше одиночного, и
+item-level concurrency этого не компенсирует, потому что параллелизм задан на
+уровне родительских observation, а не кандидатов.
+
+Почему нельзя чинить `asyncio.gather`: при десятках-сотнях spans это даёт burst
+по памяти и по downstream-провайдерам (LLM, store), то есть меняет профиль
+нагрузки непредсказуемо.
+
+Exit criterion:
+
+- явная `FanOutPolicy` с `max_concurrency`, `max_pending`, `fail_fast` и
+  политикой упорядочивания; значения задаются метаданными узла, а не константой
+  в executor;
+- дети одного родителя не могут обгонять друг друга там, где это влияет на
+  dedup или aggregation; там, где порядок не важен, он явно объявлен ненужным;
+- settlement dedup-claims детей остаётся корректным при конкурентной обработке
+  (проверяется тестами из волны 1);
+- бенчмарк fan-out 1/10/100 кандидатов показывает сублинейный рост времени.
+
+## 37. TD-036: Разрезать `Store` на узкие порты
+
+Status: open. Priority: medium.
+
+`Store` (`job_ftch/application/contracts.py:113-251`) — 35 методов и девять
+несвязанных ответственностей: outbox, dedup claims, observation ledger,
+признак обработанности, duplicate records, run state, стратегия источника,
+снапшоты, source assessment и ingest state. Это нарушает принцип разделения
+интерфейсов и делает невозможными независимые тестовые реализации, batching и
+раздельные транзакционные границы.
+
+Предлагаемый разрез — по потребителю, не по таблице:
+
+- `ObservationLedger`: `record_observation`, `get_observation`;
+- `DedupRepository`: claims, ключи, duplicate records, `compare_and_reserve`;
+- `OutboxRepository`: `enqueue_outbox`, `list_pending_outbox`,
+  `mark_outbox_delivered`;
+- `ProcessedMarker`: `has_processed`, `mark_processed`;
+- `RunStateRepository`: `get_run_state`, `set_run_state`;
+- `SourceStateRepository`: source strategy + ingest state;
+- `SnapshotRepository`: snapshot rows, hashes, purge;
+- `SourceAssessmentRepository`.
+
+Правило после разреза: узел получает свой порт, а не `Store`. `Store` остаётся
+фасадом, реализующим все протоколы, чтобы миграция шла по одному потребителю за
+раз без big-bang.
+
+Exit criterion:
+
+- ни один класс в `job_ftch/nodes/` не принимает `Store`;
+- `job_ftch/application/capabilities.py` (введён волной 2 плана) полностью
+  вытеснен настоящими портами;
+- контрактные тесты (`tests/infrastructure/stores/test_store_contracts.py`)
+  разбиты по портам и прогоняются для каждой реализации отдельно.
+
+## 38. TD-037: `Any` в graph runtime обнуляет strict-режим
+
+Status: open. Priority: medium. Делать после TD-036.
+
+`mypy strict = true` включён (`pyproject.toml`), но в ключевых модулях
+`Any` встречается 22 раза в `application/pipeline.py`, 33 в
+`application/builder.py`, 31 в `application/graph/executor.py`. Совместимость
+payload между узлами проверяется сравнением строк с именами типов в манифесте,
+а `"Any"` используется как обход проверки. Компилятор не может гарантировать,
+что `CandidateSpan -> JobDraft` действительно совместимы.
+
+Отмечено отдельно: `--strict` в mypy **не включает** `disallow_any_explicit`,
+поэтому это осознанно добавляемый флаг, а не подразумеваемый.
+
+Конкретные правки:
+
+- `disallow_any_explicit` через `[[tool.mypy.overrides]]` точечно для
+  `job_ftch.application.graph.*`;
+- `NodeDefinition[InputT, OutputT]` вместо `Stage[Any, Any]` в
+  `PipelineBuilder._stages` (`job_ftch/application/builder.py:259,364`);
+- стабильный `PayloadTypeId` со схемой версии вместо `type(x).__name__` в
+  манифестах;
+- typed capability keys вместо `RuntimeContext.resources: dict[str, Any]`;
+- `Any` остаётся легальным только в диагностических и событийных структурах, и
+  это зафиксировано правилом в `AGENTS.md`.
+
+Exit criterion: production-граф компилируется без `Any` в цепочке payload;
+несовместимость узлов ловится на compile, а не на первом item.
+
+## 39. TD-038: Resource-aware backpressure
+
+Status: open. Priority: medium.
+
+Сейчас ограничение нагрузки задано двумя механизмами: bounded-очередь по
+количеству элементов в `CompositeSource`
+(`job_ftch/infrastructure/sources/composite.py:291`, `maxsize=queue_capacity`) и
+`AsyncCallBudget` для числа LLM-вызовов. Этого мало не потому, что нужно много
+бюджетов, а потому что один item может быть ссылкой на абзац, а другой -
+страницей на сотни килобайт: очередь на 100 элементов означает в этих случаях
+разный объём резидентной памяти.
+
+Exit criterion:
+
+- byte-бюджет очереди в дополнение к count-бюджету;
+- resource classes с раздельными лимитами (`network`, `browser`, `cpu`, `llm`),
+  объявляемые метаданными узла, а не разложенные руками внутри узлов;
+- memory watermark, при достижении которого source-fetch приостанавливается;
+- ровно три бюджета, а не семь: count, bytes, resource-class concurrency.
+
+## 40. TD-039: Perf baseline вместо порогового assert
+
+Status: open. Priority: medium.
+
+Единственный throughput-тест (`tests/benchmarks/test_pipeline_throughput.py`) -
+это 100 item'ов через `SanitizeNode` с `assert duration < 1.0`. Он не поймает ни
+двукратную регрессию, ни утечку памяти, ни деградацию при росте concurrency.
+
+Exit criterion:
+
+- сохраняемый baseline-файл и сравнение с ним в CI;
+- сценарии: чисто расчётная спина и спина с преобладанием ввода-вывода,
+  1/4/16 воркеров, веер 1/10/100 кандидатов, поток дублей, отмена,
+  время импорта и резидентная память;
+- пороги в относительных дельтах к baseline, а не в абсолютных секундах, иначе
+  на разных раннерах будут ложные срабатывания;
+- регрессия выше порога блокирует мерж.
+
+## 41. TD-040: Lazy plugin catalog
+
+Status: open. Priority: medium, растёт при внешнем использовании пакета.
+
+`load_extensions()` (`job_ftch/application/registry.py:761-833`) при первом
+обращении импортирует около 45 модулей, включая весь bypass-стек, site parsers и
+realtime-источники, и исполняет плагин прямо на этапе discovery:
+`loaded = candidate.load(); if callable(loaded): loaded()`. Состояние держится в
+глобальных флагах `_builtins_loaded` / `_entry_points_loaded` под модульным
+`Lock`.
+
+Для переиспользуемой библиотеки это означает скрытые import side effects,
+медленный старт, зависимость результата от порядка импортов и сложную изоляцию
+в тестах.
+
+Exit criterion:
+
+- discovery отделён от loading, loading от instantiation;
+- дескриптор плагина несёт `plugin_id`, `api_version`, `node_types`,
+  `capabilities` без импорта модуля;
+- политика коллизий явная (`error` по умолчанию);
+- каталог неизменяем после сборки и передаётся в compiler явно, а не читается
+  из глобального состояния.
+
+Вести совместно с TD-024 (Plugin SDK parity): это две половины одной проблемы.
+
+## 42. TD-041: Settings как контракт, а не глобальная переменная
+
+Status: open. Priority: medium.
+
+Проблема не в количестве полей, а в том, что один объект `Settings` смешивает
+pipeline, infrastructure, source, output, bot и observability, и достаётся
+глобальным кэшированным геттером. Вне `job_ftch/infrastructure` осталось восемь
+вызовов `get_settings()`; реальные утечки в ядро - `job_ftch/application/pipeline.py:290`
+и `job_ftch/application/builder.py:255`. Следствия: нельзя поднять две
+независимые конфигурации в одном процессе, тесты зависят от env-синглтона,
+builder имеет скрытые зависимости.
+
+Exit criterion:
+
+- ноль вызовов `get_settings()` вне composition edge (`job_ftch/cli.py`,
+  адаптеры);
+- `Settings` разрезан на `PipelineConfig` / `RunConfig` / `InfraConfig`; узел
+  получает свой срез, а не весь объект;
+- env-loading живёт только на границе приложения;
+- два независимых пайплайна с разными конфигурациями поднимаются в одном
+  процессе, и это покрыто тестом.
+
+Сокращать число полей ради сокращения не требуется: цель - разрез по владельцу.
+
+## 43. TD-042: Batch execution lane
+
+Status: open. Priority: low, сознательно отложено.
+
+`encode_batch()` (`job_ftch/infrastructure/embeddings/bgem3.py:76`) и
+`classify_batch()` (`keyword_classifier`, `llm_classifier`, `setfit_classifier`)
+уже существуют, но вызываются только из `scripts/eval/run_pipeline_eval.py`.
+Runtime обрабатывает по одному элементу.
+
+Почему отложено, а не сделано: champion-рецепт не использует эмбеддинги вообще
+(`bgem3_enabled=false`, `embedding_prefilter_enabled=false` в
+`config/recipes/champion_artifact.json` и в `.env.prod.example`), а единственный
+дорогой узел - LLM-судья - уже забюджетирован и кэширует результат по item в run
+state. Подключение batch требует микробатч-планировщика в рантайме, то есть
+переработки execution-модели, и сейчас не окупается.
+
+Exit criterion (возвращаться при выполнении условия входа):
+
+- в графе появился узел, где batch даёт измеримый выигрыш (включённый bgem3,
+  локальный классификатор на GPU, массовый rerank);
+- `process_batch()` добавлен в контракт stage вместе с `max_batch_size`,
+  `max_batch_wait` и tenant-изоляцией;
+- выигрыш подтверждён бенчмарком из TD-039, а не оценкой.
+
+## 44. TD-043: Latent-риски параллельных лейнов
+
+Status: open. Priority: low, но обязательно к прочтению перед включением
+параллельных узлов в production-граф.
+
+Проверено 2026-08-02: production-граф полностью последовательный, узлов с
+`execution: parallel` или `background` в нём нет, конкурентность живёт внутри
+`EvidenceFanOutNode`. Поэтому оба пункта ниже сейчас не исполняются, но
+сработают в день включения parallel-лейна (например,
+`config/pipelines/experiment_parallel_bgem3.yaml`).
+
+1. `copy.deepcopy(report.item)` в `GraphExecutor._run_from`
+   (`job_ftch/application/graph/executor.py:153,167`) выполняется на каждую
+   parallel-группу и на каждый background-узел. Копируется весь `RawItem`:
+   полный текст вакансии и метаданные, а при включённом bgem3 - ещё и dense-
+   векторы. Нужна поверхностная копия с copy-on-write или явный контракт
+   "parallel-узел не мутирует вход".
+2. `GraphTaskQueue` (`job_ftch/application/graph/queues.py`) удалён как мёртвый и
+   одновременно сломанный: `asyncio.Queue()` без `maxsize`, то есть без
+   backpressure, и консьюмер `while True: await handler(await queue.get())` без
+   `try/except`, из-за чего первое же исключение в handler убивает воркер
+   навсегда - `_worker` остаётся не-None, `start()` становится no-op,
+   `task_done()` не вызывается, а `put()` продолжает копить. Если очередь между
+   лейнами понадобится, это durable-таблица из TD-015 Variant B, а не
+   восстановление удалённого in-memory класса и не новая внешняя брокерная
+   зависимость.
+
+Exit criterion: перед первым включением parallel-узла в production-граф оба
+пункта закрыты и покрыты тестом.
+
+## 45. TD-044: Один execution runtime
+
+Status: open. Priority: medium.
+
+Делать после TD-035 и TD-036.
+
+Сегодня исполнение размазано между линейным `Pipeline` и декларативным
+`GraphExecutor`, которые соединены мостом `GraphPipelineStage`. `Pipeline`
+владеет жизненным циклом источников, outbox, sink и состоянием прогона;
+`GraphExecutor` - выполнением узлов, веером и failure policy. Прямой вред от
+этого расхождения был ровно один и конкретный: потеря `DEFERRED` из-за двух
+независимых реализаций settlement (устранено волной 1 плана
+`PLAN_dedup_terminal_lifecycle.md`).
+
+Порядок работ обратный тому, который обычно предлагают: сначала из обоих
+движков выносится наружу всё, что они дублируют (settlement - сделано, порты -
+TD-036, precompile графа и типизация payload - TD-037), и только затем
+`GraphCompiler` становится единственным компилятором. Если начать со слияния
+движков, они сливаются вместе со своими расхождениями.
+
+Exit criterion:
+
+- `GraphPipelineStage` удалён;
+- декларативный YAML, сборка на Python и tenant-конфигурация дают один
+  скомпилированный объект;
+- `Pipeline` остаётся deprecated-фасадом с объявленной датой удаления;
+- `graph_hash` production-рецепта не меняется при миграции, либо изменение
+  зафиксировано в `config/recipes/*` вместе с прогоном eval.

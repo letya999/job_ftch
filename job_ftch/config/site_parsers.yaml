@@ -19,6 +19,13 @@ parsers:
     render: false
     wait: "domcontentloaded"
     include_if_detail_page: false
+  - name: careerspace
+    domain_pattern: "^https?://careerspace\\.app(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
   - name: cord
     domain_pattern: "^https?://(?:www\\.)?cord\\.co/"
     has_custom_parse: true
@@ -33,6 +40,13 @@ parsers:
     include_if_detail_page: true
     detail_pattern: "/job/\\d+/[a-z0-9\\-]+/?$"
     limit: 50
+  - name: disqo
+    domain_pattern: "^https?://(?:www\\.)?disqo\\.com/careers(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
   - name: djinni
     domain_pattern: "^https?://djinni\\.co/jobs(?:/|$)"
     has_custom_parse: false
@@ -133,6 +147,13 @@ parsers:
     render: false
     wait: "domcontentloaded"
     include_if_detail_page: false
+  - name: joberty
+    domain_pattern: "^https?://(?:www\\.)?joberty\\.com(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
   - name: site_justjoin
     domain_pattern: "justjoin\\.it"
     has_custom_parse: true
@@ -186,6 +207,13 @@ parsers:
     include_if_detail_page: true
     detail_pattern: "/jobs/view/\\d+/?"
     limit: 50
+  - name: epam
+    domain_pattern: "^https?://(?:careers\\.epam\\.com|www\\.epam\\.com/careers)(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: true
+    wait: "domcontentloaded"
+    include_if_detail_page: false
   - name: ozon_tech
     domain_pattern: "^https?://ozon\\.tech/vacancies"
     has_custom_parse: false
@@ -195,6 +223,28 @@ parsers:
       render: true
       wait: "domcontentloaded"
       include_if_detail_page: false
+  - name: ozon_career
+    domain_pattern: "^https?://(?:job|career)\\.ozon\\.ru(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: true
+    wait: "domcontentloaded"
+    include_if_detail_page: false
+  - name: protected_browser_defaults
+    domain_pattern: "^https?://(?:himalayas\\.app|(?:www\\.)?foody\\.com\\.cy|(?:www\\.)?fishingbooker\\.com|theprotocol\\.it|(?:www\\.)?pracuj\\.pl|(?:www\\.)?cypruswork\\.com)(?:/|$)"
+    has_custom_parse: false
+    supports_discover: false
+    render: true
+    wait: "networkidle"
+    include_if_detail_page: false
+    extra:
+      bypass_capability: "cloudflare_challenge"
+      bypass_capability_reason: "protected_browser_defaults"
+      disable_http2: true
+      monitor: "dom"
+      persistent_context: true
+      protected_hint: "waf_challenge"
+      settle_seconds: 5
   - name: rabota_by
     domain_pattern: "^https?://([a-z0-9-]+\\.)?rabota\\.by(?:/|$)"
     has_custom_parse: true
@@ -206,6 +256,20 @@ parsers:
     supports_discover: false
     render: true
     wait: "networkidle"
+    include_if_detail_page: false
+  - name: rwb
+    domain_pattern: "^https?://(?:(?:www\\.)?wildberries\\.ru/services/trudoustroystvo|career\\.rwb\\.ru|job\\.wb\\.ru)(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
+  - name: lamoda
+    domain_pattern: "^https?://(?:(?:www\\.)?lamoda\\.ru/careers|job\\.lamoda\\.ru)(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
     include_if_detail_page: false
   - name: sber
     domain_pattern: "(?:www\\.)?rabota\\.sber\\.ru(?:/|$)"
@@ -241,6 +305,27 @@ parsers:
     browser:
       scroll_loops: 5
       scroll_pause_ms: 500
+  - name: tomtom
+    domain_pattern: "^https?://(?:www\\.)?tomtom\\.com/careers(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
+  - name: spaceint
+    domain_pattern: "^https?://(?:www\\.)?spaceint\\.ge(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
+  - name: sololearn
+    domain_pattern: "^https?://(?:www\\.)?sololearn\\.com/(?:[a-z]{2}/)?career(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+    render: false
+    wait: "domcontentloaded"
+    include_if_detail_page: false
   - name: vk_team
     domain_pattern: "^https?://team\\.vk\\.company/vacancy/"
     has_custom_parse: true

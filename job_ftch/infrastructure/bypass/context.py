@@ -108,11 +108,15 @@ class BypassContext:
     def residential_proxy_available(self) -> bool:
         """Whether a residential proxy endpoint is configured."""
         rp = self._residential_proxy
-        return bool(getattr(rp, "current_url", None))
+        return bool(getattr(rp, "available", False) or getattr(rp, "current_url", None))
 
     @property
     def current_proxy_url(self) -> str | None:
         active = self._active_proxy
+        current_url_for_domain = getattr(active, "current_url_for_domain", None)
+        if callable(current_url_for_domain):
+            value = current_url_for_domain(self._domain)
+            return str(value) if value else None
         value = getattr(active, "current_url", None)
         return str(value) if value else None
 

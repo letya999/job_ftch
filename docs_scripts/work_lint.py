@@ -200,7 +200,8 @@ class WorkLinter:
         extra = set(change.meta) - {"spec", "phases"}
         if extra:
             self.error(
-                plan, "WK10",
+                plan,
+                "WK10",
                 f"лишние поля: {', '.join(sorted(extra))}. Разрешены только spec и phases: "
                 f"состояния выводятся из задач и зоны, хранить их нельзя",
             )
@@ -249,7 +250,8 @@ class WorkLinter:
             for file in sorted(tasks_dir.glob("*.md")):
                 if file.stem not in declared:
                     self.error(
-                        file, "WK23",
+                        file,
+                        "WK23",
                         f"файл задачи не указан ни в одной фазе плана: {file.stem}",
                     )
 
@@ -269,7 +271,8 @@ class WorkLinter:
         status = str(meta.get("status", ""))
         if status not in TASK_STATUSES:
             self.error(
-                file, "WK22",
+                file,
+                "WK22",
                 f"статус {status} недопустим, разрешены {', '.join(TASK_STATUSES)}",
             )
             status = "todo"
@@ -290,7 +293,8 @@ class WorkLinter:
         }[change.status]
         if change.zone != expected:
             self.error(
-                plan, "WK40",
+                plan,
+                "WK40",
                 f"состояние плана {change.status}, а папка лежит в {change.zone}. "
                 f"Ожидается {expected}: перенеси папку",
             )
@@ -308,7 +312,8 @@ class WorkLinter:
         for change in self.changes:
             if change.id in seen:
                 self.error(
-                    change.path, "WK60",
+                    change.path,
+                    "WK60",
                     f"идентификатор {change.id} уже занят: {seen[change.id].relative_to(ROOT)}",
                 )
             seen[change.id] = change.path
@@ -344,13 +349,17 @@ class WorkLinter:
         if not bounds:
             self.error(index, "WK80", "в реестре нет маркеров таблицы")
             return
-        block = "\n".join([
-            DEBT_START, "",
-            "| Запись | О чём | Когда переделывать |",
-            "| ------ | ----- | ------------------ |",
-            *(rows or ["| - | записей нет | - |"]), "",
-            DEBT_END,
-        ])
+        block = "\n".join(
+            [
+                DEBT_START,
+                "",
+                "| Запись | О чём | Когда переделывать |",
+                "| ------ | ----- | ------------------ |",
+                *(rows or ["| - | записей нет | - |"]),
+                "",
+                DEBT_END,
+            ]
+        )
         a, b = bounds
         if text[a:b].strip() == block.strip():
             return
@@ -375,13 +384,17 @@ class WorkLinter:
             f"| {p.id} | {p.title} | {', '.join(p.task_ids) or '-'} | {p.status} | {p.progress} |"
             for p in change.phases
         ] or ["| - | фаз нет | - | - | - |"]
-        block = "\n".join([
-            PHASES_START, "",
-            "| Фаза | О чём | Задачи | Состояние | Готово |",
-            "| ---- | ----- | ------ | --------- | ------ |",
-            *rows, "",
-            PHASES_END,
-        ])
+        block = "\n".join(
+            [
+                PHASES_START,
+                "",
+                "| Фаза | О чём | Задачи | Состояние | Готово |",
+                "| ---- | ----- | ------ | --------- | ------ |",
+                *rows,
+                "",
+                PHASES_END,
+            ]
+        )
         a, b = bounds
         new = text[:a] + block + text[b:]
         if new != text:
@@ -399,13 +412,17 @@ class WorkLinter:
             )
         if not rows:
             rows = ["| - | сейчас работ нет | - | - | - | - |"]
-        return "\n".join([
-            BOARD_START, "",
-            "| CHG | Что делаем | Зона | Состояние | Готово | Спека |",
-            "| --- | ---------- | ---- | --------- | ------ | ----- |",
-            *rows, "",
-            BOARD_END,
-        ])
+        return "\n".join(
+            [
+                BOARD_START,
+                "",
+                "| CHG | Что делаем | Зона | Состояние | Готово | Спека |",
+                "| --- | ---------- | ---- | --------- | ------ | ----- |",
+                *rows,
+                "",
+                BOARD_END,
+            ]
+        )
 
     def sync_board(self) -> None:
         index = WORK / "index.md"
@@ -438,8 +455,10 @@ class WorkLinter:
                 mark = "ОШИБКА " if i.level == "error" else "warning"
                 print(f"{mark} {i.path.relative_to(ROOT)} [{i.code}] {i.message}")
             print()
-            print(f"Изменений: {len(self.changes)}, ошибок: {len(errors)}, "
-                  f"предупреждений: {len(self.issues) - len(errors)}")
+            print(
+                f"Изменений: {len(self.changes)}, ошибок: {len(errors)}, "
+                f"предупреждений: {len(self.issues) - len(errors)}"
+            )
         return 1 if errors else 0
 
 
@@ -449,8 +468,9 @@ def main() -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--fix", action="store_true",
-                        help="пересчитать состояния фаз и пересобрать доску")
+    parser.add_argument(
+        "--fix", action="store_true", help="пересчитать состояния фаз и пересобрать доску"
+    )
     parser.add_argument("--format", choices=["text", "github"], default="text")
     args = parser.parse_args()
 

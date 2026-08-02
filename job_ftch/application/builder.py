@@ -285,6 +285,7 @@ class PipelineBuilder:
         # Pipeline orchestrator calls save_and_purge() at the end of run().
         self._run_id: str | None = None
         self._tenant_id: str = "default"
+        self._decision_version: str = settings.pipeline_decision_version
         self._snapshot_fail_open = settings.snapshot_fail_open
 
     def clone(self) -> PipelineBuilder:
@@ -316,6 +317,7 @@ class PipelineBuilder:
         cloned._job_group_store = self._job_group_store
         cloned._profile_name = self._profile_name
         cloned._output_path = self._output_path
+        cloned._decision_version = self._decision_version
         cloned._snapshot_fail_open = self._snapshot_fail_open
         return cloned
 
@@ -522,6 +524,8 @@ class PipelineBuilder:
             pipeline_item_concurrency=self._pipeline_item_concurrency,
             source_run_id=self._run_id,
             delivery_targets=self._delivery_targets,
+            decision_version=self._decision_version,
+            tenant_id=self._tenant_id,
         )
 
     async def run_async(self, *, max_items: int | None = None) -> RunSummary:

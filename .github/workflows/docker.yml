@@ -1,0 +1,80 @@
+name: Docker
+
+on:
+  push:
+    branches: [main, dev, mvp-release-final]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  docker-dev-build:
+    name: Dev Images Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Prepare dev env files
+        run: |
+          cp .env.dev.example .env.dev
+          cp job_ftch/adapters/telegram_bot/.env.dev.example job_ftch/adapters/telegram_bot/.env.dev
+      - name: Build dev runtime image
+        run: docker build -f docker/runtime/Dockerfile.dev -t job-ftch-runtime:dev .
+      - name: Build dev bot image
+        run: docker compose --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml build bot
+
+  docker-dev-run:
+    name: Dev Compose Config & Runtime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Prepare dev env files
+        run: |
+          cp .env.dev.example .env.dev
+          cp job_ftch/adapters/telegram_bot/.env.dev.example job_ftch/adapters/telegram_bot/.env.dev
+      - name: Validate dev compose
+        run: docker compose --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml config
+      - name: Start dev backing services
+        run: docker compose --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml up -d postgres qdrant
+      - name: Inspect dev backing services
+        run: docker compose --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml ps
+      - name: Stop dev backing services
+        if: always()
+        run: docker compose --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml down -v
+
+  docker-prod-build:
+    name: Prod Images Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Prepare prod env files
+        run: |
+          cp .env.prod.example .env.prod
+          cp job_ftch/adapters/telegram_bot/.env.prod.example job_ftch/adapters/telegram_bot/.env.prod
+          printf '\n%s=%s\n' POSTGRES_PASSWOR'D' ci_password >> job_ftch/adapters/telegram_bot/.env.prod
+      - name: Build prod runtime image
+        run: docker build -f docker/runtime/Dockerfile.prod -t job-ftch-runtime:prod .
+      - name: Build prod bot image
+        run: docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml build bot
+
+  docker-prod-run:
+    name: Prod Compose Config & Runtime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Prepare prod env files
+        run: |
+          cp .env.prod.example .env.prod
+          cp job_ftch/adapters/telegram_bot/.env.prod.example job_ftch/adapters/telegram_bot/.env.prod
+          printf '\n%s=%s\n' POSTGRES_PASSWOR'D' ci_password >> job_ftch/adapters/telegram_bot/.env.prod
+      - name: Validate prod compose
+        run: docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml config
+      - name: Start prod backing services
+        run: docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml up -d postgres qdrant
+      - name: Inspect prod backing services
+        run: docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml ps
+      - name: Stop prod backing services
+        if: always()
+        run: docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml down -v

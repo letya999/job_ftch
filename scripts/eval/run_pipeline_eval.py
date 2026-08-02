@@ -1340,12 +1340,26 @@ async def _run_item_graph(
             "metadata": row.get("metadata") or {},
         }
     )
+    from job_ftch.application.dedup_settlement import (
+        DedupSettlementCoordinator,
+        SettlementOutcome,
+    )
+
+    coordinator = DedupSettlementCoordinator(executor.settlement_participants())
     item_id = str(row.get("stable_id", ""))
     token = _CURRENT_ITEM_ID.set(item_id or None)
     try:
         reports = await executor.run_many(raw)
+    except Exception:
+        if item_id:
+            await coordinator.settle(item_id, SettlementOutcome.RELEASE)
+        raise
     finally:
         _CURRENT_ITEM_ID.reset(token)
+    if item_id:
+        has_deferred = any(r.status == "DEFERRED" for r in reports)
+        outcome = SettlementOutcome.RELEASE if has_deferred else SettlementOutcome.COMMIT
+        await coordinator.settle(item_id, outcome)
     candidates: list[dict[str, Any]] = []
     for report in reports:
         item = report.item

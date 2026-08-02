@@ -37,7 +37,7 @@ from job_ftch.domain import (
 if TYPE_CHECKING:
     import builtins
 
-    from job_ftch.application.contracts import Store, StoreConnector
+    from job_ftch.application.contracts import DedupReservation, Store, StoreConnector
     from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
 
 
@@ -152,6 +152,12 @@ class TenantStore:
 
     async def release_dedup_claim(self, key: str, owner_id: str) -> None:
         await self._store.release_dedup_claim(self._key(key), owner_id)
+
+    async def compare_and_reserve(
+        self, keys: tuple[str, ...], owner_id: str, *, ttl_seconds: int
+    ) -> DedupReservation:
+        scoped_keys = tuple(self._key(k) for k in keys)
+        return await self._store.compare_and_reserve(scoped_keys, owner_id, ttl_seconds=ttl_seconds)
 
     def _run_state_key(
         self,
