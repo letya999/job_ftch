@@ -183,9 +183,7 @@ class AdaptiveBypassManager:
             "browser_session_state_dir",
             Path(".runtime/session_states"),
         )
-        self._configured_profile_dir: Path | None = getattr(
-            settings, "browser_profile_dir", None
-        )
+        self._configured_profile_dir: Path | None = getattr(settings, "browser_profile_dir", None)
         self._configured_profile_persistent = bool(
             getattr(settings, "browser_profile_persistent", False)
             and self._configured_profile_dir is not None
@@ -247,6 +245,12 @@ class AdaptiveBypassManager:
         self._context: Any = None
         self._route_state = RouteState(engine=self._tiers[0])
         self._failure_window: dict[str, deque[tuple[float, str]]] = {}
+        # Engines that already failed against this source's protection. The
+        # ladder never returns to them until a network/session reset clears the
+        # set, which (with the no-downgrade rule in ``_select_engine``) stops
+        # the stealth_browser<->patchright oscillation that left camoufox/cloak
+        # unreachable (defect B4).
+        self._failed_tiers: set[str] = set()
         self._session_cookies: list[dict[str, Any]] = []
         self._profile_dir: str | None = None
         self._owns_profile_dir = True
@@ -292,10 +296,11 @@ class AdaptiveBypassManager:
                 )
                 logger.info("bypass_preflight_network_selected", network="residential_proxy")
             elif bool(getattr(context, "proxy_available", False)):
-                logger.info(
-                    "bypass_preflight_generic_proxy_ignored",
-                    reason="generic_proxy_route_disabled",
+                self._route_state = self._route_state.transition(
+                    network=NetworkRoute.PROXY,
+                    session=SessionMode.STICKY,
                 )
+                logger.info("bypass_preflight_network_selected", network="proxy")
         self._sync_context_route()
 
     def _sync_context_route(self) -> None:
@@ -523,31 +528,54 @@ class AdaptiveBypassManager:
             yield page
 
     def activate_proxy(self) -> bool:
-        """Move along the network axis without changing the engine."""
+        """Escalate one step along the network axis (defect B5).
+
+        The ladder is ``direct -> datacenter proxy -> residential proxy``: a
+        datacenter pool is cheaper and is tried first, with residential kept as
+        the heavier fallback. Previously only the residential step existed, so
+        an IP block with no residential pool configured left the network axis
+        dead and answered the block with a heavier browser from the same IP.
+
+        Changing the exit IP invalidates any IP-bound clearance cookies
+        (``cf_clearance`` etc.), so every activation drops the session cookies
+        and starts a fresh session generation. Keeping one exit IP afterwards
+        (stickiness) is a property of the proxy provider, not of this edge.
+        """
         if not self.adaptive_enabled or not self._budget.allow_proxy_rotation():
             return False
-        if self.uses_proxy:
+        current = self._route_state.network
+        if current is NetworkRoute.RESIDENTIAL_PROXY:
+            return False  # top of the network ladder
+        residential = bool(getattr(self._context, "residential_proxy_available", False))
+        datacenter = bool(getattr(self._context, "proxy_available", False))
+        if current is NetworkRoute.DIRECT:
+            if datacenter:
+                return self._transition_network(NetworkRoute.PROXY)
+            if residential:
+                return self._transition_network(NetworkRoute.RESIDENTIAL_PROXY)
             return False
-        return self._activate_residential_proxy()
+        # current is datacenter PROXY: escalate to residential when available.
+        if residential:
+            return self._transition_network(NetworkRoute.RESIDENTIAL_PROXY)
+        return False
 
-    def _activate_residential_proxy(self) -> bool:
-        """Escalate from datacenter to residential proxy."""
-        if self._route_state.network is NetworkRoute.RESIDENTIAL_PROXY:
-            return False
-        if not bool(getattr(self._context, "residential_proxy_available", False)):
-            return False
+    def _transition_network(self, network: NetworkRoute) -> bool:
+        """Atomically move the network axis, dropping the IP-bound session."""
         self._session_cookies.clear()
+        # A new exit IP may clear protection that blocked earlier engines, so
+        # let the ladder try them again from the current tier upward.
+        self._failed_tiers.clear()
         self._budget.note_proxy_rotation()
         self._route_state = self._route_state.transition(
-            network=NetworkRoute.RESIDENTIAL_PROXY,
-            session=SessionMode.STICKY,
+            network=network,
+            session=SessionMode.FRESH,
         )
         self._sync_context_route()
         self._escalations_total += 1
         logger.info(
             "bypass_network_transition",
             engine=self.current_name,
-            network="residential_proxy",
+            network=network.value,
         )
         return True
 
@@ -758,15 +786,27 @@ class AdaptiveBypassManager:
             logger.debug("browser_session_state_save_failed", domain=domain)
 
     def _select_engine(self, candidates: tuple[str, ...]) -> bool:
-        """Choose the first installed candidate that changes the current engine."""
+        """Choose the first installed candidate that escalates the engine.
+
+        The ladder is monotonic (defect B4): a candidate is rejected if it has
+        already failed for this source, or if it is cheaper than the current
+        engine. Escalation therefore only ever moves to a stronger, not-yet
+        failed tier, so a recurring challenge climbs stealth -> patchright ->
+        camoufox -> cloak instead of oscillating between the two cheapest.
+        """
+        current_cost = self._capabilities[self.current_name].cost
         for candidate in candidates:
             if candidate == self.current_name:
+                continue
+            if candidate in self._failed_tiers:
                 continue
             try:
                 target_index = self._tiers.index(candidate)
             except ValueError:
                 continue
             capability = self._capabilities[candidate]
+            if capability.cost < current_cost:
+                continue
             if not self._capability_allowed(capability):
                 logger.info(
                     "bypass_capability_skipped",
@@ -779,6 +819,9 @@ class AdaptiveBypassManager:
                 logger.info("bypass_route_budget_exhausted", engine=candidate)
                 continue
             new_name = self.current_name
+            # The engine we are leaving has failed against this protection; do
+            # not return to it until a network/session reset clears the set.
+            self._failed_tiers.add(new_name)
             self.current_tier_index = target_index
             self._ensure_strategy()
             self._budget.note_route_transition(weight=max(1, capability.cost // 10))
@@ -876,13 +919,19 @@ class AdaptiveBypassManager:
         body: bytes | None = None,
         error: BaseException | None = None,
         retry_after: float | None = None,
+        override_kind: FailureKind | None = None,
     ) -> str:
         """Record a failure and escalate if the policy triggers.
 
         Returns the FailureKind that was classified. If escalation
         happened, the manager's strategy is already updated.
+
+        ``override_kind`` lets a caller that has evidence the HTTP-level
+        classifier cannot see (defect B1: a 200 shell with the listing stripped
+        is a *silent block* only the scraper knows is wrong) inject the already
+        determined kind instead of re-deriving it from status/body.
         """
-        kind = self._signal.classify(
+        kind = override_kind or self._signal.classify(
             status_code=status_code,
             headers=headers,
             body=body,
@@ -901,15 +950,15 @@ class AdaptiveBypassManager:
             session_generation=self._route_state.generation,
             challenge_action=self._route_state.challenge.value,
         )
-        if kind == FailureKind.OK or kind == FailureKind.UNKNOWN:
+        if kind == FailureKind.OK:
             return kind
-        if self._budget.same_route_retry_exhausted():
-            logger.info(
-                "bypass_same_route_retry_exhausted",
-                tier=self.current_name,
-                failure_kind=kind,
-                status_code=status_code,
-            )
+        if kind == FailureKind.UNKNOWN:
+            # An unrecognised protection response must not be a silent no-op
+            # (defect B2): record it and, once the per-source failure window
+            # crosses the threshold, conservatively escalate to the next engine.
+            self._record_failure(source_id, kind)
+            if self.adaptive_enabled and self._should_escalate(source_id):
+                self.escalate()
             return kind
         if decision.action is TransitionAction.SOLVE_CURRENT_SESSION and self.adaptive_enabled:
             self._route_state = self._route_state.transition(
@@ -972,10 +1021,19 @@ class AdaptiveBypassManager:
                     error=error,
                 )
             return kind
-        if decision.action is TransitionAction.MANAGED_FALLBACK:
-            self._record_failure(source_id, kind)
-            if self.adaptive_enabled and self.exhausted:
-                self._try_managed_fallback()
+        if decision.action is TransitionAction.RETRY_SAME_ROUTE:
+            # Same-route retries belong to the caller's retry loop. Only when
+            # those are exhausted for this operation do we force a route change
+            # (defect B3): the exhaustion guard must escalate off the stuck
+            # route, not forbid every transition as it did before.
+            if self.adaptive_enabled and self._budget.same_route_retry_exhausted():
+                logger.info(
+                    "bypass_same_route_retry_exhausted",
+                    tier=self.current_name,
+                    failure_kind=kind,
+                    status_code=status_code,
+                )
+                self.escalate()
             return kind
         # Server/parser/auth/board-gone failures are not anti-bot evidence.
         return kind

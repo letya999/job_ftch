@@ -305,16 +305,22 @@ async def test_camoufox_bypass_preserves_browser_config(
     async with bypass.open_page(config, use_proxy=True):
         pass
 
+    # With a proxy active, Camoufox owns identity natively (defect A9): geoip
+    # derives locale/timezone from the exit IP, WebRTC is blocked to prevent an
+    # IP leak, the cursor is humanized, and our configured ``locale`` is NOT
+    # forced (the exit IP is the single source of truth).
     assert captured["browser_kwargs"] == {
         "headless": False,
-        "locale": "ru-RU",
+        "humanize": True,
+        "geoip": True,
+        "block_webrtc": True,
         "window": (1600, 900),
         "proxy": {"server": "http://proxy.local:8080"},
     }
+    # No user_agent override: forcing a Chromium persona UA onto a Firefox
+    # engine is an instant cross-check failure. No locale either while geoip owns it.
     assert captured["context_kwargs"] == {
-        "user_agent": "Agent/1.0",
         "viewport": {"width": 1600, "height": 900},
-        "locale": "ru-RU",
         "ignore_https_errors": True,
     }
     assert captured["timeout"] == 9876

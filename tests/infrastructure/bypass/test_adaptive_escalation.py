@@ -130,6 +130,60 @@ async def test_captcha_failure_escalates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_repeated_generic_challenge_climbs_ladder_without_oscillating() -> None:
+    # Defect B4: a recurring generic challenge must climb strictly upward
+    # (stealth -> patchright -> camoufox -> cloak) instead of bouncing between
+    # the two cheapest engines and never reaching the strongest tiers.
+    manager = AdaptiveBypassManager()
+    costs: list[int] = []
+    seen: list[str] = []
+    for _ in range(6):
+        await manager.handle_failure(
+            "source", status_code=200, body=b"<div>ddos-guard</div>", error=None
+        )
+        name = manager.current_name
+        seen.append(name)
+        costs.append(manager.capability_inventory[name].cost)
+
+    # Cost never decreases, engines are never revisited, and the climb reaches
+    # the highest-cost tier available for challenge handling.
+    assert costs == sorted(costs)
+    non_terminal = [name for name in seen if name != seen[-1]]
+    assert len(set(non_terminal)) == len(non_terminal)
+    assert manager.current_name == "cloak"
+
+
+@pytest.mark.asyncio
+async def test_silent_block_override_switches_to_fingerprint_resistant_engine() -> None:
+    # Defect B1: a caller that detects a 200-shell silent block injects
+    # SILENT_BLOCK, and the controller must switch to a fingerprint-resistant
+    # engine instead of treating the response as OK.
+    manager = AdaptiveBypassManager()
+    before = manager.current_name
+    kind = await manager.handle_failure(
+        "source",
+        status_code=200,
+        body=b"<html><body>lots of legit looking content</body></html>",
+        override_kind=FailureKind.SILENT_BLOCK,
+    )
+    assert kind is FailureKind.SILENT_BLOCK
+    assert manager.current_name != before
+    assert manager.capability_inventory[manager.current_name].browser_family is not None
+
+
+@pytest.mark.asyncio
+async def test_unknown_failures_still_escalate_on_threshold() -> None:
+    # Defect B2: an unrecognised protection response used to be a silent no-op.
+    # It must now record a failure and escalate once the window threshold trips.
+    manager = AdaptiveBypassManager()
+    initial = manager.current_name
+    for _ in range(AdaptiveBypassManager.FAILURE_WINDOW_COUNT):
+        kind = await manager.handle_failure("teapot", status_code=418, body=b"", error=None)
+        assert kind is FailureKind.UNKNOWN
+    assert manager.current_name != initial or manager.escalations_total > 0
+
+
+@pytest.mark.asyncio
 async def test_solve_page_challenge_uses_monitor_observed_challenge_type() -> None:
     manager = AdaptiveBypassManager()
     solver = type(

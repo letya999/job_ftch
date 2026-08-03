@@ -40,6 +40,7 @@ def _load_curl_session() -> tuple[Any | None, BaseException | None]:
 _CurlSession, _IMPORT_ERROR = _load_curl_session()
 _CURL_AVAILABLE = _CurlSession is not None
 
+
 def _supported_impersonate_targets() -> frozenset[str]:
     """Return curl_cffi's supported impersonate targets, or empty if unknown.
 
@@ -92,8 +93,7 @@ def _coerce_target(target: str, generic_alias: str) -> str:
 # ``impersonate`` config value, which ``_select_impersonate`` returns verbatim.
 _CHROME_IMPERSONATION_POOL: tuple[str, ...] = tuple(
     dict.fromkeys(
-        _coerce_target(target, "chrome")
-        for target in ("chrome", "chrome146", "chrome145")
+        _coerce_target(target, "chrome") for target in ("chrome", "chrome146", "chrome145")
     )
 )
 
@@ -114,7 +114,9 @@ def _select_impersonate(url: str, default: str) -> str:
     so a stale pin degrades to a generic alias instead of raising (defect A11).
     """
     if default != "chrome":
-        generic = "safari" if "safari" in default else "firefox" if "firefox" in default else "chrome"
+        generic = (
+            "safari" if "safari" in default else "firefox" if "firefox" in default else "chrome"
+        )
         return _coerce_target(default, generic)
 
     import hashlib

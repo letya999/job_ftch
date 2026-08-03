@@ -538,6 +538,40 @@ class CareerSiteSource(Source["RawItem"]):
         escalate = getattr(self.bypass_strategy, "escalate", None)
         return bool(escalate()) if callable(escalate) else False
 
+    async def _route_silent_block(self) -> bool:
+        """Route a detected silent block through the controller (defect B1).
+
+        Feeds a ``SILENT_BLOCK`` outcome into ``handle_failure`` so the route
+        controller switches to a fingerprint-resistant engine on a fresh
+        session. Returns True when the active tier actually changed.
+        """
+        handle = getattr(self.bypass_strategy, "handle_failure", None)
+        if not callable(handle):
+            return False
+        from job_ftch.infrastructure.bypass.failure_signal import (
+            FailureKind,
+            FetchOutcome,
+            classify_silent_block,
+        )
+
+        outcome = classify_silent_block(
+            FetchOutcome(kind=FailureKind.OK),
+            expected_nonempty=True,
+            item_count=0,
+        )
+        if outcome.kind is not FailureKind.SILENT_BLOCK:
+            return False
+        before_tier = getattr(self.bypass_strategy, "current_name", None)
+        with contextlib.suppress(Exception):
+            result = handle(
+                self.spec.url,
+                status_code=200,
+                override_kind=FailureKind.SILENT_BLOCK,
+            )
+            if inspect.isawaitable(result):
+                await result
+        return getattr(self.bypass_strategy, "current_name", None) != before_tier
+
     async def _try_escalate_bypass(
         self,
         exc: Exception,
@@ -559,11 +593,15 @@ class CareerSiteSource(Source["RawItem"]):
         if hasattr(self.bypass_strategy, "handle_failure"):
             previous_tier = getattr(self.bypass_strategy, "current_name", None)
             previous_route = getattr(self.bypass_strategy, "route_state", None)
-            status_code = status_code if status_code is not None else (
-                response.status_code if response is not None else None
+            status_code = (
+                status_code
+                if status_code is not None
+                else (response.status_code if response is not None else None)
             )
-            headers = headers if headers is not None else (
-                dict(response.headers) if response is not None else None
+            headers = (
+                headers
+                if headers is not None
+                else (dict(response.headers) if response is not None else None)
             )
             try:
                 retry_after = None
@@ -905,15 +943,14 @@ class CareerSiteSource(Source["RawItem"]):
         forced_monitor = self.spec.monitor_config.get("force_monitor")
         configured_monitor = self.spec.monitor_config.get("monitor")
         initial_monitor_name = (
-            forced_monitor
-            if isinstance(forced_monitor, str) and forced_monitor.strip()
-            else None
-        ) or self.spec.monitor or (
-            configured_monitor
-            if isinstance(configured_monitor, str) and configured_monitor.strip()
-            else None
-        ) or (
-            cached_strategy.get("monitor") if cached_strategy else "auto"
+            (forced_monitor if isinstance(forced_monitor, str) and forced_monitor.strip() else None)
+            or self.spec.monitor
+            or (
+                configured_monitor
+                if isinstance(configured_monitor, str) and configured_monitor.strip()
+                else None
+            )
+            or (cached_strategy.get("monitor") if cached_strategy else "auto")
         )
         resolved_initial_monitor_name = str(initial_monitor_name or "auto")
 
@@ -1155,6 +1192,26 @@ class CareerSiteSource(Source["RawItem"]):
                 _monitor_suggests_spa = bool(
                     retry_monitor_config.get("render") or self.spec.monitor_config.get("render")
                 )
+                # Silent block (defect B1): the page rendered a substantive 200
+                # shell but the listing payload was stripped (reCAPTCHA v3 /
+                # Akamai / Cloudflare pass-through). We only know it is wrong
+                # because a listing we have positive evidence should be
+                # non-empty (url_filter configured) came back empty *after* a
+                # render. Re-requesting a JS render cannot clear a silent block;
+                # only a fingerprint-resistant engine on a fresh session can, so
+                # route it through the controller as SILENT_BLOCK.
+                if (
+                    not found_something
+                    and _has_url_filter
+                    and _monitor_suggests_spa
+                    and await self._route_silent_block()
+                ):
+                    logger.warning(
+                        "monitor_silent_block_escalating",
+                        next_tier=self.bypass_strategy.current_name,
+                    )
+                    continue
+
                 if (
                     not found_something
                     and _should_escalate_empty_monitor(

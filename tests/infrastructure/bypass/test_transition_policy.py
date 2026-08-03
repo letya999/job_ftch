@@ -28,6 +28,8 @@ from job_ftch.infrastructure.bypass.transition_policy import (
         (FailureKind.DNS_ERROR, TransitionAction.DEBOUNCED_PROXY),
         (FailureKind.AUTH_REQUIRED, TransitionAction.TERMINAL),
         (FailureKind.BOARD_GONE, TransitionAction.TERMINAL),
+        (FailureKind.SILENT_BLOCK, TransitionAction.FINGERPRINT_RESISTANT_ENGINE),
+        (FailureKind.PAYMENT_REQUIRED, TransitionAction.TERMINAL),
         (FailureKind.OK, TransitionAction.NONE),
     ],
 )
@@ -35,7 +37,23 @@ def test_signal_transition_matrix(kind: FailureKind, action: TransitionAction) -
     assert TransitionPolicy().decide(kind).action is action
 
 
-def test_fingerprint_rejection_is_the_only_engine_switch_in_policy_table() -> None:
-    decision = TransitionPolicy().decide(FailureKind.BLOCKED_FINGERPRINT)
+@pytest.mark.parametrize("kind", [FailureKind.BLOCKED_FINGERPRINT, FailureKind.SILENT_BLOCK])
+def test_engine_switching_kinds_drop_engine_and_session(kind: FailureKind) -> None:
+    # Both a hard fingerprint block and a silent (200-shell) block can only be
+    # cleared by a different engine on a fresh session.
+    decision = TransitionPolicy().decide(kind)
     assert not decision.preserves_engine
     assert not decision.preserves_session
+
+
+def test_every_failure_kind_has_an_explicit_decision() -> None:
+    # OK is not a failure and UNKNOWN is deliberately special-cased in the
+    # controller (recorded + threshold escalate); every other kind must have an
+    # explicit table entry so a new FailureKind cannot ship as a silent NONE.
+    from job_ftch.infrastructure.bypass.transition_policy import _DECISIONS
+
+    special_cased = {FailureKind.OK, FailureKind.UNKNOWN}
+    missing = [
+        kind for kind in FailureKind if kind not in special_cased and kind not in _DECISIONS
+    ]
+    assert not missing, f"FailureKind(s) without a transition decision: {missing}"

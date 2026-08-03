@@ -20,7 +20,6 @@ class TransitionAction(StrEnum):
     DEBOUNCED_PROXY = "debounced_proxy"
     RETRY_SAME_ROUTE = "retry_same_route"
     CHANGE_EXTRACTOR = "change_extractor"
-    MANAGED_FALLBACK = "managed_fallback"
     TERMINAL = "terminal"
 
 
@@ -47,6 +46,17 @@ _DECISIONS: dict[FailureKind, TransitionDecision] = {
         preserves_engine=False,
         preserves_session=False,
     ),
+    # Silent scoring (reCAPTCHA v3 / Akamai / Cloudflare pass-through) returns a
+    # full 200 shell with the listing stripped. Retrying the same parser chain
+    # is useless; the only lever is a fingerprint-resistant engine on a fresh
+    # session, so treat it like a fingerprint block (defect B1).
+    FailureKind.SILENT_BLOCK: TransitionDecision(
+        TransitionAction.FINGERPRINT_RESISTANT_ENGINE,
+        preserves_engine=False,
+        preserves_session=False,
+    ),
+    # A hard paywall is not anti-bot evidence and no route change can clear it.
+    FailureKind.PAYMENT_REQUIRED: TransitionDecision(TransitionAction.TERMINAL),
     FailureKind.TIMEOUT: TransitionDecision(TransitionAction.DEBOUNCED_PROXY),
     FailureKind.DNS_ERROR: TransitionDecision(TransitionAction.DEBOUNCED_PROXY),
     FailureKind.CONNECT_ERROR: TransitionDecision(TransitionAction.DEBOUNCED_PROXY),
