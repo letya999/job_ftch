@@ -15,11 +15,42 @@ except ImportError:  # pragma: no cover - optional dependency
     _TLS_CLIENT_AVAILABLE = False
 
 
-_CLIENT_IDENTIFIER_POOL: tuple[str, ...] = (
-    "chrome120",
-    "chrome112",
-    "safari_16_0",
-    "firefox_110",
+def _supported_tls_identifiers() -> frozenset[str]:
+    """Best-effort read of tls_client's supported client identifiers.
+
+    tls_client enumerates identifiers in ``tls_client.settings``. Reading it
+    lets a stale pin self-heal instead of raising at request time.
+    """
+    try:
+        import typing
+
+        from tls_client.settings import ClientIdentifiers
+
+        return frozenset(str(arg) for arg in typing.get_args(ClientIdentifiers))
+    except Exception:  # pragma: no cover - optional dependency / version drift
+        return frozenset()
+
+
+_SUPPORTED_TLS_IDENTIFIERS: frozenset[str] = _supported_tls_identifiers()
+
+
+def _coerce_tls_identifier(identifier: str, fallback: str) -> str:
+    if not _SUPPORTED_TLS_IDENTIFIERS:
+        return identifier
+    if identifier in _SUPPORTED_TLS_IDENTIFIERS:
+        return identifier
+    return fallback if fallback in _SUPPORTED_TLS_IDENTIFIERS else identifier
+
+
+# Chrome-only pool (underscore form): this transport tier always carries a
+# Chromium persona after the family fix (A5), so a Chrome JA3/JA4 stays
+# coherent with the Chrome UA/headers. A mixed-family pool would reintroduce
+# the "Chrome headers, Firefox TLS" mismatch (A11).
+_CLIENT_IDENTIFIER_POOL: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        _coerce_tls_identifier(identifier, "chrome_133")
+        for identifier in ("chrome_133", "chrome_131", "chrome_120")
+    )
 )
 
 
