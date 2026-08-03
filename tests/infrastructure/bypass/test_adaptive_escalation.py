@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -54,11 +55,21 @@ def fast_bypass_registry(monkeypatch: pytest.MonkeyPatch) -> None:
             cost=10,
             challenge_actions=frozenset({"tls_impersonation"}),
         ),
+        "tls_client": BypassCapability(
+            cost=12,
+            challenge_actions=frozenset({"tls_impersonation"}),
+        ),
         "stealth_browser": BypassCapability(
             cost=20,
             browser_family="chromium",
             challenge_actions=frozenset({"passive_js", "generic_challenge"}),
             min_remaining_seconds=5.0,
+        ),
+        "patchright_browser": BypassCapability(
+            cost=25,
+            browser_family="chromium_patchright",
+            challenge_actions=frozenset({"fingerprint_resistant", "generic_challenge"}),
+            min_remaining_seconds=8.0,
         ),
         "nodriver": BypassCapability(
             cost=30,
@@ -98,7 +109,9 @@ def test_conservative_fallback_order_is_explicit() -> None:
     assert manager.available_tiers == (
         "noop",
         "curl_stealth",
+        "tls_client",
         "stealth_browser",
+        "patchright_browser",
         "nodriver",
         "camoufox",
         "cloak",
@@ -141,6 +154,78 @@ async def test_solve_page_challenge_uses_monitor_observed_challenge_type() -> No
         url="https://example.test/jobs",
     )
     solver.solve_detected.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_persistent_browser_profile_is_not_deleted(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from job_ftch.config import get_settings
+
+    profile_dir = tmp_path / "warm-profile"
+    monkeypatch.setenv("JOB_FTCH_BROWSER_PROFILE_DIR", str(profile_dir))
+    monkeypatch.setenv("JOB_FTCH_BROWSER_PROFILE_PERSISTENT", "true")
+    get_settings.cache_clear()
+    try:
+        manager = AdaptiveBypassManager()
+
+        prepared = manager.prepare_browser_config({"persistent_context": True})
+        await manager.close()
+
+        assert Path(prepared["_profile_dir"]) == profile_dir
+        assert profile_dir.exists()
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_browser_session_state_reuses_clearance_cookie_and_user_agent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from job_ftch.config import get_settings
+
+    state_dir = tmp_path / "session-states"
+    monkeypatch.setenv("JOB_FTCH_BROWSER_SESSION_STATE_ENABLED", "true")
+    monkeypatch.setenv("JOB_FTCH_BROWSER_SESSION_STATE_DIR", str(state_dir))
+    get_settings.cache_clear()
+    try:
+        manager = AdaptiveBypassManager()
+        manager.bind_context(SimpleNamespace(domain="example.test"))
+        page = SimpleNamespace(
+            url="https://example.test/jobs",
+            evaluate=AsyncMock(return_value="Pinned UA"),
+            context=SimpleNamespace(
+                cookies=AsyncMock(
+                    return_value=[
+                        {
+                            "name": "cf_clearance",
+                            "value": "secret-cookie",
+                            "domain": "example.test",
+                            "path": "/",
+                        },
+                        {
+                            "name": "tracking_cookie",
+                            "value": "ignored",
+                            "domain": "example.test",
+                            "path": "/",
+                        },
+                    ]
+                )
+            ),
+        )
+
+        await manager.capture_session_state(page)
+
+        next_manager = AdaptiveBypassManager()
+        next_manager.bind_context(SimpleNamespace(domain="example.test"))
+        prepared = next_manager.prepare_browser_config({})
+
+        assert prepared["user_agent"] == "Pinned UA"
+        assert [cookie["name"] for cookie in prepared["cookies"]] == ["cf_clearance"]
+    finally:
+        get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
@@ -206,7 +291,7 @@ async def test_parser_and_server_errors_do_not_change_route() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fingerprint_signal_selects_camoufox() -> None:
+async def test_fingerprint_signal_selects_patchright_before_heavier_browsers() -> None:
     manager = AdaptiveBypassManager()
 
     kind = await manager.handle_failure(
@@ -216,7 +301,7 @@ async def test_fingerprint_signal_selects_camoufox() -> None:
     )
 
     assert kind is FailureKind.BLOCKED_FINGERPRINT
-    assert manager.current_name == "camoufox"
+    assert manager.current_name == "patchright_browser"
 
 
 @pytest.mark.asyncio

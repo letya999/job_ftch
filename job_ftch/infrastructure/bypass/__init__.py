@@ -21,6 +21,7 @@ from . import multi_layer_obfuscation as multi_layer_obfuscation
 from . import nodriver_bypass as nodriver_bypass
 from . import noop as noop
 from . import pacing as pacing
+from . import patchright_bypass as patchright_bypass
 from . import persona as persona
 from . import preflight as preflight
 from . import proxy_bypass as proxy_bypass
@@ -30,3 +31,4 @@ from . import session_memory as session_memory
 from . import stealth_browser as stealth_browser
 from . import stealth_hardening as stealth_hardening
 from . import temporal_shaper as temporal_shaper
+from . import tls_client_bypass as tls_client_bypass

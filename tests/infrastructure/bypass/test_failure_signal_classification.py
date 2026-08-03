@@ -25,6 +25,12 @@ from job_ftch.infrastructure.bypass.failure_signal import (
         (200, b"<script src='recaptcha/api.js'></script>", None, FailureKind.CAPTCHA),
         (200, b"<script src='smartcaptcha'></script>", None, FailureKind.CAPTCHA),
         (200, b"/showcaptcha?retpath=aHR0cHM6Ly9jYXJlZXIuY2lhbi5ydS8=", None, FailureKind.CAPTCHA),
+        (
+            200,
+            b"<script>document.cookie='jsid=1';window.location.reload()</script>Qrator",
+            None,
+            FailureKind.QRATOR_CHALLENGE,
+        ),
         (None, None, ConnectionError("timeout"), FailureKind.TIMEOUT),
         (402, b"Payment Required", None, FailureKind.PAYMENT_REQUIRED),
         (498, b"Anti-bot block", None, FailureKind.BLOCKED),
@@ -63,6 +69,19 @@ def test_429_with_retry_after_header() -> None:
     )
     assert outcome.kind is FailureKind.RATE_LIMIT
     assert outcome.retry_after_seconds == 120.0
+
+
+def test_qrator_header_is_classified_as_qrator_challenge() -> None:
+    outcome = HeuristicFailureSignal().classify_detailed(
+        status_code=200,
+        headers={"X-Qrator-RequestID": "fixture"},
+        body=b"",
+        error=None,
+    )
+
+    assert outcome.kind is FailureKind.QRATOR_CHALLENGE
+    assert outcome.challenge is True
+    assert outcome.captcha_type == "qrator_jsid"
 
 
 def test_silent_block_triggers_escalation() -> None:

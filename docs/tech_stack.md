@@ -1,7 +1,7 @@
 ---
 title: "Технологический стек"
 description: "Актуальный стек зависимостей job_ftch по pyproject.toml: core dependencies, extras и запрещённые инструменты."
-updated: 2026-07-28
+updated: 2026-08-03
 ---
 # Технологический стек
 
@@ -60,6 +60,7 @@ updated: 2026-07-28
 | `[realtime]` | `aiohttp`, `websockets` | Realtime/push variants |
 | `[browser]` | `patchright`, `cloakbrowser` | Browser-backed scraping tiers |
 | `[stealth]` | `playwright-stealth`, `curl-cffi==0.15.0` | TLS/browser impersonation |
+| `[tls_client]` | `tls-client` | Alternative TLS/HTTP impersonation transport |
 | `[camoufox]` | `camoufox` | Firefox anti-detect tier |
 | `[nodriver]` | `nodriver` | CDP-native browser tier |
 | `[tracing]` | OTLP HTTP exporter | OpenObserve/Langfuse export |

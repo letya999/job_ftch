@@ -39,6 +39,7 @@ class FailureKind(StrEnum):
     UNKNOWN = "unknown"
     PAYMENT_REQUIRED = "payment_required"
     SILENT_BLOCK = "silent_block"
+    QRATOR_CHALLENGE = "qrator_challenge"
 
 
 @runtime_checkable
@@ -92,6 +93,20 @@ _CHALLENGE_MARKERS: tuple[str, ...] = (
     "smartcaptcha",
     "showcaptcha",
     "px-captcha",
+)
+
+_QRATOR_HEADER_MARKERS: tuple[str, ...] = (
+    "x-qrator",
+    "x-qrator-cache",
+    "x-qrator-requestid",
+)
+
+_QRATOR_BODY_MARKERS: tuple[str, ...] = (
+    "qrator",
+    "qrator labs",
+    "jsid",
+    "document.cookie",
+    "window.location.reload",
 )
 
 _IP_BLOCK_MARKERS: tuple[str, ...] = (
@@ -162,6 +177,7 @@ class FetchOutcome:
             FailureKind.RATE_LIMIT,
             FailureKind.TLS_ERROR,
             FailureKind.SILENT_BLOCK,
+            FailureKind.QRATOR_CHALLENGE,
         }
 
     @property
@@ -201,6 +217,8 @@ def _detect_captcha_type(text: str, headers: Mapping[str, str] | None = None) ->
         return "recaptcha"
     if "turnstile" in lowered or "cf-turnstile" in lowered:
         return "cloudflare_turnstile"
+    if "qrator" in lowered or "jsid" in lowered:
+        return "qrator_jsid"
     if (
         lowered_headers.get("cf-mitigated") == "challenge"
         or "challenge-platform" in lowered
@@ -237,6 +255,16 @@ def is_empty_html_200(status_code: int, content_type: str, body: str) -> bool:
     if "text/html" not in content_type.lower():
         return False
     return not body.strip()
+
+
+def _looks_like_qrator_challenge(lowered_text: str, substantial_content: bool) -> bool:
+    """Conservative Qrator/jsid challenge detector."""
+    if substantial_content:
+        return False
+    if "qrator" not in lowered_text and "jsid" not in lowered_text:
+        return False
+    marker_count = sum(1 for marker in _QRATOR_BODY_MARKERS if marker in lowered_text)
+    return marker_count >= 2
 
 
 def classify_error(error: BaseException) -> FailureKind:
@@ -349,6 +377,12 @@ class HeuristicFailureSignal:
             )
         if "captcha" in lowered_headers.get("x-datadome", ""):
             return FetchOutcome(kind=FailureKind.CAPTCHA, challenge=True, captcha_type="datadome")
+        if any(marker in lowered_headers for marker in _QRATOR_HEADER_MARKERS):
+            return FetchOutcome(
+                kind=FailureKind.QRATOR_CHALLENGE,
+                challenge=True,
+                captcha_type="qrator_jsid",
+            )
 
         # Challenge evidence is stronger than a status-only classification. A
         # large real page may legitimately embed a CAPTCHA vendor script, so
@@ -358,6 +392,12 @@ class HeuristicFailureSignal:
             substantial_content = _has_substantial_visible_content(text)
             if any(marker in lowered for marker in _IP_BLOCK_MARKERS):
                 return FetchOutcome(kind=FailureKind.BLOCKED_IP)
+            if _looks_like_qrator_challenge(lowered, substantial_content):
+                return FetchOutcome(
+                    kind=FailureKind.QRATOR_CHALLENGE,
+                    challenge=True,
+                    captcha_type="qrator_jsid",
+                )
             if any(marker in lowered for marker in _FINGERPRINT_BLOCK_MARKERS):
                 return FetchOutcome(kind=FailureKind.BLOCKED_FINGERPRINT)
             for pattern in _CAPTCHA_PATTERNS:

@@ -36,6 +36,7 @@ async def test_resolve_stealth_browser() -> None:
 
     kwargs = bypass.apply_browser_args({"args": ["--headless"]})
     assert "--disable-blink-features=AutomationControlled" in kwargs["args"]
+    assert "--disable-web-security" not in kwargs["args"]
 
 
 @pytest.mark.asyncio
@@ -195,9 +196,10 @@ def test_ordinary_launcher_consumes_internal_cloak_metadata() -> None:
 
     chromium = object()
     playwright = SimpleNamespace(chromium=chromium, firefox=object(), webkit=object())
-    kwargs = {"_cloakbrowser_backend": "patchright"}
+    kwargs = {"_cloakbrowser_backend": "patchright", "_patchright_required": True}
     assert _playwright_launcher(playwright, kwargs) is chromium
     assert "_cloakbrowser_backend" not in kwargs
+    assert "_patchright_required" not in kwargs
 
 
 @pytest.mark.asyncio

@@ -34,6 +34,10 @@ class TransitionDecision:
 _DECISIONS: dict[FailureKind, TransitionDecision] = {
     FailureKind.CAPTCHA: TransitionDecision(TransitionAction.SOLVE_CURRENT_SESSION),
     FailureKind.CHALLENGE: TransitionDecision(TransitionAction.SOLVE_CURRENT_SESSION),
+    FailureKind.QRATOR_CHALLENGE: TransitionDecision(
+        TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK,
+        preserves_session=False,
+    ),
     FailureKind.RATE_LIMIT: TransitionDecision(TransitionAction.ACTIVATE_PROXY),
     FailureKind.BLOCKED_IP: TransitionDecision(TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK),
     FailureKind.BLOCKED: TransitionDecision(TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK),

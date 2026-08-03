@@ -151,9 +151,18 @@ class BypassContext:
         url: str,
         *,
         config: dict[str, Any] | None = None,
+        browser_family: str | None = None,
     ) -> BypassContext:
         domain = urlparse(url).netloc.lower()
-        persona = select_persona(domain)
+        # Default to the Chromium family (defect A5): every browser engine in
+        # the pool except camoufox is Chromium-based, so a family-agnostic
+        # ``select_persona`` gives ~50% of domains a Firefox/Safari persona on a
+        # Chromium engine — an instant cross-check failure (UA says Firefox but
+        # navigator.userAgentData/window.chrome say Chromium). When the caller
+        # knows the real engine family it passes it; otherwise Chromium is the
+        # only coherent default. The adaptive controller re-aligns the persona
+        # via ``set_browser_family`` once a non-Chromium engine is selected.
+        persona = select_persona(domain, browser_family or "chromium")
         pf = run_preflight(url, config=config)
         try:
             proxy = resolve_bypass("proxy")

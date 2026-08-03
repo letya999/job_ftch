@@ -38,6 +38,7 @@ class CaptchaFailureReason(StrEnum):
     BAD_TOKEN = "bad_token"
     INJECTION_FAILED = "injection_failed"
     VERIFICATION_FAILED = "verification_failed"
+    BACKOFF_ACTIVE = "backoff_active"
 
 
 @dataclass(frozen=True, slots=True)

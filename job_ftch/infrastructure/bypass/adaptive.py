@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import tempfile
 from collections import deque
@@ -55,13 +57,15 @@ _MAX_SESSION_COOKIES = 32
 DEFAULT_TIER_ORDER: tuple[str, ...] = (
     "noop",
     "curl_stealth",
+    "tls_client",
     "stealth_browser",
+    "patchright_browser",
     "nodriver",
     "camoufox",
     "cloak",
 )
 
-OPTIONAL_TIERS: frozenset[str] = frozenset({"camoufox"})
+OPTIONAL_TIERS: frozenset[str] = frozenset({"camoufox", "patchright_browser", "tls_client"})
 
 
 class AdaptiveBypassManager:
@@ -171,6 +175,21 @@ class AdaptiveBypassManager:
         self._obfuscation_metadata: dict[str, Any] = {}
         self._session_memory_enabled = getattr(settings, "session_memory_enabled", False)
         self._session_memory: Any = None
+        self._browser_session_state_enabled = bool(
+            getattr(settings, "browser_session_state_enabled", False)
+        )
+        self._browser_session_state_dir: Path = getattr(
+            settings,
+            "browser_session_state_dir",
+            Path(".runtime/session_states"),
+        )
+        self._configured_profile_dir: Path | None = getattr(
+            settings, "browser_profile_dir", None
+        )
+        self._configured_profile_persistent = bool(
+            getattr(settings, "browser_profile_persistent", False)
+            and self._configured_profile_dir is not None
+        )
         try:
             solver_config = {
                 key.removeprefix("captcha_"): value
@@ -230,6 +249,7 @@ class AdaptiveBypassManager:
         self._failure_window: dict[str, deque[tuple[float, str]]] = {}
         self._session_cookies: list[dict[str, Any]] = []
         self._profile_dir: str | None = None
+        self._owns_profile_dir = True
         self._observed_challenge_type: str | None = None
         import asyncio
 
@@ -384,6 +404,16 @@ class AdaptiveBypassManager:
     @property
     def requires_browser(self) -> bool:
         return self._capabilities[self.current_name].requires_browser
+
+    @property
+    def owns_page_hardening(self) -> bool:
+        """This controller injects persona/JS hardening itself in ``apply_page``.
+
+        ``browser_utils`` checks this flag to avoid also calling
+        ``BypassContext.on_page`` on the same page, which would inject a second
+        conflicting copy of the hardening blob (defect A2).
+        """
+        return True
 
     @property
     def capability_inventory(self) -> dict[str, BypassCapability]:
@@ -571,15 +601,27 @@ class AdaptiveBypassManager:
         prepared = dict(config)
         if prepared.get("persistent_context"):
             if self._profile_dir is None:
-                self._profile_dir = tempfile.mkdtemp(prefix="job_ftch_source_profile_")
+                if self._configured_profile_persistent and self._configured_profile_dir:
+                    profile_dir = self._configured_profile_dir
+                    profile_dir.mkdir(parents=True, exist_ok=True)
+                    self._profile_dir = str(profile_dir)
+                    self._owns_profile_dir = False
+                else:
+                    self._profile_dir = tempfile.mkdtemp(prefix="job_ftch_source_profile_")
+                    self._owns_profile_dir = True
                 if os.name != "nt":
                     os.chmod(self._profile_dir, 0o700)
             prepared["_profile_dir"] = self._profile_dir
         configured = list(prepared.get("cookies") or [])
         memory = self._persona_session_memory()
         restored = list(memory.state.cookies) if memory is not None else []
+        persistent_state = self._load_persistent_session_state()
+        persistent_cookies = list(persistent_state.get("cookies") or [])
+        persistent_user_agent = str(persistent_state.get("user_agent", "") or "")
+        if persistent_user_agent and not prepared.get("user_agent"):
+            prepared["user_agent"] = persistent_user_agent
         by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
-        for cookie in [*restored, *configured, *self._session_cookies]:
+        for cookie in [*persistent_cookies, *restored, *configured, *self._session_cookies]:
             key = (
                 str(cookie.get("name", "")),
                 str(cookie.get("domain", "")),
@@ -594,8 +636,11 @@ class AdaptiveBypassManager:
         """Release source-scoped runtime artifacts after the terminal snapshot."""
         if self._profile_dir is not None:
             profile = Path(self._profile_dir)
+            owns_profile_dir = self._owns_profile_dir
             self._profile_dir = None
-            shutil.rmtree(profile, ignore_errors=True)
+            self._owns_profile_dir = True
+            if owns_profile_dir:
+                shutil.rmtree(profile, ignore_errors=True)
 
     async def capture_session_state(self, page: Any) -> None:
         """Capture only clearance cookies; never persist or log their values."""
@@ -632,6 +677,85 @@ class AdaptiveBypassManager:
                 memory.state.visit_count += 1
                 memory.state.last_visit_timestamp = time.time()
                 memory.save()
+            await self._save_persistent_session_state(page, allowed)
+
+    def _session_state_domain(self) -> str:
+        domain = str(getattr(self._context, "domain", "") or "").lower()
+        return domain.strip()
+
+    def _session_state_path(self, domain: str) -> Path | None:
+        if not self._browser_session_state_enabled or not domain:
+            return None
+        safe_domain = re.sub(r"[^a-z0-9_.-]+", "_", domain.lower()).strip("._")
+        if not safe_domain:
+            return None
+        return self._browser_session_state_dir / f"{safe_domain}.json"
+
+    def _load_persistent_session_state(self) -> dict[str, Any]:
+        path = self._session_state_path(self._session_state_domain())
+        if path is None or not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        cookies = data.get("cookies")
+        if not isinstance(cookies, list):
+            data["cookies"] = []
+        else:
+            data["cookies"] = [
+                dict(cookie)
+                for cookie in cookies
+                if isinstance(cookie, dict)
+                and str(cookie.get("name", "")).lower() in _SESSION_COOKIE_ALLOWLIST
+            ][:_MAX_SESSION_COOKIES]
+        return data
+
+    async def _save_persistent_session_state(
+        self,
+        page: Any,
+        cookies: list[dict[str, Any]],
+    ) -> None:
+        if not cookies:
+            return
+        domain = self._session_state_domain()
+        if not domain:
+            try:
+                from urllib.parse import urlparse
+
+                domain = urlparse(str(getattr(page, "url", "") or "")).netloc.lower()
+            except Exception:
+                domain = ""
+        path = self._session_state_path(domain)
+        if path is None:
+            return
+        user_agent = ""
+        try:
+            evaluate = getattr(page, "evaluate", None)
+            if callable(evaluate):
+                user_agent = str(await evaluate("navigator.userAgent"))
+        except Exception:
+            user_agent = ""
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(".tmp")
+            tmp_path.write_text(
+                json.dumps(
+                    {
+                        "domain": domain,
+                        "user_agent": user_agent,
+                        "cookies": [dict(cookie) for cookie in cookies][:_MAX_SESSION_COOKIES],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            tmp_path.replace(path)
+        except OSError:
+            logger.debug("browser_session_state_save_failed", domain=domain)
 
     def _select_engine(self, candidates: tuple[str, ...]) -> bool:
         """Choose the first installed candidate that changes the current engine."""
@@ -924,12 +1048,23 @@ class AdaptiveBypassManager:
         For HTTP-only tiers (noop, curl_stealth) apply_page is never
         called by browser_utils, so the decorator stays dormant.
         """
-        if self._context is not None:
-            await self._context.apply_page(page)
+        # The tier's own page hooks run first (nodriver/stealth_browser CDP
+        # setup, camoufox no-op). Persona/JS hardening is applied exactly once
+        # by ``_apply_per_request_hardening`` below — the previous extra
+        # ``self._context.apply_page(page)`` call has been removed because it
+        # injected a second, conflicting copy of the persona hardening blob.
         await self._current_strategy.apply_page(page)
-        await self._install_recaptcha_action_probe(page)
+        family = self._capabilities[self.current_name].browser_family or "chromium"
+        is_chromium = family.startswith("chromium")
+        # The reCAPTCHA action probe and the Chromium stealth blob are
+        # Blink-specific. Injecting them into a Firefox engine (camoufox) both
+        # fails and destroys camoufox's own C++-level fingerprint coherence, so
+        # they are gated to Chromium-family engines only.
+        if is_chromium:
+            await self._install_recaptcha_action_probe(page)
         await self._behavior_sim.apply_page(page)
-        await self._apply_per_request_hardening(page)
+        if is_chromium:
+            await self._apply_per_request_hardening(page)
 
         from job_ftch.infrastructure.bypass.multi_layer_obfuscation import ObfuscationContext
 
@@ -1001,15 +1136,16 @@ class AdaptiveBypassManager:
             return
 
     async def _apply_per_request_hardening(self, page: Any) -> None:
-        """Apply per-request stealth hardening with rotated seeds.
+        """Apply stealth hardening with session-stable seeds.
 
-        Each navigation gets a fresh canvas/audio seed and performance
-        offset to prevent cross-request fingerprint correlation.
+        Fingerprint seeds (canvas/audio/performance) MUST stay constant for
+        the lifetime of a session generation: a real user's canvas and audio
+        hashes do not change between page views, so rotating them per
+        navigation is itself a bot signal (invariant I7). Seeds are therefore
+        derived from the sticky persona, or from the current route-state
+        generation when no persona is bound, and only change on a deliberate
+        session reset (new generation / proxy rotation).
         """
-        import random as _random
-
-        canvas_seed = _random.randint(1000, 99999)
-        performance_offset = _random.uniform(-2.0, 2.0)
         try:
             from job_ftch.infrastructure.bypass.stealth_hardening import (
                 apply_stealth_hardening,
@@ -1017,7 +1153,16 @@ class AdaptiveBypassManager:
 
             persona = None
             if self._context is not None:
-                persona = getattr(self._context, "browser_persona", None)
+                persona = getattr(self._context, "persona", None)
+            # Stable per-session performance offset, deterministic in the
+            # session generation so it does not flip between navigations.
+            performance_offset = float(
+                ((self._route_state.generation * 2654435761) % 4000) / 1000.0 - 2.0
+            )
+            canvas_seed = (
+                int(getattr(persona, "canvas_seed", 0) or 0)
+                or 1000 + (self._route_state.generation * 2654435761) % 99000
+            )
             if persona is not None:
                 from job_ftch.infrastructure.bypass.stealth_hardening import (
                     apply_persona_hardening,

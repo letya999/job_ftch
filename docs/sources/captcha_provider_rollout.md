@@ -1,7 +1,7 @@
 ---
 title: "CAPTCHA provider rollout"
 description: "Operational rollout for observed CAPTCHA/bot-protection handling: project wiring, browser setup, provider roles, and eval gates."
-updated: 2026-08-02
+updated: 2026-08-03
 ---
 # CAPTCHA provider rollout
 
@@ -17,7 +17,7 @@ Provider roles:
 | Role | Providers |
 |---|---|
 | Production candidates | `capsolver`, `capmonster` |
-| Benchmark candidate | `nextcaptcha` for `recaptcha` only |
+| Benchmark candidate | `nextcaptcha` for `recaptcha` and `turnstile` |
 | Free/dev contour | `browser_wait`, `nopecha`, manual/mock/sandbox fixtures |
 | Observe-only until confirmed | `turnstile`, `hcaptcha`, `datadome`, `perimeterx`, `image`, `unknown` |
 
@@ -45,13 +45,25 @@ captcha_provider_routes: {}
 Paid providers only run when explicitly selected as `captcha_provider` and
 included in `captcha_enabled_providers`.
 
+Solver guardrails:
+
+```yaml
+captcha_solver_timeout_budget_seconds: 40
+captcha_solver_backoff_seconds: 300
+```
+
+The provider path waits briefly for a challenge marker/sitekey before creating a
+task. Recent domain+challenge failures are backed off in-process, so one bad
+sitekey/action does not burn the whole paid budget.
+
 Suggested eval routes:
 
 | Challenge type | Route |
 |---|---|
 | `recaptcha` | `capsolver -> capmonster -> nextcaptcha -> nopecha -> manual_required` |
-| `cloudflare_challenge` | `browser_wait/browser_session -> capsolver experimental -> capmonster experimental -> manual_required` |
-| `turnstile`, `hcaptcha` | `observe` until the fixture run confirms real frequency |
+| `turnstile` | `capsolver -> capmonster -> nextcaptcha -> manual_required` after authorized eval |
+| `cloudflare_challenge` | `browser_wait/browser_session -> manual_required`; paid API path only after explicit eval |
+| `hcaptcha` | `observe` until the fixture run confirms real frequency |
 | `datadome`, `perimeterx`, `unknown` | `observe -> manual_required`; no provider solve by default |
 
 Example benchmark route:
@@ -70,6 +82,11 @@ captcha_provider_routes:
     - nextcaptcha
     - nopecha
     - manual_required
+  turnstile:
+    - capsolver
+    - capmonster
+    - nextcaptcha
+    - manual_required
   cloudflare_challenge:
     - browser_wait
     - manual_required
@@ -86,6 +103,13 @@ Runtime artifacts belong under ignored `.runtime/` paths:
 .runtime/browser_profiles/job_ftch_ingest_profile/
 .runtime/session_states/
 .runtime/runs/
+```
+
+Enable a controlled warmed profile only for an ingest-specific directory:
+
+```text
+JOB_FTCH_BROWSER_PROFILE_DIR=.runtime/browser_profiles/job_ftch_ingest_profile/
+JOB_FTCH_BROWSER_PROFILE_PERSISTENT=true
 ```
 
 Browser profile checklist:

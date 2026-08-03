@@ -27,8 +27,6 @@ class StealthBrowserBypass:
             args.append("--disable-features=IsolateOrigins,site-per-process")
         if "--disable-site-isolation-trials" not in args:
             args.append("--disable-site-isolation-trials")
-        if "--disable-web-security" not in args:
-            args.append("--disable-web-security")
         kwargs["args"] = args
         return kwargs
 

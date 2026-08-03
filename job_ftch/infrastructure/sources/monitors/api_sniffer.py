@@ -260,6 +260,7 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> Mo
     try:
         from job_ftch.infrastructure.sources.browser_utils import (
             BROWSER_KEYS,
+            install_challenge_response_detector,
             open_page,
             run_actions,
         )
@@ -340,6 +341,12 @@ async def discover(spec: Any, client: httpx.AsyncClient, auth: Any = None) -> Mo
             raise
 
     async with collector, open_page(browser_config, bypass_strategy=bypass_strategy) as page:
+        await install_challenge_response_detector(
+            page,
+            url=board_url,
+            controller=bypass_strategy,
+            surface="monitor",
+        )
         if hasattr(page, "route"):
             await page.route("**/*", _block_trackers)
         page.on("response", collector.schedule)

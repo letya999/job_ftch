@@ -543,6 +543,8 @@ class CareerSiteSource(Source["RawItem"]):
         exc: Exception,
         *,
         response: httpx.Response | None = None,
+        status_code: int | None = None,
+        headers: dict[str, str] | None = None,
         response_body: bytes | None = None,
     ) -> bool:
         """Attempt to escalate bypass strategy. Returns True if escalated.
@@ -557,7 +559,12 @@ class CareerSiteSource(Source["RawItem"]):
         if hasattr(self.bypass_strategy, "handle_failure"):
             previous_tier = getattr(self.bypass_strategy, "current_name", None)
             previous_route = getattr(self.bypass_strategy, "route_state", None)
-            status_code = response.status_code if response is not None else None
+            status_code = status_code if status_code is not None else (
+                response.status_code if response is not None else None
+            )
+            headers = headers if headers is not None else (
+                dict(response.headers) if response is not None else None
+            )
             try:
                 retry_after = None
                 if response is not None:
@@ -566,7 +573,7 @@ class CareerSiteSource(Source["RawItem"]):
                     failure_result = self.bypass_strategy.handle_failure(
                         self.spec.url,
                         status_code=status_code,
-                        headers=dict(response.headers) if response is not None else None,
+                        headers=headers,
                         body=response_body,
                         error=exc,
                         retry_after=retry_after,
@@ -1065,7 +1072,16 @@ class CareerSiteSource(Source["RawItem"]):
                         # upstream protection page, not a parser failure.  A
                         # bypass tier may still recover it; otherwise stop
                         # rather than treating challenge links as candidates.
-                        if await self._try_escalate_bypass(exc):
+                        observed = getattr(exc, "challenge_type", None)
+                        setter = getattr(self.bypass_strategy, "set_observed_challenge_type", None)
+                        if observed and callable(setter):
+                            setter(observed)
+                        if await self._try_escalate_bypass(
+                            exc,
+                            status_code=getattr(exc, "status_code", None),
+                            headers=getattr(exc, "headers", None),
+                            response_body=getattr(exc, "body", None),
+                        ):
                             continue
                         self.stats.zero_reason = (
                             self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT

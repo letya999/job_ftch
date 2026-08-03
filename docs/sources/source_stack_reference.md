@@ -123,9 +123,9 @@ Core runtime pieces:
 
 Transport/capability implementations:
 
-- cheap/no-op: `noop`, `curl_bypass`, `managed`;
-- browser/session: `stealth_browser`, `camoufox_bypass`, `cloak_bypass`,
-  `nodriver_bypass`, `session_handoff`, `session_memory`;
+- cheap/no-op: `noop`, `curl_bypass`, `tls_client_bypass`, `managed`;
+- browser/session: `stealth_browser`, `patchright_bypass`, `camoufox_bypass`,
+  `cloak_bypass`, `nodriver_bypass`, `session_handoff`, `session_memory`;
 - behavior/fingerprint: `behavior_sim`, `behavioral_noise`, `humanize`,
   `fingerprint_profile`, `fingerprint_generator`, `fingerprint_evolution`,
   `fingerprint_baseline`, `stealth_hardening`;

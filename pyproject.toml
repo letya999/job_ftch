@@ -42,6 +42,7 @@ nodriver = ["nodriver>=0.50.2"]
 # PYSEC-2026-2431; its Python 3.12 import regression is handled narrowly in
 # infrastructure/bypass/curl_bypass.py until upstream releases a compatible fix.
 stealth = ["playwright-stealth>=2.0.3", "curl-cffi==0.15.0"]
+tls_client = ["tls-client>=1.0.1"]
 openai = ["openai>=1.30", "instructor>=1.4"]
 telegram = ["telethon>=1.36", "aiogram>=3.7"]
 dagster = ["dagster>=1.8"]
@@ -98,6 +99,7 @@ all = [
     "patchright>=1.49",
     "playwright-stealth>=2.0.3",
     "curl-cffi==0.15.0",
+    "tls-client>=1.0.1",
     "cloakbrowser>=0.5.1",
     "camoufox>=0.5.4",
     "nodriver>=0.50.2",

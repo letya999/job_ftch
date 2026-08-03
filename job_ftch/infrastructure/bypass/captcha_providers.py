@@ -186,6 +186,10 @@ class _BaseProvider:
         self.api_key = api_key
         self.proxy_url = proxy_url
 
+    async def _extract_sitekey_with_wait(self, page: Any, challenge_type: str) -> str:
+        await _wait_for_sitekey_marker(page, challenge_type)
+        return await extract_sitekey(page)
+
     def unsupported(self, challenge_type: str, method: str) -> CaptchaSolveResult | None:
         if normalize_challenge_type(challenge_type) in self.supported:
             return None
@@ -219,22 +223,73 @@ class _BaseProvider:
         return fields
 
 
+async def _wait_for_sitekey_marker(
+    page: Any,
+    challenge_type: str,
+    *,
+    timeout_ms: int = 3000,
+) -> None:
+    wait_for_selector = getattr(page, "wait_for_selector", None)
+    if not callable(wait_for_selector):
+        return
+    normalized = normalize_challenge_type(challenge_type)
+    selectors = {
+        CaptchaChallengeType.TURNSTILE.value: (
+            ".cf-turnstile",
+            "#turnstile-wrapper",
+            "[data-sitekey]",
+            "iframe[src*='turnstile']",
+        ),
+        CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value: (
+            ".cf-turnstile",
+            "#challenge-stage",
+            "[data-sitekey]",
+            "iframe[src*='turnstile']",
+        ),
+        CaptchaChallengeType.HCAPTCHA.value: (
+            ".h-captcha",
+            "[data-sitekey]",
+            "iframe[src*='hcaptcha.com']",
+        ),
+        CaptchaChallengeType.RECAPTCHA.value: (
+            ".g-recaptcha",
+            "[data-sitekey]",
+            "iframe[src*='recaptcha']",
+        ),
+        CaptchaChallengeType.RECAPTCHA_V3.value: (
+            "script[src*='recaptcha/api.js']",
+            "[data-sitekey]",
+        ),
+    }.get(normalized, ("[data-sitekey]",))
+    for selector in selectors:
+        try:
+            await wait_for_selector(selector, timeout=timeout_ms)
+            return
+        except Exception:
+            continue
+
+
 @register_captcha_provider("capsolver")
 class CapSolverProvider(_BaseProvider):
+    supported = frozenset(
+        {
+            CaptchaChallengeType.RECAPTCHA.value,
+            CaptchaChallengeType.RECAPTCHA_V3.value,
+            CaptchaChallengeType.HCAPTCHA.value,
+            CaptchaChallengeType.TURNSTILE.value,
+            CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value,
+        }
+    )
     capability = CaptchaProviderCapability(
         provider="capsolver",
-        supported_challenge_types=frozenset(
-            {
-                CaptchaChallengeType.RECAPTCHA.value,
-                CaptchaChallengeType.RECAPTCHA_V3.value,
-                CaptchaChallengeType.HCAPTCHA.value,
-                CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value,
-            }
-        ),
+        supported_challenge_types=supported,
         result_kinds=frozenset({CaptchaResultKind.TOKEN, CaptchaResultKind.SESSION}),
         production_candidate=True,
         browser_context_required=True,
-        notes="Primary production candidate for recaptcha; Cloudflare challenge remains experimental.",
+        notes=(
+            "Primary production candidate for reCAPTCHA and Turnstile; "
+            "managed Cloudflare challenge remains experimental."
+        ),
     )
 
     async def solve(
@@ -248,7 +303,7 @@ class CapSolverProvider(_BaseProvider):
         if unsupported := self.unsupported(challenge_type, "capsolver"):
             return unsupported
         wire_type = _provider_wire_type(challenge_type)
-        site_key = await extract_sitekey(page)
+        site_key = await self._extract_sitekey_with_wait(page, challenge_type)
         if not site_key:
             return CaptchaSolveResult(
                 solved=False,
@@ -264,6 +319,7 @@ class CapSolverProvider(_BaseProvider):
                 "hcaptcha": "HCaptchaTask",
                 "recaptcha": "ReCaptchaV2Task",
                 "recaptcha_v3": "ReCaptchaV3Task",
+                "turnstile": "AntiTurnstileTask",
                 "cloudflare": "AntiCloudflareTask",
             }[wire_type]
         else:
@@ -271,6 +327,7 @@ class CapSolverProvider(_BaseProvider):
                 "hcaptcha": "HCaptchaTaskProxyLess",
                 "recaptcha": "ReCaptchaV2TaskProxyLess",
                 "recaptcha_v3": "ReCaptchaV3TaskProxyLess",
+                "turnstile": "AntiTurnstileTaskProxyLess",
                 "cloudflare": "AntiCloudflareTask",
             }[wire_type]
         task_payload: dict[str, Any] = {
@@ -279,7 +336,10 @@ class CapSolverProvider(_BaseProvider):
             "websiteKey": site_key,
         }
         if wire_type == CaptchaChallengeType.RECAPTCHA_V3.value:
-            task_payload["pageAction"] = await extract_recaptcha_action(page) or "homepage"
+            action = await extract_recaptcha_action(page)
+            if action:
+                task_payload["pageAction"] = action
+            task_payload["minScore"] = 0.3
         if effective_proxy:
             task_payload.update(self._proxy_task_fields())
         try:
@@ -350,7 +410,7 @@ class TwoCaptchaProvider(_BaseProvider):
         if unsupported := self.unsupported(challenge_type, "2captcha"):
             return unsupported
         wire_type = _provider_wire_type(challenge_type)
-        site_key = await extract_sitekey(page)
+        site_key = await self._extract_sitekey_with_wait(page, challenge_type)
         task_info = {
             "cloudflare": ("turnstile", "sitekey"),
             "turnstile": ("turnstile", "sitekey"),
@@ -432,7 +492,7 @@ class AntiCaptchaProvider(_BaseProvider):
         if unsupported := self.unsupported(challenge_type, "anticaptcha"):
             return unsupported
         wire_type = _provider_wire_type(challenge_type)
-        site_key = await extract_sitekey(page)
+        site_key = await self._extract_sitekey_with_wait(page, challenge_type)
         effective_proxy = proxy_url or self.proxy_url
         if effective_proxy:
             task_type = {
@@ -527,7 +587,7 @@ class NopeChaProvider(_BaseProvider):
         if unsupported := self.unsupported(challenge_type, "nopecha"):
             return unsupported
         wire_type = _provider_wire_type(challenge_type)
-        site_key = await extract_sitekey(page)
+        site_key = await self._extract_sitekey_with_wait(page, challenge_type)
         if not site_key:
             return CaptchaSolveResult(
                 solved=False,
@@ -612,7 +672,7 @@ class CapMonsterProvider(_BaseProvider):
                 challenge_type=normalize_challenge_type(challenge_type),
                 result_kind=CaptchaResultKind.UNSUPPORTED,
             )
-        site_key = await extract_sitekey(page)
+        site_key = await self._extract_sitekey_with_wait(page, challenge_type)
         if not site_key:
             return CaptchaSolveResult(
                 solved=False,
@@ -634,7 +694,9 @@ class CapMonsterProvider(_BaseProvider):
             "websiteKey": site_key,
         }
         if wire_type == CaptchaChallengeType.RECAPTCHA_V3.value:
-            task_payload["pageAction"] = await extract_recaptcha_action(page) or "homepage"
+            action = await extract_recaptcha_action(page)
+            if action:
+                task_payload["pageAction"] = action
             task_payload["minScore"] = 0.3
         if effective_proxy and wire_type != CaptchaChallengeType.RECAPTCHA_V3.value:
             task_payload.update(self._proxy_task_fields())
@@ -689,6 +751,7 @@ class NextCaptchaProvider(_BaseProvider):
         {
             CaptchaChallengeType.RECAPTCHA.value,
             CaptchaChallengeType.RECAPTCHA_V3.value,
+            CaptchaChallengeType.TURNSTILE.value,
         }
     )
     capability = CaptchaProviderCapability(
@@ -696,7 +759,7 @@ class NextCaptchaProvider(_BaseProvider):
         supported_challenge_types=supported,
         result_kinds=frozenset({CaptchaResultKind.TOKEN}),
         benchmark_candidate=True,
-        notes="Cheap benchmark candidate for reCAPTCHA only.",
+        notes="Cheap benchmark candidate for reCAPTCHA and Turnstile.",
     )
 
     async def solve(
@@ -710,7 +773,7 @@ class NextCaptchaProvider(_BaseProvider):
         if unsupported := self.unsupported(challenge_type, "nextcaptcha"):
             return unsupported
         wire_type = _provider_wire_type(challenge_type)
-        site_key = await extract_sitekey(page)
+        site_key = await self._extract_sitekey_with_wait(page, challenge_type)
         if not site_key:
             return CaptchaSolveResult(
                 solved=False,
@@ -721,21 +784,24 @@ class NextCaptchaProvider(_BaseProvider):
                 result_kind=CaptchaResultKind.UNSUPPORTED,
             )
         effective_proxy = proxy_url or self.proxy_url
+        task_type = {
+            (CaptchaChallengeType.RECAPTCHA.value, False): "RecaptchaV2TaskProxyless",
+            (CaptchaChallengeType.RECAPTCHA.value, True): "RecaptchaV2Task",
+            (CaptchaChallengeType.RECAPTCHA_V3.value, False): "RecaptchaV3TaskProxyless",
+            (CaptchaChallengeType.RECAPTCHA_V3.value, True): "RecaptchaV3Task",
+            (CaptchaChallengeType.TURNSTILE.value, False): "TurnstileTaskProxyless",
+            (CaptchaChallengeType.TURNSTILE.value, True): "TurnstileTask",
+        }[(wire_type, bool(effective_proxy))]
         task_payload: dict[str, Any] = {
-            "type": (
-                "RecaptchaV3TaskProxyless"
-                if wire_type == CaptchaChallengeType.RECAPTCHA_V3.value and not effective_proxy
-                else "RecaptchaV3Task"
-                if wire_type == CaptchaChallengeType.RECAPTCHA_V3.value
-                else "RecaptchaV2TaskProxyless"
-                if not effective_proxy
-                else "RecaptchaV2Task"
-            ),
+            "type": task_type,
             "websiteURL": url or str(getattr(page, "url", "")),
             "websiteKey": site_key,
         }
         if wire_type == CaptchaChallengeType.RECAPTCHA_V3.value:
-            task_payload["pageAction"] = await extract_recaptcha_action(page) or "homepage"
+            action = await extract_recaptcha_action(page)
+            if action:
+                task_payload["pageAction"] = action
+            task_payload["minScore"] = 0.3
         if effective_proxy:
             task_payload["proxy"] = effective_proxy
         try:
@@ -764,7 +830,7 @@ class NextCaptchaProvider(_BaseProvider):
                         solution = result.get("solution", {})
                         return _token_result(
                             "nextcaptcha",
-                            solution.get("gRecaptchaResponse"),
+                            solution.get("gRecaptchaResponse") or solution.get("token"),
                             challenge_type=challenge_type,
                             task_id=task_id,
                         )

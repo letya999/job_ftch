@@ -223,6 +223,10 @@ class Settings(BaseSettings):
     browser_context_timeout_ms: int = Field(default=120000, gt=0)
     browser_challenge_retries: int = Field(default=1, ge=0)
     browser_challenge_wait_ms: int = Field(default=6000, gt=0)
+    browser_profile_dir: Path | None = None
+    browser_profile_persistent: bool = False
+    browser_session_state_enabled: bool = False
+    browser_session_state_dir: Path = Path(".runtime/session_states")
     api_sniffer_settle_seconds: float = Field(default=4.0, gt=0.0, le=60.0)
     api_sniffer_max_pages: int = Field(default=10, gt=0, le=100)
     api_sniffer_default_page_size: int = Field(default=10, gt=0, le=500)
@@ -254,6 +258,8 @@ class Settings(BaseSettings):
         default_factory=lambda: ["browser_wait", "nopecha"]
     )
     captcha_provider_routes: dict[str, list[str]] = Field(default_factory=dict)
+    captcha_solver_timeout_budget_seconds: float = Field(default=40.0, ge=0.0, le=180.0)
+    captcha_solver_backoff_seconds: float = Field(default=300.0, ge=0.0, le=3600.0)
     proxy_provider: str = Field(default="raw")
     proxy_gateway: str = ""
     proxy_user: str = ""

@@ -13,6 +13,7 @@ Applied via apply_stealth_hardening(page, persona) after page creation.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import structlog
@@ -1053,7 +1054,13 @@ async def apply_stealth_hardening(
                 _webgl_vendor_for_renderer(webgl_renderer).replace("'", "\\'"),
                 webgl_renderer.replace("'", "\\'"),
             ),
-            _TIMEZONE_JS % timezone,
+            # Timezone is deliberately NOT patched in JS here (defect A3). The
+            # old ``_TIMEZONE_JS`` overrode only ``Intl.DateTimeFormat`` and left
+            # ``Date.getTimezoneOffset()`` reporting the host tz, a divergence
+            # anti-bot systems check within a 90-minute tolerance. Timezone is
+            # now owned by the context-level ``timezone_id`` option, which
+            # Playwright applies via CDP to every realm (window + workers) so
+            # Intl and Date stay coherent by construction.
             _WEBDRIVER_HIDE_JS % locale,
             _FONT_SPACING_JS % font_spacing_seed,
             _WEB_API_SHAPE_JS,
@@ -1128,6 +1135,14 @@ async def apply_stealth_hardening(
         scripts.append(_CDP_DETECTION_JS)
         scripts.append(_PERFORMANCE_TIMING_JS % performance_offset)
         scripts.append(_SERVICE_WORKER_STUB_JS)
+        # Idempotency guard (defect A2): ``add_init_script`` registers a script
+        # that Playwright re-runs on every navigation, so calling this function
+        # twice for one page stacks two blobs. Mark the page after the first
+        # successful injection and make any later call a no-op; whichever caller
+        # runs first wins and defines the page's single coherent identity.
+        if getattr(page, "_job_ftch_hardening_done", False):
+            return
+
         combined = "\n".join(scripts)
 
         if hasattr(page, "add_init_script"):
@@ -1136,6 +1151,9 @@ async def apply_stealth_hardening(
             await page.evaluate(combined)
         else:
             logger.debug("stealth_hardening_no_script_injection", page_type=type(page).__name__)
+
+        with contextlib.suppress(Exception):
+            page._job_ftch_hardening_done = True
 
     except Exception as exc:
         logger.warning("stealth_hardening_failed", error=str(exc))

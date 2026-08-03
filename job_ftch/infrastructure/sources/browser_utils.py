@@ -6,6 +6,7 @@ import os
 import time
 from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import structlog
 
@@ -28,6 +29,8 @@ DEFAULT_USER_AGENT = (
 
 DEFAULT_WAIT = "domcontentloaded"
 DEFAULT_WAIT_FALLBACK = "networkidle"
+
+_CHALLENGE_DETECTOR_ATTR = "_job_ftch_challenge_response_detector"
 
 _PATCHRIGHT_CANCELLATION_FIX_ATTR = "_job_ftch_cancellation_safe_inner_send"
 _PATCHRIGHT_ROUTE_FIX_ATTR = "_job_ftch_cancellation_safe_route_handler"
@@ -539,6 +542,7 @@ async def _resolve_bypass_context(config: dict[str, Any]) -> Any:
 
 def _playwright_launcher(pw: Playwright, launch_kwargs: dict[str, Any]) -> Any:
     launch_kwargs.pop("_cloakbrowser_backend", None)
+    launch_kwargs.pop("_patchright_required", None)
     browser_engine = str(launch_kwargs.pop("browser_engine", "chromium")).strip().lower()
     if browser_engine == "chromium":
         return pw.chromium
@@ -644,7 +648,10 @@ async def _open_playwright_page(
 
     page: Page = await await_with_source_deadline(context.new_page())
 
-    if bypass_ctx:
+    # When the adaptive controller owns page hardening it injects the persona
+    # blob itself (once) inside ``apply_page``. Calling ``bypass_ctx.on_page``
+    # as well would inject a second, possibly conflicting copy, so skip it.
+    if bypass_ctx and not getattr(bypass_strategy, "owns_page_hardening", False):
         await bypass_ctx.on_page(page)
     if bypass_strategy:
         await bypass_strategy.apply_page(page)
@@ -763,7 +770,9 @@ async def _open_persistent_page(
         context.pages[0] if context.pages else await await_with_source_deadline(context.new_page())
     )
 
-    if bypass_ctx:
+    # See note in _open_playwright_page: skip the duplicate persona injection
+    # when the adaptive controller already owns page hardening.
+    if bypass_ctx and not getattr(bypass_strategy, "owns_page_hardening", False):
         await bypass_ctx.on_page(page)
     if bypass_strategy:
         await bypass_strategy.apply_page(page)
@@ -816,6 +825,13 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     stats = config.get("_pipeline_stats")
     from job_ftch.infrastructure.sources.source_deadline import await_with_source_deadline
 
+    await install_challenge_response_detector(
+        page,
+        url=url,
+        controller=config.get("_bypass_strategy"),
+        surface="browser",
+    )
+
     try:
         from job_ftch.infrastructure.network.ssrf_guard import check_ssrf
 
@@ -862,6 +878,60 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
 
     if resp is not None and resp.status in blocked:
         raise RuntimeError(f"Browser navigation blocked with status {resp.status}")
+
+
+async def install_challenge_response_detector(
+    page: Any,
+    *,
+    url: str,
+    controller: Any = None,
+    surface: str = "browser",
+) -> None:
+    """Attach a token-safe response classifier to a page once."""
+    if getattr(page, _CHALLENGE_DETECTOR_ATTR, False):
+        return
+    if not hasattr(page, "on"):
+        return
+    setattr(page, _CHALLENGE_DETECTOR_ATTR, True)
+    started_at = time.monotonic()
+
+    async def _inspect_response(response: Any) -> None:
+        try:
+            status_code = int(getattr(response, "status", 0) or 0)
+            headers = dict(getattr(response, "headers", {}) or {})
+            from job_ftch.infrastructure.bypass.challenge_classifier import (
+                classify_challenge,
+                emit_challenge_detection,
+            )
+
+            detection = classify_challenge(
+                surface=surface,
+                status_code=status_code,
+                headers=headers,
+                started_at=started_at,
+            )
+            if not detection.detected:
+                return
+            response_url = str(getattr(response, "url", "") or url)
+            emit_challenge_detection(urlparse(response_url).netloc.lower(), detection)
+            setter = getattr(controller, "set_observed_challenge_type", None)
+            if detection.challenge_type and callable(setter):
+                maybe_result = setter(detection.challenge_type)
+                if hasattr(maybe_result, "__await__"):
+                    await maybe_result
+        except Exception as exc:
+            log.debug("browser.challenge_response_detector_failed", error=str(exc))
+
+    def _schedule(response: Any) -> None:
+        task = asyncio.create_task(_inspect_response(response))
+        task.add_done_callback(_swallow_detector_exception)
+
+    page.on("response", _schedule)
+
+
+def _swallow_detector_exception(finished: asyncio.Task[Any]) -> None:
+    with suppress(Exception):
+        finished.exception()
 
 
 async def _page_has_captcha_marker(page: Page) -> bool:

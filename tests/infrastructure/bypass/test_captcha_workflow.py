@@ -23,7 +23,14 @@ from job_ftch.infrastructure.bypass.captcha_solver import (
     _normalize_provider_routes,
 )
 from job_ftch.infrastructure.bypass.failure_signal import _detect_captcha_type
-from job_ftch.infrastructure.sources.browser_utils import navigate
+from job_ftch.infrastructure.sources.browser_utils import (
+    install_challenge_response_detector,
+    navigate,
+)
+from job_ftch.infrastructure.sources.monitors.shared import (
+    BrowserChallengeError,
+    raise_if_browser_challenge,
+)
 from job_ftch.infrastructure.sources.source_deadline import (
     reset_source_deadline,
     set_source_deadline,
@@ -43,7 +50,7 @@ class _FixturePage:
 @pytest.mark.parametrize(
     ("html", "expected"),
     [
-        ('<div class="cf-turnstile" data-sitekey="0x1"></div>', "cloudflare"),
+        ('<div class="cf-turnstile" data-sitekey="0x1"></div>', "turnstile"),
         ('<div class="h-captcha" data-sitekey="h1"></div>', "hcaptcha"),
         ('<div class="g-recaptcha" data-sitekey="r1"></div>', "recaptcha"),
         (
@@ -89,6 +96,144 @@ async def test_recaptcha_v3_action_prefers_captured_execute_call() -> None:
 
 
 @pytest.mark.asyncio
+async def test_capsolver_v3_payload_omits_unknown_action_and_sets_min_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import job_ftch.infrastructure.bypass.captcha_providers as providers
+    from job_ftch.infrastructure.bypass.captcha_providers import CapSolverProvider
+
+    captured: dict[str, object] = {}
+
+    class _Response:
+        def json(self) -> dict[str, object]:
+            return {"errorId": 1, "errorDescription": "fixture reject"}
+
+    class _Client:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+        async def post(self, url: str, *, json: dict[str, object]) -> _Response:
+            del url
+            captured.update(json)
+            return _Response()
+
+    page = SimpleNamespace(evaluate=AsyncMock(side_effect=["site-key", "", ""]))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", _Client)
+
+    provider = CapSolverProvider("offline-key")  # pragma: allowlist secret
+    await provider.solve(page, challenge_type="recaptcha_v3", url="https://example.test")
+
+    task = captured["task"]
+    assert isinstance(task, dict)
+    assert task["minScore"] == 0.3
+    assert "pageAction" not in task
+
+
+@pytest.mark.asyncio
+async def test_provider_waits_for_sitekey_marker_before_extraction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import job_ftch.infrastructure.bypass.captcha_providers as providers
+    from job_ftch.infrastructure.bypass.captcha_providers import CapSolverProvider
+
+    class _Response:
+        def json(self) -> dict[str, object]:
+            return {"errorId": 1, "errorDescription": "fixture reject"}
+
+    class _Client:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+        async def post(self, url: str, *, json: dict[str, object]) -> _Response:
+            del url, json
+            return _Response()
+
+    page = SimpleNamespace(
+        wait_for_selector=AsyncMock(),
+        evaluate=AsyncMock(side_effect=["site-key"]),
+    )
+    monkeypatch.setattr(providers.httpx, "AsyncClient", _Client)
+
+    provider = CapSolverProvider("offline-key")
+    await provider.solve(page, challenge_type="turnstile", url="https://example.test")
+
+    page.wait_for_selector.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_solver_backoff_prevents_repeated_provider_attempts() -> None:
+    page = SimpleNamespace(url="https://example.test/jobs")
+    solver = CaptchaSolverBypass(
+        provider="capsolver",
+        api_key="offline-key",  # pragma: allowlist secret
+        max_attempts=3,
+        max_paid_attempts=3,
+        min_provider_seconds=0,
+        backoff_seconds=60,
+        enabled_providers=frozenset({"capsolver"}),
+    )
+    calls = 0
+
+    async def fake_external(*args: object, **kwargs: object) -> CaptchaSolveResult:
+        nonlocal calls
+        del args, kwargs
+        calls += 1
+        return CaptchaSolveResult(
+            solved=False,
+            method="capsolver",
+            failure_reason=CaptchaFailureReason.PROVIDER_REJECTED,
+        )
+
+    solver._solve_external_api = fake_external  # type: ignore[method-assign]
+
+    first = await solver.solve(page, challenge_type="recaptcha", url="https://example.test/jobs")
+    second = await solver.solve(page, challenge_type="recaptcha", url="https://example.test/jobs")
+
+    assert first.failure_reason is CaptchaFailureReason.PROVIDER_REJECTED
+    assert second.failure_reason is CaptchaFailureReason.BACKOFF_ACTIVE
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_response_detector_sets_observed_challenge_type() -> None:
+    callbacks: dict[str, object] = {}
+    controller = SimpleNamespace(set_observed_challenge_type=AsyncMock())
+
+    class _Page:
+        def on(self, event: str, callback: object) -> None:
+            callbacks[event] = callback
+
+    response = SimpleNamespace(
+        status=403,
+        headers={"cf-mitigated": "challenge"},
+        url="https://example.test/cdn-cgi/challenge",
+    )
+
+    await install_challenge_response_detector(
+        _Page(),
+        url="https://example.test/jobs",
+        controller=controller,
+        surface="monitor",
+    )
+    callbacks["response"](response)  # type: ignore[operator]
+    await asyncio.sleep(0)
+
+    controller.set_observed_challenge_type.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_recaptcha_v3_token_application_invokes_callbacks() -> None:
     page = SimpleNamespace(evaluate=AsyncMock(return_value=True))
     solver = CaptchaSolverBypass(wait_seconds=0.01)
@@ -123,6 +268,17 @@ def test_failure_signal_labels_recaptcha_v3_separately() -> None:
     html = '<script src="https://www.google.com/recaptcha/api.js?render=site-public-key"></script>'
 
     assert _detect_captcha_type(html) == "recaptcha_v3"
+
+
+def test_monitor_challenge_html_raises_typed_error() -> None:
+    html = '<html><body><div class="cf-turnstile"></div></body></html>'
+
+    with pytest.raises(BrowserChallengeError) as raised:
+        raise_if_browser_challenge(html, url="https://example.test/jobs")
+
+    assert raised.value.status_code == 200
+    assert raised.value.body
+    assert raised.value.challenge_type == "cloudflare_turnstile"
 
 
 @pytest.mark.asyncio
@@ -406,8 +562,11 @@ def test_new_captcha_providers_self_register_with_capabilities() -> None:
     assert capmonster is not None and capmonster.production_candidate
     assert nextcaptcha is not None and nextcaptcha.benchmark_candidate
     assert "recaptcha_v3" in capsolver.supported_challenge_types
+    assert "turnstile" in capsolver.supported_challenge_types
     assert "recaptcha_v3" in capmonster.supported_challenge_types
-    assert nextcaptcha.supported_challenge_types == frozenset({"recaptcha", "recaptcha_v3"})
+    assert nextcaptcha.supported_challenge_types == frozenset(
+        {"recaptcha", "recaptcha_v3", "turnstile"}
+    )
     assert nopecha is not None and nopecha.free_or_dev
 
 
