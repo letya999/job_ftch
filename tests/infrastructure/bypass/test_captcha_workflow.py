@@ -670,3 +670,51 @@ async def test_navigate_does_not_solve_success_status_without_captcha_marker() -
 
     controller.solve_page_challenge.assert_not_awaited()
     page.goto.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_provider_solving_blocked_on_unauthorized_domain() -> None:
+    # Owner scope: provider-backed solving is refused off the allowlist, while
+    # the free browser_wait tier stays available everywhere.
+    solver = CaptchaSolverBypass(
+        provider="capsolver",
+        api_key="k",
+        authorized_domains=frozenset({"example.com"}),
+    )
+    page = SimpleNamespace(url="https://evil.test/checkout")
+    with capture_logs() as logs:
+        result = await solver.solve(page, challenge_type="recaptcha", url="https://evil.test/x")
+    assert not result.solved
+    assert result.failure_reason is CaptchaFailureReason.UNAUTHORIZED_DOMAIN
+    assert any(entry["event"] == "captcha_provider_blocked_unauthorized" for entry in logs)
+
+
+@pytest.mark.asyncio
+async def test_provider_solving_allowed_on_authorized_subdomain() -> None:
+    # A parent-suffix allowlist entry authorizes its subdomains; the gate must
+    # not be the reason a solve fails here.
+    solver = CaptchaSolverBypass(
+        provider="capsolver",
+        api_key="",  # empty key -> fails downstream, but NOT at the auth gate
+        authorized_domains=frozenset({"example.com"}),
+    )
+    page = SimpleNamespace(url="https://jobs.example.com/apply")
+    result = await solver.solve(
+        page, challenge_type="recaptcha", url="https://jobs.example.com/apply"
+    )
+    assert result.failure_reason is not CaptchaFailureReason.UNAUTHORIZED_DOMAIN
+
+
+def test_domain_authorization_suffix_matching() -> None:
+    solver = CaptchaSolverBypass(authorized_domains=frozenset({"example.com", "acme.io"}))
+    assert solver._domain_authorized("example.com")
+    assert solver._domain_authorized("jobs.example.com")
+    assert solver._domain_authorized("deep.sub.acme.io")
+    assert not solver._domain_authorized("notexample.com")
+    assert not solver._domain_authorized("example.org")
+    assert not solver._domain_authorized("")
+
+
+def test_empty_allowlist_authorizes_nothing() -> None:
+    solver = CaptchaSolverBypass(authorized_domains=frozenset())
+    assert not solver._domain_authorized("example.com")

@@ -39,6 +39,7 @@ class CaptchaFailureReason(StrEnum):
     INJECTION_FAILED = "injection_failed"
     VERIFICATION_FAILED = "verification_failed"
     BACKOFF_ACTIVE = "backoff_active"
+    UNAUTHORIZED_DOMAIN = "unauthorized_domain"
 
 
 @dataclass(frozen=True, slots=True)

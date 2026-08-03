@@ -123,9 +123,23 @@ class CaptchaSolverBypass:
         proxy_url: str = "",
         enabled_providers: frozenset[str] | None = None,
         provider_routes: dict[str, tuple[str, ...]] | None = None,
+        authorized_domains: frozenset[str] | None = None,
     ) -> None:
         self._provider = provider
         self._api_key = api_key
+        # Provider-backed (paid/external) solving is restricted to owned or
+        # explicitly authorized targets. The free passive ``browser_wait`` tier
+        # is always allowed and never gated here.
+        #
+        # ``None`` means the gate is unconfigured (inactive) — used by unit tests
+        # that exercise provider mechanics directly. A frozenset means the gate
+        # is active; an EMPTY frozenset therefore authorizes nothing, which is
+        # the deny-by-default the production factory passes.
+        self._authorized_domains: frozenset[str] | None = (
+            None
+            if authorized_domains is None
+            else frozenset(d.strip().lower().lstrip(".") for d in authorized_domains if d.strip())
+        )
         # browser_wait is always permitted (free, no external call); the external
         # provider only fires when it appears in the allowlist.
         self._enabled_providers = (
@@ -225,11 +239,37 @@ class CaptchaSolverBypass:
             )
         self._attempts += 1
 
+        provider_authorized = self._domain_authorized(domain)
         provider_chain = self._provider_chain_for(challenge_type)
+        if provider_chain and not provider_authorized:
+            # Off-allowlist domains keep only the free passive wait; paid/
+            # external providers are dropped from the chain.
+            filtered = tuple(name for name in provider_chain if name == "browser_wait")
+            if filtered != provider_chain:
+                logger.info(
+                    "captcha_provider_blocked_unauthorized",
+                    domain=domain,
+                    dropped=[name for name in provider_chain if name != "browser_wait"],
+                )
+            provider_chain = filtered
         if provider_chain:
             result = await self._solve_provider_chain(page, challenge_type, url, provider_chain)
         elif self._provider == "browser_wait":
             result = await self._solve_browser_wait(page, challenge_type)
+        elif not provider_authorized:
+            logger.info(
+                "captcha_provider_blocked_unauthorized",
+                domain=domain,
+                provider=self._provider,
+            )
+            result = CaptchaSolveResult(
+                solved=False,
+                method=self._provider,
+                error="provider CAPTCHA solving is not authorized for this domain",
+                failure_reason=CaptchaFailureReason.UNAUTHORIZED_DOMAIN,
+                challenge_type=normalized_type,
+                result_kind=CaptchaResultKind.UNSUPPORTED,
+            )
         elif self._enabled_providers is not None and self._provider not in self._enabled_providers:
             result = CaptchaSolveResult(
                 solved=False,
@@ -308,13 +348,18 @@ class CaptchaSolverBypass:
                 harvested_at=time.monotonic(),
             )
             self._failure_backoff.pop(backoff_key, None)
-        elif domain and self._backoff_seconds > 0 and result.failure_reason in {
-            CaptchaFailureReason.PROVIDER_REJECTED,
-            CaptchaFailureReason.PROVIDER_TIMEOUT,
-            CaptchaFailureReason.BAD_TOKEN,
-            CaptchaFailureReason.INJECTION_FAILED,
-            CaptchaFailureReason.VERIFICATION_FAILED,
-        }:
+        elif (
+            domain
+            and self._backoff_seconds > 0
+            and result.failure_reason
+            in {
+                CaptchaFailureReason.PROVIDER_REJECTED,
+                CaptchaFailureReason.PROVIDER_TIMEOUT,
+                CaptchaFailureReason.BAD_TOKEN,
+                CaptchaFailureReason.INJECTION_FAILED,
+                CaptchaFailureReason.VERIFICATION_FAILED,
+            }
+        ):
             self._failure_backoff[backoff_key] = time.monotonic() + self._backoff_seconds
 
         return result
@@ -393,9 +438,7 @@ class CaptchaSolverBypass:
                 self._api_key = previous_api_key
             if result.solved:
                 return result
-            provider_status = result.raw_provider_status or str(
-                result.failure_reason or "failed"
-            )
+            provider_status = result.raw_provider_status or str(result.failure_reason or "failed")
             failures.append(f"{provider_name}:{provider_status}")
             if result.failure_reason in {
                 CaptchaFailureReason.DEADLINE_INSUFFICIENT,
@@ -682,6 +725,25 @@ class CaptchaSolverBypass:
     def set_proxy_url(self, proxy_url: str) -> None:
         self._proxy_url = proxy_url
 
+    def _domain_authorized(self, domain: str) -> bool:
+        """Whether provider-backed solving is authorized for ``domain``.
+
+        Matches the domain or any parent suffix against the allowlist, so
+        ``jobs.example.com`` is covered by an ``example.com`` entry. An empty
+        allowlist authorizes nothing (safe default); ``browser_wait`` is not
+        gated by this and stays available everywhere.
+        """
+        if self._authorized_domains is None:
+            return True  # gate not configured -> unrestricted
+        if not self._authorized_domains:
+            return False  # configured but empty -> deny by default
+        host = domain.strip().lower().lstrip(".")
+        if not host:
+            return False
+        parts = host.split(".")
+        candidates = {".".join(parts[i:]) for i in range(len(parts))}
+        return bool(candidates & self._authorized_domains)
+
     async def _solve_external_api(
         self,
         page: Any,
@@ -854,10 +916,15 @@ def _create_captcha_solver(
                 settings.captcha_solver_timeout_budget_seconds,
             )
         ),
-        backoff_seconds=float(config.get("backoff_seconds", settings.captcha_solver_backoff_seconds)),
+        backoff_seconds=float(
+            config.get("backoff_seconds", settings.captcha_solver_backoff_seconds)
+        ),
         proxy_url=str(config.get("proxy_url", "")),
         enabled_providers=frozenset(settings.captcha_enabled_providers),
         provider_routes=provider_routes,
+        authorized_domains=frozenset(
+            config.get("authorized_domains", settings.captcha_authorized_domains)
+        ),
     )
 
 

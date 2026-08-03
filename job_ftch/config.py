@@ -258,6 +258,10 @@ class Settings(BaseSettings):
         default_factory=lambda: ["browser_wait", "nopecha"]
     )
     captcha_provider_routes: dict[str, list[str]] = Field(default_factory=dict)
+    # Domains authorized for provider-backed (paid/external) CAPTCHA solving.
+    # Empty = none authorized (safe default). The free passive browser_wait tier
+    # is never gated by this. Comma-separated env list; parent-suffix match.
+    captcha_authorized_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
     captcha_solver_timeout_budget_seconds: float = Field(default=40.0, ge=0.0, le=180.0)
     captcha_solver_backoff_seconds: float = Field(default=300.0, ge=0.0, le=3600.0)
     proxy_provider: str = Field(default="raw")
@@ -456,6 +460,7 @@ class Settings(BaseSettings):
         "http_proxy_list",
         "proxy_rescue_allow_domains",
         "proxy_rescue_deny_domains",
+        "captcha_authorized_domains",
         mode="before",
     )
     @classmethod
