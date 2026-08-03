@@ -7,8 +7,8 @@ Supports three solving modes:
 2. Token extraction: for hCaptcha/reCAPTCHA embedded in career sites,
    wait for the challenge widget to appear and extract the response token
    via JS evaluation. Free.
-3. External API: delegate to NopeCHA (free tier, recurring credits every 23h),
-   Capsolver, 2captcha, or anticaptcha when browser-wait fails. Requires an
+3. External API: delegate to NopeCHA (free/dev), CapSolver, CapMonster,
+   NextCaptcha, 2captcha, or anticaptcha when browser-wait fails. Requires an
    API key via the provider's env var (see `_create_captcha_solver`).
 
 The solver is a composable decorator, not a standalone escalation tier.
@@ -28,11 +28,14 @@ import structlog
 
 from job_ftch.application.registry import BypassCapability, register_bypass
 from job_ftch.infrastructure.bypass.captcha_models import (
+    CaptchaChallengeType,
     CaptchaFailureReason,
+    CaptchaResultKind,
     CaptchaSolveResult,
 )
 from job_ftch.infrastructure.bypass.captcha_providers import (
     extract_sitekey,
+    normalize_challenge_type,
     resolve_captcha_provider,
 )
 from job_ftch.infrastructure.sources.source_deadline import (
@@ -41,6 +44,15 @@ from job_ftch.infrastructure.sources.source_deadline import (
 )
 
 logger = structlog.get_logger("job_ftch.bypass.captcha")
+
+CAPTCHA_PROVIDER_ENV_KEYS = {
+    "capsolver": "CAPSOLVER_API_KEY",
+    "capmonster": "CAPMONSTER_API_KEY",
+    "nextcaptcha": "NEXTCAPTCHA_API_KEY",
+    "2captcha": "TWOCAPTCHA_API_KEY",
+    "anticaptcha": "ANTICAPTCHA_API_KEY",
+    "nopecha": "NOPECHA_API_KEY",
+}
 
 _CF_CHALLENGE_SELECTORS = (
     "#challenge-running",
@@ -109,6 +121,7 @@ class CaptchaSolverBypass:
         min_provider_seconds: float = 10.0,
         proxy_url: str = "",
         enabled_providers: frozenset[str] | None = None,
+        provider_routes: dict[str, tuple[str, ...]] | None = None,
     ) -> None:
         self._provider = provider
         self._api_key = api_key
@@ -126,6 +139,7 @@ class CaptchaSolverBypass:
         self._min_provider_seconds = max(0.0, min_provider_seconds)
         self._paid_lock = asyncio.Lock()
         self._proxy_url = proxy_url
+        self._provider_routes = provider_routes or {}
 
     async def apply_http(self, client: Any) -> Any:
         return client
@@ -182,6 +196,8 @@ class CaptchaSolverBypass:
                 method="cache",
                 cookies=cached.cookies,
                 elapsed_seconds=0.0,
+                challenge_type=normalize_challenge_type(challenge_type),
+                result_kind=CaptchaResultKind.SESSION,
             )
 
         if self._attempts >= self._max_attempts:
@@ -190,10 +206,14 @@ class CaptchaSolverBypass:
                 method=self._provider,
                 error="solver attempt budget exhausted",
                 failure_reason=CaptchaFailureReason.BUDGET_EXHAUSTED,
+                challenge_type=normalize_challenge_type(challenge_type),
             )
         self._attempts += 1
 
-        if self._provider == "browser_wait":
+        provider_chain = self._provider_chain_for(challenge_type)
+        if provider_chain:
+            result = await self._solve_provider_chain(page, challenge_type, url, provider_chain)
+        elif self._provider == "browser_wait":
             result = await self._solve_browser_wait(page, challenge_type)
         elif self._enabled_providers is not None and self._provider not in self._enabled_providers:
             result = CaptchaSolveResult(
@@ -201,6 +221,8 @@ class CaptchaSolverBypass:
                 method=self._provider,
                 error=f"provider '{self._provider}' disabled in settings",
                 failure_reason=CaptchaFailureReason.PROVIDER_DISABLED,
+                challenge_type=normalize_challenge_type(challenge_type),
+                result_kind=CaptchaResultKind.UNSUPPORTED,
             )
         else:
             remaining = remaining_source_seconds()
@@ -210,6 +232,7 @@ class CaptchaSolverBypass:
                     method=self._provider,
                     error="source deadline cannot cover provider timeout",
                     failure_reason=CaptchaFailureReason.DEADLINE_INSUFFICIENT,
+                    challenge_type=normalize_challenge_type(challenge_type),
                 )
             elif self._paid_attempts >= self._max_paid_attempts:
                 result = CaptchaSolveResult(
@@ -217,6 +240,7 @@ class CaptchaSolverBypass:
                     method=self._provider,
                     error="paid solver budget exhausted",
                     failure_reason=CaptchaFailureReason.BUDGET_EXHAUSTED,
+                    challenge_type=normalize_challenge_type(challenge_type),
                 )
             else:
                 async with self._paid_lock:
@@ -230,6 +254,10 @@ class CaptchaSolverBypass:
                     method=result.method,
                     error="provider token could not be injected",
                     failure_reason=CaptchaFailureReason.INJECTION_FAILED,
+                    challenge_type=normalize_challenge_type(challenge_type),
+                    result_kind=CaptchaResultKind.TOKEN,
+                    provider_task_id=result.provider_task_id,
+                    raw_provider_status=result.raw_provider_status,
                 )
             elif token and not await self._check_challenge_cleared(page, challenge_type):
                 result = CaptchaSolveResult(
@@ -237,9 +265,15 @@ class CaptchaSolverBypass:
                     method=result.method,
                     error="challenge remained after token injection",
                     failure_reason=CaptchaFailureReason.VERIFICATION_FAILED,
+                    challenge_type=normalize_challenge_type(challenge_type),
+                    result_kind=CaptchaResultKind.TOKEN,
+                    provider_task_id=result.provider_task_id,
+                    raw_provider_status=result.raw_provider_status,
                 )
 
         result.elapsed_seconds = time.monotonic() - start
+        if result.challenge_type == CaptchaChallengeType.UNKNOWN.value:
+            result.challenge_type = normalize_challenge_type(challenge_type)
 
         if result.solved and domain and result.cookies:
             self._cookie_cache[domain] = _CookieCache(
@@ -248,6 +282,98 @@ class CaptchaSolverBypass:
             )
 
         return result
+
+    def _provider_chain_for(self, challenge_type: str) -> tuple[str, ...]:
+        normalized = normalize_challenge_type(challenge_type)
+        providers = self._provider_routes.get(normalized) or self._provider_routes.get("unknown")
+        return tuple(providers or ())
+
+    async def _solve_provider_chain(
+        self,
+        page: Any,
+        challenge_type: str,
+        url: str,
+        provider_chain: tuple[str, ...],
+    ) -> CaptchaSolveResult:
+        failures: list[str] = []
+        for provider_name in provider_chain:
+            if provider_name in {"observe", "manual_required"}:
+                return CaptchaSolveResult(
+                    solved=False,
+                    method=provider_name,
+                    error=f"provider chain stopped at {provider_name}",
+                    failure_reason=CaptchaFailureReason.UNSUPPORTED_CHALLENGE,
+                    challenge_type=normalize_challenge_type(challenge_type),
+                    result_kind=CaptchaResultKind.UNSUPPORTED,
+                    raw_provider_status=";".join(failures),
+                )
+            previous_provider = self._provider
+            previous_api_key = self._api_key
+            self._provider = provider_name
+            self._api_key = os.environ.get(CAPTCHA_PROVIDER_ENV_KEYS.get(provider_name, ""), "")
+            try:
+                if provider_name == "browser_wait":
+                    result = await self._solve_browser_wait(page, challenge_type)
+                elif (
+                    self._enabled_providers is not None
+                    and provider_name not in self._enabled_providers
+                ):
+                    result = CaptchaSolveResult(
+                        solved=False,
+                        method=provider_name,
+                        error=f"provider '{provider_name}' disabled in settings",
+                        failure_reason=CaptchaFailureReason.PROVIDER_DISABLED,
+                        challenge_type=normalize_challenge_type(challenge_type),
+                        result_kind=CaptchaResultKind.UNSUPPORTED,
+                    )
+                else:
+                    remaining = remaining_source_seconds()
+                    if remaining is not None and remaining < self._min_provider_seconds:
+                        result = CaptchaSolveResult(
+                            solved=False,
+                            method=provider_name,
+                            error="source deadline cannot cover provider timeout",
+                            failure_reason=CaptchaFailureReason.DEADLINE_INSUFFICIENT,
+                            challenge_type=normalize_challenge_type(challenge_type),
+                        )
+                    elif self._paid_attempts >= self._max_paid_attempts:
+                        result = CaptchaSolveResult(
+                            solved=False,
+                            method=provider_name,
+                            error="paid solver budget exhausted",
+                            failure_reason=CaptchaFailureReason.BUDGET_EXHAUSTED,
+                            challenge_type=normalize_challenge_type(challenge_type),
+                        )
+                    else:
+                        async with self._paid_lock:
+                            self._paid_attempts += 1
+                            result = await self._solve_external_api(
+                                page,
+                                challenge_type,
+                                url,
+                            )
+            finally:
+                self._provider = previous_provider
+                self._api_key = previous_api_key
+            if result.solved:
+                return result
+            provider_status = result.raw_provider_status or str(
+                result.failure_reason or "failed"
+            )
+            failures.append(f"{provider_name}:{provider_status}")
+            if result.failure_reason in {
+                CaptchaFailureReason.DEADLINE_INSUFFICIENT,
+                CaptchaFailureReason.BUDGET_EXHAUSTED,
+            }:
+                return result
+        return CaptchaSolveResult(
+            solved=False,
+            method="provider_chain",
+            error="all captcha providers failed",
+            failure_reason=CaptchaFailureReason.PROVIDER_REJECTED,
+            challenge_type=normalize_challenge_type(challenge_type),
+            raw_provider_status=";".join(failures),
+        )
 
     async def solve_detected(self, page: Any, *, url: str = "") -> CaptchaSolveResult:
         """Detect and solve on the current page without changing its session."""
@@ -258,6 +384,7 @@ class CaptchaSolverBypass:
                 method="none",
                 error="no supported challenge detected",
                 failure_reason=CaptchaFailureReason.UNSUPPORTED_CHALLENGE,
+                result_kind=CaptchaResultKind.UNSUPPORTED,
             )
         return await self.solve(page, challenge_type=challenge_type, url=url)
 
@@ -273,6 +400,8 @@ class CaptchaSolverBypass:
                 return None
 
             html_lower = html.lower()
+            if "recaptcha/api.js" in html_lower and "render=" in html_lower:
+                return CaptchaChallengeType.RECAPTCHA_V3.value
 
             if any(
                 marker in html_lower
@@ -334,6 +463,8 @@ class CaptchaSolverBypass:
                     solved=True,
                     method=method,
                     cookies=cookies,
+                    challenge_type=normalize_challenge_type(challenge_type),
+                    result_kind=CaptchaResultKind.SESSION,
                 )
 
         extended = await self._try_extended_wait(page, challenge_type)
@@ -343,6 +474,8 @@ class CaptchaSolverBypass:
                 solved=True,
                 method="browser_wait_extended",
                 cookies=cookies,
+                challenge_type=normalize_challenge_type(challenge_type),
+                result_kind=CaptchaResultKind.SESSION,
             )
 
         return CaptchaSolveResult(
@@ -350,6 +483,8 @@ class CaptchaSolverBypass:
             method="browser_wait",
             error=f"challenge not cleared after {self._wait}s",
             failure_reason=CaptchaFailureReason.PROVIDER_TIMEOUT,
+            challenge_type=normalize_challenge_type(challenge_type),
+            result_kind=CaptchaResultKind.SESSION,
         )
 
     async def _detect_turnstile_method(self, page: Any) -> str:
@@ -434,6 +569,31 @@ class CaptchaSolverBypass:
                     )
                     return bool(token)
 
+                elif normalize_challenge_type(challenge_type) == "recaptcha_v3":
+                    token = await page.evaluate(
+                        "(()=>{"
+                        "const el=document.querySelector('[name=\"g-recaptcha-response\"]');"
+                        "return el?el.value:'';})()"
+                    )
+                    if not token:
+                        return False
+                    body_text_full = str(
+                        await page.evaluate(
+                            "document.body ? document.body.innerText.substring(0, 2000) : ''"
+                        )
+                    )
+                    body_lower_full = body_text_full.lower()
+                    blocked_markers = (
+                        "captcha",
+                        "verify you are human",
+                        "checking your browser",
+                        "access denied",
+                        "403",
+                    )
+                    return len(body_text_full.strip()) > 100 and not any(
+                        marker in body_lower_full for marker in blocked_markers
+                    )
+
                 else:
                     return len(body_text) > 100
 
@@ -485,6 +645,7 @@ class CaptchaSolverBypass:
                 method=self._provider,
                 error=f"unknown provider: {self._provider}",
                 failure_reason=CaptchaFailureReason.PROVIDER_UNAVAILABLE,
+                challenge_type=normalize_challenge_type(challenge_type),
             )
         if not self._api_key:
             return CaptchaSolveResult(
@@ -492,6 +653,7 @@ class CaptchaSolverBypass:
                 method=self._provider,
                 error="no api_key configured",
                 failure_reason=CaptchaFailureReason.MISSING_CREDENTIAL,
+                challenge_type=normalize_challenge_type(challenge_type),
             )
 
         try:
@@ -502,6 +664,7 @@ class CaptchaSolverBypass:
                 method=self._provider,
                 error="provider timed out",
                 failure_reason=CaptchaFailureReason.PROVIDER_TIMEOUT,
+                challenge_type=normalize_challenge_type(challenge_type),
             )
         except Exception as exc:
             return CaptchaSolveResult(
@@ -509,6 +672,7 @@ class CaptchaSolverBypass:
                 method=self._provider,
                 error=type(exc).__name__,
                 failure_reason=CaptchaFailureReason.PROVIDER_UNAVAILABLE,
+                challenge_type=normalize_challenge_type(challenge_type),
             )
         if not isinstance(result, CaptchaSolveResult):
             return CaptchaSolveResult(
@@ -516,6 +680,7 @@ class CaptchaSolverBypass:
                 method=self._provider,
                 error="provider returned a malformed result",
                 failure_reason=CaptchaFailureReason.PROVIDER_UNAVAILABLE,
+                challenge_type=normalize_challenge_type(challenge_type),
             )
         return result
 
@@ -531,7 +696,8 @@ class CaptchaSolverBypass:
             return bool(
                 await page.evaluate(
                     """({token, challengeType}) => {
-                      const selectors = challengeType === 'hcaptcha'
+                      const normalized = String(challengeType || '').toLowerCase();
+                      const selectors = normalized === 'hcaptcha'
                         ? ['textarea[name="h-captcha-response"]']
                         : ['textarea[name="g-recaptcha-response"]',
                            'input[name="cf-turnstile-response"]'];
@@ -542,6 +708,50 @@ class CaptchaSolverBypass:
                           el.dispatchEvent(new Event('input', {bubbles: true}));
                           el.dispatchEvent(new Event('change', {bubbles: true}));
                           changed = true;
+                        }
+                      }
+                      if (normalized === 'recaptcha_v3' || normalized === 'recaptcha-v3') {
+                        let textarea = document.querySelector('textarea[name="g-recaptcha-response"]');
+                        if (!textarea) {
+                          textarea = document.createElement('textarea');
+                          textarea.name = 'g-recaptcha-response';
+                          textarea.style.display = 'none';
+                          (document.forms[0] || document.body || document.documentElement).appendChild(textarea);
+                        }
+                        textarea.value = token;
+                        textarea.dispatchEvent(new Event('input', {bubbles: true}));
+                        textarea.dispatchEvent(new Event('change', {bubbles: true}));
+                        changed = true;
+
+                        const invoke = (fn) => {
+                          if (typeof fn !== 'function') return false;
+                          try { fn(token); return true; } catch (_) { return false; }
+                        };
+                        const seen = new Set();
+                        const visit = (value) => {
+                          if (!value || (typeof value !== 'object' && typeof value !== 'function')) return false;
+                          if (seen.has(value)) return false;
+                          seen.add(value);
+                          let called = false;
+                          if (typeof value === 'function') called = invoke(value) || called;
+                          if (typeof value === 'object') {
+                            for (const key of ['callback', 'promise-callback']) {
+                              called = invoke(value[key]) || called;
+                            }
+                            for (const child of Object.values(value)) {
+                              called = visit(child) || called;
+                            }
+                          }
+                          return called;
+                        };
+                        const cfg = window.___grecaptcha_cfg;
+                        if (cfg && cfg.clients) {
+                          changed = visit(cfg.clients) || changed;
+                        }
+                        for (const el of document.querySelectorAll('[data-callback]')) {
+                          const name = el.getAttribute('data-callback');
+                          const fn = name && name.split('.').reduce((obj, part) => obj && obj[part], window);
+                          changed = invoke(fn) || changed;
                         }
                       }
                       return changed;
@@ -575,21 +785,36 @@ def _create_captcha_solver(
     # Per-source bypass_config may override the active provider; otherwise the
     # global setting decides which external provider (if any) backs browser_wait.
     provider = str(config.get("provider", settings.captcha_provider))
-    env_keys = {
-        "capsolver": "CAPSOLVER_API_KEY",
-        "2captcha": "TWOCAPTCHA_API_KEY",
-        "anticaptcha": "ANTICAPTCHA_API_KEY",
-        "nopecha": "NOPECHA_API_KEY",
-    }
+    route_config = config.get("provider_routes", settings.captcha_provider_routes)
+    provider_routes = _normalize_provider_routes(route_config)
     return CaptchaSolverBypass(
         provider=provider,
-        api_key=os.environ.get(env_keys.get(provider, ""), ""),
+        api_key=os.environ.get(CAPTCHA_PROVIDER_ENV_KEYS.get(provider, ""), ""),
         wait_seconds=float(config["wait_seconds"]) if "wait_seconds" in config else None,
         max_attempts=int(config.get("max_attempts", "2")),
         max_paid_attempts=int(config.get("max_paid_attempts", "1")),
         proxy_url=str(config.get("proxy_url", "")),
         enabled_providers=frozenset(settings.captcha_enabled_providers),
+        provider_routes=provider_routes,
     )
+
+
+def _normalize_provider_routes(raw: Any) -> dict[str, tuple[str, ...]]:
+    if not isinstance(raw, dict):
+        return {}
+    routes: dict[str, tuple[str, ...]] = {}
+    for challenge_type, providers in raw.items():
+        normalized_type = normalize_challenge_type(str(challenge_type))
+        if isinstance(providers, str):
+            provider_list = tuple(item.strip() for item in providers.split(",") if item.strip())
+        else:
+            try:
+                provider_list = tuple(str(item).strip() for item in providers if str(item).strip())
+            except TypeError:
+                provider_list = ()
+        if provider_list:
+            routes[normalized_type] = provider_list
+    return routes
 
 
 register_bypass(

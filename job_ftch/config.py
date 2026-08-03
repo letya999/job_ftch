@@ -235,6 +235,7 @@ class Settings(BaseSettings):
     fingerprint_body_scan_max_chars: int = Field(default=100_000, gt=0)
     bypass_timeout_escalate_threshold: int = Field(default=2, ge=1, le=10)
     bypass_max_route_attempts_per_operation: int = Field(default=6, ge=1, le=20)
+    bypass_max_same_route_retries_per_operation: int = Field(default=8, ge=0, le=100)
     bypass_max_listing_browser_launches: int = Field(default=3, ge=0, le=10)
     bypass_max_detail_browser_launches: int = Field(default=1, ge=0, le=5)
     bypass_max_source_browser_launches: int = Field(default=16, ge=0, le=100)
@@ -245,12 +246,14 @@ class Settings(BaseSettings):
     # CAPTCHA solving. `captcha_provider` is the external provider used when the
     # free browser-wait tier cannot clear a challenge. It only actually fires if
     # it is also listed in `captcha_enabled_providers`; paid providers
-    # (capsolver, 2captcha, anticaptcha) remain wired in code but are omitted
-    # from the default allowlist, so they stay disabled until explicitly enabled.
+    # (capsolver, capmonster, nextcaptcha, 2captcha, anticaptcha) remain wired
+    # in code but are omitted from the default allowlist, so they stay disabled
+    # until explicitly enabled.
     captcha_provider: str = Field(default="nopecha")
     captcha_enabled_providers: list[str] = Field(
         default_factory=lambda: ["browser_wait", "nopecha"]
     )
+    captcha_provider_routes: dict[str, list[str]] = Field(default_factory=dict)
     proxy_provider: str = Field(default="raw")
     proxy_gateway: str = ""
     proxy_user: str = ""

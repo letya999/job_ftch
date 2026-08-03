@@ -852,8 +852,42 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
                 page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
             )
 
+    if resp is not None and resp.status not in blocked and await _page_has_captcha_marker(page):
+        controller = config.get("_bypass_strategy")
+        solve = getattr(controller, "solve_page_challenge", None)
+        if callable(solve) and await solve(page, url=url):
+            resp = await await_with_source_deadline(
+                page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
+            )
+
     if resp is not None and resp.status in blocked:
         raise RuntimeError(f"Browser navigation blocked with status {resp.status}")
+
+
+async def _page_has_captcha_marker(page: Page) -> bool:
+    try:
+        return bool(
+            await page.evaluate(
+                """
+                () => {
+                  const selectors = [
+                    '.g-recaptcha',
+                    '#g-recaptcha',
+                    '[data-sitekey]',
+                    'iframe[src*="recaptcha"]',
+                    'iframe[src*="hcaptcha"]',
+                    'iframe[src*="turnstile"]',
+                    'script[src*="recaptcha"]',
+                    'script[src*="hcaptcha"]',
+                    'script[src*="turnstile"]'
+                  ];
+                  return selectors.some((selector) => document.querySelector(selector));
+                }
+                """
+            )
+        )
+    except Exception:
+        return False
 
 
 async def dismiss_overlays(page: Page) -> None:

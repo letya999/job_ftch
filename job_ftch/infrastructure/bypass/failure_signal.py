@@ -137,6 +137,7 @@ class FetchOutcome:
     challenge: bool = False
     empty: bool = False
     retry_after_seconds: float | None = None
+    captcha_type: str | None = None
 
     @property
     def retryable(self) -> bool:
@@ -172,6 +173,50 @@ def is_challenge_body(text: str) -> bool:
     """Check if HTML body contains anti-bot challenge markers."""
     lowered = text.lower()
     return any(marker in lowered for marker in _CHALLENGE_MARKERS)
+
+
+def _detect_captcha_type(text: str, headers: Mapping[str, str] | None = None) -> str | None:
+    """Return a conservative label for observed challenge evidence."""
+    lowered = text.lower()
+    lowered_headers = {
+        str(key).lower(): str(value).lower() for key, value in (headers or {}).items()
+    }
+    if "captcha" in lowered_headers.get("x-datadome", "") or "datadome" in lowered:
+        return "datadome"
+    if "px-captcha" in lowered or "perimeterx" in lowered:
+        return "perimeterx"
+    if "kasada" in lowered:
+        return "kasada"
+    if "incapsula" in lowered or "imperva" in lowered:
+        return "incapsula"
+    if "ddos-guard" in lowered:
+        return "ddos_guard"
+    if "smartcaptcha" in lowered or "showcaptcha" in lowered:
+        return "smartcaptcha"
+    if "hcaptcha" in lowered:
+        return "hcaptcha"
+    if "recaptcha/api.js" in lowered and "render=" in lowered:
+        return "recaptcha_v3"
+    if "recaptcha" in lowered or "g-recaptcha" in lowered:
+        return "recaptcha"
+    if "turnstile" in lowered or "cf-turnstile" in lowered:
+        return "cloudflare_turnstile"
+    if (
+        lowered_headers.get("cf-mitigated") == "challenge"
+        or "challenge-platform" in lowered
+        or "cf-chl" in lowered
+        or "cloudflare" in lowered
+    ):
+        return "cloudflare_challenge"
+    if "geetest" in lowered:
+        return "geetest"
+    if "funcaptcha" in lowered or "arkose" in lowered:
+        return "arkose_funcaptcha"
+    if "aws waf" in lowered or "amazon captcha" in lowered:
+        return "aws_waf"
+    if "captcha" in lowered or "не робот" in lowered or "не являетесь роботом" in lowered:
+        return "generic_captcha"
+    return None
 
 
 def _has_substantial_visible_content(text: str) -> bool:
@@ -297,9 +342,13 @@ class HeuristicFailureSignal:
             str(key).lower(): str(value).lower() for key, value in (headers or {}).items()
         }
         if lowered_headers.get("cf-mitigated") == "challenge":
-            return FetchOutcome(kind=FailureKind.CHALLENGE, challenge=True)
+            return FetchOutcome(
+                kind=FailureKind.CHALLENGE,
+                challenge=True,
+                captcha_type="cloudflare_challenge",
+            )
         if "captcha" in lowered_headers.get("x-datadome", ""):
-            return FetchOutcome(kind=FailureKind.CAPTCHA, challenge=True)
+            return FetchOutcome(kind=FailureKind.CAPTCHA, challenge=True, captcha_type="datadome")
 
         # Challenge evidence is stronger than a status-only classification. A
         # large real page may legitimately embed a CAPTCHA vendor script, so
@@ -313,16 +362,32 @@ class HeuristicFailureSignal:
                 return FetchOutcome(kind=FailureKind.BLOCKED_FINGERPRINT)
             for pattern in _CAPTCHA_PATTERNS:
                 if pattern.search(text) and not substantial_content:
-                    return FetchOutcome(kind=FailureKind.CAPTCHA, challenge=True)
+                    return FetchOutcome(
+                        kind=FailureKind.CAPTCHA,
+                        challenge=True,
+                        captcha_type=_detect_captcha_type(text, lowered_headers),
+                    )
             for pattern in _PASSIVE_CHALLENGE_PATTERNS:
                 if pattern.search(text) and not substantial_content:
-                    return FetchOutcome(kind=FailureKind.CHALLENGE, challenge=True)
+                    return FetchOutcome(
+                        kind=FailureKind.CHALLENGE,
+                        challenge=True,
+                        captcha_type=_detect_captcha_type(text, lowered_headers),
+                    )
             if not substantial_content and any(
                 pattern.search(text) for pattern in _EMBEDDABLE_CAPTCHA_PATTERNS
             ):
-                return FetchOutcome(kind=FailureKind.CHALLENGE, challenge=True)
+                return FetchOutcome(
+                    kind=FailureKind.CHALLENGE,
+                    challenge=True,
+                    captcha_type=_detect_captcha_type(text, lowered_headers),
+                )
             if is_challenge_body(text) and not substantial_content:
-                return FetchOutcome(kind=FailureKind.CHALLENGE, challenge=True)
+                return FetchOutcome(
+                    kind=FailureKind.CHALLENGE,
+                    challenge=True,
+                    captcha_type=_detect_captcha_type(text, lowered_headers),
+                )
 
         if status_code == 402:
             return FetchOutcome(kind=FailureKind.PAYMENT_REQUIRED)
@@ -396,4 +461,5 @@ def classify_silent_block(
         kind=FailureKind.SILENT_BLOCK,
         empty=True,
         retry_after_seconds=outcome.retry_after_seconds,
+        captcha_type=outcome.captcha_type,
     )

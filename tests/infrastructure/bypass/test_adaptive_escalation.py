@@ -11,6 +11,7 @@ import pytest
 from job_ftch.application.registry import BypassCapability
 from job_ftch.infrastructure.bypass import adaptive
 from job_ftch.infrastructure.bypass.adaptive import AdaptiveBypassManager
+from job_ftch.infrastructure.bypass.captcha_models import CaptchaSolveResult
 from job_ftch.infrastructure.bypass.failure_signal import FailureKind
 from job_ftch.infrastructure.sources.source_deadline import source_deadline_scope
 
@@ -28,6 +29,7 @@ class _Strategy:
 
 class _ProxyContext:
     proxy_available = True
+    residential_proxy_available = True
     current_proxy_url = "http://proxy.example:8080"
 
     def __init__(self) -> None:
@@ -112,6 +114,33 @@ async def test_captcha_failure_escalates() -> None:
     )
     assert kind is FailureKind.CHALLENGE
     assert manager.current_name != initial or manager.escalations_total > 0
+
+
+@pytest.mark.asyncio
+async def test_solve_page_challenge_uses_monitor_observed_challenge_type() -> None:
+    manager = AdaptiveBypassManager()
+    solver = type(
+        "Solver",
+        (),
+        {
+            "solve": AsyncMock(return_value=CaptchaSolveResult(solved=False, method="provider")),
+            "solve_detected": AsyncMock(
+                return_value=CaptchaSolveResult(solved=False, method="autodetect")
+            ),
+        },
+    )()
+    manager._captcha_solver = solver  # type: ignore[attr-defined]
+    manager.set_observed_challenge_type("recaptcha")
+    page = object()
+
+    await manager.solve_page_challenge(page, url="https://example.test/jobs")
+
+    solver.solve.assert_awaited_once_with(
+        page,
+        challenge_type="recaptcha",
+        url="https://example.test/jobs",
+    )
+    solver.solve_detected.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -249,3 +278,20 @@ async def test_apply_page_calls_strategy_and_behavior_simulator() -> None:
     manager._current_strategy.apply_page.assert_called_once()
     manager._behavior_sim.apply_page.assert_called_once()
     assert "behavior_sim" not in manager.available_tiers
+
+
+@pytest.mark.asyncio
+async def test_apply_page_installs_recaptcha_action_probe() -> None:
+    manager = AdaptiveBypassManager()
+    page = type(
+        "Page",
+        (),
+        {
+            "add_init_script": AsyncMock(),
+        },
+    )()
+
+    await manager.apply_page(page)
+
+    scripts = [call.args[0] for call in page.add_init_script.await_args_list]
+    assert any("__job_ftch_recaptcha_executes" in script for script in scripts)

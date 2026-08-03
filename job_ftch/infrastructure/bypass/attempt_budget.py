@@ -39,12 +39,14 @@ class AttemptBudget:
         max_source_proxy_rotations: int,
         max_weighted_work: int,
         max_proxy_rotations_per_operation: int,
+        max_same_route_retries_per_operation: int = 8,
     ) -> None:
         self.max_route_attempts = max_route_attempts
         self.max_source_browser_launches = max_source_browser_launches
         self.max_source_proxy_rotations = max_source_proxy_rotations
         self.max_weighted_work = max_weighted_work
         self.max_proxy_rotations_per_operation = max_proxy_rotations_per_operation
+        self.max_same_route_retries_per_operation = max(0, max_same_route_retries_per_operation)
         self.source_browser_launches = 0
         self.source_proxy_rotations = 0
         self.weighted_work = 0
@@ -117,6 +119,12 @@ class AttemptBudget:
             operation.proxy_rotations += 1
         self.source_proxy_rotations += 1
         self.weighted_work += 2
+
+    def same_route_retry_exhausted(self) -> bool:
+        operation = self._operation.get()
+        if operation is None:
+            return False
+        return operation.same_route_retry_count >= self.max_same_route_retries_per_operation
 
     def log_attempt(
         self,

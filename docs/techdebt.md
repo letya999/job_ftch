@@ -1,6 +1,6 @@
 ---
 title: "Технический долг"
-description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-044."
+description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-046."
 updated: 2026-08-02
 ---
 # Технический долг
@@ -984,3 +984,55 @@ Exit criterion:
 - `Pipeline` остаётся deprecated-фасадом с объявленной датой удаления;
 - `graph_hash` production-рецепта не меняется при миграции, либо изменение
   зафиксировано в `config/recipes/*` вместе с прогоном eval.
+
+## 46. TD-045: Перевести LLM-промпты на DSPy
+
+Status: open. Priority: medium. Делать после фиксации текущих prompt/eval
+артефактов и без изменения terminal decision contract.
+
+Сейчас промпты для extraction, relevance, ontology и связанных LLM-операций
+собираются как строки и YAML/TXT-артефакты. Это затрудняет версионирование
+инструкций и few-shot примеров, повторное использование сигнатур и безопасную
+оптимизацию промптов на размеченных shots. Нужно перевести промптные
+компоненты на DSPy signatures/modules, сохранив существующие `LLMProvider`,
+Pydantic-схемы ответа, provenance и возможность воспроизводимого offline
+прогона.
+
+Exit criterion:
+
+- для каждого переведённого сценария есть DSPy signature/module и явная версия;
+- legacy prompt path остаётся совместимым fallback до завершения миграции;
+- golden shots и regression gates сравнивают старый и DSPy-вариант по schema
+  validity, extraction/relevance quality, latency и token usage;
+- prompt/compile artifacts воспроизводимы, не содержат credentials и привязаны
+  к `config/recipes/*` или эквивалентному manifest;
+- новая зависимость и её runtime/cost-профиль сначала зафиксированы в
+  `docs/tech_stack.md`, а архитектурная граница описана ADR при необходимости.
+
+## 47. TD-046: Сравнить LLM-модели и выбрать более дешёвую подходящую модель в OpenRouter
+
+Status: open. Priority: medium. Отдельный этап после появления стабильного
+DSPy/legacy baseline; не смешивать с миграцией промптов.
+
+Нужно провести воспроизводимый bake-off нескольких моделей, доступных через
+OpenRouter, на тех же production-shaped shots и сценариях, которые влияют на
+extraction, relevance и ontology. Цель — выбрать самую дешёвую модель,
+проходящую quality, schema, latency и reliability gates, а не модель с
+минимальной ценой запроса без проверки качества. Цены, availability и
+capabilities OpenRouter считать внешними входными данными прогона и сохранять
+в его manifest с датой и идентификаторами моделей.
+
+Exit criterion:
+
+- список кандидатов, их OpenRouter model IDs, параметры и snapshot цен
+  зафиксированы в eval manifest;
+- каждая модель прогнана на одном и том же frozen dataset с повторяемым
+  seed/настройками, а результаты включают quality по полям, schema validity,
+  acceptance/review/reject drift, latency, retries и token/cost per item;
+- есть baseline-сравнение с текущими `openai_model` и
+  `relevance_llm_model`, включая отдельные критерии для extraction и relevance;
+- выбранная модель дешевле baseline и не нарушает production quality/reliability
+  gates; при равенстве качества выбирается более дешёвая, затем более быстрая;
+- выбранные model IDs, routing/fallback policy и дату проверки перенести в
+  recipe/runtime config, а полный отчёт и причину выбора сохранить как
+  regression evidence.

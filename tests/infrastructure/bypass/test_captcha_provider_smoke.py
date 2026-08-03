@@ -28,8 +28,11 @@ async def test_configured_paid_provider_can_return_a_token() -> None:
     provider_name = os.environ.get("CAPTCHA_SMOKE_PROVIDER", "capsolver")
     key_env = {
         "capsolver": "CAPSOLVER_API_KEY",
+        "capmonster": "CAPMONSTER_API_KEY",
+        "nextcaptcha": "NEXTCAPTCHA_API_KEY",
         "2captcha": "TWOCAPTCHA_API_KEY",
         "anticaptcha": "ANTICAPTCHA_API_KEY",
+        "nopecha": "NOPECHA_API_KEY",
     }[provider_name]
     api_key = os.environ.get(key_env, "")
     url = os.environ.get("CAPTCHA_SMOKE_URL", "")

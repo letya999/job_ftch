@@ -176,21 +176,20 @@ async def fingerprint(url: str, client: httpx.AsyncClient | None = None) -> Site
 
     from job_ftch.infrastructure.bypass.failure_signal import HeuristicFailureSignal
 
-    challenge = (
-        HeuristicFailureSignal()
-        .classify_detailed(
-            status_code=response.status_code,
-            body=body.encode("utf-8", errors="ignore"),
-            error=None,
-        )
-        .challenge
+    challenge_outcome = HeuristicFailureSignal().classify_detailed(
+        status_code=response.status_code,
+        body=body.encode("utf-8", errors="ignore"),
+        error=None,
     )
-    if challenge:
+    if challenge_outcome.challenge:
         log.info("site_challenge_detected", status=response.status_code)
+        detected_config: dict[str, Any] = {"render": True, "challenge": True}
+        if challenge_outcome.captcha_type:
+            detected_config["captcha_type"] = challenge_outcome.captcha_type
         return SiteProfile(
             SiteClass.BLOCKED,
             ["dom", "api_sniffer"],
-            {"render": True, "challenge": True},
+            detected_config,
             canonical_url=_canonical,
         )
 

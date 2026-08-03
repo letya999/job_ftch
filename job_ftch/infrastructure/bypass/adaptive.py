@@ -150,6 +150,12 @@ class AdaptiveBypassManager:
                     settings.bypass_max_proxy_rotations_per_operation,
                 )
             ),
+            max_same_route_retries_per_operation=int(
+                self.config.get(
+                    "max_same_route_retries_per_operation",
+                    settings.bypass_max_same_route_retries_per_operation,
+                )
+            ),
         )
         # BehaviorSim is a composable decorator, not a standalone tier:
         # it adds human-like mouse/scroll behavior ON TOP of whatever
@@ -224,6 +230,7 @@ class AdaptiveBypassManager:
         self._failure_window: dict[str, deque[tuple[float, str]]] = {}
         self._session_cookies: list[dict[str, Any]] = []
         self._profile_dir: str | None = None
+        self._observed_challenge_type: str | None = None
         import asyncio
 
         self._profile_lock = asyncio.Lock()
@@ -707,6 +714,18 @@ class AdaptiveBypassManager:
         )
         return changed
 
+    def set_observed_challenge_type(self, challenge_type: str | None) -> None:
+        """Remember monitor-detected challenge type for the next browser solve.
+
+        Some WAF pages return HTTP 200 and expose CAPTCHA evidence in a
+        preflight/monitor detector, but the live browser page later no longer
+        contains an easy-to-detect site marker. Keeping the detector's typed
+        observation lets the solver route to the intended provider instead of
+        falling back to an ``unknown`` DOM guess.
+        """
+        if isinstance(challenge_type, str) and challenge_type.strip():
+            self._observed_challenge_type = challenge_type.strip()
+
     @staticmethod
     def _captcha_actions(
         body: bytes | None,
@@ -759,6 +778,14 @@ class AdaptiveBypassManager:
             challenge_action=self._route_state.challenge.value,
         )
         if kind == FailureKind.OK or kind == FailureKind.UNKNOWN:
+            return kind
+        if self._budget.same_route_retry_exhausted():
+            logger.info(
+                "bypass_same_route_retry_exhausted",
+                tier=self.current_name,
+                failure_kind=kind,
+                status_code=status_code,
+            )
             return kind
         if decision.action is TransitionAction.SOLVE_CURRENT_SESSION and self.adaptive_enabled:
             self._route_state = self._route_state.transition(
@@ -900,6 +927,7 @@ class AdaptiveBypassManager:
         if self._context is not None:
             await self._context.apply_page(page)
         await self._current_strategy.apply_page(page)
+        await self._install_recaptcha_action_probe(page)
         await self._behavior_sim.apply_page(page)
         await self._apply_per_request_hardening(page)
 
@@ -916,6 +944,61 @@ class AdaptiveBypassManager:
         await self._obfuscation_orchestrator.apply_all(ctx)
         self._obfuscation_metadata = ctx.metadata
         self._behavior_sim.update_noise_params(ctx.metadata)
+
+    async def _install_recaptcha_action_probe(self, page: Any) -> None:
+        """Capture dynamic grecaptcha.execute actions before page scripts run.
+
+        reCAPTCHA v3 provider payloads need the page action. Many SPAs do not
+        expose it in the initial HTML; they call grecaptcha.execute from a
+        bundled module after navigation. This hook records those calls without
+        logging tokens, credentials, or page content.
+        """
+        add_init_script = getattr(page, "add_init_script", None)
+        if not callable(add_init_script):
+            return
+        script = r"""
+        (() => {
+          if (window.__job_ftch_recaptcha_probe_installed) return;
+          window.__job_ftch_recaptcha_probe_installed = true;
+          window.__job_ftch_recaptcha_executes = window.__job_ftch_recaptcha_executes || [];
+          const remember = (sitekey, options) => {
+            try {
+              const action = options && typeof options === 'object' ? String(options.action || '') : '';
+              window.__job_ftch_recaptcha_executes.push({
+                sitekey: sitekey ? String(sitekey) : '',
+                action,
+                ts: Date.now()
+              });
+              if (window.__job_ftch_recaptcha_executes.length > 20) {
+                window.__job_ftch_recaptcha_executes.shift();
+              }
+            } catch (_) {}
+          };
+          const wrap = (grecaptcha) => {
+            if (!grecaptcha || grecaptcha.__job_ftch_wrapped) return grecaptcha;
+            const original = grecaptcha.execute;
+            if (typeof original === 'function') {
+              grecaptcha.execute = function(sitekey, options) {
+                remember(sitekey, options);
+                return original.apply(this, arguments);
+              };
+            }
+            try { Object.defineProperty(grecaptcha, '__job_ftch_wrapped', {value: true}); } catch (_) {}
+            return grecaptcha;
+          };
+          let current = window.grecaptcha;
+          Object.defineProperty(window, 'grecaptcha', {
+            configurable: true,
+            get() { return current; },
+            set(value) { current = wrap(value); }
+          });
+          if (current) current = wrap(current);
+        })();
+        """
+        try:
+            await add_init_script(script)
+        except Exception:
+            return
 
     async def _apply_per_request_hardening(self, page: Any) -> None:
         """Apply per-request stealth hardening with rotated seeds.
@@ -969,10 +1052,32 @@ class AdaptiveBypassManager:
             session=SessionMode.STICKY,
         )
         self._sync_context_route()
-        result = await solve_detected(page, url=url)
+        solve = getattr(self._captcha_solver, "solve", None)
+        observed_type = self._observed_challenge_type
+        if observed_type and callable(solve):
+            result = await solve(page, challenge_type=observed_type, url=url)
+        else:
+            result = await solve_detected(page, url=url)
         solved = bool(getattr(result, "solved", False))
+        logger.info(
+            "bypass_captcha_solver_result",
+            solved=solved,
+            challenge_type=getattr(result, "challenge_type", None),
+            result_kind=(
+                getattr(getattr(result, "result_kind", None), "value", None)
+                or getattr(result, "result_kind", None)
+            ),
+            failure_reason=(
+                getattr(getattr(result, "failure_reason", None), "value", None)
+                or getattr(result, "failure_reason", None)
+            ),
+            provider_task_id_present=bool(getattr(result, "provider_task_id", None)),
+            raw_provider_status=getattr(result, "raw_provider_status", None),
+            error=getattr(result, "error", None),
+        )
         if solved:
             self._route_state = self._route_state.transition(challenge=ChallengeState.NONE)
+            self._observed_challenge_type = None
             self._sync_context_route()
         return solved
 

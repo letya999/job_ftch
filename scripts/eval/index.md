@@ -32,6 +32,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [merge_pool.py](merge_pool.py)
 - [promote_champion_recipe.py](promote_champion_recipe.py)
 - [refreeze_production_recipe.py](refreeze_production_recipe.py)
+- [run_captcha_provider_eval.py](run_captcha_provider_eval.py)
 - [run_eval.py](run_eval.py)
 - [run_graph_sweep.py](run_graph_sweep.py)
 - [run_h22_h26_n140.ps1](run_h22_h26_n140.ps1)

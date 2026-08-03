@@ -120,6 +120,7 @@ class FetchStats:
     final_monitor: str | None = None
     successful_scraper: str | None = None
     detected_monitor_config: dict[str, Any] = field(default_factory=dict)
+    detected_captcha_types: list[str] = field(default_factory=list)
     zero_reason: ZeroYieldReason | None = None
 
     def to_log_dict(self) -> dict[str, Any]:
@@ -142,6 +143,7 @@ class FetchStats:
             "final_monitor": self.final_monitor,
             "successful_scraper": self.successful_scraper,
             "detected_monitor_config": self.detected_monitor_config,
+            "detected_captcha_types": self.detected_captcha_types,
         }
         if self.zero_reason is not None:
             d["zero_reason"] = self.zero_reason.value
@@ -203,13 +205,26 @@ def _classified_zero_reason(
     status_code: int | None = None,
     response_body: bytes | None = None,
 ) -> ZeroYieldReason:
+    return _classified_protection(
+        exc,
+        status_code=status_code,
+        response_body=response_body,
+    )[0]
+
+
+def _classified_protection(
+    exc: BaseException | None,
+    *,
+    status_code: int | None = None,
+    response_body: bytes | None = None,
+) -> tuple[ZeroYieldReason, str | None]:
     error_text = str(exc or "").casefold()
     if "err_tunnel_connection_failed" in error_text or "tunnel connection failed" in error_text:
-        return ZeroYieldReason.PROVIDER_TUNNEL_DENIED
+        return ZeroYieldReason.PROVIDER_TUNNEL_DENIED, None
     if status_code in {403, 498, 499} and _has_substantial_html_content(response_body):
-        return ZeroYieldReason.SOFT_403_WITH_CONTENT
+        return ZeroYieldReason.SOFT_403_WITH_CONTENT, None
     if status_code in {404, 410}:
-        return ZeroYieldReason.STALE_URL
+        return ZeroYieldReason.STALE_URL, None
     if response_body:
         from job_ftch.infrastructure.bypass.failure_signal import (
             FailureKind,
@@ -222,10 +237,10 @@ def _classified_zero_reason(
             error=exc,
         )
         if outcome.kind in {FailureKind.CAPTCHA, FailureKind.CHALLENGE}:
-            return ZeroYieldReason.WAF_CHALLENGE
+            return ZeroYieldReason.WAF_CHALLENGE, outcome.captcha_type
     if status_code in {401, 403, 429, 498, 499}:
-        return ZeroYieldReason.WAF_CHALLENGE
-    return ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+        return ZeroYieldReason.WAF_CHALLENGE, None
+    return ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT, None
 
 
 def _looks_like_spa_shell(html: str | None) -> bool:
@@ -599,11 +614,13 @@ class CareerSiteSource(Source["RawItem"]):
                 failure_kind=failure_kind,
             )
             if status_code in {401, 403, 429, 498, 499} or _is_protected_source_error(exc):
-                self.stats.zero_reason = _classified_zero_reason(
+                self.stats.zero_reason, captcha_type = _classified_protection(
                     exc,
                     status_code=status_code,
                     response_body=response_body,
                 )
+                if captcha_type and captcha_type not in self.stats.detected_captcha_types:
+                    self.stats.detected_captcha_types.append(captcha_type)
             return False
 
         from job_ftch.infrastructure.bypass.failure_signal import (
@@ -646,11 +663,13 @@ class CareerSiteSource(Source["RawItem"]):
         if escalatable:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             body = getattr(getattr(exc, "response", None), "content", None)
-            self.stats.zero_reason = _classified_zero_reason(
+            self.stats.zero_reason, captcha_type = _classified_protection(
                 exc,
                 status_code=status,
                 response_body=body,
             )
+            if captcha_type and captcha_type not in self.stats.detected_captcha_types:
+                self.stats.detected_captcha_types.append(captcha_type)
         return False
 
     async def _init_strategy(self) -> tuple[str, dict[str, Any] | None, Any, str]:
@@ -922,6 +941,22 @@ class CareerSiteSource(Source["RawItem"]):
                             )
                     self.stats.recommended_monitors = list(monitors_to_try)
                     self.stats.detected_monitor_config = dict(detected_monitor_config)
+                    captcha_type = detected_monitor_config.get("captcha_type")
+                    if (
+                        isinstance(captcha_type, str)
+                        and captcha_type
+                        and captcha_type not in self.stats.detected_captcha_types
+                    ):
+                        self.stats.detected_captcha_types.append(captcha_type)
+                    if isinstance(captcha_type, str) and captcha_type:
+                        set_challenge_type = getattr(
+                            self.bypass_strategy,
+                            "set_observed_challenge_type",
+                            None,
+                        )
+                        if callable(set_challenge_type):
+                            with contextlib.suppress(Exception):
+                                set_challenge_type(captcha_type)
                 except Exception:
                     monitors_to_try = ["dom", "api_sniffer"]
                     self.stats.recommended_monitors = list(monitors_to_try)

@@ -205,6 +205,7 @@ def _probe_result(
                 "scrape_fallback_used",
                 "zero_reason",
                 "detected_monitor_config",
+                "detected_captcha_types",
             )
         },
         "selection": {"site_class": "not_probed", "recommended_monitors": []},
