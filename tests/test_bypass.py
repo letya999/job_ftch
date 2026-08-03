@@ -115,7 +115,7 @@ async def test_curl_bypass_preserves_timeout_from_source_client(
         curl_bypass_module._CurlSession = original_session_cls
         curl_bypass_module._IMPORT_ERROR = original_import_error
 
-    assert captured["impersonate"] in ("chrome", "chrome131", "chrome124")
+    assert captured["impersonate"] in ("chrome", "chrome146", "chrome145")
     assert captured["url"] == "https://example.com/jobs"
     assert captured["allow_redirects"] is True
     assert captured["kwargs"] == {"timeout": 12.5}

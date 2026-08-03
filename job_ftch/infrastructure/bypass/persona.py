@@ -131,21 +131,25 @@ _LOCALES: list[tuple[str, str]] = [
     ("ru-RU", "Europe/Moscow"),
 ]
 
+# Kept current with the shipping browser majors and with curl_cffi's newest
+# impersonate targets (chrome146, firefox147, safari18_4). test_persona_pool_
+# is_not_stale fails if this drifts too far behind, so the pool cannot silently
+# rot the way it did at Chrome 131 for ~20 months.
 _BROWSERS: list[dict[str, Any]] = [
     {
         "family": "chromium",
-        "version": "131",
-        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "ch_ua": '"Chromium";v="131", "Not?A_Brand";v="24", "Google Chrome";v="131"',
+        "version": "146",
+        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "ch_ua": '"Chromium";v="146", "Not?A_Brand";v="24", "Google Chrome";v="146"',
         "nav_win": "Win32",
         "nav_mac": "MacIntel",
         "nav_linux": "Linux x86_64",
     },
     {
         "family": "chromium",
-        "version": "124",
-        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "ch_ua": '"Chromium";v="124", "Not_A Brand";v="8", "Google Chrome";v="124"',
+        "version": "145",
+        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+        "ch_ua": '"Chromium";v="145", "Not_A Brand";v="8", "Google Chrome";v="145"',
         "nav_win": "Win32",
         "nav_mac": "MacIntel",
         "nav_linux": "Linux x86_64",
@@ -153,8 +157,8 @@ _BROWSERS: list[dict[str, Any]] = [
     {
         "family": "safari",
         "supported_os": ("macos",),
-        "version": "safari17",
-        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+        "version": "safari18",
+        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15",
         "ch_ua": "",
         "nav_win": "MacIntel",
         "nav_mac": "MacIntel",
@@ -162,8 +166,8 @@ _BROWSERS: list[dict[str, Any]] = [
     },
     {
         "family": "firefox",
-        "version": "ff125",
-        "ua_tpl": "Mozilla/5.0 ({platform}; rv:125.0) Gecko/20100101 Firefox/125.0",
+        "version": "ff147",
+        "ua_tpl": "Mozilla/5.0 ({platform}; rv:147.0) Gecko/20100101 Firefox/147.0",
         "ch_ua": "",
         "nav_win": "Win32",
         "nav_mac": "MacIntel",
