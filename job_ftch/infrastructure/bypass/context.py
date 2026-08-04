@@ -207,6 +207,31 @@ class BypassContext:
         Must be called BEFORE first navigation (page.goto).
         """
         await apply_persona_hardening(page, self.persona)
+        self._debug_selfcheck()
+
+    def _debug_selfcheck(self) -> None:
+        """Log any declared-identity incoherence when the debug flag is on.
+
+        Opt-in via ``JOB_FTCH_BYPASS_IDENTITY_SELFCHECK``. Never raises in
+        production - a leak here is a code defect to surface, not a reason to
+        abort a crawl.
+        """
+        try:
+            from job_ftch.config import get_settings
+
+            if not getattr(get_settings(), "bypass_identity_selfcheck", False):
+                return
+            from job_ftch.infrastructure.bypass.identity.coherence import check_identity
+
+            report = check_identity(self.persona)
+            if not report.ok:
+                logger.warning(
+                    "bypass_identity_incoherent",
+                    persona=getattr(self.persona, "name", "?"),
+                    issues=[f"{i.code}:{i.axis}" for i in report.issues],
+                )
+        except Exception:  # never let a debug check affect a crawl
+            logger.debug("bypass_identity_selfcheck_failed")
 
     def record_success(self, url: str) -> None:
         domain = urlparse(url).netloc.lower()

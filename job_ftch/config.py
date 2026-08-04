@@ -261,6 +261,9 @@ class Settings(BaseSettings):
     bypass_priming_settle_seconds: float = Field(default=6.0, ge=0.0, le=120.0)
     bypass_priming_min_interval_seconds: int = Field(default=1800, ge=0, le=604_800)
     bypass_priming_prefetch_listings: bool = False
+    # Debug-only: on each page, log any identity-coherence issue (never raises in
+    # prod). Off by default => zero behavior change; used with the self-check.
+    bypass_identity_selfcheck: bool = False
     # CAPTCHA solving. `captcha_provider` is the external provider used when the
     # free browser-wait tier cannot clear a challenge. It only actually fires if
     # it is also listed in `captcha_enabled_providers`; paid providers
