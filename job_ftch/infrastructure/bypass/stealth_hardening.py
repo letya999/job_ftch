@@ -572,25 +572,10 @@ _NAVIGATOR_OSCPU_JS = """
 })();
 """
 
-_HARDWARE_CONCURRENCY_JS = """
-(() => {
-    const cores = %d;
-    Object.defineProperty(navigator, 'hardwareConcurrency', {
-        get: () => cores,
-        configurable: false,
-    });
-})();
-"""
-
-_DEVICE_MEMORY_JS = """
-(() => {
-    const memory = %d;
-    Object.defineProperty(navigator, 'deviceMemory', {
-        get: () => memory,
-        configurable: false,
-    });
-})();
-"""
+# navigator.hardwareConcurrency / deviceMemory are intentionally NOT spoofed:
+# an init-script override does not reach dedicated Workers, so faking them in the
+# window realm only creates a window-vs-worker divergence (defect A5). See the
+# note at the injection site in ``apply_stealth_hardening``.
 
 _FONT_SPACING_JS = """
 (() => {
@@ -1064,8 +1049,14 @@ async def apply_stealth_hardening(
             _WEBDRIVER_HIDE_JS % locale,
             _FONT_SPACING_JS % font_spacing_seed,
             _WEB_API_SHAPE_JS,
-            _HARDWARE_CONCURRENCY_JS % hardware_concurrency,
-            _DEVICE_MEMORY_JS % device_memory,
+            # navigator.hardwareConcurrency / deviceMemory are deliberately NOT
+            # patched in JS (defect A5, same class as the A3 timezone fix). An
+            # ``add_init_script`` override runs in the window and child frames but
+            # NOT in dedicated Workers, so a Worker reading navigator.* would
+            # report the real value while the window reports the spoofed one - a
+            # window-vs-worker divergence anti-bot systems cross-check. These are
+            # benign scalars, so reporting the real value in every realm is more
+            # coherent than faking a value we cannot enforce in workers.
             _NAVIGATOR_VENDOR_JS % navigator_vendor.replace("'", "\\'"),
             _NAVIGATOR_OSCPU_JS % navigator_oscpu.replace("'", "\\'"),
             _ERROR_PROTOTYPE_JS,

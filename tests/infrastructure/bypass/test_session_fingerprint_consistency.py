@@ -83,6 +83,25 @@ async def test_fingerprint_harness_covers_stable_canvas_audio_and_web_api_shapes
 
 
 @pytest.mark.asyncio
+async def test_hardening_does_not_window_only_override_worker_readable_scalars() -> None:
+    # TRACK A5: navigator.hardwareConcurrency / deviceMemory must NOT be patched
+    # in an init script - it would not reach dedicated Workers, so the window and
+    # worker realms would disagree (a fingerprint leak). They are left real,
+    # which is coherent across all realms.
+    page = SimpleNamespace(add_init_script=AsyncMock())
+    await apply_stealth_hardening(
+        page,
+        canvas_seed=42,
+        browser_family="chromium",
+        hardware_concurrency=8,
+        device_memory=8,
+    )
+    script = page.add_init_script.await_args.args[0]
+    assert "'hardwareConcurrency'" not in script
+    assert "'deviceMemory'" not in script
+
+
+@pytest.mark.asyncio
 async def test_proxy_hardening_blocks_direct_webrtc_candidates() -> None:
     page = SimpleNamespace(add_init_script=AsyncMock())
     persona = select_persona("proxy.test", "chromium")

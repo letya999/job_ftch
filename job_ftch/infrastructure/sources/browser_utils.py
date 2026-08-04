@@ -21,11 +21,20 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/146.0.0.0 Safari/537.36"
-)
+def resolve_identity_ua(
+    config: dict[str, Any], persona_kw: dict[str, Any]
+) -> str | None:
+    """The identity's coherent User-Agent, or ``None`` to keep the real one.
+
+    TRACK A4: the session identity is the sole writer of UA. An explicit config
+    UA wins, then the persona's aligned UA; when neither exists we return
+    ``None`` so the caller omits the override and the engine keeps its real
+    bundled Chromium UA - overriding with a hardcoded constant that cannot match
+    the runtime is itself a fabricated-identity leak.
+    """
+    ua = config.get("user_agent") or persona_kw.get("user_agent")
+    return str(ua) if ua else None
+
 
 DEFAULT_WAIT = "domcontentloaded"
 DEFAULT_WAIT_FALLBACK = "networkidle"
@@ -591,12 +600,14 @@ async def _open_playwright_page(
 
     persona_kw = bypass_ctx.context_kwargs() if bypass_ctx else {}
     context_kwargs: dict[str, Any] = {
-        "user_agent": config.get("user_agent") or persona_kw.get("user_agent", DEFAULT_USER_AGENT),
         "viewport": config.get("viewport")
         or persona_kw.get("viewport", {"width": 1440, "height": 900}),
         "locale": config.get("locale") or persona_kw.get("locale", "en-US"),
         "ignore_https_errors": config.get("skip_ssl", True),
     }
+    identity_ua = resolve_identity_ua(config, persona_kw)
+    if identity_ua:
+        context_kwargs["user_agent"] = identity_ua
     if persona_kw.get("timezone_id") and "timezone_id" not in config:
         context_kwargs["timezone_id"] = persona_kw["timezone_id"]
 
@@ -718,13 +729,15 @@ async def _open_persistent_page(
         "user_data_dir": user_data_dir,
         "headless": headless,
         "args": args,
-        "user_agent": config.get("user_agent") or persona_kw.get("user_agent", DEFAULT_USER_AGENT),
         "viewport": config.get("viewport")
         or persona_kw.get("viewport", {"width": 1440, "height": 900}),
         "locale": config.get("locale") or persona_kw.get("locale", "en-US"),
         "ignore_https_errors": config.get("skip_ssl", True),
         "timeout": settings.browser_context_timeout_ms,
     }
+    identity_ua = resolve_identity_ua(config, persona_kw)
+    if identity_ua:
+        launch_kwargs["user_agent"] = identity_ua
     if channel:
         launch_kwargs["channel"] = channel
     if persona_kw.get("timezone_id") and "timezone_id" not in config:

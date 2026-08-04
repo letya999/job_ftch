@@ -292,12 +292,17 @@ async def test_retrying_client_retry_after_flows_through_tenacity_path(
     assert any(call.args[0] >= 2.0 for call in sleep.await_args_list)
 
 
-def test_browser_utils_default_user_agent_is_chrome_131_or_newer() -> None:
-    import re
-
-    match = re.search(r"Chrome/(\d+)\.", browser_utils.DEFAULT_USER_AGENT)
-    assert match is not None
-    assert int(match.group(1)) >= 131
+def test_identity_is_sole_ua_writer_no_stale_fallback() -> None:
+    # TRACK A4: no hardcoded fallback UA. With no persona/config UA the override
+    # is omitted so the engine keeps its real bundled UA; a persona/config UA is
+    # honored when present.
+    assert browser_utils.resolve_identity_ua({}, {}) is None
+    assert browser_utils.resolve_identity_ua({"user_agent": "cfg-ua"}, {}) == "cfg-ua"
+    assert browser_utils.resolve_identity_ua({}, {"user_agent": "persona-ua"}) == "persona-ua"
+    # config wins over persona
+    assert (
+        browser_utils.resolve_identity_ua({"user_agent": "cfg"}, {"user_agent": "persona"}) == "cfg"
+    )
 
 
 class _FakePage:
