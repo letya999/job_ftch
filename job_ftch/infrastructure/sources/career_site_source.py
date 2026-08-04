@@ -1676,7 +1676,15 @@ class CareerSiteSource(Source["RawItem"]):
                 urls_to_scrape, source_name=source_name
             )
 
-        ranked = _rank_detail_urls(urls_to_scrape, self.spec.url)
+        trusted_urls = [c.url for c in candidates if c.rich_payload is None and c.url in self._trusted_parser_urls]
+        ranked_trusted: list[str] = []
+        seen_trusted: set[str] = set()
+        for url in trusted_urls:
+            if url in urls_to_scrape and url not in seen_trusted:
+                seen_trusted.add(url)
+                ranked_trusted.append(url)
+        ranked_generic = _rank_detail_urls(urls_to_scrape - seen_trusted, self.spec.url)
+        ranked = [*ranked_trusted, *ranked_generic]
         async for item in self._iter_scraped_detail_items(ranked, scraper_chain, source_name):
             yield item
 
