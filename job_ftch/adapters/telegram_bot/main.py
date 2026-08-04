@@ -80,6 +80,36 @@ def _clear_polling_ready() -> None:
         READINESS_PATH.unlink(missing_ok=True)
 
 
+HEARTBEAT_INTERVAL_SECONDS = float(
+    os.environ.get("JOB_FTCH_BOT_HEARTBEAT_SECONDS", "30")
+)
+
+
+async def _run_readiness_heartbeat(
+    scheduler_task: asyncio.Task[object],
+    interval: float = HEARTBEAT_INTERVAL_SECONDS,
+) -> None:
+    """Refresh the readiness marker on a fixed cadence while the scheduler lives.
+
+    The container healthcheck treats a marker older than 180s as unhealthy, and
+    autoheal restarts on that status. The scheduler only refreshed the marker
+    once per loop iteration, so a normal multi-minute crawl let the marker go
+    stale and looked identical to a real hang (incident 2026-08-04). This
+    independent task keeps the marker fresh during healthy long crawls, but:
+
+    - if the event loop is wedged (CPU-bound block, as in the incident), this
+      coroutine is starved, the marker goes stale, and autoheal restarts;
+    - if the scheduler task dies, we stop refreshing so the marker goes stale,
+      preserving the original "dead scheduler is detectable" contract.
+    """
+    while not scheduler_task.done():
+        _mark_polling_ready()
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
+
+
 def _log_scheduler_task_result(task: asyncio.Task[object]) -> None:
     """Make an unexpected scheduler-loop exit visible immediately."""
     if task.cancelled():
@@ -985,6 +1015,11 @@ async def start_polling(
     )
     scheduler_task.add_done_callback(_log_scheduler_task_result)
 
+    heartbeat_task = asyncio.create_task(
+        _run_readiness_heartbeat(scheduler_task),
+        name="bot_readiness_heartbeat",
+    )
+
     # Auth sanity warnings
     if config.open_access:
         logger.warning("telegram_bot_open_access_enabled: bot accepts updates from ANY user")
@@ -1002,6 +1037,9 @@ async def start_polling(
         await dp.start_polling(bot, drop_pending_updates=False)
     finally:
         _clear_polling_ready()
+        heartbeat_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await heartbeat_task
         scheduler_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await scheduler_task
