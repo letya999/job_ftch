@@ -11,6 +11,7 @@ covering Chrome 120-131, Safari 17, and Firefox 125 across Windows/macOS/Linux.
 from __future__ import annotations
 
 import hashlib
+import platform
 import random
 import re
 from dataclasses import dataclass, replace
@@ -396,7 +397,19 @@ def _generate_personas(count: int = 20) -> list[BrowserPersona]:
 
 PERSONA_POOL: list[BrowserPersona] = _generate_personas(20)
 
-_domain_persona_map: dict[tuple[str, str | None, str], BrowserPersona] = {}
+_domain_persona_map: dict[tuple[str, str | None, str, str], BrowserPersona] = {}
+
+
+def local_os_family() -> str:
+    """Return the browser-native OS family for this runtime host."""
+    system = platform.system().lower()
+    if system == "windows":
+        return "windows"
+    if system == "darwin":
+        return "macos"
+    if system == "linux":
+        return "linux"
+    return ""
 
 
 def select_persona(
@@ -404,6 +417,7 @@ def select_persona(
     browser_family: str | None = None,
     *,
     proxy_country: str = "",
+    os_family: str | None = None,
 ) -> BrowserPersona:
     """Select a sticky persona for a domain (consistent within session).
 
@@ -414,8 +428,10 @@ def select_persona(
     normalized_family = {
         "chromium_cdp": "chromium",
         "chromium_patched": "chromium",
+        "chromium_patchright": "chromium",
     }.get(browser_family or "", browser_family)
-    key = (domain, normalized_family, proxy_country.upper())
+    normalized_os = (os_family or "").strip().lower()
+    key = (domain, normalized_family, proxy_country.upper(), normalized_os)
     if key in _domain_persona_map:
         return _domain_persona_map[key]
     candidates = [
@@ -423,10 +439,26 @@ def select_persona(
         for persona in PERSONA_POOL
         if normalized_family is None or persona.browser_family == normalized_family
     ]
+    if normalized_os:
+        platform_by_os = {
+            "windows": "Win32",
+            "macos": "MacIntel",
+            "linux": "Linux x86_64",
+        }
+        expected_platform = platform_by_os.get(normalized_os)
+        os_candidates = [
+            persona
+            for persona in candidates
+            if expected_platform is not None and persona.navigator_platform == expected_platform
+        ]
+        if os_candidates:
+            candidates = os_candidates
     if not candidates:
         candidates = PERSONA_POOL
     idx = int(
-        hashlib.sha256(f"{domain}:{normalized_family}:{proxy_country}".encode()).hexdigest(),
+        hashlib.sha256(
+            f"{domain}:{normalized_family}:{proxy_country}:{normalized_os}".encode()
+        ).hexdigest(),
         16,
     ) % len(candidates)
     persona = candidates[idx]
@@ -457,6 +489,7 @@ def align_persona_version(
     normalized_family = {
         "chromium_cdp": "chromium",
         "chromium_patched": "chromium",
+        "chromium_patchright": "chromium",
     }.get(browser_family, browser_family)
     match = re.search(r"\d+", reported_version)
     if match is None or normalized_family != persona.browser_family:

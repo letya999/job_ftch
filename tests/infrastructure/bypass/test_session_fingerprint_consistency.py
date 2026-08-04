@@ -11,10 +11,13 @@ from job_ftch.infrastructure.bypass.adaptive import AdaptiveBypassManager
 from job_ftch.infrastructure.bypass.persona import (
     PERSONA_POOL,
     align_persona_version,
+    local_os_family,
     select_persona,
 )
 from job_ftch.infrastructure.bypass.session_handoff import HandoffState, SessionHandoff
 from job_ftch.infrastructure.bypass.stealth_hardening import (
+    _REALM_COVERAGE_MATRIX,
+    _WORKER_WEBGL_BOOTSTRAP_JS,
     apply_persona_hardening,
     apply_stealth_hardening,
 )
@@ -46,6 +49,21 @@ def test_persona_is_sticky_per_domain_and_requested_family() -> None:
     assert first is second
     assert first.browser_family == "firefox"
     assert chromium.browser_family == "chromium"
+
+
+def test_persona_selection_can_be_constrained_to_runtime_os_family() -> None:
+    os_family = local_os_family()
+    if not os_family:
+        pytest.skip("unknown host OS")
+    expected_platform = {
+        "windows": "Win32",
+        "macos": "MacIntel",
+        "linux": "Linux x86_64",
+    }[os_family]
+
+    persona = select_persona("runtime-platform.test", "chromium", os_family=os_family)
+
+    assert persona.navigator_platform == expected_platform
 
 
 def test_runtime_browser_version_realigns_ua_and_client_hints() -> None:
@@ -80,6 +98,38 @@ async def test_fingerprint_harness_covers_stable_canvas_audio_and_web_api_shapes
     assert "navigator.mediaDevices.enumerateDevices" in script
     assert "window.speechSynthesis.getVoices" in script
     assert "userAgentData" in script
+
+
+@pytest.mark.asyncio
+async def test_hardening_propagates_webgl_spoof_to_workers() -> None:
+    page = SimpleNamespace(add_init_script=AsyncMock())
+    await apply_stealth_hardening(
+        page,
+        webgl_renderer="ANGLE (Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0)",
+        browser_family="chromium",
+    )
+    script = page.add_init_script.await_args.args[0]
+    assert "_WORKER_WEBGL_BOOTSTRAP_JS" not in script
+    assert "wrapWorkerCtor('Worker')" in script
+    assert "wrapWorkerCtor('SharedWorker')" in script
+    assert "importScripts(" in script
+    assert ";import " in script
+    assert "Object.defineProperty(proto, 'language'" in script
+    assert "WebGLRenderingContext.prototype.getParameter" in script
+    assert "WebGL2RenderingContext.prototype.getParameter" in script
+    assert "UNMASKED_RENDERER_WEBGL" not in script
+    assert "37446" in script
+    assert "ANGLE (Intel(R) UHD Graphics 630" in script
+    assert "options.type === 'module'" in _WORKER_WEBGL_BOOTSTRAP_JS
+    assert "import " in _WORKER_WEBGL_BOOTSTRAP_JS
+
+
+def test_realm_coverage_matrix_documents_worker_readable_axes() -> None:
+    assert "userAgent/platform/language/timezone/hardwareConcurrency/deviceMemory" in (
+        _REALM_COVERAGE_MATRIX
+    )
+    assert "WebGL vendor/renderer" in _REALM_COVERAGE_MATRIX
+    assert "Worker/SharedWorker wrapper" in _REALM_COVERAGE_MATRIX
 
 
 @pytest.mark.asyncio

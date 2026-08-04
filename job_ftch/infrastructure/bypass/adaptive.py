@@ -698,6 +698,17 @@ class AdaptiveBypassManager:
     def prepare_browser_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Overlay allowlisted source-session cookies onto a browser attempt."""
         prepared = dict(config)
+        context_kwargs = getattr(self._context, "context_kwargs", None)
+        if callable(context_kwargs):
+            persona_kw = context_kwargs(use_proxy=self.uses_proxy)
+            if persona_kw.get("user_agent") and not prepared.get("user_agent"):
+                prepared["user_agent"] = persona_kw["user_agent"]
+            if persona_kw.get("locale") and not prepared.get("locale"):
+                prepared["locale"] = persona_kw["locale"]
+            if persona_kw.get("timezone_id") and not prepared.get("timezone_id"):
+                prepared["timezone_id"] = persona_kw["timezone_id"]
+            if persona_kw.get("viewport") and not prepared.get("viewport"):
+                prepared["viewport"] = persona_kw["viewport"]
         if prepared.get("persistent_context"):
             if self._profile_dir is None:
                 domain_profile = self._domain_profile_dir()

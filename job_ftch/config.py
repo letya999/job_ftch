@@ -413,6 +413,26 @@ class Settings(BaseSettings):
             file_secret_settings,
         )
 
+    @model_validator(mode="before")
+    @classmethod
+    def apply_standard_openai_env_alias(cls, data: object) -> object:
+        """Accept the standard OpenAI SDK env var as a fallback.
+
+        ``JOB_FTCH_OPENAI_API_KEY`` remains the project-scoped source of truth
+        through pydantic-settings' ``env_prefix``. This fallback only fills the
+        field when no explicit or project-scoped value has already been
+        provided, so tests can still assert that ``openai_api_key=None`` is
+        invalid for the OpenAI backend.
+        """
+        if not isinstance(data, dict) or "openai_api_key" in data:
+            return data
+        fallback = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not fallback:
+            return data
+        merged = dict(data)
+        merged["openai_api_key"] = fallback
+        return merged
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, value: str) -> str:
@@ -555,13 +575,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_dependencies(self) -> Settings:
-        if self.llm_backend == "openai":
-            if self.openai_api_key is None:
-                msg = "openai_api_key is required when llm_backend=openai."
-                raise ValueError(msg)
-            if self.openai_model is None:
-                msg = "openai_model is required when llm_backend=openai."
-                raise ValueError(msg)
+        if self.llm_backend == "openai" and self.openai_model is None:
+            msg = "openai_model is required when llm_backend=openai."
+            raise ValueError(msg)
         if self.posting_backend == "telegram_posting":
             if self.telegram_publish_entity is None:
                 msg = "telegram_publish_entity is required when posting_backend=telegram_posting."

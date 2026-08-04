@@ -105,6 +105,13 @@ class TestSessionIdentity:
 
 
 class TestCrossCheckObserved:
+    def _webgl_vendor(self, renderer: str) -> str:
+        if "Apple" in renderer:
+            return "Apple Inc."
+        if renderer.startswith("Mesa"):
+            return "Mesa"
+        return "Google Inc. (Intel)"
+
     def _observed(self, persona: BrowserPersona) -> dict[str, object]:
         return {
             "userAgent": persona.ua,
@@ -113,7 +120,7 @@ class TestCrossCheckObserved:
             "deviceMemory": persona.device_memory,
             "timezone": persona.timezone,
             "language": persona.locale,
-            "webglVendor": "Google Inc. (Intel)",
+            "webglVendor": self._webgl_vendor(persona.webgl_renderer),
             "webglRenderer": persona.webgl_renderer,
         }
 
@@ -145,3 +152,24 @@ class TestCrossCheckObserved:
         window["userAgent"] = "totally-different-ua"
         report = cross_check_observed(persona, window=window, worker=dict(window))
         assert "OBS" in report.codes
+
+    def test_observed_timezone_mismatch_is_obs(self) -> None:
+        persona = select_persona("x.example.com", "chromium")
+        window = self._observed(persona)
+        window["timezone"] = "Asia/Tokyo"
+        report = cross_check_observed(persona, window=window, worker=dict(window))
+        assert any(issue.axis == "timezone" for issue in report.issues)
+
+    def test_observed_language_mismatch_is_obs(self) -> None:
+        persona = select_persona("x.example.com", "chromium")
+        window = self._observed(persona)
+        window["language"] = "ja-JP"
+        report = cross_check_observed(persona, window=window, worker=dict(window))
+        assert any(issue.axis == "language" for issue in report.issues)
+
+    def test_observed_webgl_mismatch_is_obs(self) -> None:
+        persona = select_persona("x.example.com", "chromium")
+        window = self._observed(persona)
+        window["webglRenderer"] = "Google SwiftShader"
+        report = cross_check_observed(persona, window=window, worker=dict(window))
+        assert any(issue.axis == "webgl_renderer" for issue in report.issues)

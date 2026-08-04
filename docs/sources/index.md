@@ -6,6 +6,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 
 ## Files On This Level
 
+- [Bot Parity Lab](bot_parity_lab.md) - Local defensive red-team layer for browser, network, realm, behavior, and identity-parity evidence. (Updated: 2026-08-04)
 - [Browser lifecycle и teardown](browser_lifecycle.md) - Жизненный цикл browser-сессий в ingest: open_page, слот конкурентности, patchright cancellation-фиксы, session-bypass path, реапинг драйверов и полный teardown на выходе. (Updated: 2026-07-30)
 - [Bypass и escalation path](bypass_and_escalation.md) - Adaptive bypass для ingest: failure signals, route axes, proxy/session/challenge boundaries и запреты. (Updated: 2026-07-28)
 - [CAPTCHA provider rollout](captcha_provider_rollout.md) - Operational rollout for observed CAPTCHA/bot-protection handling: project wiring, browser setup, provider roles, and eval gates. (Updated: 2026-08-02)

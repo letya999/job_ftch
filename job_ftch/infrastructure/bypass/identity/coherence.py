@@ -150,6 +150,26 @@ def _check_webgl_vs_os(report: CoherenceReport, renderer: str, platform: str) ->
         report.add("I5", "webgl_vs_os", f"Mesa renderer on non-Linux platform {platform!r}")
 
 
+def _expected_webgl_vendor(renderer: str) -> str:
+    if "Apple" in renderer:
+        return "Apple Inc."
+    if renderer.startswith("Mesa"):
+        return "Mesa"
+    if renderer.startswith("ANGLE"):
+        return "Google Inc. (Intel)"
+    return ""
+
+
+def _webgl_vendor_matches(renderer: str, observed_vendor: str, expected_vendor: str) -> bool:
+    if not expected_vendor:
+        return True
+    if renderer.startswith("ANGLE"):
+        return observed_vendor.startswith("Google Inc.")
+    if "Apple" in renderer:
+        return observed_vendor in {"Apple", "Apple Inc."}
+    return observed_vendor == expected_vendor
+
+
 def _check_transport_family(report: CoherenceReport, persona: Any, family: str) -> None:
     try:
         from job_ftch.infrastructure.bypass.fingerprint_profile import FingerprintProfile
@@ -205,13 +225,44 @@ def cross_check_observed(
             f"observed platform {observed_platform!r} != declared {declared_platform!r}",
         )
 
-    declared_hc = getattr(persona, "hardware_concurrency", None)
-    observed_hc = window.get("hardwareConcurrency")
-    if observed_hc is not None and declared_hc is not None and int(observed_hc) != int(declared_hc):
+    declared_language = str(getattr(persona, "locale", ""))
+    observed_language = str(window.get("language", ""))
+    if observed_language and declared_language and observed_language != declared_language:
         report.add(
             "OBS",
-            "hardware_concurrency",
-            f"observed hardwareConcurrency {observed_hc} != declared {declared_hc}",
+            "language",
+            f"observed language {observed_language!r} != declared {declared_language!r}",
+        )
+
+    declared_timezone = str(getattr(persona, "timezone", ""))
+    observed_timezone = str(window.get("timezone", ""))
+    if observed_timezone and declared_timezone and observed_timezone != declared_timezone:
+        report.add(
+            "OBS",
+            "timezone",
+            f"observed timezone {observed_timezone!r} != declared {declared_timezone!r}",
+        )
+
+    declared_renderer = str(getattr(persona, "webgl_renderer", ""))
+    observed_renderer = str(window.get("webglRenderer", ""))
+    if observed_renderer and declared_renderer and observed_renderer != declared_renderer:
+        report.add(
+            "OBS",
+            "webgl_renderer",
+            f"observed WebGL renderer {observed_renderer!r} != declared {declared_renderer!r}",
+        )
+
+    expected_vendor = _expected_webgl_vendor(declared_renderer) if declared_renderer else ""
+    observed_vendor = str(window.get("webglVendor", ""))
+    if (
+        observed_vendor
+        and expected_vendor
+        and not _webgl_vendor_matches(declared_renderer, observed_vendor, expected_vendor)
+    ):
+        report.add(
+            "OBS",
+            "webgl_vendor",
+            f"observed WebGL vendor {observed_vendor!r} != expected {expected_vendor!r}",
         )
 
     return report

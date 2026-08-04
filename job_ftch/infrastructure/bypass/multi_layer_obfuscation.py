@@ -212,20 +212,15 @@ class JSStealthLayer:
         fp = gen.generate(os=platform)
         context.metadata["fingerprint"] = {
             "canvas_seed": fp.canvas_seed,
-            "hardware_concurrency": fp.hardware_concurrency,
-            "device_memory": fp.device_memory,
+            "hardware_concurrency_observed": "browser-native",
+            "device_memory_observed": "browser-native",
             "screen": f"{fp.screen_width}x{fp.screen_height}",
         }
-        js = (
-            f"Object.defineProperty(navigator, 'hardwareConcurrency', {{get: () => {fp.hardware_concurrency}}});"
-            f"Object.defineProperty(navigator, 'deviceMemory', {{get: () => {fp.device_memory}}});"
-        )
-        add_init_script = getattr(context.page, "add_init_script", None)
-        if callable(add_init_script):
-            with contextlib.suppress(Exception):
-                await _maybe_await(add_init_script(js))
-                return LayerResult(layer_name=self.name, applied=True)
-        return LayerResult(layer_name=self.name, applied=False, skipped_reason="init_script_failed")
+        # TRACK A5/R1: navigator.hardwareConcurrency/deviceMemory are worker-readable
+        # scalars. A page init script would patch only the window realm and create
+        # an I8 window-vs-worker leak, so this layer records the generated profile
+        # metadata but leaves the browser-native values untouched.
+        return LayerResult(layer_name=self.name, applied=True)
 
 
 class NetworkFingerprintLayer:

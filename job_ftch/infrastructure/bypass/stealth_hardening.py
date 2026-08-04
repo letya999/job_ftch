@@ -14,6 +14,7 @@ Applied via apply_stealth_hardening(page, persona) after page creation.
 from __future__ import annotations
 
 import contextlib
+import json
 from typing import Any
 
 import structlog
@@ -157,19 +158,98 @@ _WEBGL_NOISE_JS = """
 (() => {
     const VENDOR = '%s';
     const RENDERER = '%s';
+    if (typeof WebGLRenderingContext === 'undefined') return;
     const origGetParameter = WebGLRenderingContext.prototype.getParameter;
     WebGLRenderingContext.prototype.getParameter = function(pname) {
         if (pname === 37445) return VENDOR;
         if (pname === 37446) return RENDERER;
         return origGetParameter.call(this, pname);
     };
-    const origGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
-    WebGL2RenderingContext.prototype.getParameter = function(pname) {
-        if (pname === 37445) return VENDOR;
-        if (pname === 37446) return RENDERER;
-        return origGetParameter2.call(this, pname);
-    };
+    if (typeof WebGL2RenderingContext !== 'undefined') {
+        const origGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
+        WebGL2RenderingContext.prototype.getParameter = function(pname) {
+            if (pname === 37445) return VENDOR;
+            if (pname === 37446) return RENDERER;
+            return origGetParameter2.call(this, pname);
+        };
+    }
 })();
+"""
+
+_WORKER_WEBGL_BOOTSTRAP_JS = """
+(() => {
+    const WORKER_IDENTITY_PATCH = %s;
+    const resolvedUrl = (scriptURL) => {
+        try {
+            return new URL(String(scriptURL), location.href).href;
+        } catch (e) {
+            return String(scriptURL);
+        }
+    };
+    const makeBootstrapUrl = (scriptURL, options) => {
+        const original = resolvedUrl(scriptURL);
+        const isModule = Boolean(options && options.type === 'module');
+        const bootstrap = isModule
+            ? WORKER_IDENTITY_PATCH + "\\n;import " + JSON.stringify(original) + ";"
+            : WORKER_IDENTITY_PATCH + "\\n;importScripts(" + JSON.stringify(original) + ");";
+        return URL.createObjectURL(new Blob([bootstrap], {type: 'application/javascript'}));
+    };
+    const shouldWrap = (scriptURL, options) => {
+        if (typeof Blob === 'undefined' || typeof URL === 'undefined' || !URL.createObjectURL) return false;
+        try {
+            const url = new URL(String(scriptURL), location.href);
+            return url.protocol === 'blob:' || url.protocol === 'data:' || url.origin === location.origin;
+        } catch (e) {
+            return true;
+        }
+    };
+    const wrapWorkerCtor = (name) => {
+        const NativeWorker = self[name];
+        if (typeof NativeWorker !== 'function') return;
+        const WrappedWorker = function(scriptURL, options) {
+            if (!shouldWrap(scriptURL, options)) {
+                return new NativeWorker(scriptURL, options);
+            }
+            try {
+                return new NativeWorker(makeBootstrapUrl(scriptURL, options), options);
+            } catch (e) {
+                return new NativeWorker(scriptURL, options);
+            }
+        };
+        WrappedWorker.prototype = NativeWorker.prototype;
+        Object.setPrototypeOf(WrappedWorker, NativeWorker);
+        self[name] = WrappedWorker;
+    };
+    wrapWorkerCtor('Worker');
+    wrapWorkerCtor('SharedWorker');
+})();
+"""
+
+_WORKER_NAVIGATOR_JS = """
+(() => {
+    const LANGUAGE = '%s';
+    const LANGUAGES = %s;
+    if (typeof navigator === 'undefined') return;
+    const proto = Object.getPrototypeOf(navigator);
+    try {
+        Object.defineProperty(proto, 'language', {get: () => LANGUAGE, configurable: true});
+        Object.defineProperty(proto, 'languages', {get: () => LANGUAGES.slice(), configurable: true});
+    } catch (e) {}
+})();
+"""
+
+_REALM_COVERAGE_MATRIX = """
+Realm coverage matrix for worker-readable identity axes:
+- userAgent/platform/language/timezone/hardwareConcurrency/deviceMemory:
+  owned by browser context/CDP, worker bootstrap, or left real, so window and
+  Worker stay aligned.
+- WebGL vendor/renderer: page init scripts patch window/frame contexts and the
+  Worker/SharedWorker wrapper prepends the same OffscreenCanvas-readable
+  getParameter override before classic or module same-origin/blob/data worker
+  code runs.
+- UA-CH/chrome/plugins/screen/battery/fonts/media/performance/serviceWorker:
+  window-facing browser API shape only; not used as declared worker identity in
+  the fingerprint self-check oracle.
 """
 
 _CLIENT_HINTS_JS = """
@@ -510,6 +590,7 @@ _HEADER_ORDER_JS = """
             }
             return origFetch.call(this, input, init);
         };
+        if (window.__markNative) window.__markNative(window.fetch, 'fetch');
     }
 })();
 """
@@ -539,6 +620,7 @@ _CONNECTION_ISOLATION_JS = """
             const finalInit = Object.assign({}, init || {}, {headers});
             return origFetch.call(this, input, finalInit);
         };
+        if (window.__markNative) window.__markNative(window.fetch, 'fetch');
     }
     if (window.XMLHttpRequest) {
         const origOpen = XMLHttpRequest.prototype.open;
@@ -548,6 +630,7 @@ _CONNECTION_ISOLATION_JS = """
                 this.setRequestHeader('Connection', 'keep-alive');
             } catch (e) {}
         };
+        if (window.__markNative) window.__markNative(XMLHttpRequest.prototype.open, 'open');
     }
 })();
 """
@@ -696,7 +779,7 @@ _ERROR_PROTOTYPE_JS = """
     const origEvalError = window.EvalError;
     function sanitizeStack(error) {
         if (error && error.stack && typeof error.stack === 'string') {
-            const lines = error.stack.split('\n');
+            const lines = error.stack.split('\\n');
             const filtered = lines.filter(line =>
                 !line.includes('playwright') &&
                 !line.includes('nodriver') &&
@@ -709,7 +792,7 @@ _ERROR_PROTOTYPE_JS = """
                 !line.includes('webdriver')
             );
             Object.defineProperty(error, 'stack', {
-                get: () => filtered.join('\n'),
+                get: () => filtered.join('\\n'),
                 configurable: true,
             });
         }
@@ -1030,15 +1113,26 @@ async def apply_stealth_hardening(
     """
     try:
         brands_js = _sec_ch_ua_to_brands_js(sec_ch_ua)
+        webgl_patch = _WEBGL_NOISE_JS % (
+            _webgl_vendor_for_renderer(webgl_renderer).replace("'", "\\'"),
+            webgl_renderer.replace("'", "\\'"),
+        )
+        worker_identity_patch = "\n".join(
+            [
+                webgl_patch,
+                _WORKER_NAVIGATOR_JS
+                % (
+                    locale.replace("'", "\\'"),
+                    json.dumps([locale, locale.split("-")[0]]),
+                ),
+            ]
+        )
         scripts = [
             _NATIVE_TOSTRING_GUARD_JS,
             _CANVAS_NOISE_JS % canvas_seed,
             _AUDIO_STABILITY_JS % canvas_seed,
-            _WEBGL_NOISE_JS
-            % (
-                _webgl_vendor_for_renderer(webgl_renderer).replace("'", "\\'"),
-                webgl_renderer.replace("'", "\\'"),
-            ),
+            webgl_patch,
+            _WORKER_WEBGL_BOOTSTRAP_JS % json.dumps(worker_identity_patch),
             # Timezone is deliberately NOT patched in JS here (defect A3). The
             # old ``_TIMEZONE_JS`` overrode only ``Intl.DateTimeFormat`` and left
             # ``Date.getTimezoneOffset()`` reporting the host tz, a divergence

@@ -7,7 +7,7 @@ import json
 import os
 import shutil
 import tempfile
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -89,14 +89,20 @@ class _NodriverPageAdapter:
         *,
         cookies: list[dict[str, Any]] | None = None,
         viewport: dict[str, Any] | None = None,
+        timezone_id: str | None = None,
     ) -> None:
         self._tab = tab
         self._cookies = list(cookies or [])
         self._viewport = viewport
+        self._timezone_id = timezone_id
+        self._init_scripts: list[str] = []
         self._network_enable_task: asyncio.Task[None] | None = None
         self._cookie_origins: set[str] = set()
 
     async def initialize(self) -> None:
+        if self._timezone_id and cdp is not None:
+            with suppress(Exception):
+                await self._tab.send(cdp.emulation.set_timezone_override(self._timezone_id))
         if not isinstance(self._viewport, dict):
             return
         width = int(self._viewport.get("width", 1440) or 1440)
@@ -194,13 +200,34 @@ class _NodriverPageAdapter:
         if self._network_enable_task is not None:
             await self._network_enable_task
         await self._prime_cookies(url)
-        nav = self._tab.get(url)
-        if timeout is not None:
-            self._tab = await asyncio.wait_for(nav, timeout / 1000)
+        if cdp is not None:
+            nav = self._tab.send(cdp.page.navigate(url))
+            if timeout is not None:
+                await asyncio.wait_for(nav, timeout / 1000)
+            else:
+                await nav
         else:
-            self._tab = await nav
+            nav = self._tab.get(url)
+            if timeout is not None:
+                self._tab = await asyncio.wait_for(nav, timeout / 1000)
+            else:
+                self._tab = await nav
+            for script in self._init_scripts:
+                await self._install_init_script(script)
         await self.wait_for_load_state("domcontentloaded", timeout=timeout)
         return None
+
+    async def add_init_script(self, script: str) -> None:
+        self._init_scripts.append(script)
+        await self._install_init_script(script)
+
+    async def _install_init_script(self, script: str) -> None:
+        if cdp is None:
+            await self.evaluate(script)
+            return
+        await self._tab.send(
+            cdp.page.add_script_to_evaluate_on_new_document(script, run_immediately=True)
+        )
 
     async def content(self) -> str:
         return str(await self._tab.get_content())
@@ -378,6 +405,7 @@ class NodriverBypass:
             tab,
             cookies=config.get("cookies"),
             viewport=viewport if isinstance(viewport, dict) else None,
+            timezone_id=str(config.get("timezone_id") or "") or None,
         )
         await page.initialize()
         try:

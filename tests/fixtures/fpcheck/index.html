@@ -9,8 +9,8 @@
 <pre id="out">collecting…</pre>
 <script>
 // LOCAL self-check page (no third-party detector). Reads the same identity axes
-// in the window realm AND inside a Worker, then exposes both via window.__fpcheck
-// so the harness can assert window == worker (I8) and window == declared.
+// in the window realm and inside classic/module Workers, then exposes all realms
+// via window.__fpcheck so the harness can assert I8 and window == declared.
 function readWebGL() {
   try {
     const canvas = document.createElement('canvas');
@@ -68,11 +68,11 @@ self.onmessage = function() {
 };
 `;
 
-function collectWorker() {
+function collectWorker(options) {
   return new Promise(function (resolve) {
     try {
       const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
-      const worker = new Worker(URL.createObjectURL(blob));
+      const worker = new Worker(URL.createObjectURL(blob), options || {});
       const timer = setTimeout(function () { resolve({ error: 'worker_timeout' }); }, 3000);
       worker.onmessage = function (ev) { clearTimeout(timer); resolve(ev.data); };
       worker.onerror = function () { clearTimeout(timer); resolve({ error: 'worker_error' }); };
@@ -87,7 +87,8 @@ function collectWorker() {
   const wg = readWebGL();
   const windowBag = readNavigator(navigator, { webglVendor: wg.vendor, webglRenderer: wg.renderer });
   const workerBag = await collectWorker();
-  window.__fpcheck = { window: windowBag, worker: workerBag };
+  const moduleWorkerBag = await collectWorker({ type: 'module' });
+  window.__fpcheck = { window: windowBag, worker: workerBag, moduleWorker: moduleWorkerBag };
   document.getElementById('out').textContent = JSON.stringify(window.__fpcheck, null, 2);
 })();
 </script>

@@ -20,6 +20,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [publication index](publication/index.md)
 - [scripts index](scripts/index.md)
 - [sinks index](sinks/index.md)
+- [tools index](tools/index.md)
 - [unit index](unit/index.md)
 
 ## Files On This Level

@@ -20,6 +20,7 @@ from job_ftch.infrastructure.bypass.pacing import get_domain_pacer
 from job_ftch.infrastructure.bypass.persona import (
     BrowserPersona,
     align_persona_version,
+    local_os_family,
     select_persona,
 )
 from job_ftch.infrastructure.bypass.preflight import PreflightResult, run_preflight
@@ -79,7 +80,11 @@ class BypassContext:
         """Align the persona when a route switches browser families."""
         if browser_family is None:
             return
-        self.persona = select_persona(self._domain, browser_family)
+        self.persona = select_persona(
+            self._domain,
+            browser_family,
+            os_family=local_os_family(),
+        )
 
     def align_browser_runtime(self, browser_family: str, reported_version: str) -> None:
         """Use the launched browser's version instead of a declared static version."""
@@ -162,7 +167,11 @@ class BypassContext:
         # knows the real engine family it passes it; otherwise Chromium is the
         # only coherent default. The adaptive controller re-aligns the persona
         # via ``set_browser_family`` once a non-Chromium engine is selected.
-        persona = select_persona(domain, browser_family or "chromium")
+        persona = select_persona(
+            domain,
+            browser_family or "chromium",
+            os_family=local_os_family(),
+        )
         pf = run_preflight(url, config=config)
         try:
             proxy = resolve_bypass("proxy")

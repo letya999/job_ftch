@@ -21,9 +21,8 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
-def resolve_identity_ua(
-    config: dict[str, Any], persona_kw: dict[str, Any]
-) -> str | None:
+
+def resolve_identity_ua(config: dict[str, Any], persona_kw: dict[str, Any]) -> str | None:
     """The identity's coherent User-Agent, or ``None`` to keep the real one.
 
     TRACK A4: the session identity is the sole writer of UA. An explicit config
@@ -608,6 +607,8 @@ async def _open_playwright_page(
     identity_ua = resolve_identity_ua(config, persona_kw)
     if identity_ua:
         context_kwargs["user_agent"] = identity_ua
+    if config.get("timezone_id"):
+        context_kwargs["timezone_id"] = config["timezone_id"]
     if persona_kw.get("timezone_id") and "timezone_id" not in config:
         context_kwargs["timezone_id"] = persona_kw["timezone_id"]
 
@@ -674,7 +675,8 @@ async def _open_playwright_page(
                 stats.browser_navigations_attempted += 1
             from job_ftch.infrastructure.network.ssrf_guard import check_ssrf
 
-            await check_ssrf(config["warmup_url"])
+            if not config.get("_allow_private_selfcheck_fixture"):
+                await check_ssrf(config["warmup_url"])
             await page.goto(config["warmup_url"])
         yield page
     finally:
@@ -740,6 +742,8 @@ async def _open_persistent_page(
         launch_kwargs["user_agent"] = identity_ua
     if channel:
         launch_kwargs["channel"] = channel
+    if config.get("timezone_id"):
+        launch_kwargs["timezone_id"] = config["timezone_id"]
     if persona_kw.get("timezone_id") and "timezone_id" not in config:
         launch_kwargs["timezone_id"] = persona_kw["timezone_id"]
 
@@ -797,7 +801,8 @@ async def _open_persistent_page(
                 stats.browser_navigations_attempted += 1
             from job_ftch.infrastructure.network.ssrf_guard import check_ssrf
 
-            await check_ssrf(config["warmup_url"])
+            if not config.get("_allow_private_selfcheck_fixture"):
+                await check_ssrf(config["warmup_url"])
             await page.goto(config["warmup_url"])
         yield page
     finally:
@@ -838,17 +843,19 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     stats = config.get("_pipeline_stats")
     from job_ftch.infrastructure.sources.source_deadline import await_with_source_deadline
 
-    await install_challenge_response_detector(
-        page,
-        url=url,
-        controller=config.get("_bypass_strategy"),
-        surface="browser",
-    )
+    if not config.get("_allow_private_selfcheck_fixture"):
+        await install_challenge_response_detector(
+            page,
+            url=url,
+            controller=config.get("_bypass_strategy"),
+            surface="browser",
+        )
 
     try:
         from job_ftch.infrastructure.network.ssrf_guard import check_ssrf
 
-        await check_ssrf(url)
+        if not config.get("_allow_private_selfcheck_fixture"):
+            await check_ssrf(url)
         if stats is not None:
             stats.browser_navigations_attempted += 1
         resp = await await_with_source_deadline(page.goto(url, wait_until=wait, timeout=timeout))
