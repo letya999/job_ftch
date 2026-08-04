@@ -92,10 +92,18 @@ class TestBypassContextRobotsEnforcement:
 
 
 class TestSessionMemoryWiring:
-    def test_disabled_by_default_returns_none(self) -> None:
+    def test_enabled_by_default_returns_memory(self) -> None:
+        from job_ftch.infrastructure.bypass.adaptive import AdaptiveBypassManager
+
+        # TRACK B2: session memory now defaults on.
+        mgr = AdaptiveBypassManager({}, adaptive_enabled=True)
+        assert mgr._persona_session_memory() is not None
+
+    def test_explicit_disable_returns_none(self) -> None:
         from job_ftch.infrastructure.bypass.adaptive import AdaptiveBypassManager
 
         mgr = AdaptiveBypassManager({}, adaptive_enabled=True)
+        mgr._session_memory_enabled = False
         assert mgr._persona_session_memory() is None
 
     def test_persist_and_restore_across_managers(
@@ -135,7 +143,8 @@ class TestSessionMemoryWiring:
         seeded.save()
 
         mgr = AdaptiveBypassManager({}, adaptive_enabled=True)
-        # session memory disabled (default): no restore even if a file exists
+        # explicitly disabled: no restore even if a file exists
+        mgr._session_memory_enabled = False
         mgr._context = SimpleNamespace(persona=SimpleNamespace(name="persona_off"))
         prepared = mgr.prepare_browser_config({})
         assert not prepared.get("cookies")

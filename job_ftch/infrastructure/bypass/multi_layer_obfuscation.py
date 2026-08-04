@@ -392,15 +392,47 @@ class ReferrerChainLayer:
         }
         if context.transport != "browser" or context.page is None:
             return LayerResult(layer_name=self.name, applied=False, skipped_reason="metadata_only")
-        set_headers = getattr(context.page, "set_extra_http_headers", None)
-        if not callable(set_headers):
+        # TRACK B4: scope the forged Referer to the TOP-LEVEL DOCUMENT only.
+        # A blanket ``set_extra_http_headers({"Referer": ...})`` pins the same
+        # external referrer (e.g. a Google search URL) onto every subresource,
+        # which is itself a fingerprint - real browsers derive subresource
+        # Referers from their referrer policy. A one-shot route handler rewrites
+        # only the document request, then removes itself so subresources keep
+        # the browser's native referrer behavior.
+        page = context.page
+        route = getattr(page, "route", None)
+        unroute = getattr(page, "unroute", None)
+        if not callable(route) or not callable(unroute):
             return LayerResult(
-                layer_name=self.name, applied=False, skipped_reason="page_no_header_api"
+                layer_name=self.name, applied=False, skipped_reason="page_no_route_api"
             )
+
+        referer_url = referrer.url
+
+        async def _referer_for_document(handler_route: Any, *_args: Any) -> None:
+            request = getattr(handler_route, "request", None)
+            resource_type = getattr(request, "resource_type", "")
+            try:
+                if resource_type == "document":
+                    headers = dict(getattr(request, "headers", {}) or {})
+                    headers["referer"] = referer_url
+                    await _maybe_await(handler_route.continue_(headers=headers))
+                    with contextlib.suppress(Exception):
+                        await _maybe_await(unroute("**/*", _referer_for_document))
+                else:
+                    await _maybe_await(handler_route.continue_())
+            except Exception as exc:  # normal during deadline teardown
+                if type(exc).__name__ == "TargetClosedError" or "already handled" in str(exc):
+                    return
+                with contextlib.suppress(Exception):
+                    await _maybe_await(handler_route.continue_())
+
         with contextlib.suppress(Exception):
-            await _maybe_await(set_headers({"Referer": referrer.url}))
+            await _maybe_await(route("**/*", _referer_for_document))
             return LayerResult(layer_name=self.name, applied=True)
-        return LayerResult(layer_name=self.name, applied=False, skipped_reason="header_set_failed")
+        return LayerResult(
+            layer_name=self.name, applied=False, skipped_reason="route_install_failed"
+        )
 
 
 def build_default_orchestrator() -> MultiLayerObfuscation:

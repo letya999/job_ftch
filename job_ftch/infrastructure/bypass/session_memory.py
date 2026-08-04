@@ -13,6 +13,7 @@ memory creates the illusion of a real user who visits the site regularly.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +32,7 @@ class SessionState:
     """Persistent session state for a persona."""
 
     persona_id: str
+    domain: str = ""
     cookies: list[dict[str, Any]] = field(default_factory=list)
     localStorage: dict[str, str] = field(default_factory=dict)
     visit_count: int = 0
@@ -43,6 +45,7 @@ class SessionState:
         """Convert to JSON-serializable dict."""
         return {
             "persona_id": self.persona_id,
+            "domain": self.domain,
             "cookies": self.cookies,
             "localStorage": self.localStorage,
             "visit_count": self.visit_count,
@@ -57,6 +60,7 @@ class SessionState:
         """Create from dict."""
         return cls(
             persona_id=data.get("persona_id", ""),
+            domain=data.get("domain", ""),
             cookies=data.get("cookies", []),
             localStorage=data.get("localStorage", {}),
             visit_count=data.get("visit_count", 0),
@@ -78,23 +82,41 @@ class SessionMemory:
         memory.save()  # Persist to disk
     """
 
-    def __init__(self, persona_id: str, storage_dir: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        persona_id: str,
+        storage_dir: str | Path | None = None,
+        *,
+        domain: str | None = None,
+    ) -> None:
         self._persona_id = persona_id
+        self._domain = (domain or "").strip().lower()
         self._storage_dir = Path(storage_dir or _DEFAULT_STORAGE_DIR)
-        self._storage_path = self._storage_dir / f"{persona_id}.json"
+        # TRACK B2: key by (persona, domain) so one site's clearance state never
+        # bleeds into another. ``domain=None`` keeps the legacy per-persona file
+        # for backward compatibility with existing callers and tests.
+        if self._domain:
+            safe_domain = re.sub(r"[^a-z0-9_.-]+", "_", self._domain).strip("._") or "domain"
+            filename = f"{persona_id}__{safe_domain}.json"
+        else:
+            filename = f"{persona_id}.json"
+        self._storage_path = self._storage_dir / filename
         self._state = self._load()
+
+    def _new_state(self) -> SessionState:
+        return SessionState(persona_id=self._persona_id, domain=self._domain)
 
     def _load(self) -> SessionState:
         """Load session state from disk."""
         if not self._storage_path.exists():
-            return SessionState(persona_id=self._persona_id)
+            return self._new_state()
 
         try:
             data = json.loads(self._storage_path.read_text(encoding="utf-8"))
             return SessionState.from_dict(data)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("session_memory_load_failed", error=str(exc))
-            return SessionState(persona_id=self._persona_id)
+            return self._new_state()
 
     def save(self) -> None:
         """Persist session state to disk."""

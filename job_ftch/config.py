@@ -225,6 +225,10 @@ class Settings(BaseSettings):
     browser_challenge_wait_ms: int = Field(default=6000, gt=0)
     browser_profile_dir: Path | None = None
     browser_profile_persistent: bool = False
+    browser_profile_root: Path = Path(".runtime/profiles")
+    browser_profile_per_domain: bool = True
+    browser_profile_max_bytes: int = Field(default=2 * 1024**3, gt=0)
+    browser_profile_ttl_days: int = Field(default=30, ge=1, le=365)
     browser_session_state_enabled: bool = False
     browser_session_state_dir: Path = Path(".runtime/session_states")
     api_sniffer_settle_seconds: float = Field(default=4.0, gt=0.0, le=60.0)
@@ -276,7 +280,7 @@ class Settings(BaseSettings):
     proxy_rescue_deny_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
     proxy_strict_geo: bool = False
     robots_enforce: bool = False
-    session_memory_enabled: bool = False
+    session_memory_enabled: bool = True
     monitor_timeout_seconds: float = Field(default=15.0, gt=0.0, le=300.0)
     monitor_max_retries: int = Field(default=3, ge=0, le=10)
     rss_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)

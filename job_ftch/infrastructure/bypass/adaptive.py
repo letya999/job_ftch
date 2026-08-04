@@ -50,6 +50,55 @@ _SESSION_COOKIE_ALLOWLIST = frozenset({"cf_clearance", "cf_bm", "dd_cookie", "_p
 _MAX_SESSION_COOKIES = 32
 
 
+def _domain_profile_key(domain: str) -> str:
+    """Stable, filesystem-safe directory name for a domain's warm profile."""
+    import hashlib
+
+    return hashlib.sha256(domain.strip().lower().encode("utf-8")).hexdigest()[:16]
+
+
+def _gc_profile_root(root: Path, *, max_bytes: int, ttl_days: int, keep: str | None) -> None:
+    """LRU + TTL garbage-collect the per-domain profile root (best effort).
+
+    Removes profile dirs whose mtime is older than ``ttl_days``; then, while the
+    total size still exceeds ``max_bytes``, evicts least-recently-used dirs. The
+    directory named ``keep`` (the one about to be used) is never removed.
+    """
+    if not root.exists():
+        return
+    import time
+
+    now = time.time()
+    ttl_seconds = max(0, ttl_days) * 86400
+    entries: list[tuple[float, int, Path]] = []
+    for child in root.iterdir():
+        if not child.is_dir() or child.name == keep:
+            continue
+        try:
+            mtime = child.stat().st_mtime
+        except OSError:
+            continue
+        if ttl_seconds and (now - mtime) > ttl_seconds:
+            shutil.rmtree(child, ignore_errors=True)
+            continue
+        size = 0
+        for path in child.rglob("*"):
+            try:
+                if path.is_file():
+                    size += path.stat().st_size
+            except OSError:
+                continue
+        entries.append((mtime, size, child))
+    total = sum(size for _mtime, size, _child in entries)
+    if total <= max_bytes:
+        return
+    for _mtime, size, child in sorted(entries, key=lambda item: item[0]):
+        shutil.rmtree(child, ignore_errors=True)
+        total -= size
+        if total <= max_bytes:
+            break
+
+
 # Default tier order; actual tiers are filtered to those that are
 # currently registered (per ADR-037: registry-driven, no hardcoded
 # bypass dependency). If `cloakbrowser` is not installed the
@@ -188,6 +237,16 @@ class AdaptiveBypassManager:
             getattr(settings, "browser_profile_persistent", False)
             and self._configured_profile_dir is not None
         )
+        # TRACK B1: per-domain persistent profiles (default on). One profile dir
+        # per source domain, reused across runs, so clearance cookies and other
+        # warm-session state survive rather than starting cold every launch.
+        self._profile_root: Path = getattr(
+            settings, "browser_profile_root", Path(".runtime/profiles")
+        )
+        self._profile_per_domain = bool(getattr(settings, "browser_profile_per_domain", True))
+        self._profile_max_bytes = int(getattr(settings, "browser_profile_max_bytes", 2 * 1024**3))
+        self._profile_ttl_days = int(getattr(settings, "browser_profile_ttl_days", 30))
+        self._profile_gc_done = False
         try:
             solver_config = {
                 key.removeprefix("captcha_"): value
@@ -252,8 +311,15 @@ class AdaptiveBypassManager:
         # unreachable (defect B4).
         self._failed_tiers: set[str] = set()
         self._session_cookies: list[dict[str, Any]] = []
+        # True after an exit-IP change (proxy activate/rotate) invalidates the
+        # IP-bound clearance session. While set, warm cookies from session
+        # memory / persistent state are NOT restored - they belong to the
+        # abandoned IP and would be incoherent on the new one. Cleared once
+        # fresh clearance is captured on the new IP (TRACK B coherence guard).
+        self._session_cookies_invalidated = False
         self._profile_dir: str | None = None
         self._owns_profile_dir = True
+        self._warmed_domains: set[str] = set()
         self._observed_challenge_type: str | None = None
         import asyncio
 
@@ -562,6 +628,7 @@ class AdaptiveBypassManager:
     def _transition_network(self, network: NetworkRoute) -> bool:
         """Atomically move the network axis, dropping the IP-bound session."""
         self._session_cookies.clear()
+        self._session_cookies_invalidated = True
         # A new exit IP may clear protection that blocked earlier engines, so
         # let the ladder try them again from the current tier upward.
         self._failed_tiers.clear()
@@ -600,28 +667,32 @@ class AdaptiveBypassManager:
         )
         self._budget.note_proxy_rotation()
         self._session_cookies.clear()
+        self._session_cookies_invalidated = True
         self._route_state = self._route_state.transition(session=SessionMode.FRESH)
         self._sync_context_route()
         logger.info("bypass_proxy_rotated", engine=self.current_name)
         return True
 
     def _persona_session_memory(self) -> Any:
-        """Lazy per-persona SessionMemory for returning-user simulation (Wave 5.2).
+        """Lazy per-(persona, domain) SessionMemory for returning-user simulation.
 
-        Opt-in via ``JOB_FTCH_SESSION_MEMORY_ENABLED``. Persists only
-        clearance-allowlist cookies keyed by persona, so a later run of the
-        same persona presents "returning user" signals.
+        Opt-in via ``JOB_FTCH_SESSION_MEMORY_ENABLED`` (default on since TRACK B2).
+        Persists only clearance-allowlist cookies keyed by persona AND domain, so
+        a later run of the same persona on the same site presents "returning user"
+        signals without leaking one site's cookies into another.
         """
         if not self._session_memory_enabled:
             return None
         persona_id = getattr(getattr(self._context, "persona", None), "name", "default")
+        domain = self._session_state_domain()
         if (
             self._session_memory is None
             or getattr(self._session_memory, "_persona_id", None) != persona_id
+            or getattr(self._session_memory, "_domain", "") != domain
         ):
             from job_ftch.infrastructure.bypass.session_memory import SessionMemory
 
-            self._session_memory = SessionMemory(persona_id)
+            self._session_memory = SessionMemory(persona_id, domain=domain or None)
         return self._session_memory
 
     def prepare_browser_config(self, config: dict[str, Any]) -> dict[str, Any]:
@@ -629,10 +700,17 @@ class AdaptiveBypassManager:
         prepared = dict(config)
         if prepared.get("persistent_context"):
             if self._profile_dir is None:
+                domain_profile = self._domain_profile_dir()
                 if self._configured_profile_persistent and self._configured_profile_dir:
+                    # Explicit operator override always wins.
                     profile_dir = self._configured_profile_dir
                     profile_dir.mkdir(parents=True, exist_ok=True)
                     self._profile_dir = str(profile_dir)
+                    self._owns_profile_dir = False
+                elif domain_profile is not None:
+                    # TRACK B1: reuse a stable per-domain profile across runs.
+                    domain_profile.mkdir(parents=True, exist_ok=True)
+                    self._profile_dir = str(domain_profile)
                     self._owns_profile_dir = False
                 else:
                     self._profile_dir = tempfile.mkdtemp(prefix="job_ftch_source_profile_")
@@ -642,9 +720,16 @@ class AdaptiveBypassManager:
             prepared["_profile_dir"] = self._profile_dir
         configured = list(prepared.get("cookies") or [])
         memory = self._persona_session_memory()
-        restored = list(memory.state.cookies) if memory is not None else []
         persistent_state = self._load_persistent_session_state()
-        persistent_cookies = list(persistent_state.get("cookies") or [])
+        # After an exit-IP change the warm clearance cookies are bound to the
+        # abandoned IP; restoring them onto a new IP is incoherent, so suppress
+        # them until fresh clearance is captured on the new IP.
+        if self._session_cookies_invalidated:
+            restored: list[dict[str, Any]] = []
+            persistent_cookies: list[dict[str, Any]] = []
+        else:
+            restored = list(memory.state.cookies) if memory is not None else []
+            persistent_cookies = list(persistent_state.get("cookies") or [])
         persistent_user_agent = str(persistent_state.get("user_agent", "") or "")
         if persistent_user_agent and not prepared.get("user_agent"):
             prepared["user_agent"] = persistent_user_agent
@@ -658,7 +743,34 @@ class AdaptiveBypassManager:
             by_key[key] = dict(cookie)
         if by_key:
             prepared["cookies"] = list(by_key.values())[:_MAX_SESSION_COOKIES]
+        self._maybe_add_warmup(prepared)
         return prepared
+
+    def _maybe_add_warmup(self, prepared: dict[str, Any]) -> None:
+        """Inject a cold-profile-only warm-up navigation to the domain root (B3).
+
+        On a COLD profile the browser first visits the origin root, then the
+        caller navigates to the deep listing in the same tab, so the Referer
+        chain root -> listing is genuine (browser-native, not injected). Warm
+        profiles get no extra navigation, and the warm-up fires at most once per
+        domain per run. An explicit warmup_url (e.g. session handoff) is honored.
+        """
+        if prepared.get("warmup_url"):
+            return
+        target = str(prepared.get("url") or "")
+        if not target or not self.is_cold_profile():
+            return
+        from urllib.parse import urlsplit, urlunsplit
+
+        parts = urlsplit(target)
+        if not parts.scheme or not parts.netloc:
+            return
+        root = urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
+        if root == target:
+            return  # listing already IS the root; nothing to warm to.
+        if not self.mark_warmed(parts.netloc):
+            return
+        prepared["warmup_url"] = root
 
     async def close(self) -> None:
         """Release source-scoped runtime artifacts after the terminal snapshot."""
@@ -695,6 +807,9 @@ class AdaptiveBypassManager:
                 break
         self._session_cookies = allowed
         if allowed:
+            # Fresh clearance captured on the current IP: the warm session is
+            # valid again for this identity/IP, so re-enable cookie restoration.
+            self._session_cookies_invalidated = False
             self._route_state = self._route_state.transition(session=SessionMode.STICKY)
             self._sync_context_route()
             memory = self._persona_session_memory()
@@ -710,6 +825,54 @@ class AdaptiveBypassManager:
     def _session_state_domain(self) -> str:
         domain = str(getattr(self._context, "domain", "") or "").lower()
         return domain.strip()
+
+    def _domain_profile_dir(self) -> Path | None:
+        """Resolve this source's stable per-domain profile dir (TRACK B1).
+
+        Returns ``None`` when per-domain profiles are disabled or the domain is
+        unknown, in which case the caller falls back to a throwaway tempdir. GC
+        of the profile root runs at most once per controller, lazily.
+        """
+        if not self._profile_per_domain:
+            return None
+        domain = self._session_state_domain()
+        if not domain:
+            return None
+        key = _domain_profile_key(domain)
+        if not self._profile_gc_done:
+            self._profile_gc_done = True
+            try:
+                _gc_profile_root(
+                    self._profile_root,
+                    max_bytes=self._profile_max_bytes,
+                    ttl_days=self._profile_ttl_days,
+                    keep=key,
+                )
+            except OSError:
+                logger.debug("browser_profile_gc_failed")
+        return self._profile_root / key
+
+    def is_cold_profile(self) -> bool:
+        """True when this domain has never been warmed (TRACK B3 signal).
+
+        A profile is cold when the persona/domain session memory reports zero
+        visits AND no per-domain session-state file exists yet. Warm profiles
+        skip the warm-up navigation so warm runs add no extra requests (R6).
+        """
+        memory = self._persona_session_memory()
+        visit_count = int(getattr(getattr(memory, "state", None), "visit_count", 0) or 0)
+        if visit_count > 0:
+            return False
+        state_path = self._session_state_path(self._session_state_domain())
+        return not (state_path is not None and state_path.exists())
+
+    def mark_warmed(self, domain: str) -> bool:
+        """Record a one-shot warm-up for ``domain``; return False if already warmed."""
+        key = domain.strip().lower()
+        if not key or key in self._warmed_domains:
+            return False
+        self._warmed_domains.add(key)
+        return True
 
     def _session_state_path(self, domain: str) -> Path | None:
         if not self._browser_session_state_enabled or not domain:
