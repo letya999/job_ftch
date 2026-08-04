@@ -251,6 +251,16 @@ class Settings(BaseSettings):
     bypass_max_source_proxy_rotations: int = Field(default=8, ge=0, le=50)
     bypass_max_weighted_work_per_source: int = Field(default=500, ge=1, le=10_000)
     bypass_default_requests_per_second: float = Field(default=2.0, ge=0.1, le=20.0)
+    # Background priming (TRACK C). Opt-in, polite: warms clearance sessions
+    # ahead of the live crawl so the crawl hits already-trusted sessions. Never
+    # faster than DomainPacer. Default off => behavior unchanged.
+    bypass_background_priming_enabled: bool = False
+    bypass_priming_state_dir: Path = Path(".runtime/priming")
+    bypass_priming_refresh_window_seconds: int = Field(default=600, ge=0, le=86_400)
+    bypass_priming_max_domains_per_cycle: int = Field(default=20, ge=1, le=500)
+    bypass_priming_settle_seconds: float = Field(default=6.0, ge=0.0, le=120.0)
+    bypass_priming_min_interval_seconds: int = Field(default=1800, ge=0, le=604_800)
+    bypass_priming_prefetch_listings: bool = False
     # CAPTCHA solving. `captcha_provider` is the external provider used when the
     # free browser-wait tier cannot clear a challenge. It only actually fires if
     # it is also listed in `captcha_enabled_providers`; paid providers
