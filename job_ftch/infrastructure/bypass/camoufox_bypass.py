@@ -8,6 +8,7 @@ from typing import Any
 
 from job_ftch.application.registry import BypassCapability, register_bypass
 from job_ftch.config import get_settings
+from job_ftch.infrastructure.bypass.proxy_pool import ProxyEndpoint
 
 try:
     from camoufox.async_api import AsyncCamoufox as _ImportedAsyncCamoufox
@@ -91,7 +92,7 @@ class CamoufoxBypass:
         if use_proxy:
             proxy_url = config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY")
             if proxy_url:
-                browser_kwargs["proxy"] = {"server": proxy_url}
+                browser_kwargs["proxy"] = ProxyEndpoint(url=str(proxy_url)).playwright_proxy()
 
         try:
             created_context: Any = None

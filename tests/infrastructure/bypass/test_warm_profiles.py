@@ -33,7 +33,7 @@ class TestPerDomainProfileDir:
         mgr = _mgr(tmp_path)
         prepared = mgr.prepare_browser_config({"persistent_context": True})
         first = prepared["_profile_dir"]
-        expected = mgr._profile_root / _domain_profile_key("jobs.example.com")
+        expected = mgr._profile_root / _domain_profile_key("jobs.example.com") / "direct"
         assert Path(first) == expected
         assert Path(first).is_dir()
         # A second controller for the same domain lands on the same dir.

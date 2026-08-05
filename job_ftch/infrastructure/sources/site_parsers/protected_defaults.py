@@ -45,10 +45,13 @@ class ProtectedBrowserDefaultsParser:
             extra={
                 "bypass_capability": "cloudflare_challenge",
                 "bypass_capability_reason": "protected_browser_defaults",
+                "challenge_retries": 1,
+                "challenge_wait_ms": 2500,
                 "disable_http2": True,
                 "monitor": "dom",
                 "persistent_context": True,
                 "protected_hint": "waf_challenge",
+                "wait_fallback": "load",
                 "settle_seconds": 5,
             },
         )

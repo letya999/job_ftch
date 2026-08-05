@@ -77,9 +77,7 @@ def _sample_shape(data: Any) -> dict[str, Any]:
     if isinstance(data, dict):
         keys = sorted(str(key) for key in data)[:30]
         list_counts = {
-            str(key): len(value)
-            for key, value in data.items()
-            if isinstance(value, list)
+            str(key): len(value) for key, value in data.items() if isinstance(value, list)
         }
         return {"type": "object", "keys": keys, "list_counts": list_counts}
     if isinstance(data, list):

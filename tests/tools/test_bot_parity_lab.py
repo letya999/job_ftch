@@ -268,6 +268,31 @@ def test_deep_catalog_detects_service_worker_realm_leak() -> None:
     assert report.signal_count >= 600
 
 
+def test_deep_catalog_accepts_anonymized_session_history_marker() -> None:
+    probe = _browser_probe()
+    probe["window"]["storage"]["history"] = {"sessionPresent": True, "visits": 1}  # type: ignore[index]
+    snapshot = {"requests": [_request("/")], "events": [{"payload": probe}]}
+
+    report = score_snapshot("patchright_browser", snapshot)
+
+    assert "CAT_HISTORY_ID_MISSING" not in {finding.code for finding in report.findings}
+
+
+def test_deep_catalog_accepts_firefox_angle_on_windows() -> None:
+    probe = _browser_probe()
+    window = probe["window"]  # type: ignore[index]
+    window["userAgent"] = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0"
+    )
+    window["userAgentData"] = None
+    window["chromeShape"] = {"hasChrome": False, "hasRuntime": False}
+    snapshot = {"requests": [_request("/")], "events": [{"payload": probe}]}
+
+    report = score_snapshot("camoufox", snapshot)
+
+    assert "CAT_FIREFOX_ANGLE_WEBGL" not in {finding.code for finding in report.findings}
+
+
 def test_markdown_and_json_contract_include_signal_count() -> None:
     report = score_snapshot("httpx_raw", {"requests": [_request("/")], "events": []})
 

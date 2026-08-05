@@ -45,6 +45,8 @@ class BrowserChallengeError(Exception):
         headers: dict[str, str] | None = None,
         body: bytes | None = None,
         challenge_type: str | None = None,
+        confidence: float | None = None,
+        evidence_hash: str | None = None,
     ) -> None:
         super().__init__(f"blocked browser challenge at {url}")
         self.url = url
@@ -52,6 +54,8 @@ class BrowserChallengeError(Exception):
         self.headers = headers or {}
         self.body = body
         self.challenge_type = challenge_type
+        self.confidence = confidence
+        self.evidence_hash = evidence_hash
 
 
 def raise_if_browser_challenge(html: str, *, url: str) -> None:
@@ -76,6 +80,8 @@ def raise_if_browser_challenge(html: str, *, url: str) -> None:
             status_code=200,
             body=body,
             challenge_type=detection.challenge_type,
+            confidence=detection.confidence,
+            evidence_hash=detection.evidence_hash,
         )
 
 

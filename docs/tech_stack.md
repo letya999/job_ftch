@@ -63,13 +63,16 @@ updated: 2026-08-03
 | `[tls_client]` | `tls-client` | Alternative TLS/HTTP impersonation transport |
 | `[camoufox]` | `camoufox` | Firefox anti-detect tier |
 | `[nodriver]` | `nodriver` | CDP-native browser tier |
+| `[parity_lab]` | `cryptography`, `httpx[http2]`, `hypercorn[h3]`, `maxminddb`, `starlette` | Local-only browser/network parity lab |
 | `[tracing]` | OTLP HTTP exporter | OpenObserve/Langfuse export |
 | `[langfuse]` | `langfuse` | Eval/trace client |
 | `[resilience]` | `tenacity` | Explicit retry helpers |
 | `[ollama]` | `httpx` | Ollama-compatible LLM path |
 
-`[all]` объединяет shipped optional stack. Новые heavy зависимости добавлять
-только через отдельный extra и с обновлением этого файла.
+`[all]` объединяет shipped runtime optional stack. Local-only lab/tooling extras
+such as `[parity_lab]` stay separate when they can conflict with production
+adapter dependency ranges. Новые heavy зависимости добавлять только через
+отдельный extra и с обновлением этого файла.
 
 ## Dev dependencies
 

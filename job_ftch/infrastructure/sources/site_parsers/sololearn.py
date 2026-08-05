@@ -51,7 +51,10 @@ class SololearnParser:
         response.raise_for_status()
         final_url = str(response.url)
         parsed_final = urlparse(final_url)
-        if parsed_final.hostname == "www.bamboohr.com" and parsed_final.path.rstrip("/") in {"", "/"}:
+        if parsed_final.hostname == "www.bamboohr.com" and parsed_final.path.rstrip("/") in {
+            "",
+            "/",
+        }:
             raise BoardGoneError(
                 "Sololearn BambooHR jobs board redirects to vendor root",
                 url=final_url,

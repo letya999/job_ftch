@@ -72,7 +72,44 @@ def test_runtime_browser_version_realigns_ua_and_client_hints() -> None:
     assert "Chrome/142" in aligned.ua
     assert '"Chromium";v="142"' in aligned.sec_ch_ua
     assert '"Google Chrome";v="142"' in aligned.sec_ch_ua
-    assert aligned.browser_version == "142"
+    assert aligned.browser_version == "142.0.7312.10"
+
+
+def test_nodriver_profile_does_not_inject_unverified_runtime_ua(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from job_ftch.infrastructure.bypass import fingerprint_profile
+
+    bypass = SimpleNamespace(_browser_args=["--existing-flag"], _lang=None)
+    monkeypatch.setattr(
+        fingerprint_profile,
+        "get_profile",
+        lambda: SimpleNamespace(accept_language="en-US,en;q=0.9"),
+    )
+
+    fingerprint_profile.patch_nodriver_bypass(bypass)
+
+    assert bypass._browser_args == ["--existing-flag"]
+    assert bypass._lang == "en-US"
+
+
+def test_adaptive_marks_only_automatically_projected_persona_ua() -> None:
+    manager = AdaptiveBypassManager()
+    manager.bind_context(
+        SimpleNamespace(
+            context_kwargs=lambda **_: {"user_agent": "Persona UA"},
+            set_browser_family=lambda _: None,
+            set_effective_route=lambda **_: None,
+        )
+    )
+
+    automatic = manager.prepare_browser_config({})
+    explicit = manager.prepare_browser_config({"user_agent": "Explicit UA"})
+
+    assert automatic["user_agent"] == "Persona UA"
+    assert automatic["_persona_user_agent"] is True
+    assert explicit["user_agent"] == "Explicit UA"
+    assert "_persona_user_agent" not in explicit
 
 
 @pytest.mark.asyncio
@@ -98,6 +135,11 @@ async def test_fingerprint_harness_covers_stable_canvas_audio_and_web_api_shapes
     assert "navigator.mediaDevices.enumerateDevices" in script
     assert "window.speechSynthesis.getVoices" in script
     assert "userAgentData" in script
+    assert "window.Error = function" not in script
+    assert "Error.prepareStackTrace = function" not in script
+    assert "window.chrome, 'runtime'" not in script
+    assert "usage: estimate.usage || 1234567" not in script
+    assert "CanvasRenderingContext2D.prototype.measureText" not in script
 
 
 @pytest.mark.asyncio

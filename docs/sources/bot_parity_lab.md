@@ -10,6 +10,15 @@ bypass stack. It runs a localhost site, records every request, collects runtime
 browser probes, and scores whether a client looks self-consistent across
 network, JavaScript, realm, behavior, and short-session history surfaces.
 
+The same `tools/bot_parity_lab` tool also contains the full owned
+`bot-browser-parity-lab` reference implementation under its local `paritylab`
+package. It adds passive TLS ClientHello capture, JA3/JA4 evidence,
+HTTP/2/HTTP/3-aware request graph scoring, window/iframe/worker/SharedWorker
+probes, opaque-payload observations, an opt-in protected career-site playground
+with local challenge/clearance/gate decisions, and the explainable
+`hard_bot_signal` / `medium_suspicious` / `low_entropy_mismatch` finding model.
+Keep its `LICENSE` and `NOTICE.md` with the vendored copy.
+
 It is not part of production ingest and does not target third-party sites. The
 lab is a defensive red-team gate: it should make weak bypass tiers visible
 before a scraper route is trusted.
@@ -36,6 +45,8 @@ evaluates hundreds of atomic signals and records `signal_count` in both raw JSON
 and Markdown output.
 
 ## Run
+
+Fast in-repo smoke lab:
 
 ```bash
 uv run python -m tools.bot_parity_lab.runner --out artifacts/bot_parity_lab
@@ -66,6 +77,36 @@ Outputs:
   `signal_count`.
 - `bot_parity_report.md` is the human-readable summary.
 
+Full parity campaign against the real `job_ftch` browser tiers:
+
+```bash
+uv run python scripts/eval/run_bot_browser_parity_lab.py \
+  --tiers patchright_browser,nodriver,camoufox,cloak \
+  --out artifacts/bot_parity_lab
+```
+
+The wrapper sets `PARITYLAB_CLIENT_HOOK=examples.job_ftch_hook:run_owned_browser`
+and runs the vendored `project-browser-hook` adapter against each selected tier.
+The hook uses the actual `job_ftch` bypass strategy, browser config preparation,
+`open_page`, and `navigate` flow against a loopback-only URL. A gated run
+returns a non-zero exit code when the selected browser tier emits hard or medium
+parity findings. Use `--allow-fail-tiers` only for known negative controls or
+while triaging a tier.
+
+Parsed `raw.json` artifacts can be normalized through
+`job_ftch.infrastructure.bypass.parity_audit` to surface counts and blocking
+codes. This is the bridge for campaign dashboards and future observability.
+
+## Protected Playground
+
+`PARITYLAB_PLAYGROUND=1` enables the owned career-site playground. It serves a
+deterministic jobs catalog and API, hidden trap paths, proof-of-work,
+interactive puzzle, HMAC clearance cookie, edge gate decisions, and
+`/api/playground/report/<sid>`. The playground classifies local scrape intent
+such as recon, pagination walk, detail harvest, API harvest, catalog harvest,
+or trap seeking. Full route and artifact details live in
+`tools/bot_parity_lab/docs/PLAYGROUND.md`.
+
 ## Boundaries
 
 This layer does not claim production bot-management equivalence. Localhost
@@ -85,4 +126,10 @@ Run these focused checks after editing the lab:
 uv run pytest tests/tools/test_bot_parity_lab.py
 uv run ruff check tools/bot_parity_lab tests/tools/test_bot_parity_lab.py
 uv run ruff format --check tools/bot_parity_lab tests/tools/test_bot_parity_lab.py
+```
+
+For the standalone `paritylab` package tests, run from `tools/bot_parity_lab`:
+
+```bash
+python -m pytest tests -q
 ```

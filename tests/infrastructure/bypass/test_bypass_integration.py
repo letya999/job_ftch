@@ -142,10 +142,7 @@ class TestPhaseA1RiskRouterPersistence:
             "job_ftch.infrastructure.bypass.risk_router.list_bypass_capabilities",
             return_value=capabilities,
         ):
-            assert (
-                router.select_tier("https://hard.example.com/jobs")
-                == "patchright_browser"
-            )
+            assert router.select_tier("https://hard.example.com/jobs") == "patchright_browser"
 
 
 class TestPhaseA2BypassContext:

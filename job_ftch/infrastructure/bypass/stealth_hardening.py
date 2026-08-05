@@ -227,11 +227,15 @@ _WORKER_WEBGL_BOOTSTRAP_JS = """
 
 _WORKER_NAVIGATOR_JS = """
 (() => {
+    const USER_AGENT = %s;
+    const PLATFORM = %s;
     const LANGUAGE = '%s';
     const LANGUAGES = %s;
     if (typeof navigator === 'undefined') return;
     const proto = Object.getPrototypeOf(navigator);
     try {
+        Object.defineProperty(proto, 'userAgent', {get: () => USER_AGENT, configurable: true});
+        Object.defineProperty(proto, 'platform', {get: () => PLATFORM, configurable: true});
         Object.defineProperty(proto, 'language', {get: () => LANGUAGE, configurable: true});
         Object.defineProperty(proto, 'languages', {get: () => LANGUAGES.slice(), configurable: true});
     } catch (e) {}
@@ -268,6 +272,12 @@ _CLIENT_HINTS_JS = """
                 bitness: '%s',
                 model: '',
                 uaFullVersion: '%s',
+                fullVersionList: %s.map((entry) => ({
+                    brand: entry.brand,
+                    version: entry.brand === 'Chromium' || entry.brand === 'Google Chrome'
+                        ? '%s'
+                        : entry.version,
+                })),
             }),
         }),
     });
@@ -350,12 +360,14 @@ _WEB_API_SHAPE_JS = """
 (() => {
     if (navigator.permissions && navigator.permissions.query) {
         const nativeQuery = navigator.permissions.query.bind(navigator.permissions);
-        navigator.permissions.query = (descriptor) => {
+        navigator.permissions.query = function query(descriptor) {
             if (descriptor && descriptor.name === 'notifications' && window.Notification) {
-                return Promise.resolve({state: Notification.permission, onchange: null});
+                const state = Notification.permission === 'default' ? 'prompt' : Notification.permission;
+                return Promise.resolve({state, onchange: null});
             }
             return nativeQuery(descriptor);
         };
+        if (window.__markNative) window.__markNative(navigator.permissions.query, 'query');
     }
     if (navigator.getBattery) {
         const battery = Promise.resolve({
@@ -1099,6 +1111,8 @@ async def apply_stealth_hardening(
     device_memory: int = 8,
     navigator_vendor: str = "Google Inc.",
     navigator_oscpu: str = "Windows NT 10.0; Win64; x64",
+    user_agent: str = "",
+    navigator_platform: str = "Win32",
     font_spacing_seed: int = 42,
     font_list: list[str] | None = None,
     speech_voices: list[str] | None = None,
@@ -1122,6 +1136,8 @@ async def apply_stealth_hardening(
                 webgl_patch,
                 _WORKER_NAVIGATOR_JS
                 % (
+                    json.dumps(user_agent),
+                    json.dumps(navigator_platform),
                     locale.replace("'", "\\'"),
                     json.dumps([locale, locale.split("-")[0]]),
                 ),
@@ -1140,8 +1156,6 @@ async def apply_stealth_hardening(
             # now owned by the context-level ``timezone_id`` option, which
             # Playwright applies via CDP to every realm (window + workers) so
             # Intl and Date stay coherent by construction.
-            _WEBDRIVER_HIDE_JS % locale,
-            _FONT_SPACING_JS % font_spacing_seed,
             _WEB_API_SHAPE_JS,
             # navigator.hardwareConcurrency / deviceMemory are deliberately NOT
             # patched in JS (defect A5, same class as the A3 timezone fix). An
@@ -1153,12 +1167,8 @@ async def apply_stealth_hardening(
             # coherent than faking a value we cannot enforce in workers.
             _NAVIGATOR_VENDOR_JS % navigator_vendor.replace("'", "\\'"),
             _NAVIGATOR_OSCPU_JS % navigator_oscpu.replace("'", "\\'"),
-            _ERROR_PROTOTYPE_JS,
-            _IFRAME_WEBDRIVER_JS,
-            _STACK_TRACE_JS,
             _GAMEPAD_JS,
             _MEDIA_DEVICES_JS,
-            _STORAGE_ESTIMATE_JS,
             _INTL_LOCALE_JS % locale,
             _CLIPBOARD_JS,
             _MUTATION_OBSERVER_JS,
@@ -1187,11 +1197,12 @@ async def apply_stealth_hardening(
                         architecture,
                         bitness,
                         chrome_version,
+                        brands_js,
+                        chrome_version,
                     ),
                     _CHROMIUM_SHAPE_JS,
                     _HEADER_ORDER_JS,
                     _CONNECTION_ISOLATION_JS,
-                    _CHROME_RUNTIME_JS,
                 ]
             )
         if proxy_active:
@@ -1287,6 +1298,8 @@ async def apply_persona_hardening(
         device_memory=getattr(persona, "device_memory", 8),
         navigator_vendor=getattr(persona, "navigator_vendor", "Google Inc."),
         navigator_oscpu=getattr(persona, "navigator_oscpu", "Windows NT 10.0; Win64; x64"),
+        user_agent=getattr(persona, "ua", ""),
+        navigator_platform=getattr(persona, "navigator_platform", "Win32"),
         font_spacing_seed=getattr(persona, "font_spacing_seed", 42),
         font_list=getattr(persona, "font_list", None),
         speech_voices=getattr(persona, "speech_voices", None),

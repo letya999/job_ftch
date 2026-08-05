@@ -70,7 +70,10 @@ async def test_captcha_detection(monkeypatch: pytest.MonkeyPatch):
     profile = await fingerprint("https://example.com/blocked", client)
 
     assert profile.site_class == SiteClass.BLOCKED
-    assert profile.detected_config == {"challenge": True, "render": True}
+    assert profile.detected_config["challenge"] is True
+    assert profile.detected_config["render"] is True
+    assert profile.detected_config["challenge_confidence"] > 0
+    assert len(profile.detected_config["challenge_evidence_hash"]) == 16
 
 
 @pytest.mark.asyncio

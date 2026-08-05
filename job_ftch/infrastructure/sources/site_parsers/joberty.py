@@ -81,7 +81,11 @@ class JobertyParser:
             detail = await self._get_detail(client, str(job_id))
             merged = {**row, **detail}
             company_slug = _clean(merged.get("companyUrlName"))
-            job_url = f"{_BOARD_URL}/{company_slug}-{job_id}" if company_slug else f"{_BOARD_URL}/{job_id}"
+            job_url = (
+                f"{_BOARD_URL}/{company_slug}-{job_id}"
+                if company_slug
+                else f"{_BOARD_URL}/{job_id}"
+            )
             company = _clean(merged.get("companyName"))
             cities = _join(merged.get("cities"))
             domains = _join(merged.get("domains"))

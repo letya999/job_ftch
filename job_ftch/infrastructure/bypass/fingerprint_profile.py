@@ -246,9 +246,15 @@ def patch_curl_bypass(bypass: Any) -> None:
 
 
 def patch_nodriver_bypass(bypass: Any) -> None:
-    """Align a NodriverBypass instance with the canonical profile."""
+    """Apply only runtime-independent profile values to Nodriver.
+
+    Nodriver may select a system Chrome executable that differs from the
+    Playwright/curl runtime used to derive ``get_profile()``. Do not inject
+    that profile's UA before the executable can report its own version: doing
+    so leaves native UA-CH at one major while the command-line UA claims
+    another. An explicit caller UA remains supported by NodriverBypass.
+    """
     profile = get_profile()
-    bypass._browser_args = list(bypass._browser_args or []) + profile.browser_args
     if not bypass._lang:
         bypass._lang = profile.accept_language.split(",")[0]
 

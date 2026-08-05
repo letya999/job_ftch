@@ -93,7 +93,9 @@ class DisqoParser:
         source_name = spec.source_name or "disqo"
         tree = LexborHTMLParser(shortcode_html)
         for card in tree.css(".ljb-job-card")[: spec.limit or 50]:
-            title = _clean(card.css_first(".ljb-job-title").text() if card.css_first(".ljb-job-title") else "")
+            title = _clean(
+                card.css_first(".ljb-job-title").text() if card.css_first(".ljb-job-title") else ""
+            )
             link = card.css_first("a[href]")
             job_url = link.attributes.get("href", "") if link else ""
             if not title or not job_url:
@@ -112,7 +114,9 @@ class DisqoParser:
                 else ""
             )
             salary = _clean(
-                card.css_first(".ljb-job-salary").text() if card.css_first(".ljb-job-salary") else ""
+                card.css_first(".ljb-job-salary").text()
+                if card.css_first(".ljb-job-salary")
+                else ""
             )
             yield build_raw_item(
                 source_kind=SourceKind.CAREER_SITE,

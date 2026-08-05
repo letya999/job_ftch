@@ -491,10 +491,12 @@ def align_persona_version(
         "chromium_patched": "chromium",
         "chromium_patchright": "chromium",
     }.get(browser_family, browser_family)
-    match = re.search(r"\d+", reported_version)
+    match = re.search(r"\d+(?:\.\d+){0,3}", reported_version)
     if match is None or normalized_family != persona.browser_family:
         return persona
-    major = match.group(0)
+    runtime_version = match.group(0)
+    major = runtime_version.split(".", maxsplit=1)[0]
+    full_version = runtime_version if "." in runtime_version else f"{major}.0.0.0"
     if normalized_family == "chromium":
         ua = re.sub(r"Chrome/\d+", f"Chrome/{major}", persona.ua)
         client_hints = re.sub(
@@ -512,5 +514,5 @@ def align_persona_version(
         persona,
         ua=ua,
         sec_ch_ua=client_hints,
-        browser_version=major,
+        browser_version=full_version,
     )

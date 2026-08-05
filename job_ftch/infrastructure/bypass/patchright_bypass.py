@@ -20,11 +20,15 @@ class PatchrightBrowserBypass:
     that belong to the Patchright-specific escalation step.
     """
 
+    requires_process_identity = True
+
     async def apply_http(self, client: Any) -> Any:
         return client
 
     def apply_browser_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         args = list(kwargs.get("args", []) or [])
+        process_user_agent = kwargs.pop("_process_identity_user_agent", None)
+        process_locale = kwargs.pop("_process_identity_locale", None)
         for arg in (
             "--disable-blink-features=AutomationControlled",
             "--disable-features=IsolateOrigins,site-per-process",
@@ -32,6 +36,10 @@ class PatchrightBrowserBypass:
         ):
             if arg not in args:
                 args.append(arg)
+        if process_user_agent and not any(arg.startswith("--user-agent=") for arg in args):
+            args.append(f"--user-agent={process_user_agent}")
+        if process_locale and not any(arg.startswith("--lang=") for arg in args):
+            args.append(f"--lang={process_locale}")
         kwargs["args"] = args
         kwargs["_patchright_required"] = True
         return kwargs

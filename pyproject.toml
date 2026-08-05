@@ -37,6 +37,13 @@ dependencies = [
 browser = ["patchright>=1.49", "cloakbrowser>=0.5.1"]
 camoufox = ["camoufox>=0.5.4"]
 nodriver = ["nodriver>=0.50.2"]
+parity_lab = [
+    "cryptography==50.0.0",
+    "httpx[http2]>=0.28.1,<0.29",
+    "hypercorn[h3]==0.18.0",
+    "maxminddb==3.1.1",
+    "starlette==1.3.1",
+]
 # curl-cffi impersonation profiles are pinned per release so floating minors
 # cannot silently mutate the JA3/JA4 baseline. Version 0.15.0 is required for
 # PYSEC-2026-2431; its Python 3.12 import regression is handled narrowly in
@@ -188,6 +195,7 @@ dev = [
     "pytest-benchmark>=4.0",
     "bandit[toml]>=1.7",
     "pip-audit>=2.10",
+    "jsonschema>=4.0",
     "httpx",
     "hypothesis>=6.100",
     "syrupy>=4.0",
@@ -204,6 +212,11 @@ packages = ["job_ftch"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+extend-exclude = [
+    "tools/bot_parity_lab/paritylab/**",
+    "tools/bot_parity_lab/tests/**",
+    "tools/bot_parity_lab/examples/project_hook.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "TCH"]
@@ -213,6 +226,9 @@ ignore = ["E501"]
 "tests/*" = ["S101"]  # allow assert in tests
 "job_ftch/adapters/**/*.py" = ["TC001"]
 "job_ftch/application/builder.py" = ["TC001", "TC006"]
+"tools/bot_parity_lab/paritylab/**/*.py" = ["ALL"]
+"tools/bot_parity_lab/tests/**/*.py" = ["ALL"]
+"tools/bot_parity_lab/examples/project_hook.py" = ["ALL"]
 
 [tool.mypy]
 python_version = "3.12"

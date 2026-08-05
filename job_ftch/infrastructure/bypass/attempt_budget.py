@@ -50,6 +50,7 @@ class AttemptBudget:
         self.source_browser_launches = 0
         self.source_proxy_rotations = 0
         self.weighted_work = 0
+        self.attempts: list[dict[str, object]] = []
         self._operation: ContextVar[OperationState | None] = ContextVar(
             f"bypass_operation_{id(self)}",
             default=None,
@@ -85,6 +86,14 @@ class AttemptBudget:
         if operation is not None and operation.route_attempts >= self.max_route_attempts:
             return False
         return self.weighted_work + max(1, weight) <= self.max_weighted_work
+
+    def attempt_exhausted(self) -> bool:
+        """Whether the active operation must stop before another route action."""
+        remaining = remaining_source_seconds()
+        if remaining is not None and remaining <= 0:
+            return True
+        operation = self._operation.get()
+        return operation is not None and operation.attempts >= self.max_route_attempts
 
     def note_route_transition(self, *, weight: int) -> None:
         operation = self._operation.get()
@@ -149,26 +158,31 @@ class AttemptBudget:
                 operation.same_route_retry_count = 0
                 operation.last_route = route
         source_hash = hashlib.sha256(source_id.encode()).hexdigest()[:16]
-        logger.info(
-            "bypass_attempt",
-            source_hash=source_hash,
-            url_hash=source_hash,
-            operation_id=operation.operation_id if operation else "unscoped",
-            operation_kind=operation.kind if operation else "unscoped",
-            attempt_number=operation.attempts if operation else 1,
-            transport=transport,
-            browser=browser,
-            network=network,
-            session_generation=session_generation,
-            challenge_action=challenge_action,
-            failure_kind=failure_kind,
-            status_code=status_code,
-            elapsed_ms=(
+        event: dict[str, object] = {
+            "source_hash": source_hash,
+            "url_hash": source_hash,
+            "operation_id": operation.operation_id if operation else "unscoped",
+            "operation_kind": operation.kind if operation else "unscoped",
+            "attempt_number": operation.attempts if operation else 1,
+            "transport": transport,
+            "browser": browser,
+            "network": network,
+            "session_generation": session_generation,
+            "challenge_action": challenge_action,
+            "failure_kind": failure_kind,
+            "status_code": status_code,
+            "elapsed_ms": (
                 round((time.monotonic() - operation.started_at) * 1000) if operation else None
             ),
-            remaining_deadline_ms=(round(remaining * 1000) if remaining is not None else None),
-            same_route_retry_count=(operation.same_route_retry_count if operation else 0),
-            route_transition_count=operation.route_attempts if operation else 0,
-            proxy_rotation_count=operation.proxy_rotations if operation else 0,
-            browser_launch_count=operation.browser_launches if operation else 0,
-        )
+            "remaining_deadline_ms": round(remaining * 1000) if remaining is not None else None,
+            "same_route_retry_count": operation.same_route_retry_count if operation else 0,
+            "route_transition_count": operation.route_attempts if operation else 0,
+            "proxy_rotation_count": operation.proxy_rotations if operation else 0,
+            "browser_launch_count": operation.browser_launches if operation else 0,
+        }
+        self.attempts.append(event)
+        logger.info("bypass_attempt", **event)
+
+    def snapshot(self) -> list[dict[str, object]]:
+        """Return token/cookie-safe route attempt telemetry."""
+        return [dict(event) for event in self.attempts]

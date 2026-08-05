@@ -235,15 +235,18 @@ parsers:
     has_custom_parse: false
     supports_discover: false
     render: true
-    wait: "networkidle"
+    wait: "domcontentloaded"
     include_if_detail_page: false
     extra:
       bypass_capability: "cloudflare_challenge"
       bypass_capability_reason: "protected_browser_defaults"
+      challenge_retries: 1
+      challenge_wait_ms: 2500
       disable_http2: true
       monitor: "dom"
       persistent_context: true
       protected_hint: "waf_challenge"
+      wait_fallback: "load"
       settle_seconds: 5
   - name: rabota_by
     domain_pattern: "^https?://([a-z0-9-]+\\.)?rabota\\.by(?:/|$)"

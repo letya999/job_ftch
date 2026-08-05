@@ -65,6 +65,16 @@ def _parser_name(spec: CareerSiteSpec) -> str | None:
     return parser.__class__.__name__
 
 
+def _ua_family(ua: str) -> str | None:
+    if "Firefox/" in ua:
+        return "firefox"
+    if "Chrome/" in ua or "Chromium/" in ua:
+        return "chromium"
+    if "Safari/" in ua:
+        return "safari"
+    return None
+
+
 def _failure_bucket(
     *,
     item_count: int,
@@ -88,12 +98,18 @@ def _failure_bucket(
     error = (source_result.error or "").casefold()
     zero_reason = str(stats.get("zero_reason") or "")
     detected = stats.get("detected_monitor_config") or {}
+    has_challenge_evidence = bool(
+        detected.get("challenge")
+        or stats.get("detected_captcha_types")
+        or stats.get("challenge_events")
+    )
     if "err_tunnel_connection_failed" in error or "tunnel connection failed" in error:
         return "provider_tunnel_denied"
     if zero_reason == "soft_403_with_content":
         return "soft_403_with_content"
     if zero_reason == "waf_challenge" or (
-        zero_reason == "blocked_no_bypass_left" and detected.get("challenge")
+        zero_reason in {"blocked_no_bypass_left", "monitor_empty", "all_monitors_exhausted"}
+        and has_challenge_evidence
     ):
         return "waf_challenge"
     if parser_name == "ProtectedBrowserDefaultsParser" and zero_reason == "blocked_no_bypass_left":
@@ -157,7 +173,44 @@ def _probe_result(
     final_tier = getattr(bypass_obj, "current_name", None)
     route_state = getattr(bypass_obj, "route_state", None)
     final_network = getattr(getattr(route_state, "network", None), "value", None)
+    final_session = getattr(getattr(route_state, "session", None), "value", None)
+    final_challenge_state = getattr(getattr(route_state, "challenge", None), "value", None)
     escalations = int(getattr(bypass_obj, "escalations_total", 0) or 0)
+    attempt_telemetry = getattr(bypass_obj, "attempt_telemetry", [])
+    route_transition_telemetry = getattr(bypass_obj, "route_transition_telemetry", [])
+    bypass_ctx = getattr(getattr(source, "_source", source), "_bypass_ctx", None)
+    persona = getattr(bypass_ctx, "persona", None)
+    viewport = None
+    if persona is not None:
+        viewport = {
+            "width": getattr(persona, "viewport_width", None),
+            "height": getattr(persona, "viewport_height", None),
+        }
+    coherence_ok: bool | None = None
+    coherence_issues: list[str] = []
+    if persona is not None:
+        try:
+            from job_ftch.infrastructure.bypass.identity.coherence import check_identity
+
+            coherence_report = check_identity(persona)
+            coherence_ok = coherence_report.ok
+            coherence_issues = [f"{issue.code}:{issue.axis}" for issue in coherence_report.issues]
+        except Exception as exc:
+            coherence_ok = False
+            coherence_issues = [f"check_failed:{exc.__class__.__name__}"]
+    parser_outcome = {
+        "page_opened": bool(
+            stats.get("monitored")
+            or stats.get("rich_emitted")
+            or stats.get("detail_attempted")
+            or len(items) > 0
+        ),
+        "substantial_content": bool(
+            len(items) > 0 or stats.get("scraped") or stats.get("rich_emitted")
+        ),
+        "urls_found": int(stats.get("monitored") or 0),
+        "items_extracted": len(items),
+    }
 
     parser_name = _parser_name(source.spec)
     is_partial = bool(source_result.partial)
@@ -185,7 +238,20 @@ def _probe_result(
         "exception": source_result.error,
         "bypass_final_tier": final_tier,
         "bypass_final_network": final_network,
+        "bypass_final_session": final_session,
+        "bypass_final_challenge_state": final_challenge_state,
         "bypass_escalations": escalations,
+        "bypass_attempts": attempt_telemetry,
+        "bypass_route_transitions": route_transition_telemetry,
+        "fingerprint_audit": {
+            "browser_family": getattr(persona, "browser_family", None),
+            "ua_family": _ua_family(str(getattr(persona, "ua", "") or "")),
+            "timezone": getattr(persona, "timezone", None),
+            "viewport": viewport,
+            "coherent": coherence_ok,
+            "issues": coherence_issues,
+        },
+        "parser_outcome": parser_outcome,
         "evicted": source_result.evicted,
         "eviction_kind": source_result.eviction_kind,
         "terminal_outcome": source_result.terminal_outcome,
@@ -206,6 +272,8 @@ def _probe_result(
                 "zero_reason",
                 "detected_monitor_config",
                 "detected_captcha_types",
+                "challenge_events",
+                "monitor_failure_without_escalation",
             )
         },
         "selection": {"site_class": "not_probed", "recommended_monitors": []},
@@ -298,7 +366,19 @@ def _timeout_result(url: str, *, elapsed_seconds: float) -> dict[str, Any]:
         "preflight_error": None,
         "exception": "TimeoutError: source task exceeded watchdog deadline",
         "bypass_final_tier": None,
+        "bypass_final_network": None,
+        "bypass_final_session": None,
+        "bypass_final_challenge_state": None,
         "bypass_escalations": 0,
+        "bypass_attempts": [],
+        "bypass_route_transitions": [],
+        "fingerprint_audit": {},
+        "parser_outcome": {
+            "page_opened": False,
+            "substantial_content": False,
+            "urls_found": 0,
+            "items_extracted": 0,
+        },
         "evicted": True,
         "eviction_kind": "task_watchdog",
         "terminal_outcome": "deadline_exceeded",
@@ -620,8 +700,12 @@ async def main() -> int:
     watchdog_thread.start()
 
     completed_count = 0
+
     def _global_budget_exhausted() -> bool:
-        return args.global_timeout is not None and time.monotonic() - batch_started_at >= args.global_timeout
+        return (
+            args.global_timeout is not None
+            and time.monotonic() - batch_started_at >= args.global_timeout
+        )
 
     while url_by_task:
         if _global_budget_exhausted():
@@ -631,7 +715,8 @@ async def main() -> int:
                 _record_result(
                     _global_timeout_result(
                         url,
-                        elapsed_seconds=time.monotonic() - task_started_at.get(task, batch_started_at),
+                        elapsed_seconds=time.monotonic()
+                        - task_started_at.get(task, batch_started_at),
                     )
                 )
                 url_by_task.pop(task, None)

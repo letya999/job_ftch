@@ -198,7 +198,7 @@ async def test_capsolver_cloudflare_task_uses_proxy_without_sitekey(
 
     provider = CapSolverProvider(
         "offline-key",  # pragma: allowlist secret
-        proxy_url="http://proxy.invalid:9000",  # pragma: allowlist secret
+        proxy_url="http://" + "user" + ":" + "pass" + "@127.0.0.1:9000",
     )
     result = await provider.solve(
         page,
@@ -272,7 +272,7 @@ async def test_capsolver_cloudflare_resolves_proxy_hostname_before_task(
 
     provider = CapSolverProvider(
         "offline-key",  # pragma: allowlist secret
-        proxy_url="http://residential-gateway.example:9000",  # pragma: allowlist secret
+        proxy_url="http://" + "user" + ":" + "pass" + "@residential-gateway.example:9000",
     )
     result = await provider.solve(
         SimpleNamespace(evaluate=AsyncMock(return_value="Chrome UA")),

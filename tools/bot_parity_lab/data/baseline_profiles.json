@@ -1,0 +1,16 @@
+{
+  "version": "1.0.0",
+  "profiles": [
+    {"id":"playwright-chrome-channel-windows-headed","browser":"chromium","engine":"blink","os":"windows","mode":"headed","controller":"playwright","expected_disposition":"pass","minimum_runs":3},
+    {"id":"playwright-firefox-windows-headed","browser":"firefox","engine":"gecko","os":"windows","mode":"headed","controller":"playwright","expected_disposition":"pass","minimum_runs":3},
+    {"id":"playwright-webkit-windows-headed","browser":"webkit","engine":"webkit","os":"windows","mode":"headed","controller":"playwright","expected_disposition":"pass","minimum_runs":3},
+    {"id":"playwright-chromium-windows-headed","browser":"chromium","engine":"blink","os":"windows","mode":"headed","controller":"playwright","expected_disposition":"pass","minimum_runs":3},
+    {"id":"playwright-chromium-windows-headless","browser":"chromium","engine":"blink","os":"windows","mode":"headless","controller":"playwright","expected_disposition":"expected_fail","minimum_runs":3},
+    {"id":"patchright-chromium-windows-headed","browser":"chromium","engine":"blink","os":"windows","mode":"headed","controller":"patchright","expected_disposition":"pass","minimum_runs":3},
+    {"id":"nodriver-chromium-windows-headed","browser":"chromium","engine":"blink","os":"windows","mode":"headed","controller":"nodriver","expected_disposition":"pass","minimum_runs":3},
+    {"id":"camoufox-firefox-windows-headed","browser":"firefox","engine":"gecko","os":"windows","mode":"headed","controller":"camoufox","expected_disposition":"pass","minimum_runs":3},
+    {"id":"raw-httpx-negative","browser":"none","engine":"httpx","os":"any","mode":"none","controller":"httpx","expected_disposition":"expected_fail","minimum_runs":3},
+    {"id":"curl-negative","browser":"none","engine":"curl","os":"any","mode":"none","controller":"curl","expected_disposition":"expected_fail","minimum_runs":3},
+    {"id":"tls-impersonation-negative","browser":"none","engine":"impersonator","os":"linux","mode":"none","controller":"curl-impersonate","expected_disposition":"expected_fail","minimum_runs":3}
+  ]
+}

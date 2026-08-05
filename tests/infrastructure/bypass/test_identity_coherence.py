@@ -119,6 +119,35 @@ def test_i2_timezone_is_not_patched_in_injected_js() -> None:
     assert "_TIMEZONE_JS % timezone" not in module_src
 
 
+def test_worker_bootstrap_patches_declared_identity_axes() -> None:
+    from job_ftch.infrastructure.bypass import stealth_hardening
+
+    module_src = _read_module_source(stealth_hardening)
+    assert "Object.defineProperty(proto, 'userAgent'" in module_src
+    assert "Object.defineProperty(proto, 'platform'" in module_src
+    assert (
+        "if (window.__markNative) window.__markNative(navigator.permissions.query, 'query')"
+        in module_src
+    )
+
+
+def test_notification_default_maps_to_permissions_prompt() -> None:
+    from job_ftch.infrastructure.bypass import stealth_hardening
+
+    module_src = _read_module_source(stealth_hardening)
+    assert (
+        "Notification.permission === 'default' ? 'prompt' : Notification.permission" in module_src
+    )
+
+
+def test_chromium_high_entropy_client_hints_include_full_version_list() -> None:
+    from job_ftch.infrastructure.bypass import stealth_hardening
+
+    module_src = _read_module_source(stealth_hardening)
+    assert "fullVersionList:" in module_src
+    assert "entry.brand === 'Chromium' || entry.brand === 'Google Chrome'" in module_src
+
+
 def _read_module_source(module: object) -> str:
     import inspect
 

@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-
 from tools.bot_parity_lab.scoring import ScoreReport, score_snapshot, to_markdown
 from tools.bot_parity_lab.server import LabServer
 

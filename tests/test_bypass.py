@@ -10,6 +10,7 @@ from job_ftch.infrastructure.bypass.cloak_bypass import CloakBrowserBypass
 from job_ftch.infrastructure.bypass.curl_bypass import CurlBypass
 from job_ftch.infrastructure.bypass.nodriver_bypass import NodriverBypass
 from job_ftch.infrastructure.bypass.noop import NoopBypass
+from job_ftch.infrastructure.bypass.patchright_bypass import PatchrightBrowserBypass
 from job_ftch.infrastructure.bypass.stealth_browser import StealthBrowserBypass
 from job_ftch.infrastructure.sources.site_fingerprinter import fingerprint
 
@@ -37,6 +38,21 @@ async def test_resolve_stealth_browser() -> None:
     kwargs = bypass.apply_browser_args({"args": ["--headless"]})
     assert "--disable-blink-features=AutomationControlled" in kwargs["args"]
     assert "--disable-web-security" not in kwargs["args"]
+
+
+def test_patchright_projects_identity_to_worker_bootstrap_requests() -> None:
+    result = PatchrightBrowserBypass().apply_browser_args(
+        {
+            "args": [],
+            "_process_identity_user_agent": "Mozilla/5.0 Chrome/150.0.0.0",
+            "_process_identity_locale": "de-DE",
+        }
+    )
+
+    assert "_process_identity_user_agent" not in result
+    assert "_process_identity_locale" not in result
+    assert "--user-agent=Mozilla/5.0 Chrome/150.0.0.0" in result["args"]
+    assert "--lang=de-DE" in result["args"]
 
 
 @pytest.mark.asyncio
@@ -196,10 +212,15 @@ def test_ordinary_launcher_consumes_internal_cloak_metadata() -> None:
 
     chromium = object()
     playwright = SimpleNamespace(chromium=chromium, firefox=object(), webkit=object())
-    kwargs = {"_cloakbrowser_backend": "patchright", "_patchright_required": True}
+    kwargs = {
+        "_cloakbrowser_backend": "patchright",
+        "_patchright_required": True,
+        "geoip": True,
+    }
     assert _playwright_launcher(playwright, kwargs) is chromium
     assert "_cloakbrowser_backend" not in kwargs
     assert "_patchright_required" not in kwargs
+    assert "geoip" not in kwargs
 
 
 @pytest.mark.asyncio
@@ -379,7 +400,10 @@ async def test_nodriver_bypass_preserves_browser_config(
     )
     monkeypatch.setenv("JOB_FTCH_HTTP_PROXY", "http://proxy.local:8080")
 
-    bypass = NodriverBypass(browser_args=["--existing-flag"], lang="en-US")
+    bypass = NodriverBypass(
+        browser_args=["--existing-flag", "--user-agent=Old/1.0", "--lang=de-DE"],
+        lang="en-US",
+    )
     config = {
         "headless": False,
         "disable_http2": True,

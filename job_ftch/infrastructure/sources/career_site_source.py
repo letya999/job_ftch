@@ -121,6 +121,8 @@ class FetchStats:
     successful_scraper: str | None = None
     detected_monitor_config: dict[str, Any] = field(default_factory=dict)
     detected_captcha_types: list[str] = field(default_factory=list)
+    challenge_events: list[dict[str, Any]] = field(default_factory=list)
+    monitor_failure_without_escalation: int = 0
     zero_reason: ZeroYieldReason | None = None
 
     def to_log_dict(self) -> dict[str, Any]:
@@ -144,6 +146,8 @@ class FetchStats:
             "successful_scraper": self.successful_scraper,
             "detected_monitor_config": self.detected_monitor_config,
             "detected_captcha_types": self.detected_captcha_types,
+            "challenge_events": self.challenge_events,
+            "monitor_failure_without_escalation": self.monitor_failure_without_escalation,
         }
         if self.zero_reason is not None:
             d["zero_reason"] = self.zero_reason.value
@@ -658,6 +662,7 @@ class CareerSiteSource(Source["RawItem"]):
                 tier=current_tier,
                 failure_kind=failure_kind,
             )
+            self.stats.monitor_failure_without_escalation += 1
             if status_code in {401, 403, 429, 498, 499} or _is_protected_source_error(exc):
                 self.stats.zero_reason, captcha_type = _classified_protection(
                     exc,
@@ -992,6 +997,17 @@ class CareerSiteSource(Source["RawItem"]):
                         and captcha_type not in self.stats.detected_captcha_types
                     ):
                         self.stats.detected_captcha_types.append(captcha_type)
+                    if detected_monitor_config.get("challenge"):
+                        self.stats.challenge_events.append(
+                            {
+                                "surface": "monitor_detector",
+                                "type": captcha_type or "challenge",
+                                "confidence": detected_monitor_config.get("challenge_confidence"),
+                                "evidence_hash": detected_monitor_config.get(
+                                    "challenge_evidence_hash"
+                                ),
+                            }
+                        )
                     if isinstance(captcha_type, str) and captcha_type:
                         set_challenge_type = getattr(
                             self.bypass_strategy,
@@ -1001,7 +1017,38 @@ class CareerSiteSource(Source["RawItem"]):
                         if callable(set_challenge_type):
                             with contextlib.suppress(Exception):
                                 set_challenge_type(captcha_type)
-                except Exception:
+                except Exception as exc:
+                    response = (
+                        getattr(exc, "response", None)
+                        if isinstance(exc, httpx.HTTPStatusError)
+                        else None
+                    )
+                    if response is not None or _is_protected_source_error(exc):
+                        body = getattr(response, "content", None) if response is not None else None
+                        status_code = response.status_code if response is not None else None
+                        self.stats.zero_reason, captcha_type = _classified_protection(
+                            exc,
+                            status_code=status_code,
+                            response_body=body,
+                        )
+                        if captcha_type and captcha_type not in self.stats.detected_captcha_types:
+                            self.stats.detected_captcha_types.append(captcha_type)
+                        self.stats.challenge_events.append(
+                            {
+                                "surface": "monitor_detector",
+                                "type": captcha_type or "challenge",
+                                "confidence": 0.92 if captcha_type else 0.74,
+                                "status_code": status_code,
+                            }
+                        )
+                        set_challenge_type = getattr(
+                            self.bypass_strategy,
+                            "set_observed_challenge_type",
+                            None,
+                        )
+                        if captcha_type and callable(set_challenge_type):
+                            with contextlib.suppress(Exception):
+                                set_challenge_type(captcha_type)
                     monitors_to_try = ["dom", "api_sniffer"]
                     self.stats.recommended_monitors = list(monitors_to_try)
 
@@ -1021,6 +1068,30 @@ class CareerSiteSource(Source["RawItem"]):
                     if fallback not in monitors_to_try:
                         monitors_to_try.append(fallback)
 
+        # A parser or response hook may have observed a challenge before the
+        # monitor detector runs. Materialize that evidence into a browser route
+        # even when fingerprinting itself returned an ordinary/empty config.
+        await asyncio.sleep(0)
+        self._capture_observed_challenge_type()
+        observed_challenge = getattr(self.bypass_strategy, "observed_challenge_type", None)
+        if not observed_challenge and self.stats.detected_captcha_types:
+            observed_challenge = self.stats.detected_captcha_types[-1]
+        if isinstance(observed_challenge, str) and observed_challenge.strip():
+            action = (
+                "cloudflare_challenge"
+                if observed_challenge.strip() == "cloudflare_challenge"
+                else "generic_challenge"
+            )
+            with contextlib.suppress(Exception):
+                self._request_bypass_capability(
+                    action,
+                    reason="pre_monitor_observed_challenge",
+                )
+            monitor_config["render"] = True
+            for fallback in ("dom", "api_sniffer"):
+                if fallback not in monitors_to_try:
+                    monitors_to_try.append(fallback)
+
         if (
             _is_filtered_listing_url(self.spec.url)
             and self.spec.monitor in (None, "", "auto")
@@ -1039,7 +1110,11 @@ class CareerSiteSource(Source["RawItem"]):
         extraction outcomes.
         """
         return bool(
-            self.stats.detected_monitor_config.get("challenge")
+            (
+                self.stats.detected_monitor_config.get("challenge")
+                or self.stats.challenge_events
+                or self.stats.detected_captcha_types
+            )
             and getattr(self.bypass_strategy, "exhausted", False)
             and int(getattr(self.bypass_strategy, "escalations_total", 0) or 0) > 0
         )
@@ -1087,6 +1162,24 @@ class CareerSiteSource(Source["RawItem"]):
                         auth=self.auth,
                         monitor_config=retry_monitor_config,
                     )
+                    self._capture_observed_challenge_type()
+                    observed = getattr(self.bypass_strategy, "observed_challenge_type", None)
+                    if isinstance(observed, str) and observed.strip():
+                        action = (
+                            "cloudflare_challenge"
+                            if observed.strip() == "cloudflare_challenge"
+                            else "generic_challenge"
+                        )
+                        if self._request_bypass_capability(
+                            action,
+                            reason="monitor_attempt_observed_challenge",
+                        ):
+                            logger.info(
+                                "monitor_observed_challenge_route_changed",
+                                name=current_monitor_name,
+                                challenge_type=observed,
+                            )
+                            continue
                 except Exception as exc:
                     from job_ftch.infrastructure.sources.monitors.shared import (
                         AtsRedirectException,
@@ -1110,6 +1203,15 @@ class CareerSiteSource(Source["RawItem"]):
                         # bypass tier may still recover it; otherwise stop
                         # rather than treating challenge links as candidates.
                         observed = getattr(exc, "challenge_type", None)
+                        self.stats.challenge_events.append(
+                            {
+                                "surface": "monitor",
+                                "type": observed or "challenge",
+                                "confidence": getattr(exc, "confidence", None),
+                                "evidence_hash": getattr(exc, "evidence_hash", None),
+                                "status_code": getattr(exc, "status_code", None),
+                            }
+                        )
                         setter = getattr(self.bypass_strategy, "set_observed_challenge_type", None)
                         if observed and callable(setter):
                             setter(observed)
@@ -1341,6 +1443,7 @@ class CareerSiteSource(Source["RawItem"]):
                 # visible on broad sitemap pages) without new evidence.
                 break
 
+        self._capture_observed_challenge_type()
         if self._challenge_bypass_exhausted():
             self.stats.zero_reason = (
                 self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
@@ -1351,6 +1454,22 @@ class CareerSiteSource(Source["RawItem"]):
         }:
             self.stats.zero_reason = ZeroYieldReason.ALL_MONITORS_EXHAUSTED
         logger.info("career_site_fetch_exhausted_all_monitors", **self.stats.to_log_dict())
+
+    def _capture_observed_challenge_type(self) -> None:
+        observed = getattr(self.bypass_strategy, "observed_challenge_type", None)
+        if not isinstance(observed, str) or not observed.strip():
+            return
+        challenge_type = observed.strip()
+        if challenge_type not in self.stats.detected_captcha_types:
+            self.stats.detected_captcha_types.append(challenge_type)
+        if not any(event.get("type") == challenge_type for event in self.stats.challenge_events):
+            self.stats.challenge_events.append(
+                {
+                    "surface": "monitor",
+                    "type": challenge_type,
+                    "confidence": 0.92,
+                }
+            )
 
     async def fetch(self) -> AsyncIterator[RawItem | QuarantinedRawItem]:
         self.stats = FetchStats()
@@ -1676,7 +1795,11 @@ class CareerSiteSource(Source["RawItem"]):
                 urls_to_scrape, source_name=source_name
             )
 
-        trusted_urls = [c.url for c in candidates if c.rich_payload is None and c.url in self._trusted_parser_urls]
+        trusted_urls = [
+            c.url
+            for c in candidates
+            if c.rich_payload is None and c.url in self._trusted_parser_urls
+        ]
         ranked_trusted: list[str] = []
         seen_trusted: set[str] = set()
         for url in trusted_urls:

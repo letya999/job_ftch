@@ -1,7 +1,7 @@
 ---
 title: "Технический долг"
-description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-048."
-updated: 2026-08-04
+description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-049."
+updated: 2026-08-05
 ---
 # Технический долг
 
@@ -1097,3 +1097,35 @@ Exit criterion:
   убитых браузеров;
 - регрессионный тест: искусственно зависший run отменяется watchdog'ом в пределах
   дедлайна, браузеры убиты, следующая итерация scheduler'а стартует.
+
+## 50. TD-049: Static/sticky residential proxy для AntiCloudflareTask
+
+Status: open. Priority: high для managed Cloudflare sources.
+
+Текущий residential gateway пригоден для обычной ротации HTTP/browser routes,
+но не удовлетворяет контракту CapSolver `AntiCloudflareTask`: задаче требуется
+отдельный raw static/sticky proxy с неизменным exit IP на протяжении challenge
+и последующего TLS-запроса. Рекомендуемая длительность sticky session — не
+менее трёх минут. User-Agent, proxy exit и TLS-клиент при применении полученного
+`cf_clearance` должны оставаться согласованными.
+
+До закрытия этого пункта paid matrix gate обязан различать
+`residential_proxy_available` и `capsolver_cloudflare_proxy.available`, а не
+считать любой gateway достаточным. Отключение gate допускается только для
+диагностического прогона и должно оставаться видимым в manifest.
+
+Exit criterion:
+
+- настроен отдельный secret-backed pool raw static/sticky residential proxy,
+  не сохраняющий credentials в коде, telemetry или run artifacts;
+- одна sticky session удерживает тот же exit IP не менее трёх минут и
+  переиспользуется для `AntiCloudflareTask`, установки clearance cookies и
+  последующего TLS/browser запроса;
+- runtime проверяет доступность, внешний IP и срок жизни маршрута до paid task;
+- UA, proxy и TLS identity передаются и проверяются как одна session persona;
+- health/cost telemetry содержит только redacted endpoint ID, session age,
+  provider outcome и причину ротации;
+- live fixture campaign подтверждает получение и повторное использование
+  clearance session без challenge loop;
+- negative test гарантирует fail-closed поведение при gateway-only,
+  rotating или недоступном proxy.

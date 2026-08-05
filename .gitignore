@@ -110,6 +110,8 @@ profiles/
 artifacts/
 dist/
 data/
+!tools/bot_parity_lab/data/
+!tools/bot_parity_lab/data/ip_reputation.example.json
 .benchmarks/
 test_output.txt
 fixtures/shots/derived_keywords.json

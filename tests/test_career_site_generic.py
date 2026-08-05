@@ -12,6 +12,7 @@ from job_ftch.infrastructure.bypass.adaptive import AdaptiveBypassManager
 from job_ftch.infrastructure.sources.career_site import client_for_config
 from job_ftch.infrastructure.sources.career_site_source import (
     CareerSiteSource,
+    FetchStats,
     _is_valid_detail_candidate,
 )
 from job_ftch.infrastructure.sources.embedded_state_utils import (
@@ -130,6 +131,46 @@ def test_challenge_exhaustion_is_distinct_from_an_empty_generic_board() -> None:
 
     source.bypass_strategy = SimpleNamespace(exhausted=False, escalations_total=2)
     assert source._challenge_bypass_exhausted() is False
+
+
+def test_observed_challenge_type_is_captured_in_source_stats() -> None:
+    source = object.__new__(CareerSiteSource)
+    source.stats = FetchStats()
+    source.bypass_strategy = SimpleNamespace(observed_challenge_type="cloudflare_challenge")
+
+    source._capture_observed_challenge_type()
+
+    assert source.stats.detected_captcha_types == ["cloudflare_challenge"]
+    assert source.stats.challenge_events == [
+        {"surface": "monitor", "type": "cloudflare_challenge", "confidence": 0.92}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_observed_preflight_challenge_materializes_browser_monitors() -> None:
+    source = CareerSiteSource(
+        spec=CareerSiteSpec(url="https://example.com/careers", monitor="sitemap"),
+        http_client=MagicMock(),
+        auth=MagicMock(),
+    )
+    request_capability = MagicMock(return_value=True)
+    source.bypass_strategy = SimpleNamespace(
+        observed_challenge_type="cloudflare_challenge",
+        request_capability=request_capability,
+    )
+
+    monitors, config = await source._resolve_monitors(
+        source.http,
+        cached_strategy=None,
+        monitor_config={},
+    )
+
+    assert monitors == ["sitemap", "dom", "api_sniffer"]
+    assert config["render"] is True
+    request_capability.assert_called_once_with(
+        "cloudflare_challenge",
+        reason="pre_monitor_observed_challenge",
+    )
 
 
 def test_extract_nuxt_and_inertia_data():

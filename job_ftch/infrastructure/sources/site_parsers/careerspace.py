@@ -20,7 +20,9 @@ if TYPE_CHECKING:
 
 
 _JOBS_URL = "https://careerspace.app/jobs"
-_NUXT_RE = re.compile(r"window\.__NUXT__=\(function\((?P<names>[^)]*)\)\{(?P<body>.*?)\}\((?P<args>.*?)\)\);", re.S)
+_NUXT_RE = re.compile(
+    r"window\.__NUXT__=\(function\((?P<names>[^)]*)\)\{(?P<body>.*?)\}\((?P<args>.*?)\)\);", re.S
+)
 
 
 def _decode_js_string(value: str) -> str:
