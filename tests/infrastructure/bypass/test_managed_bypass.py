@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import MagicMock
 
 import httpx
@@ -73,6 +74,115 @@ async def test_nodriver_raises_without_optional_dependency(monkeypatch):
         await manager.__aenter__()
 
 
+@pytest.mark.asyncio
+async def test_nodriver_serializes_same_persistent_profile(monkeypatch, tmp_path):
+    import job_ftch.infrastructure.bypass.nodriver_bypass as nodriver_bypass
+
+    active_starts = 0
+    max_active_starts = 0
+
+    class _FakeBrowser:
+        async def get(self, url):
+            del url
+            return MagicMock(set_window_size=MagicMock())
+
+        def stop(self):
+            nonlocal active_starts
+            active_starts -= 1
+
+    class _FakeNodriver:
+        async def start(self, **kwargs):
+            nonlocal active_starts, max_active_starts
+            assert kwargs["user_data_dir"] == str((tmp_path / "profile").resolve())
+            active_starts += 1
+            max_active_starts = max(max_active_starts, active_starts)
+            await asyncio.sleep(0.02)
+            return _FakeBrowser()
+
+    async def _open_once() -> None:
+        async with nodriver_bypass.NodriverBypass().open_page(
+            {"persistent_context": True, "_profile_dir": str(tmp_path / "profile")}
+        ):
+            await asyncio.sleep(0.02)
+
+    monkeypatch.setattr(nodriver_bypass, "nodriver", _FakeNodriver())
+    await asyncio.gather(_open_once(), _open_once())
+
+    assert max_active_starts == 1
+
+
+@pytest.mark.asyncio
+async def test_nodriver_recovers_corrupt_shared_profile(monkeypatch, tmp_path):
+    import job_ftch.infrastructure.bypass.nodriver_bypass as nodriver_bypass
+
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    (profile / "stale-lock").write_text("locked", encoding="utf-8")
+    starts: list[str] = []
+
+    class _FakeBrowser:
+        async def get(self, url):
+            del url
+            return MagicMock(set_window_size=MagicMock())
+
+        def stop(self):
+            return None
+
+    class _FakeNodriver:
+        async def start(self, **kwargs):
+            starts.append(kwargs["user_data_dir"])
+            if len(starts) == 1:
+                raise Exception("Failed to connect to browser")
+            return _FakeBrowser()
+
+    monkeypatch.setattr(nodriver_bypass, "nodriver", _FakeNodriver())
+
+    async with nodriver_bypass.NodriverBypass().open_page(
+        {"persistent_context": True, "_profile_dir": str(profile)}
+    ):
+        pass
+
+    assert starts == [str(profile.resolve()), str(profile.resolve())]
+    assert not (profile / "stale-lock").exists()
+    assert any((tmp_path / "_quarantine").glob("profile.*"))
+
+
+@pytest.mark.asyncio
+async def test_nodriver_applies_persona_user_agent_to_network_launch_args(monkeypatch, tmp_path):
+    import job_ftch.infrastructure.bypass.nodriver_bypass as nodriver_bypass
+
+    captured_args: list[str] = []
+
+    class _FakeBrowser:
+        async def get(self, url):
+            del url
+            return MagicMock(set_window_size=MagicMock())
+
+        def stop(self):
+            return None
+
+    class _FakeNodriver:
+        async def start(self, **kwargs):
+            captured_args.extend(kwargs["browser_args"])
+            return _FakeBrowser()
+
+    monkeypatch.setattr(nodriver_bypass, "nodriver", _FakeNodriver())
+
+    async with nodriver_bypass.NodriverBypass().open_page(
+        {
+            "persistent_context": True,
+            "_profile_dir": str(tmp_path / "profile"),
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/146.0.0.0",
+            "_persona_user_agent": True,
+        }
+    ):
+        pass
+
+    assert (
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/146.0.0.0" in captured_args
+    )
+
+
 def test_cloak_without_dependency_or_executable_degrades_without_metadata(monkeypatch):
     import job_ftch.infrastructure.bypass.cloak_bypass as cloak_bypass
 
@@ -80,3 +190,27 @@ def test_cloak_without_dependency_or_executable_degrades_without_metadata(monkey
     kwargs = {"headless": True, "args": []}
     assert cloak_bypass.CloakBrowserBypass().apply_browser_args(kwargs) == kwargs
     assert "_cloakbrowser_backend" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_nodriver_response_exposes_playwright_like_headers_and_body():
+    from job_ftch.infrastructure.bypass.nodriver_bypass import _NodriverResponse
+
+    response = _NodriverResponse(
+        url="https://example.test",
+        status=403,
+        headers={"content-type": "text/html"},
+        body="<html>blocked</html>",
+    )
+
+    assert response.headers == {"content-type": "text/html"}
+    assert await response.all_headers() == {"content-type": "text/html"}
+    assert await response.body() == b"<html>blocked</html>"
+
+
+def test_nodriver_evaluate_invokes_playwright_style_function_strings():
+    from job_ftch.infrastructure.bypass.nodriver_bypass import _playwright_eval_expression
+
+    assert _playwright_eval_expression("() => 1") == "(() => 1)()"
+    assert _playwright_eval_expression("async () => 1") == "(async () => 1)()"
+    assert _playwright_eval_expression("document.readyState") == "document.readyState"

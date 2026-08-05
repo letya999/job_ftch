@@ -1,7 +1,7 @@
 ---
 title: "Bypass и escalation path"
 description: "Adaptive bypass для ingest: failure signals, route axes, proxy/session/challenge boundaries и запреты."
-updated: 2026-08-03
+updated: 2026-08-05
 ---
 # Bypass и escalation path
 
@@ -101,6 +101,17 @@ Challenge detection is unified through
 - DOM monitor rejects challenge HTML before link extraction, so a protected page
   is not misreported as an empty job board.
 
+For Cloudflare browser challenges, the route is intentionally conservative:
+
+- direct-network Cloudflare challenges defer provider solving until a
+  proxy/residential route is active;
+- browser profiles are separated by network route (`direct`, `proxy`,
+  `residential_proxy`) unless an operator explicitly pins a persistent profile;
+- a provider response is not accepted as solved until the browser route has
+  clearance cookies and no classified challenge body remains;
+- CapSolver `AntiCloudflareTask` is allowed only for authorized domains and
+  requires a static/sticky proxy that the provider can reach.
+
 ## Qrator / jsid
 
 Qrator обрабатывается как отдельный failure signal:
@@ -141,10 +152,11 @@ Values are never logged.
 ## Explicit Non-Goals
 
 The project does not implement reCAPTCHA submit/XHR token substitution,
-Cloudflare checkbox automation, `cf_clearance` harvesting, or private WAF solver
-integrations as generic scraper behavior. Those paths are limited to
-owned/explicitly authorized test targets and must go through a separate
-security/legal review before any implementation.
+Cloudflare checkbox automation, generic `cf_clearance` harvesting, or private
+WAF solver integrations as scraper behavior. Official provider-backed
+Cloudflare challenge tasks are limited to owned/explicitly authorized eval
+targets, require domain authorization and proxy compatibility, and must fail
+closed when clearance cannot be verified.
 
 ## Бюджеты и остановка
 

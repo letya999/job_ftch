@@ -59,6 +59,7 @@ logger = structlog.get_logger("job_ftch.bypass.proxy")
 
 _IP_ENDPOINTS = ("https://api.ipify.org", "https://checkip.amazonaws.com")
 _GEO_ENDPOINT = "https://ipapi.co/json/"
+CAPSOLVER_CHALLENGE_PROXY_ENV = "JOB_FTCH_CAPSOLVER_CHALLENGE_PROXY_LIST"
 _TOR_CONTROL_DEFAULT = "127.0.0.1:9051"
 _TOR_SOCKS5_DEFAULT = "socks5://127.0.0.1:9050"
 
@@ -595,6 +596,7 @@ async def verify_proxy(
 
 def _load_residential_proxies() -> list[str]:
     proxies: list[str] = []
+    proxies.extend(_load_capsolver_cloudflare_proxies())
     yaml_path = Path(__file__).parents[3] / "config" / "proxies.yaml"
     if yaml_path.exists():
         import yaml
@@ -604,6 +606,16 @@ def _load_residential_proxies() -> list[str]:
     env_val = os.environ.get("JOB_FTCH_RESIDENTIAL_PROXY_LIST", "")
     proxies.extend(p.strip() for p in env_val.split(",") if p.strip())
     return list(dict.fromkeys(proxies))
+
+
+def _load_capsolver_cloudflare_proxies() -> list[str]:
+    """Operator-provided static/sticky proxies for CapSolver Cloudflare tasks.
+
+    These are prepended to the residential pool so the browser route and
+    CapSolver's ``AntiCloudflareTask`` use the same compatible endpoint.
+    """
+    env_val = os.environ.get(CAPSOLVER_CHALLENGE_PROXY_ENV, "")
+    return [p.strip() for p in env_val.split(",") if p.strip()]
 
 
 class ResidentialProxyBypass(ProxyBypass):

@@ -16,6 +16,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_graph_eval_fanout.py](test_graph_eval_fanout.py)
 - [test_merge_pool.py](test_merge_pool.py)
 - [test_run_ingest_batch.py](test_run_ingest_batch.py)
+- [test_run_protected_proxy_captcha_matrix.py](test_run_protected_proxy_captcha_matrix.py)
 - [test_split_manifest.py](test_split_manifest.py)
 - [test_validate_career_site_fixture.py](test_validate_career_site_fixture.py)
 - [test_verify_observability_run.py](test_verify_observability_run.py)

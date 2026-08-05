@@ -23,6 +23,10 @@ from job_ftch.application.registry import (
     resolve_bypass,
 )
 from job_ftch.infrastructure.bypass.attempt_budget import AttemptBudget
+from job_ftch.infrastructure.bypass.captcha_models import (
+    CaptchaFailureReason,
+    CaptchaResultKind,
+)
 from job_ftch.infrastructure.bypass.failure_signal import (
     FailureKind,
     HeuristicFailureSignal,
@@ -321,6 +325,8 @@ class AdaptiveBypassManager:
         self._owns_profile_dir = True
         self._warmed_domains: set[str] = set()
         self._observed_challenge_type: str | None = None
+        self._challenge_solution_requires_reload = True
+        self._challenge_solver_terminal = False
         self._route_transitions: list[dict[str, Any]] = []
         import asyncio
 
@@ -645,6 +651,8 @@ class AdaptiveBypassManager:
         """Atomically move the network axis, dropping the IP-bound session."""
         self._session_cookies.clear()
         self._session_cookies_invalidated = True
+        if not self._configured_profile_persistent:
+            self._profile_dir = None
         # A new exit IP may clear protection that blocked earlier engines, so
         # let the ladder try them again from the current tier upward.
         self._failed_tiers.clear()
@@ -758,9 +766,12 @@ class AdaptiveBypassManager:
                     self._profile_dir = str(profile_dir)
                     self._owns_profile_dir = False
                 elif domain_profile is not None:
-                    # TRACK B1: reuse a stable per-domain profile across runs.
-                    domain_profile.mkdir(parents=True, exist_ok=True)
-                    self._profile_dir = str(domain_profile)
+                    # TRACK B1/B2: clearance cookies are IP-bound, so keep
+                    # direct/proxy profiles separate while still reusing each
+                    # warm profile across runs for the same route.
+                    route_profile = domain_profile / self._route_state.network.value
+                    route_profile.mkdir(parents=True, exist_ok=True)
+                    self._profile_dir = str(route_profile)
                     self._owns_profile_dir = False
                 else:
                     self._profile_dir = tempfile.mkdtemp(prefix="job_ftch_source_profile_")
@@ -1115,12 +1126,28 @@ class AdaptiveBypassManager:
         """
         if isinstance(challenge_type, str) and challenge_type.strip():
             self._observed_challenge_type = challenge_type.strip()
+            self._challenge_solver_terminal = False
+
+    @property
+    def challenge_solution_requires_reload(self) -> bool:
+        """Whether browser navigation should reload after the latest solution."""
+        return self._challenge_solution_requires_reload
+
+    @property
+    def challenge_solver_terminal(self) -> bool:
+        """Whether retrying this solver outcome on another engine is pointless."""
+        return self._challenge_solver_terminal
 
     @staticmethod
     def _captcha_actions(
         body: bytes | None,
         headers: Mapping[str, str] | None,
+        observed_type: str | None = None,
     ) -> tuple[str, ...]:
+        if observed_type == "cloudflare_challenge":
+            return ("cloudflare_challenge", "generic_challenge", "terminal")
+        if observed_type in {"recaptcha", "recaptcha_v3", "turnstile", "hcaptcha"}:
+            return ("generic_challenge", "terminal")
         evidence = (body or b"").decode("utf-8", errors="ignore").lower()
         header_text = " ".join(f"{key}:{value}" for key, value in (headers or {}).items()).lower()
         evidence = f"{evidence} {header_text}"
@@ -1160,6 +1187,18 @@ class AdaptiveBypassManager:
             body=body,
             error=error,
         )
+        if self._observed_challenge_type and kind in {
+            FailureKind.BLOCKED,
+            FailureKind.UNKNOWN,
+        }:
+            kind = FailureKind.CHALLENGE
+        if self._budget.attempt_exhausted():
+            logger.info(
+                "bypass_operation_attempt_budget_exhausted",
+                tier=self.current_name,
+                failure_kind=kind,
+            )
+            return kind
         del retry_after  # Retry-After is consumed by the HTTP RouteBudget layer.
         decision = self._transition_policy.decide(kind)
         capability = self._capabilities[self.current_name]
@@ -1192,7 +1231,9 @@ class AdaptiveBypassManager:
                     challenge=ChallengeState.OBSERVED,
                     session=SessionMode.STICKY,
                 )
-            changed = self._select_capability(self._captcha_actions(body, headers))
+            changed = self._select_capability(
+                self._captcha_actions(body, headers, self._observed_challenge_type)
+            )
             if not changed and self._budget.same_route_retry_exhausted():
                 logger.info(
                     "bypass_challenge_same_route_retry_exhausted",
@@ -1488,6 +1529,8 @@ class AdaptiveBypassManager:
 
     async def solve_page_challenge(self, page: Any, *, url: str) -> bool:
         """Run one bounded solver action in the current browser session."""
+        if self._challenge_solver_terminal:
+            return False
         solve_detected = getattr(self._captcha_solver, "solve_detected", None)
         if not callable(solve_detected):
             return False
@@ -1521,6 +1564,18 @@ class AdaptiveBypassManager:
         else:
             result = await solve_detected(page, url=url)
         solved = bool(getattr(result, "solved", False))
+        result_kind = getattr(result, "result_kind", None)
+        failure_reason = getattr(result, "failure_reason", None)
+        self._challenge_solution_requires_reload = result_kind is not CaptchaResultKind.TOKEN
+        self._challenge_solver_terminal = failure_reason in {
+            CaptchaFailureReason.UNSUPPORTED_CHALLENGE,
+            CaptchaFailureReason.UNAUTHORIZED_DOMAIN,
+            CaptchaFailureReason.PROVIDER_DISABLED,
+            CaptchaFailureReason.MISSING_CREDENTIAL,
+            CaptchaFailureReason.BUDGET_EXHAUSTED,
+            CaptchaFailureReason.DEADLINE_INSUFFICIENT,
+            CaptchaFailureReason.BACKOFF_ACTIVE,
+        }
         logger.info(
             "bypass_captcha_solver_result",
             solved=solved,
@@ -1536,6 +1591,26 @@ class AdaptiveBypassManager:
             provider_task_id_present=bool(getattr(result, "provider_task_id", None)),
             raw_provider_status=getattr(result, "raw_provider_status", None),
             error=getattr(result, "error", None),
+        )
+        self._route_transitions.append(
+            {
+                "axis": "challenge",
+                "engine": self.current_name,
+                "network": self._route_state.network.value,
+                "challenge_type": (
+                    getattr(result, "challenge_type", None) or observed_type or "unknown"
+                ),
+                "solved": solved,
+                "result_kind": (
+                    getattr(getattr(result, "result_kind", None), "value", None)
+                    or getattr(result, "result_kind", None)
+                ),
+                "failure_reason": (
+                    getattr(getattr(result, "failure_reason", None), "value", None)
+                    or getattr(result, "failure_reason", None)
+                ),
+                "provider_task_id_present": bool(getattr(result, "provider_task_id", None)),
+            }
         )
         if solved:
             self._route_state = self._route_state.transition(challenge=ChallengeState.NONE)

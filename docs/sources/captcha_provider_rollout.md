@@ -1,7 +1,7 @@
 ---
 title: "CAPTCHA provider rollout"
 description: "Operational rollout for observed CAPTCHA/bot-protection handling: project wiring, browser setup, provider roles, and eval gates."
-updated: 2026-08-03
+updated: 2026-08-05
 ---
 # CAPTCHA provider rollout
 
@@ -62,7 +62,7 @@ Suggested eval routes:
 |---|---|
 | `recaptcha` | `capsolver -> capmonster -> nextcaptcha -> nopecha -> manual_required` |
 | `turnstile` | `capsolver -> capmonster -> nextcaptcha -> manual_required` after authorized eval |
-| `cloudflare_challenge` | `browser_wait/browser_session -> manual_required`; paid API path only after explicit eval |
+| `cloudflare_challenge` | `browser_wait -> capsolver -> manual_required` only for authorized eval domains with a static/sticky proxy |
 | `hcaptcha` | `observe` until the fixture run confirms real frequency |
 | `datadome`, `perimeterx`, `unknown` | `observe -> manual_required`; no provider solve by default |
 
@@ -89,6 +89,7 @@ captcha_provider_routes:
     - manual_required
   cloudflare_challenge:
     - browser_wait
+    - capsolver
     - manual_required
 ```
 
@@ -124,6 +125,59 @@ Browser profile checklist:
 For `cloudflare_challenge`, first validate whether a manual browser pass creates
 stable cookies/session state. Treat it as a browser/session problem before using
 paid CAPTCHA APIs.
+
+## Cloudflare Challenge with CapSolver
+
+`cloudflare_challenge` is handled as a session challenge, not as a token-only
+CAPTCHA. The runtime therefore verifies actual clearance cookies after the
+provider returns; challenge HTML or visible Cloudflare verification text is
+still a failed route even if a provider call completed.
+
+Operational requirements:
+
+- Run only on owned or explicitly authorized eval targets.
+- Authorize the target domain through `captcha_authorized_domains`; the
+  protected matrix runner populates this from the selected target domains.
+- Use `capsolver` as the selected paid provider and keep `browser_wait` first
+  in the route, so easy browser/session clears do not spend provider balance.
+- Use a static or sticky residential proxy endpoint shared by the browser route
+  and the provider task. Prefer `JOB_FTCH_CAPSOLVER_CHALLENGE_PROXY_LIST` for
+  this path; it is prepended to the residential pool before
+  `config/proxies.yaml` and `JOB_FTCH_RESIDENTIAL_PROXY_LIST`.
+- Keep the browser user-agent stable for the route. The CapSolver
+  `AntiCloudflareTask` payload uses `websiteURL`, the compact proxy string and
+  the live browser user-agent.
+
+CapSolver rejects dynamic proxy hostnames for `AntiCloudflareTask`. The
+provider adapter resolves proxy hostnames to an IP before task creation to avoid
+that class of rejection, but the resolved endpoint still has to be reachable and
+sticky enough for Cloudflare clearance to bind to the same browser route.
+
+Protected matrix preflight blocks paid CapSolver runs when only gateway-mode
+residential proxy config is available. Use one of these explicit raw/static
+inputs before running a Cloudflare eval:
+
+```text
+JOB_FTCH_CAPSOLVER_CHALLENGE_PROXY_LIST=http://static-resi.example:9000
+```
+
+or:
+
+```yaml
+residential:
+  - http://static-resi.example:9000
+```
+
+The dedicated env is safest for experiments because it does not change the
+general proxy pool ordering outside the current process.
+
+Known external blocker signatures:
+
+| Provider error | Meaning |
+|---|---|
+| `Your proxy host uses dynamic DNS` | The configured proxy gateway is not acceptable for CapSolver Cloudflare tasks; use a region-specific static/sticky endpoint. |
+| `proxy timeout or other issues` | CapSolver could not reach or use the proxy within its task budget; validate the proxy from the same region and credentials before rerunning the matrix. |
+| `invalid html` | Do not send page HTML for this task shape; the current adapter intentionally omits it. |
 
 ## Eval gate
 

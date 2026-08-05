@@ -8,8 +8,10 @@ import pytest
 from structlog.testing import capture_logs
 
 from job_ftch.infrastructure.bypass.captcha_providers import (
+    CapSolverProvider,
     extract_recaptcha_action,
     extract_sitekey,
+    extract_turnstile_metadata,
     get_captcha_provider_capability,
     list_captcha_providers,
     normalize_challenge_type,
@@ -96,6 +98,18 @@ async def test_recaptcha_v3_action_prefers_captured_execute_call() -> None:
 
 
 @pytest.mark.asyncio
+async def test_turnstile_metadata_reads_public_widget_attributes() -> None:
+    page = SimpleNamespace(
+        evaluate=AsyncMock(return_value={"action": "career", "cdata": "opaque-public-data"})
+    )
+
+    assert await extract_turnstile_metadata(page) == {
+        "action": "career",
+        "cdata": "opaque-public-data",
+    }
+
+
+@pytest.mark.asyncio
 async def test_capsolver_v3_payload_omits_unknown_action_and_sets_min_score(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -133,6 +147,159 @@ async def test_capsolver_v3_payload_omits_unknown_action_and_sets_min_score(
     assert isinstance(task, dict)
     assert task["minScore"] == 0.3
     assert "pageAction" not in task
+
+
+@pytest.mark.asyncio
+async def test_capsolver_cloudflare_task_uses_proxy_without_sitekey(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import job_ftch.infrastructure.bypass.captcha_providers as providers
+
+    captured: dict[str, object] = {}
+    responses = iter(
+        [
+            {"errorId": 0, "taskId": "task-1"},
+            {
+                "errorId": 0,
+                "status": "ready",
+                "solution": {"cf_clearance": "clearance-cookie"},
+            },
+        ]
+    )
+
+    class _Response:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    class _Client:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+        async def post(self, url: str, *, json: dict[str, object]) -> _Response:
+            del url
+            if "task" in json:
+                captured.update(json)
+            return _Response(next(responses))
+
+    page = SimpleNamespace(
+        evaluate=AsyncMock(return_value="Chrome UA"),
+        content=AsyncMock(return_value="<html>Just a moment</html>"),
+    )
+    monkeypatch.setattr(providers.httpx, "AsyncClient", _Client)
+
+    provider = CapSolverProvider(
+        "offline-key",  # pragma: allowlist secret
+        proxy_url="http://proxy.invalid:9000",  # pragma: allowlist secret
+    )
+    result = await provider.solve(
+        page,
+        challenge_type="cloudflare_challenge",
+        url="https://example.test/jobs",
+    )
+
+    task = captured["task"]
+    assert isinstance(task, dict)
+    assert task["type"] == "AntiCloudflareTask"
+    assert task["proxy"] == "127.0.0.1:9000:user:pass"
+    assert task["userAgent"] == "Chrome UA"
+    assert task["html"] == "<html>Just a moment</html>"
+    assert "websiteKey" not in task
+    assert result.solved
+    assert result.cookies == {"cf_clearance": "clearance-cookie"}
+
+
+@pytest.mark.asyncio
+async def test_capsolver_cloudflare_resolves_proxy_hostname_before_task(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import job_ftch.infrastructure.bypass.captcha_providers as providers
+
+    captured: dict[str, object] = {}
+    responses = iter(
+        [
+            {"errorId": 0, "taskId": "task-1"},
+            {"errorId": 0, "status": "ready", "solution": {"cf_clearance": "ok"}},
+        ]
+    )
+
+    class _Response:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    class _Client:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+        async def post(self, url: str, *, json: dict[str, object]) -> _Response:
+            del url
+            if "task" in json:
+                captured.update(json)
+            return _Response(next(responses))
+
+    def fake_getaddrinfo(host: str, *args: object, **kwargs: object) -> list[tuple[object, ...]]:
+        del args, kwargs
+        assert host == "residential-gateway.example"
+        return [
+            (
+                providers.socket.AF_INET,
+                providers.socket.SOCK_STREAM,
+                0,
+                "",
+                ("203.0.113.7", 0),
+            )
+        ]
+
+    monkeypatch.setattr(providers.socket, "getaddrinfo", fake_getaddrinfo)
+    monkeypatch.setattr(providers.httpx, "AsyncClient", _Client)
+
+    provider = CapSolverProvider(
+        "offline-key",  # pragma: allowlist secret
+        proxy_url="http://residential-gateway.example:9000",  # pragma: allowlist secret
+    )
+    result = await provider.solve(
+        SimpleNamespace(evaluate=AsyncMock(return_value="Chrome UA")),
+        challenge_type="cloudflare_challenge",
+        url="https://example.test/jobs",
+    )
+
+    task = captured["task"]
+    assert isinstance(task, dict)
+    assert task["proxy"] == "203.0.113.7:9000:user:pass"
+    assert result.solved
+
+
+@pytest.mark.asyncio
+async def test_capsolver_cloudflare_requires_proxy() -> None:
+    page = SimpleNamespace(evaluate=AsyncMock())
+    provider = CapSolverProvider("offline-key")  # pragma: allowlist secret
+
+    result = await provider.solve(
+        page,
+        challenge_type="cloudflare_challenge",
+        url="https://example.test/jobs",
+    )
+
+    assert not result.solved
+    assert result.failure_reason is CaptchaFailureReason.UNSUPPORTED_CHALLENGE
+    page.evaluate.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -207,6 +374,50 @@ async def test_solver_backoff_prevents_repeated_provider_attempts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_solver_applies_provider_clearance_cookies_to_browser_context() -> None:
+    context = SimpleNamespace(add_cookies=AsyncMock())
+    page = SimpleNamespace(url="https://jobs.example.test/list", context=context)
+    solver = CaptchaSolverBypass(
+        provider="capsolver",
+        api_key="offline-key",  # pragma: allowlist secret
+        max_attempts=1,
+        max_paid_attempts=1,
+        min_provider_seconds=0,
+        enabled_providers=frozenset({"capsolver"}),
+        authorized_domains=frozenset({"example.test"}),
+    )
+
+    async def fake_external(*args: object, **kwargs: object) -> CaptchaSolveResult:
+        del args, kwargs
+        return CaptchaSolveResult(
+            solved=True,
+            method="capsolver",
+            cookies={"cf_clearance": "clearance-cookie"},
+        )
+
+    solver._solve_external_api = fake_external  # type: ignore[method-assign]
+
+    result = await solver.solve(
+        page,
+        challenge_type="cloudflare_challenge",
+        url="https://jobs.example.test/list",
+    )
+
+    assert result.solved
+    context.add_cookies.assert_awaited_once_with(
+        [
+            {
+                "name": "cf_clearance",
+                "value": "clearance-cookie",
+                "domain": "jobs.example.test",
+                "path": "/",
+                "secure": True,
+            }
+        ]
+    )
+
+
+@pytest.mark.asyncio
 async def test_response_detector_sets_observed_challenge_type() -> None:
     callbacks: dict[str, object] = {}
     controller = SimpleNamespace(set_observed_challenge_type=AsyncMock())
@@ -264,6 +475,72 @@ async def test_recaptcha_v3_clear_check_requires_visible_non_blocked_content() -
     assert await solver._check_challenge_cleared(page, "recaptcha_v3")
 
 
+@pytest.mark.asyncio
+async def test_cloudflare_challenge_alias_uses_cloudflare_clear_check() -> None:
+    page = SimpleNamespace(
+        evaluate=AsyncMock(
+            side_effect=[
+                "complete",
+                "Just a moment Checking your browser",
+            ]
+        )
+    )
+    solver = CaptchaSolverBypass(wait_seconds=0.01)
+
+    assert not await solver._check_challenge_cleared(page, "cloudflare_challenge")
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_clear_check_rejects_classified_challenge_html() -> None:
+    page = SimpleNamespace(
+        evaluate=AsyncMock(
+            side_effect=[
+                "complete",
+                "Enable cookies and reload this page",
+                "<html><script src='/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1'></script></html>",
+            ]
+        )
+    )
+    solver = CaptchaSolverBypass(wait_seconds=0.01)
+
+    assert not await solver._check_challenge_cleared(page, "cloudflare_challenge")
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_clear_check_rejects_visible_security_verification_text() -> None:
+    page = SimpleNamespace(
+        evaluate=AsyncMock(
+            side_effect=[
+                "complete",
+                "Performing security verification. "
+                "This website uses a security service to protect against malicious bots. "
+                "Performance and Security by Cloudflare",
+            ]
+        )
+    )
+    solver = CaptchaSolverBypass(wait_seconds=0.01)
+
+    assert not await solver._check_challenge_cleared(page, "cloudflare_challenge")
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_clear_check_requires_clearance_cookie() -> None:
+    page = SimpleNamespace(
+        evaluate=AsyncMock(
+            side_effect=[
+                "complete",
+                "Open roles Senior Python Engineer Apply now "
+                "Remote backend developer vacancy with team description and benefits. " * 2,
+                "<html><body><main>Open roles Senior Python Engineer</main></body></html>",
+                "",
+            ]
+        )
+    )
+    solver = CaptchaSolverBypass(wait_seconds=0.01)
+
+    assert not await solver._check_challenge_cleared(page, "cloudflare_challenge")
+
+
 def test_failure_signal_labels_recaptcha_v3_separately() -> None:
     html = '<script src="https://www.google.com/recaptcha/api.js?render=site-public-key"></script>'
 
@@ -278,7 +555,7 @@ def test_monitor_challenge_html_raises_typed_error() -> None:
 
     assert raised.value.status_code == 200
     assert raised.value.body
-    assert raised.value.challenge_type == "cloudflare_turnstile"
+    assert raised.value.challenge_type == "turnstile"
 
 
 @pytest.mark.asyncio
@@ -638,6 +915,75 @@ async def test_navigate_solves_embedded_captcha_on_success_status() -> None:
         evaluate=AsyncMock(return_value=True),
     )
     controller = SimpleNamespace(solve_page_challenge=AsyncMock(return_value=True))
+
+    await navigate(
+        page,
+        "https://example.test/jobs",
+        {"challenge_retries": 0, "_bypass_strategy": controller},
+    )
+
+    controller.solve_page_challenge.assert_awaited_once_with(
+        page,
+        url="https://example.test/jobs",
+    )
+    assert page.goto.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_navigate_preserves_page_after_token_solution() -> None:
+    from job_ftch.infrastructure.sources.browser_utils import navigate
+
+    page = SimpleNamespace(
+        goto=AsyncMock(return_value=SimpleNamespace(status=200)),
+        evaluate=AsyncMock(return_value=True),
+    )
+    controller = SimpleNamespace(
+        challenge_solution_requires_reload=False,
+        solve_page_challenge=AsyncMock(return_value=True),
+    )
+
+    await navigate(
+        page,
+        "https://example.test/jobs",
+        {"challenge_retries": 0, "_bypass_strategy": controller},
+    )
+
+    controller.solve_page_challenge.assert_awaited_once()
+    page.goto.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_navigate_skips_terminal_solver_outcome() -> None:
+    from job_ftch.infrastructure.sources.browser_utils import navigate
+
+    page = SimpleNamespace(
+        goto=AsyncMock(return_value=SimpleNamespace(status=200)),
+        evaluate=AsyncMock(return_value=True),
+    )
+    controller = SimpleNamespace(
+        challenge_solver_terminal=True,
+        solve_page_challenge=AsyncMock(return_value=False),
+    )
+
+    await navigate(
+        page,
+        "https://example.test/jobs",
+        {"challenge_retries": 0, "_bypass_strategy": controller},
+    )
+
+    controller.solve_page_challenge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_navigate_solves_observed_challenge_without_response_object() -> None:
+    page = SimpleNamespace(
+        goto=AsyncMock(return_value=None),
+        evaluate=AsyncMock(return_value=False),
+    )
+    controller = SimpleNamespace(
+        observed_challenge_type="cloudflare_challenge",
+        solve_page_challenge=AsyncMock(return_value=True),
+    )
 
     await navigate(
         page,

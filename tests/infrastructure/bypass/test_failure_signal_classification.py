@@ -8,6 +8,7 @@ from job_ftch.infrastructure.bypass.failure_signal import (
     FailureKind,
     FetchOutcome,
     HeuristicFailureSignal,
+    _detect_captcha_type,
 )
 
 
@@ -21,6 +22,14 @@ from job_ftch.infrastructure.bypass.failure_signal import (
         (503, b"Service Unavailable", None, FailureKind.SERVER_ERROR),
         (200, b"", None, FailureKind.PARSE_EMPTY),
         (200, b'<div class="cf-turnstile"></div>', None, FailureKind.CHALLENGE),
+        (
+            200,
+            b"himalayas.app Performing security verification. "
+            b"This website uses a security service to protect against malicious bots. "
+            b"Performance and Security by Cloudflare",
+            None,
+            FailureKind.CHALLENGE,
+        ),
         (200, b"<iframe src='hcaptcha.com'></iframe>", None, FailureKind.CAPTCHA),
         (200, b"<script src='recaptcha/api.js'></script>", None, FailureKind.CAPTCHA),
         (200, b"<script src='smartcaptcha'></script>", None, FailureKind.CAPTCHA),
@@ -94,3 +103,7 @@ def test_payment_required_is_terminal() -> None:
     outcome = FetchOutcome(kind=FailureKind.PAYMENT_REQUIRED)
     assert outcome.should_escalate is False
     assert outcome.retryable is False
+
+
+def test_turnstile_marker_is_normalized_for_solver_routes() -> None:
+    assert _detect_captcha_type('<div class="cf-turnstile"></div>') == "turnstile"

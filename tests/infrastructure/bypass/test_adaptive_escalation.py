@@ -211,6 +211,39 @@ async def test_chromium_specific_rejection_selects_engine_diversity() -> None:
 
 
 @pytest.mark.asyncio
+async def test_observed_cloudflare_routes_to_solver_browser_before_proxy_ladder() -> None:
+    manager = AdaptiveBypassManager()
+    manager.set_observed_challenge_type("cloudflare_challenge")
+
+    kind = await manager.handle_failure(
+        "source",
+        status_code=403,
+        body=None,
+    )
+
+    assert kind is FailureKind.CHALLENGE
+    assert manager.current_name == "nodriver"
+    assert manager.route_state.network.value == "direct"
+
+
+@pytest.mark.asyncio
+async def test_operation_attempt_budget_stops_additional_failure_actions() -> None:
+    manager = AdaptiveBypassManager(
+        bypass_config={"max_route_attempts_per_operation": 1}
+    )
+    token = manager.start_operation("listing", kind="listing", max_browser_launches=2)
+    try:
+        await manager.handle_failure("source", status_code=403)
+        tier_after_first = manager.current_name
+        await manager.handle_failure("source", status_code=403)
+    finally:
+        manager.end_operation(token)
+
+    assert len(manager.attempt_telemetry) == 1
+    assert manager.current_name == tier_after_first
+
+
+@pytest.mark.asyncio
 async def test_unknown_failures_still_escalate_on_threshold() -> None:
     # Defect B2: an unrecognised protection response used to be a silent no-op.
     # It must now record a failure and escalate once the window threshold trips.

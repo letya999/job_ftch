@@ -84,6 +84,34 @@ def test_proxy_bypass_tor_integration(monkeypatch, tmp_path):
     assert any("socks5://127.0.0.1:9050" in p for p in proxies)
 
 
+def test_capsolver_cloudflare_proxy_env_precedes_generic_residential_pool(
+    monkeypatch,
+    tmp_path,
+):
+    import job_ftch.infrastructure.bypass.proxy_bypass as pb
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "proxies.yaml").write_text(
+        "residential:\n  - http://yaml.residential:8080\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(pb, "__file__", str(tmp_path / "a" / "b" / "c" / "d.py"))
+    monkeypatch.setenv(
+        "JOB_FTCH_CAPSOLVER_CHALLENGE_PROXY_LIST",
+        "http://capsolver-static:9000",
+    )
+    monkeypatch.setenv("JOB_FTCH_RESIDENTIAL_PROXY_LIST", "http://env.residential:8080")
+
+    proxies = pb._load_residential_proxies()
+    assert proxies == [
+        "http://capsolver-static:9000",
+        "http://yaml.residential:8080",
+        "http://env.residential:8080",
+    ]
+
+
 def test_proxy_pool_stats():
     from job_ftch.infrastructure.bypass.proxy_bypass import ProxyBypass, ProxyHealth
 

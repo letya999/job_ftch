@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import socket
 from typing import TYPE_CHECKING, Any, Protocol
+from urllib.parse import urlparse
 
 import httpx
 
@@ -167,6 +169,32 @@ async def extract_recaptcha_action(page: Any) -> str:
         return ""
 
 
+async def extract_turnstile_metadata(page: Any) -> dict[str, str]:
+    """Read optional public Turnstile widget metadata from the rendered DOM."""
+    if not hasattr(page, "evaluate"):
+        return {}
+    try:
+        raw = await page.evaluate(
+            """(()=>{
+                const el=document.querySelector('.cf-turnstile,[data-sitekey]');
+                if(!el) return {};
+                return {
+                    action: el.getAttribute('data-action') || '',
+                    cdata: el.getAttribute('data-cdata') || ''
+                };
+            })()"""
+        )
+    except Exception:
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        key: str(raw[key])
+        for key in ("action", "cdata")
+        if isinstance(raw.get(key), str) and raw[key]
+    }
+
+
 class _BaseProvider:
     supported = frozenset(
         {
@@ -221,6 +249,41 @@ class _BaseProvider:
         if parsed.password:
             fields["proxyPassword"] = parsed.password
         return fields
+
+    def _capsolver_proxy_value(self) -> str:
+        """Return CapSolver's compact sticky proxy format.
+
+        CapSolver's Cloudflare Challenge API expects one ``proxy`` string
+        (``host:port`` or ``host:port:user:pass``), not the split proxy fields
+        used by their Turnstile/reCAPTCHA task types.
+        """
+        if not self.proxy_url:
+            return ""
+        parsed = urlparse(self.proxy_url)
+        if not parsed.hostname or not parsed.port:
+            return self.proxy_url
+        host = _resolve_proxy_host_for_provider(parsed.hostname)
+        value = f"{host}:{parsed.port}"
+        if parsed.username:
+            value = f"{value}:{parsed.username}:{parsed.password or ''}"
+        return value
+
+    async def _page_user_agent(self, page: Any) -> str:
+        if not hasattr(page, "evaluate"):
+            return ""
+        try:
+            return str(await page.evaluate("navigator.userAgent"))
+        except Exception:
+            return ""
+
+    async def _page_html(self, page: Any, *, limit: int = 250_000) -> str:
+        content = getattr(page, "content", None)
+        if not callable(content):
+            return ""
+        try:
+            return str(await content())[:limit]
+        except Exception:
+            return ""
 
 
 async def _wait_for_sitekey_marker(
@@ -303,6 +366,74 @@ class CapSolverProvider(_BaseProvider):
         if unsupported := self.unsupported(challenge_type, "capsolver"):
             return unsupported
         wire_type = _provider_wire_type(challenge_type)
+        if wire_type == "cloudflare":
+            proxy_value = self._capsolver_proxy_value()
+            if not proxy_value:
+                return CaptchaSolveResult(
+                    solved=False,
+                    method="capsolver",
+                    error="cloudflare challenge requires a sticky/static proxy",
+                    failure_reason=CaptchaFailureReason.UNSUPPORTED_CHALLENGE,
+                    challenge_type=normalize_challenge_type(challenge_type),
+                    result_kind=CaptchaResultKind.UNSUPPORTED,
+                )
+            cloudflare_task_payload: dict[str, Any] = {
+                "type": "AntiCloudflareTask",
+                "websiteURL": url or str(getattr(page, "url", "")),
+                "proxy": proxy_value,
+            }
+            user_agent = await self._page_user_agent(page)
+            if user_agent:
+                cloudflare_task_payload["userAgent"] = user_agent
+            challenge_html = await self._page_html(page)
+            if challenge_html:
+                cloudflare_task_payload["html"] = challenge_html
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    created = (
+                        await client.post(
+                            "https://api.capsolver.com/createTask",
+                            json={
+                                "clientKey": self.api_key,
+                                "task": cloudflare_task_payload,
+                            },
+                        )
+                    ).json()
+                    task_id = created.get("taskId")
+                    if not task_id:
+                        return _rejected(
+                            "capsolver",
+                            _provider_error_text(created, "provider rejected createTask"),
+                        )
+                    for _ in range(60):
+                        await sleep_with_source_deadline(1.0)
+                        result = (
+                            await client.post(
+                                "https://api.capsolver.com/getTaskResult",
+                                json={"clientKey": self.api_key, "taskId": task_id},
+                            )
+                        ).json()
+                        if result.get("status") == "ready":
+                            cookies = _extract_solution_cookies(result.get("solution", {}))
+                            if cookies:
+                                return _session_result(
+                                    "capsolver",
+                                    cookies,
+                                    challenge_type=challenge_type,
+                                    task_id=str(task_id),
+                                )
+                            return _rejected(
+                                "capsolver",
+                                "provider returned no clearance cookie",
+                            )
+                        if result.get("status") == "failed":
+                            return _rejected(
+                                "capsolver",
+                                _provider_error_text(result, "provider failed"),
+                            )
+                    return _timeout("capsolver")
+            except (httpx.HTTPError, ValueError, TypeError) as exc:
+                return _unavailable("capsolver", exc)
         site_key = await self._extract_sitekey_with_wait(page, challenge_type)
         if not site_key:
             return CaptchaSolveResult(
@@ -340,6 +471,10 @@ class CapSolverProvider(_BaseProvider):
             if action:
                 task_payload["pageAction"] = action
             task_payload["minScore"] = 0.3
+        elif wire_type == CaptchaChallengeType.TURNSTILE.value:
+            metadata = await extract_turnstile_metadata(page)
+            if metadata:
+                task_payload["metadata"] = metadata
         if effective_proxy:
             task_payload.update(self._proxy_task_fields())
         try:
@@ -355,7 +490,10 @@ class CapSolverProvider(_BaseProvider):
                 ).json()
                 task_id = created.get("taskId")
                 if not task_id:
-                    return _rejected("capsolver", "provider rejected createTask")
+                    return _rejected(
+                        "capsolver",
+                        _provider_error_text(created, "provider rejected createTask"),
+                    )
                 for _ in range(30):
                     await sleep_with_source_deadline(2.0)
                     result = (
@@ -375,7 +513,7 @@ class CapSolverProvider(_BaseProvider):
                     if result.get("status") == "failed":
                         return _rejected(
                             "capsolver",
-                            result.get("errorDescription", "provider failed"),
+                            _provider_error_text(result, "provider failed"),
                         )
                 return _timeout("capsolver")
         except (httpx.HTTPError, ValueError, TypeError) as exc:
@@ -566,7 +704,9 @@ class AntiCaptchaProvider(_BaseProvider):
 class NopeChaProvider(_BaseProvider):
     """Free-tier provider (recurring free credits every 23h, no card required)."""
 
-    supported = frozenset({CaptchaChallengeType.RECAPTCHA.value, CaptchaChallengeType.HCAPTCHA.value})
+    supported = frozenset(
+        {CaptchaChallengeType.RECAPTCHA.value, CaptchaChallengeType.HCAPTCHA.value}
+    )
     capability = CaptchaProviderCapability(
         provider="nopecha",
         supported_challenge_types=supported,
@@ -870,6 +1010,91 @@ def _token_result(
         result_kind=CaptchaResultKind.TOKEN,
         provider_task_id=task_id,
     )
+
+
+def _session_result(
+    method: str,
+    cookies: dict[str, str],
+    *,
+    challenge_type: str = CaptchaChallengeType.UNKNOWN.value,
+    task_id: str = "",
+) -> CaptchaSolveResult:
+    if not cookies:
+        return CaptchaSolveResult(
+            solved=False,
+            method=method,
+            error="provider returned no clearance cookies",
+            failure_reason=CaptchaFailureReason.BAD_TOKEN,
+            challenge_type=normalize_challenge_type(challenge_type),
+            result_kind=CaptchaResultKind.SESSION,
+            provider_task_id=task_id,
+        )
+    return CaptchaSolveResult(
+        solved=True,
+        method=method,
+        cookies=cookies,
+        challenge_type=normalize_challenge_type(challenge_type),
+        result_kind=CaptchaResultKind.SESSION,
+        provider_task_id=task_id,
+    )
+
+
+def _extract_solution_cookies(solution: Any) -> dict[str, str]:
+    if not isinstance(solution, dict):
+        return {}
+    cookies: dict[str, str] = {}
+    direct = solution.get("cf_clearance") or solution.get("clearance")
+    if direct:
+        cookies["cf_clearance"] = str(direct)
+
+    raw_cookies = solution.get("cookies") or solution.get("cookie")
+    if isinstance(raw_cookies, dict):
+        for key, value in raw_cookies.items():
+            if _is_clearance_cookie_name(str(key)):
+                cookies[str(key)] = str(value)
+    elif isinstance(raw_cookies, list):
+        for item in raw_cookies:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "") or "")
+            value = item.get("value")
+            if name and value is not None and _is_clearance_cookie_name(name):
+                cookies[name] = str(value)
+    elif isinstance(raw_cookies, str):
+        for part in raw_cookies.split(";"):
+            name, sep, value = part.strip().partition("=")
+            if sep and _is_clearance_cookie_name(name):
+                cookies[name.strip()] = value.strip()
+    return cookies
+
+
+def _is_clearance_cookie_name(name: str) -> bool:
+    lowered = name.strip().lower()
+    return lowered in {"cf_clearance", "cf_bm", "__cf_bm"}
+
+
+def _provider_error_text(payload: Any, fallback: str) -> str:
+    if not isinstance(payload, dict):
+        return fallback
+    code = str(payload.get("errorCode") or "").strip()
+    description = str(payload.get("errorDescription") or payload.get("error") or "").strip()
+    if code and description:
+        return f"{code}: {description}"
+    return description or code or fallback
+
+
+def _resolve_proxy_host_for_provider(hostname: str) -> str:
+    try:
+        candidates = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+    except OSError:
+        return hostname
+    for family, _socktype, _proto, _canonname, sockaddr in candidates:
+        if family is socket.AF_INET and sockaddr:
+            return str(sockaddr[0])
+    for _family, _socktype, _proto, _canonname, sockaddr in candidates:
+        if sockaddr:
+            return str(sockaddr[0])
+    return hostname
 
 
 def _rejected(method: str, error: str) -> CaptchaSolveResult:

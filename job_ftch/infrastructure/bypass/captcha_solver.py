@@ -200,11 +200,12 @@ class CaptchaSolverBypass:
         if url:
             from urllib.parse import urlparse
 
-            domain = urlparse(url).netloc.lower()
+            domain = (urlparse(url).hostname or urlparse(url).netloc).lower()
         elif hasattr(page, "url"):
             from urllib.parse import urlparse
 
-            domain = urlparse(str(page.url)).netloc.lower()
+            parsed_page_url = urlparse(str(page.url))
+            domain = (parsed_page_url.hostname or parsed_page_url.netloc).lower()
         normalized_type = normalize_challenge_type(challenge_type)
         backoff_key = (domain, normalized_type)
         backoff_until = self._failure_backoff.get(backoff_key)
@@ -322,6 +323,18 @@ class CaptchaSolverBypass:
                     failure_reason=CaptchaFailureReason.VERIFICATION_FAILED,
                     challenge_type=normalized_type,
                     result_kind=CaptchaResultKind.TOKEN,
+                    provider_task_id=result.provider_task_id,
+                    raw_provider_status=result.raw_provider_status,
+                )
+        elif result.solved and result.cookies:
+            if not await self._apply_clearance_cookies(page, domain, result.cookies):
+                result = CaptchaSolveResult(
+                    solved=False,
+                    method=result.method,
+                    error="provider cookies could not be applied",
+                    failure_reason=CaptchaFailureReason.INJECTION_FAILED,
+                    challenge_type=normalized_type,
+                    result_kind=CaptchaResultKind.SESSION,
                     provider_task_id=result.provider_task_id,
                     raw_provider_status=result.raw_provider_status,
                 )
@@ -555,7 +568,11 @@ class CaptchaSolverBypass:
             if cleared:
                 cookies = await self._harvest_cookies(page)
                 method = "browser_wait"
-                if challenge_type in {"cloudflare", "turnstile"}:
+                normalized_type = normalize_challenge_type(challenge_type)
+                if normalized_type in {
+                    CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value,
+                    CaptchaChallengeType.TURNSTILE.value,
+                }:
                     method = await self._detect_turnstile_method(page)
                 return CaptchaSolveResult(
                     solved=True,
@@ -605,7 +622,11 @@ class CaptchaSolverBypass:
         challenge_type: str,
     ) -> bool:
         try:
-            if challenge_type in {"cloudflare", "turnstile"}:
+            normalized_type = normalize_challenge_type(challenge_type)
+            if normalized_type in {
+                CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value,
+                CaptchaChallengeType.TURNSTILE.value,
+            }:
                 for selector in ("#challenge-stage", "#turnstile-wrapper", "iframe"):
                     try:
                         if hasattr(page, "click"):
@@ -633,6 +654,7 @@ class CaptchaSolverBypass:
 
     async def _check_challenge_cleared(self, page: Any, challenge_type: str) -> bool:
         try:
+            normalized_type = normalize_challenge_type(challenge_type)
             if hasattr(page, "evaluate"):
                 ready_state = await page.evaluate("document.readyState")
                 if ready_state not in ("interactive", "complete"):
@@ -645,9 +667,42 @@ class CaptchaSolverBypass:
                 )
                 body_lower = body_text.lower()
 
-                if challenge_type in {"cloudflare", "turnstile"}:
-                    if "checking your browser" in body_lower or "just a moment" in body_lower:
+                if normalized_type in {
+                    CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value,
+                    CaptchaChallengeType.TURNSTILE.value,
+                }:
+                    if any(
+                        marker in body_lower
+                        for marker in (
+                            "checking your browser",
+                            "just a moment",
+                            "performing security verification",
+                            "protect against malicious bots",
+                            "protects against malicious bots",
+                            "performance and security by cloudflare",
+                        )
+                    ):
                         return False
+                    html = str(
+                        await page.evaluate(
+                            "document.documentElement ? "
+                            "document.documentElement.outerHTML.substring(0, 50000) : ''"
+                        )
+                    )
+                    if html:
+                        from job_ftch.infrastructure.bypass.challenge_classifier import (
+                            classify_challenge,
+                        )
+
+                        detection = classify_challenge(
+                            surface="browser_clear_check",
+                            status_code=200,
+                            body=html,
+                        )
+                        if detection.detected:
+                            return False
+                    if normalized_type == CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value:
+                        return bool(await self._harvest_cookies(page))
                     turnstile_token = await page.evaluate(
                         "(()=>{"
                         "const el=document.querySelector('input[name=\"cf-turnstile-response\"]');"
@@ -658,7 +713,10 @@ class CaptchaSolverBypass:
                     if len(body_text) > 100:
                         return True
 
-                elif challenge_type in ("hcaptcha", "recaptcha"):
+                elif normalized_type in (
+                    CaptchaChallengeType.HCAPTCHA.value,
+                    CaptchaChallengeType.RECAPTCHA.value,
+                ):
                     token = await page.evaluate(
                         "(()=>{"
                         "const el=document.querySelector('[name=\"h-captcha-response\"]')"
@@ -667,7 +725,7 @@ class CaptchaSolverBypass:
                     )
                     return bool(token)
 
-                elif normalize_challenge_type(challenge_type) == "recaptcha_v3":
+                elif normalized_type == CaptchaChallengeType.RECAPTCHA_V3.value:
                     token = await page.evaluate(
                         "(()=>{"
                         "const el=document.querySelector('[name=\"g-recaptcha-response\"]');"
@@ -721,6 +779,57 @@ class CaptchaSolverBypass:
         except Exception as exc:
             logger.debug("captcha_cookie_harvest_error", error=str(exc))
         return cookies
+
+    async def _apply_clearance_cookies(
+        self,
+        page: Any,
+        domain: str,
+        cookies: dict[str, str],
+    ) -> bool:
+        if not domain or not cookies:
+            return False
+        cookie_items = [
+            {
+                "name": str(name),
+                "value": str(value),
+                "domain": domain,
+                "path": "/",
+                "secure": True,
+            }
+            for name, value in cookies.items()
+            if str(name).strip() and str(value).strip()
+        ]
+        if not cookie_items:
+            return False
+        try:
+            add_cookies = getattr(page, "add_cookies", None)
+            if callable(add_cookies):
+                await add_cookies(cookie_items)
+                return True
+            context = getattr(page, "context", None)
+            context_add = getattr(context, "add_cookies", None)
+            if callable(context_add):
+                await context_add(cookie_items)
+                return True
+            if hasattr(page, "evaluate"):
+                applied = False
+                for cookie in cookie_items:
+                    applied = (
+                        bool(
+                            await page.evaluate(
+                                """(cookie) => {
+                              document.cookie = `${cookie.name}=${cookie.value}; path=/; SameSite=None; Secure`;
+                              return document.cookie.includes(`${cookie.name}=`);
+                            }""",
+                                cookie,
+                            )
+                        )
+                        or applied
+                    )
+                return applied
+        except Exception as exc:
+            logger.debug("captcha_cookie_apply_error", error=str(exc))
+        return False
 
     def set_proxy_url(self, proxy_url: str) -> None:
         self._proxy_url = proxy_url

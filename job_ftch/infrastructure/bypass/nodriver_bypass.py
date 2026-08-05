@@ -482,14 +482,17 @@ class NodriverBypass:
             )
             try:
                 if profile_lock is not None:
-                    async with profile_lock, self._open_page_unlocked(
-                        config,
-                        browser_args=browser_args,
-                        user_data_dir=current_user_data_dir,
-                        owns_profile_dir=current_owns_profile_dir,
-                        use_proxy=use_proxy,
-                        viewport=viewport if isinstance(viewport, dict) else None,
-                    ) as page:
+                    async with (
+                        profile_lock,
+                        self._open_page_unlocked(
+                            config,
+                            browser_args=browser_args,
+                            user_data_dir=current_user_data_dir,
+                            owns_profile_dir=current_owns_profile_dir,
+                            use_proxy=use_proxy,
+                            viewport=viewport if isinstance(viewport, dict) else None,
+                        ) as page,
+                    ):
                         yield page
                     return
 

@@ -76,14 +76,19 @@ def _is_protected_record(record: dict[str, Any]) -> bool:
     )
 
 
-def _priority(record: dict[str, Any]) -> tuple[int, int, float]:
+def _priority(record: dict[str, Any]) -> tuple[int, int, int, float]:
     stats = record.get("stats") or {}
     detected = stats.get("detected_captcha_types") or []
     explicit_captcha = bool(detected)
     residential_seen = record.get("bypass_final_network") == "residential_proxy"
     failed = record.get("parse_status") != "parsed_ok"
     elapsed = float(record.get("elapsed_seconds") or 0)
-    return (0 if explicit_captcha else 1, 0 if residential_seen else 1, 0 if failed else 1, -elapsed)
+    return (
+        0 if explicit_captcha else 1,
+        0 if residential_seen else 1,
+        0 if failed else 1,
+        -elapsed,
+    )
 
 
 def load_protected_targets(paths: list[Path], *, limit: int) -> list[str]:
@@ -131,7 +136,25 @@ def load_targets_file(path: Path) -> list[str]:
     return [str(url) for url in urls if str(url).strip()]
 
 
+def dedupe_targets_by_domain(urls: list[str]) -> tuple[list[str], list[str]]:
+    """Keep the first representative per registrable host family."""
+    kept: list[str] = []
+    skipped: list[str] = []
+    seen: set[str] = set()
+    for url in urls:
+        domain = _domain(url)
+        if domain in seen:
+            skipped.append(url)
+            continue
+        seen.add(domain)
+        kept.append(url)
+    return kept, skipped
+
+
 def _runtime_overlay(provider: str, domains: list[str]) -> dict[str, Any]:
+    cloudflare_route = ["browser_wait", "manual_required"]
+    if provider == "capsolver":
+        cloudflare_route = ["browser_wait", "capsolver", "manual_required"]
     return {
         "captcha_provider": provider,
         "captcha_enabled_providers": [
@@ -144,15 +167,14 @@ def _runtime_overlay(provider: str, domains: list[str]) -> dict[str, Any]:
         "captcha_provider_routes": {
             "recaptcha": [provider, "manual_required"],
             "recaptcha_v3": [provider, "manual_required"],
-            "hcaptcha": [provider, "manual_required"]
-            if provider in {"capsolver"}
-            else ["observe"],
-            "cloudflare_challenge": ["browser_wait", "manual_required"],
+            "hcaptcha": [provider, "manual_required"] if provider in {"capsolver"} else ["observe"],
+            "cloudflare_challenge": cloudflare_route,
             "turnstile": ["capmonster", "manual_required"]
             if provider == "capmonster"
             else ["observe"],
             "unknown": ["observe"],
         },
+        "captcha_authorized_domains": domains,
         "proxy_rescue_allow_domains": domains,
         "bypass_max_route_attempts_per_operation": 8,
         "bypass_max_same_route_retries_per_operation": 8,
@@ -179,10 +201,12 @@ def _post_json(url: str, body: dict[str, Any], *, timeout: int = 30) -> dict[str
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+            payload = json.loads(response.read().decode("utf-8"))
+            return payload if isinstance(payload, dict) else {"payload": payload}
     except urllib.error.HTTPError as exc:
         try:
-            return json.loads(exc.read().decode("utf-8"))
+            payload = json.loads(exc.read().decode("utf-8"))
+            return payload if isinstance(payload, dict) else {"payload": payload}
         except json.JSONDecodeError:
             return {"error": str(exc)}
     except OSError as exc:
@@ -221,6 +245,42 @@ def _residential_available() -> bool:
         return False
 
 
+def _capsolver_cloudflare_proxy_status() -> dict[str, Any]:
+    """Return redacted compatibility status for CapSolver Cloudflare tasks."""
+    from job_ftch.infrastructure.bypass.proxy_bypass import (
+        CAPSOLVER_CHALLENGE_PROXY_ENV,
+        ResidentialProxyBypass,
+        _load_capsolver_cloudflare_proxies,
+        _load_residential_proxies,
+    )
+
+    dedicated_count = len(_load_capsolver_cloudflare_proxies())
+    raw_count = len(_load_residential_proxies())
+    try:
+        gateway_mode = ResidentialProxyBypass().gateway_provider is not None
+    except Exception:
+        gateway_mode = False
+    if dedicated_count:
+        source = CAPSOLVER_CHALLENGE_PROXY_ENV
+        available = True
+    elif raw_count:
+        source = "raw_residential_pool"
+        available = True
+    elif gateway_mode:
+        source = "gateway_only"
+        available = False
+    else:
+        source = "none"
+        available = False
+    return {
+        "available": available,
+        "source": source,
+        "dedicated_count": dedicated_count,
+        "raw_count": raw_count,
+        "gateway_mode": gateway_mode,
+    }
+
+
 def _summarize_results(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
     if not isinstance(data, list):
@@ -242,6 +302,44 @@ def _summarize_results(path: Path) -> dict[str, Any]:
     }
 
 
+def _diagnose_results(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+    rows = data if isinstance(data, list) else []
+    groups: dict[str, list[str]] = {}
+    domains: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        url = str(row.get("url") or "")
+        transitions = row.get("bypass_route_transitions") or []
+        solver = [item for item in transitions if item.get("axis") == "challenge"]
+        latest = solver[-1] if solver else {}
+        attempts = row.get("bypass_attempts") or []
+        if row.get("parse_status") == "parsed_ok":
+            category = "recovered"
+        elif not attempts and ((row.get("stats") or {}).get("detected_captcha_types") or []):
+            category = "challenge_detected_without_bypass_attempt"
+        elif latest.get("failure_reason"):
+            category = f"solver_{latest['failure_reason']}"
+        elif any(item.get("failure_kind") == "timeout" for item in attempts):
+            category = "timeout_before_solver"
+        else:
+            category = str(row.get("failure_bucket") or "unclassified")
+        groups.setdefault(category, []).append(url)
+        domains[_domain(url)] = {
+            "url": url,
+            "category": category,
+            "final_tier": row.get("bypass_final_tier"),
+            "final_network": row.get("bypass_final_network"),
+            "attempt_count": len(attempts),
+            "solver_attempt_count": len(solver),
+            "latest_solver": latest,
+        }
+    return {
+        "counts": {name: len(urls) for name, urls in groups.items()},
+        "groups": groups,
+        "domains": domains,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--history", action="append", default=[])
@@ -253,9 +351,27 @@ def main() -> int:
     parser.add_argument("--concurrency", type=int, default=2)
     parser.add_argument("--global-timeout", type=float, default=None)
     parser.add_argument("--max-items", type=int, default=1)
-    parser.add_argument("--out-dir", type=Path, default=Path(".runtime/runs/protected_proxy_captcha_matrix"))
+    parser.add_argument(
+        "--one-per-domain",
+        action="store_true",
+        help="Run one representative URL per normalized domain.",
+    )
+    parser.add_argument(
+        "--out-dir", type=Path, default=Path(".runtime/runs/protected_proxy_captcha_matrix")
+    )
     parser.add_argument("--allow-paid", action="store_true")
-    parser.add_argument("--require-residential", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--require-residential", action=argparse.BooleanOptionalAction, default=True
+    )
+    parser.add_argument(
+        "--require-capsolver-cloudflare-proxy",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Block paid CapSolver runs unless a raw/static residential proxy is "
+            "available for Cloudflare AntiCloudflareTask."
+        ),
+    )
     args = parser.parse_args()
 
     providers = [item.strip() for item in args.providers.split(",") if item.strip()]
@@ -263,26 +379,32 @@ def main() -> int:
     history_paths = [Path(p) for p in (args.history or DEFAULT_HISTORY_PATHS)]
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    urls = load_targets_file(args.targets) if args.targets else load_protected_targets(history_paths, limit=args.limit)
-    domains = sorted(
-        {
-            variant
-            for url in urls
-            for variant in _domain_variants(_domain(url))
-        }
+    urls = (
+        load_targets_file(args.targets)
+        if args.targets
+        else load_protected_targets(history_paths, limit=args.limit)
     )
+    skipped_domain_duplicates: list[str] = []
+    if args.one_per_domain:
+        urls, skipped_domain_duplicates = dedupe_targets_by_domain(urls)
+    domains = sorted({variant for url in urls for variant in _domain_variants(_domain(url))})
     targets_path = args.out_dir / "targets.yaml"
-    targets_path.write_text(yaml.safe_dump({"urls": urls}, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    targets_path.write_text(
+        yaml.safe_dump({"urls": urls}, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
 
     residential_available = _residential_available()
+    capsolver_cloudflare_proxy = _capsolver_cloudflare_proxy_status()
     manifest: dict[str, Any] = {
         "created_at": datetime.now(UTC).isoformat(),
         "targets_path": str(targets_path),
         "target_count": len(urls),
+        "skipped_domain_duplicates": skipped_domain_duplicates,
         "domains": domains,
         "providers": providers,
         "provider_env": [_provider_env_status(provider) for provider in providers],
         "residential_proxy_available": residential_available,
+        "capsolver_cloudflare_proxy": capsolver_cloudflare_proxy,
         "allow_paid": bool(args.allow_paid),
         "runs": [],
     }
@@ -306,10 +428,31 @@ def main() -> int:
         print(f"wrote {args.out_dir / 'manifest.json'}")
         return 2
 
+    if (
+        args.require_capsolver_cloudflare_proxy
+        and "capsolver" in providers
+        and not capsolver_cloudflare_proxy["available"]
+    ):
+        manifest["status"] = "blocked"
+        manifest["blocker"] = "capsolver_cloudflare_proxy_unavailable"
+        manifest["blocker_detail"] = (
+            "CapSolver AntiCloudflareTask requires a raw static/sticky proxy. "
+            "Set JOB_FTCH_CAPSOLVER_CHALLENGE_PROXY_LIST or add a raw "
+            "residential proxy URL under config/proxies.yaml:residential."
+        )
+        (args.out_dir / "manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"wrote {args.out_dir / 'manifest.json'}")
+        return 2
+
     for provider in providers:
         overlay_path = args.out_dir / f"runtime_{provider}.yaml"
         overlay_path.write_text(
-            yaml.safe_dump(_runtime_overlay(provider, domains), allow_unicode=True, sort_keys=False),
+            yaml.safe_dump(
+                _runtime_overlay(provider, domains), allow_unicode=True, sort_keys=False
+            ),
             encoding="utf-8",
         )
         out_json = args.out_dir / f"ingest_{provider}.json"
@@ -344,6 +487,11 @@ def main() -> int:
             cmd.extend(["--global-timeout", str(args.global_timeout)])
         completed = subprocess.run(cmd, cwd=Path.cwd(), env=env, check=False)
         after = _balances(providers)
+        diagnostics_path = args.out_dir / f"diagnostics_{provider}.json"
+        diagnostics_path.write_text(
+            json.dumps(_diagnose_results(out_json), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         manifest["runs"].append(
             {
                 "provider": provider,
@@ -351,6 +499,7 @@ def main() -> int:
                 "runtime_overlay": str(overlay_path),
                 "out_json": str(out_json),
                 "slow_queue": str(slow_yaml),
+                "diagnostics": str(diagnostics_path),
                 "balances_before": before,
                 "balances_after": after,
                 "summary": _summarize_results(out_json),
