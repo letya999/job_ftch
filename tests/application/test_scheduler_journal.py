@@ -37,9 +37,9 @@ async def test_due_slot_is_fixed_and_next_due_is_advanced() -> None:
 
     assert slot is not None
     assert slot["scheduled_for"] == (last_attempt + timedelta(hours=4)).isoformat()
-    assert store.state["bot_scheduler:next_due_at"] == (
-        last_attempt + timedelta(hours=8)
-    ).isoformat()
+    assert (
+        store.state["bot_scheduler:next_due_at"] == (last_attempt + timedelta(hours=8)).isoformat()
+    )
 
     await update_scheduler_slot(
         store,

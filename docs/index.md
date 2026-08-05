@@ -29,4 +29,4 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [Правила разработки](rules.md) - Короткие рабочие правила для изменений в job_ftch: границы слоёв, зависимости, тесты, документация и release gates. (Updated: 2026-08-02)
 - [Технологический стек](tech_stack.md) - Актуальный стек зависимостей job_ftch по pyproject.toml: core dependencies, extras и запрещённые инструменты. (Updated: 2026-08-03)
 - [Технический долг](techdebt.md) - Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-049. (Updated: 2026-08-05)
-- [Видение job_ftch](vision.md) - Назначение, границы и текущее состояние проекта job_ftch. (Updated: 2026-07-28)
+- [Видение job_ftch](vision.md) - Назначение, границы и текущее состояние проекта job_ftch. (Updated: 2026-08-05)

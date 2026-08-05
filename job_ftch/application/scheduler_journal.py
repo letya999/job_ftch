@@ -47,7 +47,9 @@ async def load_scheduler_journal(store: SchedulerJournalStore) -> list[dict[str,
         return []
     if not isinstance(payload, list):
         return []
-    return [item for item in payload if isinstance(item, dict) and isinstance(item.get("slot_id"), str)]
+    return [
+        item for item in payload if isinstance(item, dict) and isinstance(item.get("slot_id"), str)
+    ]
 
 
 async def _save_scheduler_journal(
@@ -87,7 +89,7 @@ async def ensure_scheduler_slot(
 
     if recovery_marker is not None:
         slot_id = recovery_marker.isoformat()
-        record = {
+        recovery_record: dict[str, object] = {
             "slot_id": slot_id,
             "scheduled_for": slot_id,
             "run_state": "succeeded" if publish_pending else "pending",
@@ -95,22 +97,22 @@ async def ensure_scheduler_slot(
             "publish_since": slot_id,
             "run_attempts": 0,
         }
-        journal.append(record)
+        journal.append(recovery_record)
         await _save_scheduler_journal(store, journal)
-        return record
+        return recovery_record
 
-    next_due = parse_scheduler_timestamp(
-        await _maybe_await(store.get_run_state(_NEXT_DUE_KEY))
-    )
+    next_due = parse_scheduler_timestamp(await _maybe_await(store.get_run_state(_NEXT_DUE_KEY)))
     if next_due is None:
         baseline = legacy_last_attempt or now
-        next_due = baseline + timedelta(seconds=interval_seconds) if legacy_last_attempt else baseline
+        next_due = (
+            baseline + timedelta(seconds=interval_seconds) if legacy_last_attempt else baseline
+        )
         await _maybe_await(store.set_run_state(_NEXT_DUE_KEY, next_due.isoformat()))
     if now < next_due:
         return None
 
     slot_id = next_due.isoformat()
-    record = {
+    scheduled_record: dict[str, object] = {
         "slot_id": slot_id,
         "scheduled_for": slot_id,
         "run_state": "pending",
@@ -118,11 +120,11 @@ async def ensure_scheduler_slot(
         "publish_since": None,
         "run_attempts": 0,
     }
-    journal.append(record)
+    journal.append(scheduled_record)
     next_due += timedelta(seconds=interval_seconds)
     await _maybe_await(store.set_run_state(_NEXT_DUE_KEY, next_due.isoformat()))
     await _save_scheduler_journal(store, journal)
-    return record
+    return scheduled_record
 
 
 async def update_scheduler_slot(

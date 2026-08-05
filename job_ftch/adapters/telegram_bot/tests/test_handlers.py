@@ -517,6 +517,10 @@ async def test_run_pipeline_uses_fallback_job_url_when_canonical_missing(
         return url == "https://example.com/fallback"
 
     monkeypatch.setattr("job_ftch.adapters.telegram_bot.handlers.pipeline._url_is_alive", _alive)
+    monkeypatch.setattr(
+        "job_ftch.adapters.telegram_bot.sender._render_with_layout",
+        lambda job, *_args: f"<b>{job.title}</b> https://example.com/fallback",
+    )
 
     runner = MagicMock()
     runtime = MagicMock()
@@ -574,7 +578,9 @@ async def test_run_pipeline_uses_fallback_job_url_when_canonical_missing(
     assert runner.latest_jobs.await_args.kwargs["since"] == datetime(2026, 7, 7, 12, 0, tzinfo=UTC)
     # one card send to chat after status message
     sent_card = message.answer.call_args_list[1].args[0]
-    assert "Открыть вакансию" in sent_card
+    assert "<b>AI Engineer</b>" in sent_card
+    assert "https://example.com/fallback" in sent_card
+    assert "🔵" not in sent_card
 
 
 async def test_run_pipeline_reports_channel_publish_outer_failure(
@@ -588,10 +594,9 @@ async def test_run_pipeline_reports_channel_publish_outer_failure(
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "job_ftch.adapters.telegram_bot.sender.format_vacancy_card",
-        lambda _job: "card",
+        "job_ftch.adapters.telegram_bot.sender._render_with_layout",
+        lambda job, *_args: f"card:{job.title}",
     )
-
     runner = MagicMock()
     runtime = MagicMock()
     runtime.settings = MagicMock(
@@ -656,10 +661,9 @@ async def test_run_pipeline_reports_partial_chat_delivery_and_publishes_only_del
         AsyncMock(return_value=True),
     )
     monkeypatch.setattr(
-        "job_ftch.adapters.telegram_bot.sender.format_vacancy_card",
-        lambda job: f"card:{job.title}",
+        "job_ftch.adapters.telegram_bot.sender._render_with_layout",
+        lambda job, *_args: f"card:{job.title}",
     )
-
     runner = MagicMock()
     runtime = MagicMock()
     runtime.settings = MagicMock(
@@ -758,10 +762,9 @@ async def test_run_pipeline_backfills_past_dead_links_before_send_limit(
 
     monkeypatch.setattr("job_ftch.adapters.telegram_bot.handlers.pipeline._url_is_alive", _alive)
     monkeypatch.setattr(
-        "job_ftch.adapters.telegram_bot.sender.format_vacancy_card",
-        lambda job: f"card:{job.title}",
+        "job_ftch.adapters.telegram_bot.sender._render_with_layout",
+        lambda job, *_args: f"card:{job.title}",
     )
-
     runner = MagicMock()
     runtime = MagicMock()
     runtime.settings = MagicMock(

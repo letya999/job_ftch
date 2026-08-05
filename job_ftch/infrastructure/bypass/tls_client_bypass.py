@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import Any
 
 from job_ftch.application.registry import BypassCapability, register_bypass
@@ -205,17 +206,23 @@ def _create_tls_client(bypass_config: dict[str, Any] | None = None) -> TlsClient
     )
 
 
-def _resolve_timeout_seconds(client: Any) -> float:
+def _normalize_timeout_seconds(value: float) -> int:
+    if value <= 0:
+        raise ValueError("tls-client timeout must be positive")
+    return max(1, int(math.ceil(value)))
+
+
+def _resolve_timeout_seconds(client: Any) -> int:
     timeout = getattr(client, "timeout", None)
     if isinstance(timeout, (int, float)) and timeout > 0:
-        return float(timeout)
+        return _normalize_timeout_seconds(float(timeout))
     if timeout is not None:
         for attr in ("read", "connect", "write", "pool"):
             value = getattr(timeout, attr, None)
             if isinstance(value, (int, float)) and value > 0:
-                return float(value)
+                return _normalize_timeout_seconds(float(value))
     settings = get_settings()
-    return max(settings.monitor_timeout_seconds, 0.1)
+    return _normalize_timeout_seconds(max(settings.monitor_timeout_seconds, 0.1))
 
 
 if _TLS_CLIENT_AVAILABLE:

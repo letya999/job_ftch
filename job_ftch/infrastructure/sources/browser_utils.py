@@ -69,6 +69,35 @@ _BROWSER_DRIVER_STALE_SECONDS = 180
 _BROWSER_TERMINATE_GRACE_SECONDS = 5.0
 
 
+def normalize_browser_timeout_ms(value: Any) -> int:
+    """Return a Playwright/Patchright-compatible integer timeout in milliseconds.
+
+    Runtime/source configs can carry YAML floats such as ``15.0``. Patchright's
+    Go transport rejects those when they reach a ``timeoutSeconds`` field, so
+    browser-bound timeouts are normalized at the boundary instead of requiring
+    every config source to use integer literals.
+    """
+    if isinstance(value, bool):
+        raise TypeError("browser timeout must be numeric, not bool")
+    if isinstance(value, int):
+        if value <= 0:
+            raise ValueError("browser timeout must be positive")
+        return value
+    if isinstance(value, float):
+        if value <= 0:
+            raise ValueError("browser timeout must be positive")
+        return int(value) if value.is_integer() else int(round(value))
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("browser timeout must not be empty")
+        number = float(stripped)
+        if number <= 0:
+            raise ValueError("browser timeout must be positive")
+        return int(number) if number.is_integer() else int(round(number))
+    raise TypeError(f"unsupported browser timeout type: {type(value).__name__}")
+
+
 async def _solve_page_challenge(controller: Any, page: Any, *, url: str) -> bool:
     """Solve once and preserve token-bearing page state when required."""
     if bool(getattr(controller, "challenge_solver_terminal", False)):
@@ -683,7 +712,10 @@ async def _open_playwright_page(
         browser.new_context(**context_kwargs)
     )
 
-    context.set_default_timeout(config.get("timeout", settings.browser_default_timeout_ms))
+    timeout_ms = normalize_browser_timeout_ms(
+        config.get("timeout", settings.browser_default_timeout_ms)
+    )
+    context.set_default_timeout(timeout_ms)
 
     if config.get("cookies"):
         await context.add_cookies(config["cookies"])
@@ -806,7 +838,10 @@ async def _open_persistent_page(
 
     from job_ftch.infrastructure.sources.source_deadline import await_with_source_deadline
 
-    context.set_default_timeout(config.get("timeout", settings.browser_default_timeout_ms))
+    timeout_ms = normalize_browser_timeout_ms(
+        config.get("timeout", settings.browser_default_timeout_ms)
+    )
+    context.set_default_timeout(timeout_ms)
 
     if config.get("cookies"):
         await context.add_cookies(config["cookies"])
@@ -859,7 +894,9 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     from job_ftch.config import get_settings
 
     settings = get_settings()
-    timeout = config.get("timeout", settings.browser_default_timeout_ms)
+    timeout = normalize_browser_timeout_ms(
+        config.get("timeout", settings.browser_default_timeout_ms)
+    )
     challenge_retries = config.get("challenge_retries", settings.browser_challenge_retries)
     challenge_wait_ms = config.get("challenge_wait_ms", 6000)
     blocked = (403, 401, 429, 503)

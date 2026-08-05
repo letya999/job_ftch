@@ -132,10 +132,9 @@ async def test_scheduler_loop_uses_publish_owner_profile(
 
     monkeypatch.setattr("job_ftch.adapters.telegram_bot.main.asyncio.sleep", fake_sleep)
     monkeypatch.setattr(
-        "job_ftch.adapters.telegram_bot.sender.format_vacancy_card",
-        lambda _job: "card",
+        "job_ftch.adapters.telegram_bot.sender._render_with_layout",
+        lambda *_args: "card",
     )
-
     store_state: dict[str, str] = {}
 
     async def _get_state(key: str) -> str | None:
@@ -211,6 +210,10 @@ async def test_scheduler_retries_run_left_incomplete_by_restart(
         raise asyncio.CancelledError
 
     monkeypatch.setattr("job_ftch.adapters.telegram_bot.main.asyncio.sleep", fake_sleep)
+    monkeypatch.setattr(
+        "job_ftch.adapters.telegram_bot.sender._render_with_layout",
+        lambda *_args: "card",
+    )
 
     now = datetime.now(UTC)
     store_state: dict[str, str] = {
@@ -255,15 +258,14 @@ async def test_scheduler_recovers_pending_publish_before_next_run(
 
     monkeypatch.setattr("job_ftch.adapters.telegram_bot.main.asyncio.sleep", fake_sleep)
     monkeypatch.setattr(
-        "job_ftch.adapters.telegram_bot.sender.format_vacancy_card", lambda _job: "card"
+        "job_ftch.adapters.telegram_bot.sender._render_with_layout",
+        lambda job, *_args: f"card:{job.group_id}",
     )
 
     async def _send_card(_self: object, _target: str, _job: object) -> None:
         return None
 
-    monkeypatch.setattr(
-        "job_ftch.adapters.telegram_bot.main.TelegramCardSender.send", _send_card
-    )
+    monkeypatch.setattr("job_ftch.adapters.telegram_bot.main.TelegramCardSender.send", _send_card)
 
     async def _publish(*_args: object, **_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
@@ -339,8 +341,8 @@ async def test_scheduler_loop_does_not_warn_when_jobs_are_grouped_for_publish(
 
     monkeypatch.setattr("job_ftch.adapters.telegram_bot.main.asyncio.sleep", fake_sleep)
     monkeypatch.setattr(
-        "job_ftch.adapters.telegram_bot.sender.format_vacancy_card",
-        lambda job: f"card:{job.group_id}",
+        "job_ftch.adapters.telegram_bot.sender._render_with_layout",
+        lambda job, *_args: f"card:{job.group_id}",
     )
     warning = MagicMock()
     monkeypatch.setattr(bot_main.logger, "warning", warning)
@@ -605,18 +607,15 @@ async def test_scheduler_loop_drains_pending_publish_window_on_zero_emit_run(
         if seconds >= 60:
             iteration["outer"] += 1
             store_state.pop("bot_scheduler:last_attempt_at", None)
-            store_state["bot_scheduler:last_publish_attempt_at"] = (
-                "2020-01-01T00:00:00+00:00"
-            )
+            store_state["bot_scheduler:last_publish_attempt_at"] = "2020-01-01T00:00:00+00:00"
             if iteration["outer"] >= 2:
                 raise asyncio.CancelledError
 
     monkeypatch.setattr("job_ftch.adapters.telegram_bot.main.asyncio.sleep", fake_sleep)
     monkeypatch.setattr(
-        "job_ftch.adapters.telegram_bot.sender.format_vacancy_card",
-        lambda job: f"card:{job.group_id}",
+        "job_ftch.adapters.telegram_bot.sender._render_with_layout",
+        lambda *_args: "card",
     )
-
     store_state: dict[str, str] = {}
 
     async def _get_state(key: str) -> str | None:

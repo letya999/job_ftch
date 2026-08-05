@@ -228,9 +228,7 @@ async def test_observed_cloudflare_routes_to_solver_browser_before_proxy_ladder(
 
 @pytest.mark.asyncio
 async def test_operation_attempt_budget_stops_additional_failure_actions() -> None:
-    manager = AdaptiveBypassManager(
-        bypass_config={"max_route_attempts_per_operation": 1}
-    )
+    manager = AdaptiveBypassManager(bypass_config={"max_route_attempts_per_operation": 1})
     token = manager.start_operation("listing", kind="listing", max_browser_launches=2)
     try:
         await manager.handle_failure("source", status_code=403)

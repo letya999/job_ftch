@@ -3,7 +3,7 @@ display_name: AI Jobs RU/KZ (dev)
 
 source_backend: telegram_channel
 sources:
-  # All 22 fixture sources — see fixtures/sources/ai_jobs.json
+  # All 17 fixture sources — see fixtures/sources/ai_jobs.json
   # Loaded at runtime via: load_sources(Path("fixtures/sources/ai_jobs.json"))
   # This file lists them explicitly for bot config clarity.
   - type: telegram_channel

@@ -219,6 +219,7 @@ def default_test_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("JOB_FTCH_JOB_BACKEND", "sqlite")
     monkeypatch.setenv("JOB_FTCH_RELEVANCE_SHOT_BACKEND", "memory")
     monkeypatch.setenv("JOB_FTCH_OPENAI_API_KEY", "sk-test-offline-pytest-openai-key")
+    monkeypatch.delenv("JOB_FTCH_LLM_BACKEND", raising=False)
     monkeypatch.delenv("JOB_FTCH_VECTOR_BACKEND", raising=False)
     monkeypatch.delenv("JOB_FTCH_QDRANT_URL", raising=False)
     monkeypatch.delenv("JOB_FTCH_QDRANT_API_KEY", raising=False)

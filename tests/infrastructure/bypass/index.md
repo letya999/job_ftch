@@ -41,6 +41,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_session_fingerprint_consistency.py](test_session_fingerprint_consistency.py)
 - [test_stealth_hardening_consistency.py](test_stealth_hardening_consistency.py)
 - [test_temporal_graph.py](test_temporal_graph.py)
+- [test_tls_client_bypass.py](test_tls_client_bypass.py)
 - [test_transition_policy.py](test_transition_policy.py)
 - [test_warm_profiles.py](test_warm_profiles.py)
 - [test_wave2_coherence.py](test_wave2_coherence.py)

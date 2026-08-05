@@ -198,7 +198,7 @@ async def test_capsolver_cloudflare_task_uses_proxy_without_sitekey(
 
     provider = CapSolverProvider(
         "offline-key",  # pragma: allowlist secret
-        proxy_url="http://" + "user" + ":" + "pass" + "@127.0.0.1:9000",
+        proxy_url="http://127.0.0.1:9000",
     )
     result = await provider.solve(
         page,
@@ -209,7 +209,7 @@ async def test_capsolver_cloudflare_task_uses_proxy_without_sitekey(
     task = captured["task"]
     assert isinstance(task, dict)
     assert task["type"] == "AntiCloudflareTask"
-    assert task["proxy"] == "127.0.0.1:9000:user:pass"
+    assert task["proxy"] == "127.0.0.1:9000"
     assert task["userAgent"] == "Chrome UA"
     assert task["html"] == "<html>Just a moment</html>"
     assert "websiteKey" not in task
@@ -272,7 +272,7 @@ async def test_capsolver_cloudflare_resolves_proxy_hostname_before_task(
 
     provider = CapSolverProvider(
         "offline-key",  # pragma: allowlist secret
-        proxy_url="http://" + "user" + ":" + "pass" + "@residential-gateway.example:9000",
+        proxy_url="http://residential-gateway.example:9000",
     )
     result = await provider.solve(
         SimpleNamespace(evaluate=AsyncMock(return_value="Chrome UA")),
@@ -282,7 +282,7 @@ async def test_capsolver_cloudflare_resolves_proxy_hostname_before_task(
 
     task = captured["task"]
     assert isinstance(task, dict)
-    assert task["proxy"] == "203.0.113.7:9000:user:pass"
+    assert task["proxy"] == "203.0.113.7:9000"
     assert result.solved
 
 

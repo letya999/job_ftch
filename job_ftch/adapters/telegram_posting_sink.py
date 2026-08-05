@@ -30,17 +30,10 @@ def _build_telegram_posting_sink(settings: Settings) -> TelegramPostingSink:
     if settings.telegram_publish_entity is None:
         msg = "telegram_publish_entity is required when sink_backend=telegram_posting."
         raise ValueError(msg)
-    from job_ftch.adapters.telegram_bot.formatter import format_job_digest  # lazy: only in bot mode
-
     return TelegramPostingSink(
         _build_telegram_client(settings),
         settings.telegram_publish_entity,
         own_client=True,
         notify_mode=settings.notify_mode,
         notify_batch_size=settings.notify_batch_size,
-        digest_formatter=lambda jobs, page, page_size: format_job_digest(
-            jobs,
-            page=page,
-            page_size=page_size,
-        ),
     )

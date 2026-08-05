@@ -56,16 +56,16 @@ class _FakeClient:
         return _FakeResponse(
             text=(
                 '<html><head><script src="/chunk.js"></script></head><body>'
-                r'{\"id\":\"697597a8-8608-45b7-8d1a-f49960b185a1\",'
-                r'\"name\":\"Accenture\"}'
-                r'{\"id\":\"'
+                r"{\"id\":\"697597a8-8608-45b7-8d1a-f49960b185a1\","
+                r"\"name\":\"Accenture\"}"
+                r"{\"id\":\""
                 f"{_POSTING_ID}"
-                r'\",\"title\":\"Advanced AI Full Stack Engineer\",'
-                r'\"firstSeenAt\":\"$D2026-08-04T14:50:22.000Z\"}'
-                r'{\"id\":\"'
+                r"\",\"title\":\"Advanced AI Full Stack Engineer\","
+                r"\"firstSeenAt\":\"$D2026-08-04T14:50:22.000Z\"}"
+                r"{\"id\":\""
                 f"{_DUPLICATE_POSTING_ID}"
-                r'\",\"title\":\"Advanced AI Full Stack Engineer\",'
-                r'\"firstSeenAt\":\"$D2026-08-04T14:53:13.000Z\"}'
+                r"\",\"title\":\"Advanced AI Full Stack Engineer\","
+                r"\"firstSeenAt\":\"$D2026-08-04T14:53:13.000Z\"}"
                 "</body></html>"
             ),
             url=url,
@@ -148,9 +148,9 @@ class _FakeSearchClient:
 
 def test_jseek_helpers_extract_listing_ids_and_action_id() -> None:
     html = (
-        r'{\"id\":\"770b065f-ceda-4f32-82f7-edc0aa6daae2\",'
-        r'\"title\":\"Advanced AI Full Stack Engineer\",'
-        r'\"firstSeenAt\":\"$D2026-08-04T14:50:22.000Z\"}'
+        r"{\"id\":\"770b065f-ceda-4f32-82f7-edc0aa6daae2\","
+        r"\"title\":\"Advanced AI Full Stack Engineer\","
+        r"\"firstSeenAt\":\"$D2026-08-04T14:50:22.000Z\"}"
     )
     chunk = (
         f'createServerReference)("{_ACTION_ID}",'
@@ -208,9 +208,7 @@ async def test_jseek_discover_returns_deduped_external_source_urls() -> None:
     assert urls == [_SOURCE_URL]
     assert len(client.posts) == 2
     assert client.posts[0]["headers"]["next-action"] == _ACTION_ID
-    assert client.posts[0]["content"] == (
-        f'[{{"postingId":"{_POSTING_ID}","locale":"en"}}]'
-    )
+    assert client.posts[0]["content"] == (f'[{{"postingId":"{_POSTING_ID}","locale":"en"}}]')
 
 
 @pytest.mark.asyncio
@@ -262,8 +260,12 @@ async def test_trusted_jseek_external_urls_bypass_generic_url_ranking() -> None:
     source._iter_scraped_detail_items = _iter_scraped_detail_items
 
     candidates = [
-        DiscoveredCandidate(url="https://people.mcdonalds.co.uk/job-search/location/title/pdx-mc-abc-123"),
-        DiscoveredCandidate(url="https://www.werkenbijmcdonalds.nl/maintenance-employee/job/P8-274080-2"),
+        DiscoveredCandidate(
+            url="https://people.mcdonalds.co.uk/job-search/location/title/pdx-mc-abc-123"
+        ),
+        DiscoveredCandidate(
+            url="https://www.werkenbijmcdonalds.nl/maintenance-employee/job/P8-274080-2"
+        ),
     ]
 
     items = [item async for item in source._enrich_candidates(candidates, ["dom"], "jseek")]

@@ -1310,6 +1310,23 @@ async def _build_full_pipeline(
             "graph_hash": graph_executor.graph.graph_hash if graph_executor is not None else None,
         }
     )
+    runtime_ontology = derived_ontology_override or {}
+    build_context.setdefault(
+        "runtime_ontology",
+        {
+            "skills": len(runtime_ontology.get("skills", [])),
+            "roles": len(runtime_ontology.get("roles", [])),
+            "positive_keywords": len(runtime_ontology.get("positive_keywords", [])),
+            "negative_keywords": len(runtime_ontology.get("negative_keywords", [])),
+            "anti_patterns": len(runtime_ontology.get("anti_patterns", [])),
+        },
+    )
+    build_context.setdefault(
+        "runtime_ontology_hash",
+        hashlib.sha256(
+            json.dumps(runtime_ontology, sort_keys=True, default=str).encode()
+        ).hexdigest(),
+    )
     return (
         settings,
         catalog,
@@ -1345,7 +1362,9 @@ async def _run_item_graph(
         SettlementOutcome,
     )
 
-    coordinator = DedupSettlementCoordinator(executor.settlement_participants())
+    settlement_participants = getattr(executor, "settlement_participants", None)
+    participants = settlement_participants() if callable(settlement_participants) else ()
+    coordinator = DedupSettlementCoordinator(participants)
     item_id = str(row.get("stable_id", ""))
     token = _CURRENT_ITEM_ID.set(item_id or None)
     try:

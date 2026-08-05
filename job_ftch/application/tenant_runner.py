@@ -190,7 +190,7 @@ def _update_source_health_payload(
             failed=stats.failed,
         )
     had_failure = (stats.fetched == 0 and stats.failed > 0) or (
-        stats.fetched > 0 and stats.failed / stats.fetched > majority_failure_ratio
+        stats.fetched > 1 and stats.failed / stats.fetched > majority_failure_ratio
     )
     degraded = False
     drift_ratio: float | None = None

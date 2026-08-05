@@ -103,7 +103,9 @@ class TelegramPostingSink:
 
                 if self._digest_formatter is None:
                     digest = "\n\n".join(
-                        f"<b>{j.title or '?'}</b> — {j.company or '?'}" for j in chunk
+                        text
+                        for job in chunk
+                        if (text := _render_job(job, self._layout, self._profile)) is not None
                     )
                 else:
                     digest = self._digest_formatter(chunk, 0, chunk_size)

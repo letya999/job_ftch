@@ -1,10 +1,4 @@
-"""The bot senders must render the YAML card layout by default.
-
-Regression guard for the release gap where the scheduler and ``/run`` built
-``TelegramCardSender`` / ``ReplyCardSender`` without a ``layout``, so
-``_render`` silently fell back to the legacy ``format_vacancy_card`` and the
-v0.0.6 card renderer never reached the channel.
-"""
+"""The bot senders always render the YAML card layout."""
 
 from __future__ import annotations
 
@@ -30,10 +24,22 @@ def _job() -> JobRecord:
     )
 
 
+def _incomplete_job() -> JobRecord:
+    return JobRecord(
+        raw_item_id="fmt-incomplete",
+        source_kind=SourceKind.TELEGRAM_CHANNEL,
+        source_name="AI Engineers Jobs",
+        title="Специалист по нейросетям",
+        description="Молодая команда автоматизирует процессы с помощью нейросетей.",
+        canonical_url="https://t.me/example/1",
+        language=LanguageCode.RU,
+    )
+
+
 def test_telegram_card_sender_defaults_to_yaml_layout() -> None:
     text = TelegramCardSender(bot=object())._render(_job())
 
-    # New labelled-row layout, not the legacy "🔗 Открыть вакансию" card.
+    # New labelled-row layout.
     assert "Компания: Яндекс" in text
     assert "<b>Senior ML Engineer</b>" in text
     assert "Открыть вакансию" not in text
@@ -43,4 +49,16 @@ def test_reply_card_sender_defaults_to_yaml_layout() -> None:
     text = ReplyCardSender(message=object())._render(_job())
 
     assert "Компания: Яндекс" in text
+    assert "Открыть вакансию" not in text
+
+
+def test_incomplete_job_is_marked_but_stays_in_yaml_card_format() -> None:
+    text = TelegramCardSender(bot=object())._render(_incomplete_job())
+
+    assert text.startswith("⚠️ <i>Требует проверки</i>")
+    assert "<b>Специалист по нейросетям</b>" in text
+    assert "Компания: не указана" in text
+    assert "Формат: не указан" in text
+    assert "🔵" not in text
+    assert "#" not in text
     assert "Открыть вакансию" not in text

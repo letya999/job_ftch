@@ -80,9 +80,7 @@ def _clear_polling_ready() -> None:
         READINESS_PATH.unlink(missing_ok=True)
 
 
-HEARTBEAT_INTERVAL_SECONDS = float(
-    os.environ.get("JOB_FTCH_BOT_HEARTBEAT_SECONDS", "30")
-)
+HEARTBEAT_INTERVAL_SECONDS = float(os.environ.get("JOB_FTCH_BOT_HEARTBEAT_SECONDS", "30"))
 
 
 async def _run_readiness_heartbeat(
@@ -126,6 +124,22 @@ async def _maybe_await(value: object) -> object:
     if asyncio.isfuture(value) or asyncio.iscoroutine(value):
         return await value
     return value
+
+
+def _optional_state_str(raw: object) -> str | None:
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    return value or None
+
+
+def _state_int(raw: object, default: int = 0) -> int:
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str):
+        with contextlib.suppress(ValueError):
+            return int(raw)
+    return default
 
 
 def _parse_scheduler_timestamp(raw: object) -> datetime | None:
@@ -185,7 +199,7 @@ async def _recover_pending_scheduler_publish(
         tenant_id,
         limit=publish_candidate_fetch_limit(send_limit),
         since=publish_since,
-        user_id=publish_user_id,
+        user_id=_optional_state_str(publish_user_id),
     )
     eligible = [job for job in jobs if job_passes_bot_publish_gates(job)]
     if not eligible:
@@ -222,9 +236,7 @@ async def _recover_pending_scheduler_publish(
     remaining = max(0, len(eligible) - outcome.sent - outcome.skipped_already_published)
     if remaining:
         await _maybe_await(
-            store.set_run_state(
-                "bot_scheduler:pending_publish_since", publish_since.isoformat()
-            )
+            store.set_run_state("bot_scheduler:pending_publish_since", publish_since.isoformat())
         )
     else:
         await _maybe_await(store.set_run_state("bot_scheduler:pending_publish_since", ""))
@@ -255,7 +267,9 @@ async def _recover_pending_scheduler_publish(
                 last_publish_sent=outcome.sent,
             )
         await _maybe_await(
-            store.set_run_state("bot_scheduler:last_publish_success_at", datetime.now(UTC).isoformat())
+            store.set_run_state(
+                "bot_scheduler:last_publish_success_at", datetime.now(UTC).isoformat()
+            )
         )
         await _maybe_await(store.set_run_state("bot_scheduler:last_publish_error", ""))
     logger.info(
@@ -565,9 +579,10 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                             store.get_run_state("bot_scheduler:last_publish_attempt_at")
                         )
                     )
-                    retry_ready = last_publish_attempt is None or (
-                        now - last_publish_attempt
-                    ).total_seconds() >= 60
+                    retry_ready = (
+                        last_publish_attempt is None
+                        or (now - last_publish_attempt).total_seconds() >= 60
+                    )
                     if retry_ready:
                         await _recover_pending_scheduler_publish(
                             runner,
@@ -593,7 +608,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         store,
                         scheduler_slot_id,
                         run_state="running",
-                        run_attempts=int(scheduler_slot.get("run_attempts", 0) or 0) + 1,
+                        run_attempts=_state_int(scheduler_slot.get("run_attempts")) + 1,
                         run_started_at=t_start.isoformat(),
                     )
                     await _maybe_await(
@@ -851,9 +866,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     had_flood_failure = publish_outcome.had_transient_failure
                     remaining = max(
                         0,
-                        eligible_to_send
-                        - chan_count
-                        - publish_outcome.skipped_already_published,
+                        eligible_to_send - chan_count - publish_outcome.skipped_already_published,
                     )
                     # Keep the window open for every unsent candidate. This covers
                     # network outages as well as flood waits; the publish ledger
@@ -877,7 +890,8 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                             store,
                             scheduler_slot_id,
                             publish_state="failed",
-                            publish_error=publish_error or f"{remaining} publish candidate(s) remain",
+                            publish_error=publish_error
+                            or f"{remaining} publish candidate(s) remain",
                             last_publish_sent=chan_count,
                         )
                         await _maybe_await(
