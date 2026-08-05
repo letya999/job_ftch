@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from job_ftch.application.registry import BypassCapability
 from job_ftch.infrastructure.bypass.adaptive import (
     DEFAULT_TIER_ORDER,
     OPTIONAL_TIERS,
@@ -104,6 +105,47 @@ class TestPhaseA1RiskRouterPersistence:
 
         score = rep.decayed_score(86400.0)
         assert score > 0.65
+
+    def test_router_reuses_last_observed_successful_tier(self) -> None:
+        router = RiskRouter()
+        rep = router.get_reputation("https://known.example.com/jobs")
+        rep.total_successes = 3
+        rep.last_tier = "camoufox"
+        rep.last_success_at = time.time()
+
+        with patch(
+            "job_ftch.infrastructure.bypass.risk_router.list_bypass_capabilities",
+            return_value={"camoufox": BypassCapability(browser_family="firefox")},
+        ):
+            assert router.select_tier("https://known.example.com/jobs") == "camoufox"
+
+    def test_high_risk_uses_cheapest_fingerprint_capability(self) -> None:
+        router = RiskRouter()
+        rep = router.get_reputation("https://hard.example.com/jobs")
+        rep.total_failures = 3
+        rep.risk_score = 0.9
+        rep.last_failure_at = time.time()
+
+        capabilities = {
+            "patchright_browser": BypassCapability(
+                cost=25,
+                browser_family="chromium_patchright",
+                challenge_actions=frozenset({"fingerprint_resistant"}),
+            ),
+            "nodriver": BypassCapability(
+                cost=30,
+                browser_family="chromium_cdp",
+                challenge_actions=frozenset({"fingerprint_resistant"}),
+            ),
+        }
+        with patch(
+            "job_ftch.infrastructure.bypass.risk_router.list_bypass_capabilities",
+            return_value=capabilities,
+        ):
+            assert (
+                router.select_tier("https://hard.example.com/jobs")
+                == "patchright_browser"
+            )
 
 
 class TestPhaseA2BypassContext:

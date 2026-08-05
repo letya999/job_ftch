@@ -321,6 +321,7 @@ class AdaptiveBypassManager:
         self._owns_profile_dir = True
         self._warmed_domains: set[str] = set()
         self._observed_challenge_type: str | None = None
+        self._route_transitions: list[dict[str, Any]] = []
         import asyncio
 
         self._profile_lock = asyncio.Lock()
@@ -499,6 +500,21 @@ class AdaptiveBypassManager:
         return tuple(self._tiers)
 
     @property
+    def attempt_telemetry(self) -> list[dict[str, object]]:
+        snapshot = getattr(self._budget, "snapshot", None)
+        if callable(snapshot):
+            return cast("list[dict[str, object]]", snapshot())
+        return []
+
+    @property
+    def route_transition_telemetry(self) -> list[dict[str, Any]]:
+        return [dict(event) for event in self._route_transitions]
+
+    @property
+    def observed_challenge_type(self) -> str | None:
+        return self._observed_challenge_type
+
+    @property
     def exhausted(self) -> bool:
         """Whether adaptive escalation has reached its last installed tier."""
         return self.current_tier_index >= len(self._tiers) - 1
@@ -644,6 +660,15 @@ class AdaptiveBypassManager:
             engine=self.current_name,
             network=network.value,
         )
+        self._route_transitions.append(
+            {
+                "axis": "network",
+                "engine": self.current_name,
+                "network": network.value,
+                "session": self._route_state.session.value,
+                "challenge": self._route_state.challenge.value,
+            }
+        )
         return True
 
     def _rotate_proxy(
@@ -671,6 +696,15 @@ class AdaptiveBypassManager:
         self._route_state = self._route_state.transition(session=SessionMode.FRESH)
         self._sync_context_route()
         logger.info("bypass_proxy_rotated", engine=self.current_name)
+        self._route_transitions.append(
+            {
+                "axis": "network",
+                "engine": self.current_name,
+                "network": self._route_state.network.value,
+                "session": self._route_state.session.value,
+                "challenge": self._route_state.challenge.value,
+            }
+        )
         return True
 
     def _persona_session_memory(self) -> Any:
@@ -703,6 +737,11 @@ class AdaptiveBypassManager:
             persona_kw = context_kwargs(use_proxy=self.uses_proxy)
             if persona_kw.get("user_agent") and not prepared.get("user_agent"):
                 prepared["user_agent"] = persona_kw["user_agent"]
+                # Session-owning engines can select a different executable
+                # than the profile used to derive this persona.  Preserve the
+                # provenance so they can decline an unverified command-line
+                # UA while still honoring a caller's explicit override.
+                prepared["_persona_user_agent"] = True
             if persona_kw.get("locale") and not prepared.get("locale"):
                 prepared["locale"] = persona_kw["locale"]
             if persona_kw.get("timezone_id") and not prepared.get("timezone_id"):
@@ -1006,6 +1045,16 @@ class AdaptiveBypassManager:
                 to_engine=candidate,
                 network=self._route_state.network.value,
             )
+            self._route_transitions.append(
+                {
+                    "axis": "engine",
+                    "from_engine": new_name,
+                    "to_engine": candidate,
+                    "network": self._route_state.network.value,
+                    "session": self._route_state.session.value,
+                    "challenge": self._route_state.challenge.value,
+                }
+            )
             return True
         return False
 
@@ -1135,11 +1184,23 @@ class AdaptiveBypassManager:
                 self.escalate()
             return kind
         if decision.action is TransitionAction.SOLVE_CURRENT_SESSION and self.adaptive_enabled:
-            self._route_state = self._route_state.transition(
-                challenge=ChallengeState.OBSERVED,
-                session=SessionMode.STICKY,
-            )
-            self._select_capability(self._captcha_actions(body, headers))
+            if (
+                self._route_state.challenge is not ChallengeState.OBSERVED
+                or self._route_state.session is not SessionMode.STICKY
+            ):
+                self._route_state = self._route_state.transition(
+                    challenge=ChallengeState.OBSERVED,
+                    session=SessionMode.STICKY,
+                )
+            changed = self._select_capability(self._captcha_actions(body, headers))
+            if not changed and self._budget.same_route_retry_exhausted():
+                logger.info(
+                    "bypass_challenge_same_route_retry_exhausted",
+                    tier=self.current_name,
+                    failure_kind=kind,
+                    status_code=status_code,
+                )
+                self.escalate()
             return kind
         if decision.action is TransitionAction.ACTIVATE_PROXY:
             # HTTP retry policy owns any bounded Retry-After sleep.  The route
@@ -1167,6 +1228,10 @@ class AdaptiveBypassManager:
         if decision.action is TransitionAction.FINGERPRINT_RESISTANT_ENGINE:
             if self.adaptive_enabled:
                 self._select_capability(("fingerprint_resistant", "terminal"))
+            return kind
+        if decision.action is TransitionAction.ENGINE_DIVERSITY:
+            if self.adaptive_enabled:
+                self._select_capability(("engine_diversity", "terminal"))
             return kind
         if decision.action is TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK:
             if (
@@ -1270,6 +1335,11 @@ class AdaptiveBypassManager:
                 use_proxy=self.uses_proxy,
             )
         return cast("dict[str, Any]", self._current_strategy.apply_browser_args(kwargs))
+
+    @property
+    def requires_process_identity(self) -> bool:
+        """Whether the selected engine needs identity on worker-originated requests."""
+        return bool(getattr(self._current_strategy, "requires_process_identity", False))
 
     async def apply_page(self, page: Any) -> None:
         """Apply the current tier's page hooks, then compose behavior_sim and orchestrator.
@@ -1424,13 +1494,28 @@ class AdaptiveBypassManager:
         proxy_setter = getattr(self._captcha_solver, "set_proxy_url", None)
         if callable(proxy_setter) and self.current_proxy_url:
             proxy_setter(self.current_proxy_url)
+        observed_type = self._observed_challenge_type
+        if (
+            observed_type == "cloudflare_challenge"
+            and not self.uses_proxy
+            and (
+                bool(getattr(self._context, "proxy_available", False))
+                or bool(getattr(self._context, "residential_proxy_available", False))
+            )
+            and self.activate_proxy()
+        ):
+            logger.info(
+                "bypass_captcha_solver_deferred_until_proxy",
+                challenge_type=observed_type,
+                network=self._route_state.network.value,
+            )
+            return False
         self._route_state = self._route_state.transition(
             challenge=ChallengeState.SOLVING,
             session=SessionMode.STICKY,
         )
         self._sync_context_route()
         solve = getattr(self._captcha_solver, "solve", None)
-        observed_type = self._observed_challenge_type
         if observed_type and callable(solve):
             result = await solve(page, challenge_type=observed_type, url=url)
         else:

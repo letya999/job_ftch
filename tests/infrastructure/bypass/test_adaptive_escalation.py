@@ -74,14 +74,23 @@ def fast_bypass_registry(monkeypatch: pytest.MonkeyPatch) -> None:
         "nodriver": BypassCapability(
             cost=30,
             browser_family="chromium_cdp",
-            challenge_actions=frozenset({"cdp_checkbox", "cloudflare_challenge"}),
+            challenge_actions=frozenset(
+                {
+                    "cdp_checkbox",
+                    "cloudflare_challenge",
+                    "fingerprint_resistant",
+                    "generic_challenge",
+                }
+            ),
             legal_gate="adr_073",
             min_remaining_seconds=10.0,
         ),
         "camoufox": BypassCapability(
             cost=40,
             browser_family="firefox",
-            challenge_actions=frozenset({"fingerprint_resistant", "generic_challenge"}),
+            challenge_actions=frozenset(
+                {"engine_diversity", "fingerprint_resistant", "generic_challenge"}
+            ),
             min_remaining_seconds=12.0,
         ),
         "cloak": BypassCapability(
@@ -172,6 +181,36 @@ async def test_silent_block_override_switches_to_fingerprint_resistant_engine() 
 
 
 @pytest.mark.asyncio
+async def test_generic_fingerprint_route_uses_nodriver_before_camoufox() -> None:
+    manager = AdaptiveBypassManager()
+    assert manager.escalate_to("patchright_browser")
+
+    kind = await manager.handle_failure(
+        "source",
+        status_code=403,
+        body=b"automated browser fingerprint rejected",
+    )
+
+    assert kind is FailureKind.BLOCKED_FINGERPRINT
+    assert manager.current_name == "nodriver"
+
+
+@pytest.mark.asyncio
+async def test_chromium_specific_rejection_selects_engine_diversity() -> None:
+    manager = AdaptiveBypassManager()
+    assert manager.escalate_to("patchright_browser")
+
+    kind = await manager.handle_failure(
+        "source",
+        status_code=403,
+        body=b"Chromium fingerprint rejected",
+    )
+
+    assert kind is FailureKind.BLOCKED_CHROMIUM_FINGERPRINT
+    assert manager.current_name == "camoufox"
+
+
+@pytest.mark.asyncio
 async def test_unknown_failures_still_escalate_on_threshold() -> None:
     # Defect B2: an unrecognised protection response used to be a silent no-op.
     # It must now record a failure and escalate once the window threshold trips.
@@ -208,6 +247,45 @@ async def test_solve_page_challenge_uses_monitor_observed_challenge_type() -> No
         url="https://example.test/jobs",
     )
     solver.solve_detected.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_solver_defers_until_proxy_route() -> None:
+    manager = AdaptiveBypassManager()
+    solver = type(
+        "Solver",
+        (),
+        {
+            "solve": AsyncMock(return_value=CaptchaSolveResult(solved=True, method="provider")),
+            "solve_detected": AsyncMock(
+                return_value=CaptchaSolveResult(solved=True, method="autodetect")
+            ),
+        },
+    )()
+    context = SimpleNamespace(
+        proxy_available=False,
+        residential_proxy_available=True,
+        set_browser_family=lambda _family: None,
+        set_effective_route=lambda **_kwargs: None,
+    )
+    manager._captcha_solver = solver  # type: ignore[attr-defined]
+    manager.bind_context(context)
+    manager.set_observed_challenge_type("cloudflare_challenge")
+
+    solved = await manager.solve_page_challenge(object(), url="https://example.test/jobs")
+
+    assert not solved
+    assert manager.uses_proxy
+    solver.solve.assert_not_awaited()
+    solver.solve_detected.assert_not_awaited()
+
+
+def test_observed_challenge_type_is_exposed_read_only() -> None:
+    manager = AdaptiveBypassManager()
+
+    manager.set_observed_challenge_type("cloudflare_challenge")
+
+    assert manager.observed_challenge_type == "cloudflare_challenge"
 
 
 @pytest.mark.asyncio
@@ -320,6 +398,21 @@ async def test_proxy_route_survives_engine_transition() -> None:
 
     assert manager.current_name == "nodriver"
     assert manager.uses_proxy
+
+
+@pytest.mark.asyncio
+async def test_repeated_challenge_does_not_fake_route_progress() -> None:
+    manager = AdaptiveBypassManager({"max_same_route_retries_per_operation": 2})
+    token = manager.start_operation("listing", kind="listing", max_browser_launches=0)
+    try:
+        await manager.handle_failure("source", status_code=202, body=b"Robot Challenge Screen")
+        observed = manager.route_state
+
+        await manager.handle_failure("source", status_code=202, body=b"Robot Challenge Screen")
+
+        assert manager.route_state == observed
+    finally:
+        manager.end_operation(token)
 
 
 @pytest.mark.asyncio

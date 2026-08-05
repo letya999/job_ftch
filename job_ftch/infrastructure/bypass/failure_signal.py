@@ -26,6 +26,7 @@ class FailureKind(StrEnum):
     BLOCKED = "blocked"
     BLOCKED_IP = "blocked_ip"
     BLOCKED_FINGERPRINT = "blocked_fingerprint"
+    BLOCKED_CHROMIUM_FINGERPRINT = "blocked_chromium_fingerprint"
     AUTH_REQUIRED = "auth_required"
     TIMEOUT = "timeout"
     DNS_ERROR = "dns_error"
@@ -64,6 +65,15 @@ _CAPTCHA_PATTERNS: tuple[re.Pattern[str], ...] = (
 _PASSIVE_CHALLENGE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"checking your browser", re.IGNORECASE),
     re.compile(r"just a moment", re.IGNORECASE),
+    re.compile(r"performing security verification", re.IGNORECASE),
+    re.compile(r"protect(?:s|ing)? against malicious bots", re.IGNORECASE),
+    re.compile(r"performance and security by cloudflare", re.IGNORECASE),
+)
+
+_PASSIVE_CHALLENGE_STRONG_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"performing security verification", re.IGNORECASE),
+    re.compile(r"protect(?:s|ing)? against malicious bots", re.IGNORECASE),
+    re.compile(r"performance and security by cloudflare", re.IGNORECASE),
 )
 
 _EMBEDDABLE_CAPTCHA_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -85,7 +95,9 @@ _CHALLENGE_MARKERS: tuple[str, ...] = (
     "cf-chl",
     "cf_chl_opt",
     "_cf_chl",
+    "cf-turnstile",
     "challenge-platform",
+    "challenges.cloudflare.com/turnstile",
     "datadome",
     "dd=",
     "hcaptcha",
@@ -123,6 +135,13 @@ _FINGERPRINT_BLOCK_MARKERS: tuple[str, ...] = (
     "automated browser",
     "automation detected",
     "webdriver",
+)
+
+_CHROMIUM_FINGERPRINT_BLOCK_MARKERS: tuple[str, ...] = (
+    "chromium fingerprint",
+    "chromium automation",
+    "blink automation",
+    "chrome automation detected",
 )
 
 _TIMEOUT_ERROR_MARKERS: tuple[str, ...] = (
@@ -215,8 +234,6 @@ def _detect_captcha_type(text: str, headers: Mapping[str, str] | None = None) ->
         return "recaptcha_v3"
     if "recaptcha" in lowered or "g-recaptcha" in lowered:
         return "recaptcha"
-    if "turnstile" in lowered or "cf-turnstile" in lowered:
-        return "cloudflare_turnstile"
     if "qrator" in lowered or "jsid" in lowered:
         return "qrator_jsid"
     if (
@@ -226,6 +243,8 @@ def _detect_captcha_type(text: str, headers: Mapping[str, str] | None = None) ->
         or "cloudflare" in lowered
     ):
         return "cloudflare_challenge"
+    if "turnstile" in lowered or "cf-turnstile" in lowered:
+        return "turnstile"
     if "geetest" in lowered:
         return "geetest"
     if "funcaptcha" in lowered or "arkose" in lowered:
@@ -390,6 +409,13 @@ class HeuristicFailureSignal:
         if text:
             lowered = text.lower()
             substantial_content = _has_substantial_visible_content(text)
+            for pattern in _PASSIVE_CHALLENGE_STRONG_PATTERNS:
+                if pattern.search(text):
+                    return FetchOutcome(
+                        kind=FailureKind.CHALLENGE,
+                        challenge=True,
+                        captcha_type=_detect_captcha_type(text, lowered_headers),
+                    )
             if any(marker in lowered for marker in _IP_BLOCK_MARKERS):
                 return FetchOutcome(kind=FailureKind.BLOCKED_IP)
             if _looks_like_qrator_challenge(lowered, substantial_content):
@@ -398,6 +424,8 @@ class HeuristicFailureSignal:
                     challenge=True,
                     captcha_type="qrator_jsid",
                 )
+            if any(marker in lowered for marker in _CHROMIUM_FINGERPRINT_BLOCK_MARKERS):
+                return FetchOutcome(kind=FailureKind.BLOCKED_CHROMIUM_FINGERPRINT)
             if any(marker in lowered for marker in _FINGERPRINT_BLOCK_MARKERS):
                 return FetchOutcome(kind=FailureKind.BLOCKED_FINGERPRINT)
             for pattern in _CAPTCHA_PATTERNS:

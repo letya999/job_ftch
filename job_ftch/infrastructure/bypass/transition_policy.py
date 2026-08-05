@@ -17,6 +17,7 @@ class TransitionAction(StrEnum):
     ACTIVATE_PROXY_THEN_FALLBACK = "activate_proxy_then_fallback"
     TLS_IMPERSONATION = "tls_impersonation"
     FINGERPRINT_RESISTANT_ENGINE = "fingerprint_resistant_engine"
+    ENGINE_DIVERSITY = "engine_diversity"
     DEBOUNCED_PROXY = "debounced_proxy"
     RETRY_SAME_ROUTE = "retry_same_route"
     CHANGE_EXTRACTOR = "change_extractor"
@@ -43,6 +44,11 @@ _DECISIONS: dict[FailureKind, TransitionDecision] = {
     FailureKind.TLS_ERROR: TransitionDecision(TransitionAction.TLS_IMPERSONATION),
     FailureKind.BLOCKED_FINGERPRINT: TransitionDecision(
         TransitionAction.FINGERPRINT_RESISTANT_ENGINE,
+        preserves_engine=False,
+        preserves_session=False,
+    ),
+    FailureKind.BLOCKED_CHROMIUM_FINGERPRINT: TransitionDecision(
+        TransitionAction.ENGINE_DIVERSITY,
         preserves_engine=False,
         preserves_session=False,
     ),

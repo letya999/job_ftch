@@ -22,6 +22,10 @@ from job_ftch.infrastructure.bypass.transition_policy import (
             FailureKind.BLOCKED_FINGERPRINT,
             TransitionAction.FINGERPRINT_RESISTANT_ENGINE,
         ),
+        (
+            FailureKind.BLOCKED_CHROMIUM_FINGERPRINT,
+            TransitionAction.ENGINE_DIVERSITY,
+        ),
         (FailureKind.SERVER_ERROR, TransitionAction.RETRY_SAME_ROUTE),
         (FailureKind.PARSER_ERROR, TransitionAction.CHANGE_EXTRACTOR),
         (FailureKind.PARSE_EMPTY, TransitionAction.CHANGE_EXTRACTOR),
@@ -53,7 +57,5 @@ def test_every_failure_kind_has_an_explicit_decision() -> None:
     from job_ftch.infrastructure.bypass.transition_policy import _DECISIONS
 
     special_cased = {FailureKind.OK, FailureKind.UNKNOWN}
-    missing = [
-        kind for kind in FailureKind if kind not in special_cased and kind not in _DECISIONS
-    ]
+    missing = [kind for kind in FailureKind if kind not in special_cased and kind not in _DECISIONS]
     assert not missing, f"FailureKind(s) without a transition decision: {missing}"

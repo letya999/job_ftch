@@ -149,7 +149,9 @@ if _CAMOUFOX_AVAILABLE:
             cost=40,
             browser_family="firefox",
             owns_session=True,
-            challenge_actions=frozenset({"fingerprint_resistant", "generic_challenge"}),
+            challenge_actions=frozenset(
+                {"engine_diversity", "fingerprint_resistant", "generic_challenge"}
+            ),
             min_remaining_seconds=12.0,
         ),
     )(_create_camoufox)
