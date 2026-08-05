@@ -1,6 +1,6 @@
 ---
 title: "Технический долг"
-description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-049."
+description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-050."
 updated: 2026-08-05
 ---
 # Технический долг
@@ -1129,3 +1129,61 @@ Exit criterion:
   clearance session без challenge loop;
 - negative test гарантирует fail-closed поведение при gateway-only,
   rotating или недоступном proxy.
+
+## 51. TD-050: Публичный реестр источников канала и AI-стартапов Центральной Азии
+
+Status: open. Priority: medium-high. Делать после стабилизации release flow и
+перед публичным расширением source network.
+
+Нужно вывести список источников в публичный вид и сделать отдельный полезный
+реестр AI-стартапов Центральной Азии для парсинга, source discovery и ручного
+использования читателями канала. Реестр должен разделять два слоя:
+
+- **source registry канала** — Telegram/career/API/RSS источники, из которых
+  реально питается `ai_jobs` или которые кандидаты на добавление;
+- **AI startups registry** — компании/стартапы с AI/ML/LLM/automation фокусом,
+  особенно из Центральной Азии, сгруппированные по странам:
+  Казахстан, Узбекистан, Таджикистан, Кыргызстан.
+
+Требование: публичная версия не должна утекать private runtime details,
+credentials, bypass/profile state, внутренние tenant/user IDs, приватные notes и
+непроверенные контакты. Из БД можно брать только нормализованные public-safe поля
+и явно разрешённые metadata.
+
+Желаемый public artifact:
+
+- GitHub Pages сайт или раздел документации со списком источников и стартапов;
+- фильтры/группировка по стране, типу источника, статусу парсинга, качеству
+  извлечения, свежести, категории (`AI startup`, `career page`, `telegram`,
+  `community`, `job board`, `accelerator/portfolio`);
+- отдельная страница/секция “AI startups Central Asia”:
+  - KZ — Казахстан;
+  - UZ — Узбекистан;
+  - TJ — Таджикистан;
+  - KG — Кыргызстан;
+- машинно-читаемый экспорт (`json`/`jsonl`/`csv`) для повторного ingest/discovery;
+- ссылка из README/docs на публичный каталог.
+
+CI/release требование:
+
+- при выпуске нового тега CI собирает public-safe export из БД/controlled dump,
+  обновляет generated registry artifact и redeploy GitHub Pages;
+- если БД недоступна, CI должен fail closed или использовать заранее
+  зафиксированный sanitized snapshot, явно помечая stale timestamp;
+- export job должен иметь allowlist полей и тест, запрещающий секреты,
+  приватные tenant/user IDs, cookies, proxy/auth data, internal traces/log links;
+- release checklist должен проверять, что registry build не расходится с
+  текущими source fixtures/DB snapshot.
+
+Exit criterion:
+
+- определена схема `PublicSourceRegistry` и `PublicAiStartupRegistry`;
+- есть exporter из БД/runtime sources в sanitized artifacts;
+- есть минимальная ручная seed-таблица AI-стартапов Центральной Азии по KZ/UZ/TJ/KG
+  с provenance и статусом проверки;
+- GitHub Pages build публикует каталог и machine-readable exports;
+- CI на tag пересобирает и деплоит Pages без ручного шага;
+- security tests подтверждают отсутствие секретов/private runtime полей в
+  публичном экспорте;
+- docs описывают, как добавить новый источник/стартап и как он попадёт в
+  публичный реестр.
