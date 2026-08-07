@@ -7,4 +7,5 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 ## Files On This Level
 
 - [test_mcp_server.py](test_mcp_server.py)
+- [test_mcp_unit.py](test_mcp_unit.py)
 - [test_sources_pagination.py](test_sources_pagination.py)

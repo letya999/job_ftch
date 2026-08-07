@@ -9,6 +9,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [dev index](dev/index.md)
 - [diagnostics index](diagnostics/index.md)
 - [eval index](eval/index.md)
+- [mcp index](mcp/index.md)
 - [publication index](publication/index.md)
 - [shots index](shots/index.md)
 

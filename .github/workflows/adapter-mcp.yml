@@ -7,7 +7,8 @@ on:
       - "docker/local-mcp/**"
       - "deploy/mcp/**"
       - "scripts/mcp/**"
-      - "tests/adapters/test_mcp*.py"
+      - "tests/adapters/test_mcp_server.py"
+      - "tests/adapters/test_mcp_unit.py"
       - "job_ftch/cli.py"
       - "pyproject.toml"
   pull_request:
@@ -16,7 +17,8 @@ on:
       - "docker/local-mcp/**"
       - "deploy/mcp/**"
       - "scripts/mcp/**"
-      - "tests/adapters/test_mcp*.py"
+      - "tests/adapters/test_mcp_server.py"
+      - "tests/adapters/test_mcp_unit.py"
       - "job_ftch/cli.py"
       - "pyproject.toml"
 
