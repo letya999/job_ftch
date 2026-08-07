@@ -130,7 +130,12 @@ def _build_parser() -> argparse.ArgumentParser:
     tenants_reset.add_argument("tenant_id", type=str)
 
     mcp_parser = sub.add_parser("mcp-server", help="Start the FastMCP tenant server")
-    mcp_parser.add_argument("--transport", choices=("stdio", "http", "sse"), default="stdio")
+    mcp_parser.add_argument(
+        "--transport",
+        choices=("stdio", "http", "sse", "streamable-http"),
+        default="stdio",
+        help="stdio for desktop agents; streamable-http/http for Codex/remote MCP.",
+    )
     mcp_parser.add_argument("--host", default="127.0.0.1")
     mcp_parser.add_argument("--port", type=int, default=8000)
 
@@ -554,11 +559,8 @@ def _run_mcp_server(settings: Settings, args: argparse.Namespace) -> None:
     from job_ftch.adapters.mcp.server import create_server
 
     server = create_server(configs_dir=settings.configs_dir, base_settings=settings)
-    asyncio.run(server.startup())
-    try:
-        server.run(transport=args.transport, host=args.host, port=args.port)
-    finally:
-        asyncio.run(server.shutdown())
+    # FastMCP lifespan owns TenantRunner startup/shutdown for the process.
+    server.run(transport=args.transport, host=args.host, port=args.port)
 
 
 # ---------------------------------------------------------------------------

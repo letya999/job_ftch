@@ -141,16 +141,21 @@ def test_fastapi_adapter_registers_routes(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_mcp_adapter_registers_tool_and_resource(monkeypatch: pytest.MonkeyPatch) -> None:
     # create_mcp_server is a deprecated shim over TenantMCPServer.
-    # TenantMCPServer registers 17 tools and 3 resources.
+    # TenantMCPServer registers 18 tools and 3 resources.
     registered: dict[str, object] = {"tools": 0, "resources": 0, "uris": []}
 
     class FakeMCP:
-        def __init__(self, name):  # type: ignore[no-untyped-def]
+        def __init__(self, name, **kwargs):  # type: ignore[no-untyped-def]
             self.name = name
 
-        def tool(self, func):  # type: ignore[no-untyped-def]
-            registered["tools"] = int(registered["tools"]) + 1  # type: ignore[arg-type]
-            return func
+        def tool(self, func=None, **kwargs):  # type: ignore[no-untyped-def]
+            def decorator(fn):  # type: ignore[no-untyped-def]
+                registered["tools"] = int(registered["tools"]) + 1  # type: ignore[arg-type]
+                return fn
+
+            if func is not None and callable(func):
+                return decorator(func)
+            return decorator
 
         def resource(self, uri):  # type: ignore[no-untyped-def]
             def decorator(func):  # type: ignore[no-untyped-def]
@@ -164,14 +169,22 @@ def test_mcp_adapter_registers_tool_and_resource(monkeypatch: pytest.MonkeyPatch
 
     import warnings
 
+    from job_ftch.config import Settings
+
+    safe_settings = Settings(llm_backend="heuristic", store_backend="memory")
+    monkeypatch.setattr(
+        "job_ftch.adapters.mcp.server.get_settings",
+        lambda: safe_settings,
+    )
+
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         server = create_mcp_server(_DummyBuilder())
         assert any(issubclass(warning.category, DeprecationWarning) for warning in w)
 
     assert server.name == "job_ftch"
-    # TenantMCPServer surface: 17 tools, 3 resources
-    assert registered["tools"] == 17
+    # TenantMCPServer surface: 18 tools, 3 resources
+    assert registered["tools"] == 18
     assert registered["resources"] == 3
     uris = cast("list[str]", registered["uris"])
     assert any("jobs://" in uri for uri in uris)

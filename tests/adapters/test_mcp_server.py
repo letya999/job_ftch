@@ -81,14 +81,20 @@ profiles:
     )
 
     class FakeMCP:
-        def __init__(self, name: str) -> None:
+        def __init__(self, name: str, **kwargs) -> None:  # type: ignore[no-untyped-def]
             self.name = name
+            self.kwargs = kwargs
             self.tools: dict[str, object] = {}
             self.resources: dict[str, object] = {}
 
-        def tool(self, func):  # type: ignore[no-untyped-def]
-            self.tools[func.__name__] = func
-            return func
+        def tool(self, func=None, **kwargs):  # type: ignore[no-untyped-def]
+            def decorator(fn):  # type: ignore[no-untyped-def]
+                self.tools[fn.__name__] = fn
+                return fn
+
+            if func is not None and callable(func):
+                return decorator(func)
+            return decorator
 
         def resource(self, uri: str):  # type: ignore[no-untyped-def]
             def decorator(func):  # type: ignore[no-untyped-def]
@@ -104,6 +110,7 @@ profiles:
 
     from job_ftch.adapters.mcp.server import create_server
     from job_ftch.application import tenant_runner as tenant_runner_module
+    from job_ftch.config import Settings
 
     monkeypatch.setattr(
         tenant_runner_module,
@@ -111,7 +118,21 @@ profiles:
         lambda settings: _AcceptingHeuristicLLMProvider(),
     )
 
-    server = create_server(configs_dir=configs_dir)
+    base_settings = Settings(
+        llm_backend="heuristic",
+        store_backend="sqlite",
+        store_path=tmp_path / "store.db",
+        job_backend="sqlite",
+        search_backend="sqlite",
+        job_group_store_backend="sqlite",
+    )
+    for target in (
+        "job_ftch.config.get_settings",
+        "job_ftch.application.builder.get_settings",
+        "job_ftch.application.pipeline.get_settings",
+    ):
+        monkeypatch.setattr(target, lambda: base_settings)
+    server = create_server(configs_dir=configs_dir, base_settings=base_settings)
     await server.startup()
 
     assert server.runner is not None
@@ -131,6 +152,7 @@ profiles:
         "list_source_health",
         "list_sources",
         "list_tenants",
+        "llm_backend_health",
         "reset_tenant",
         "run_all_pipelines",
         "run_pipeline",
@@ -197,7 +219,101 @@ profiles:
 
 
 @pytest.mark.asyncio
-async def test_mcp_server_real_fastmcp_tool_handlers(tmp_path: Path) -> None:
+async def test_llm_backend_health_reports_gateway(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    (configs_dir / "tenant.json").write_text(
+        json.dumps(
+            {
+                "tenant_id": "ai_jobs",
+                "display_name": "AI Jobs",
+                "sources": [],
+                "store_backend": "sqlite",
+                "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+                "job_group_store_backend": "sqlite",
+                "job_backend": "sqlite",
+                "search_backend": "sqlite",
+                "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeMCP:
+        def __init__(self, name: str, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            self.name = name
+            self.tools: dict[str, object] = {}
+            self.resources: dict[str, object] = {}
+
+        def tool(self, func=None, **kwargs):  # type: ignore[no-untyped-def]
+            def decorator(fn):  # type: ignore[no-untyped-def]
+                self.tools[fn.__name__] = fn
+                return fn
+
+            if func is not None and callable(func):
+                return decorator(func)
+            return decorator
+
+        def resource(self, uri: str):  # type: ignore[no-untyped-def]
+            def decorator(func):  # type: ignore[no-untyped-def]
+                self.resources[uri] = func
+                return func
+
+            return decorator
+
+    monkeypatch.setitem(sys.modules, "fastmcp", type("FastMCPModule", (), {"FastMCP": FakeMCP}))
+
+    from job_ftch.adapters.mcp.server import create_server
+    from job_ftch.config import Settings
+
+    settings = Settings(
+        llm_backend="openai",
+        openai_api_key="test-key",  # type: ignore[arg-type]
+        openai_base_url="http://127.0.0.1:8317/v1",
+        openai_model="gpt-test",
+        store_backend="sqlite",
+        store_path=tmp_path / "store.db",
+    )
+    server = create_server(configs_dir=configs_dir, base_settings=settings)
+
+    class _Resp:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {"data": [{"id": "gpt-test"}, {"id": "other"}]}
+
+    class _Client:
+        def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            pass
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args) -> None:  # type: ignore[no-untyped-def]
+            return None
+
+        async def get(self, url: str, headers: dict[str, str] | None = None) -> _Resp:
+            assert "models" in url
+            assert headers is not None
+            assert headers.get("Authorization", "").startswith("Bearer ")
+            return _Resp()
+
+    monkeypatch.setattr("httpx.AsyncClient", _Client)
+
+    health = await server.app.tools["llm_backend_health"]()
+    assert health["ok"] is True
+    assert health["reachable"] is True
+    assert "gpt-test" in health["models_sample"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_real_fastmcp_tool_handlers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pytest.importorskip("fastmcp")
 
     fixture_path = tmp_path / "fixture.json"
@@ -222,8 +338,23 @@ async def test_mcp_server_real_fastmcp_tool_handlers(tmp_path: Path) -> None:
     )
 
     from job_ftch.adapters.mcp.server import create_server
+    from job_ftch.config import Settings
 
-    server = create_server(configs_dir=configs_dir)
+    base_settings = Settings(
+        llm_backend="heuristic",
+        store_backend="sqlite",
+        store_path=tmp_path / "store.db",
+        job_backend="sqlite",
+        search_backend="sqlite",
+        job_group_store_backend="sqlite",
+    )
+    for target in (
+        "job_ftch.config.get_settings",
+        "job_ftch.application.builder.get_settings",
+        "job_ftch.application.pipeline.get_settings",
+    ):
+        monkeypatch.setattr(target, lambda: base_settings)
+    server = create_server(configs_dir=configs_dir, base_settings=base_settings)
     await server.startup()
     assert server.runner is not None
 

@@ -1,0 +1,49 @@
+# One service: job_ftch MCP (SQLite + browsers).
+# LLM steps go to CLIProxyAPI on the host (Codex subscription OAuth).
+# No OpenObserve / Langfuse.
+#
+# Usage:
+#   1) Start CLIProxyAPI on the host, log in to Codex, note client API key.
+#   2) cp docker/local-mcp/env.example docker/local-mcp/.env  and edit.
+#   3) docker compose -f docker/local-mcp/docker-compose.yml up --build
+#   4) Point Codex MCP at http://127.0.0.1:8000/mcp (see README).
+
+services:
+  job_ftch_mcp:
+    build:
+      context: ../..
+      dockerfile: docker/local-mcp/Dockerfile
+    image: job-ftch-local-mcp:latest
+    container_name: job_ftch_local_mcp
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Observability off
+      JOB_FTCH_TRACING_ENABLED: "false"
+      JOB_FTCH_OPENOBSERVE_ENABLED: "false"
+      # SQLite on the data volume
+      JOB_FTCH_STORE_BACKEND: sqlite
+      JOB_FTCH_JOB_GROUP_STORE_BACKEND: sqlite
+      JOB_FTCH_JOB_BACKEND: sqlite
+      JOB_FTCH_SEARCH_BACKEND: sqlite
+      JOB_FTCH_STORE_PATH: /data/{tenant_id}/store.db
+      JOB_FTCH_CONFIGS_DIR: /app/config/tenants
+      # LLM: only these hit CLIProxy / subscription models
+      JOB_FTCH_LLM_BACKEND: openai
+      JOB_FTCH_OPENAI_BASE_URL: ${JOB_FTCH_OPENAI_BASE_URL:-http://host.docker.internal:8317/v1}
+      JOB_FTCH_OPENAI_API_KEY: ${JOB_FTCH_OPENAI_API_KEY:-cliproxy-local-key}
+      JOB_FTCH_OPENAI_MODEL: ${JOB_FTCH_OPENAI_MODEL:-gpt-5.6-codex}
+    extra_hosts:
+      # Docker Desktop (Windows/Mac) + modern Linux compose
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - job_ftch_mcp_data:/data
+      # Optional: mount your own tenant YAMLs
+      # - ../../job_ftch/adapters/telegram_bot/config/tenants:/app/config/tenants:ro
+    restart: unless-stopped
+
+volumes:
+  job_ftch_mcp_data:

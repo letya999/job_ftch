@@ -1,24 +1,39 @@
 ---
 title: "MCP client setup"
 description: "How to point local MCP clients at the job_ftch tenant server."
-updated: 2026-07-28
+updated: 2026-08-07
 ---
 # MCP client setup
 
-For local MCP clients, point the client command to the repository CLI:
+## Codex CLI (HTTP)
+
+Preferred local product path: one container from `docker/local-mcp/`, MCP URL:
+
+```toml
+# ~/.codex/config.toml
+[mcp_servers.job_ftch]
+url = "http://127.0.0.1:8000/mcp"
+```
+
+See `docker/local-mcp/README.md` and `docker/local-mcp/codex.mcp.example.toml`.
+
+LLM for pipeline steps (not the Codex harness itself): set container env to
+CLIProxyAPI on the host (`JOB_FTCH_OPENAI_BASE_URL=http://host.docker.internal:8317/v1`).
+
+## stdio clients
 
 ```bash
 uv run job_ftch mcp-server \
-  --configs-dir job_ftch/adapters/telegram_bot/config/tenants \
+  --configs-dir docker/local-mcp/config/tenants \
   --transport stdio
 ```
 
-For remote/HTTP clients, run the server separately:
+## Streamable HTTP
 
 ```bash
 uv run job_ftch mcp-server \
-  --configs-dir job_ftch/adapters/telegram_bot/config/tenants \
-  --transport http \
+  --configs-dir docker/local-mcp/config/tenants \
+  --transport streamable-http \
   --host 0.0.0.0 \
   --port 8000
 ```
@@ -28,13 +43,15 @@ uv run job_ftch mcp-server \
 - `run_pipeline(tenant_id)`
 - `run_all_pipelines()`
 - `get_status(tenant_id)`
-- `list_runs(tenant_id, limit)`
-- `get_run(run_id, tenant_id)`
+- `list_source_health(tenant_id)` / `list_sources(tenant_id)`
+- `add_source` / `disable_source`
+- `list_profiles` / `save_profile` / `activate_profile`
+- `list_runs(tenant_id, limit)` / `get_run(run_id, tenant_id)`
 - `search_jobs(query, tenant_id, limit)`
-- `get_job(job_id, tenant_id)`
-- `get_job_lineage(job_id, tenant_id)`
+- `get_job(job_id, tenant_id)` / `get_job_lineage(job_id, tenant_id)`
 - `list_tenants()`
-- `reset_tenant(tenant_id)`
+- `llm_backend_health()` — probe OpenAI-compatible gateway (CLIProxy)
+- `reset_tenant(tenant_id)` (destructive)
 
 ## Resources
 
@@ -44,5 +61,6 @@ uv run job_ftch mcp-server \
 
 ## Config directory
 
-The CLI requires `--configs-dir` or `JOB_FTCH_CONFIGS_DIR`. The production bot
-tenant directory is `job_ftch/adapters/telegram_bot/config/tenants`.
+The CLI requires `--configs-dir` or `JOB_FTCH_CONFIGS_DIR`. Local MCP defaults
+to `docker/local-mcp/config/tenants`. Production bot tenants live under
+`job_ftch/adapters/telegram_bot/config/tenants`.

@@ -1,0 +1,27 @@
+# Local single-container tenant: SQLite everywhere, no cloud stores.
+# Sources are a small default set; add/remove via MCP tools or edit this file.
+tenant_id: local_mcp
+display_name: Local MCP (SQLite)
+
+sources:
+  - type: career_site
+    url: https://career.habr.com/vacancies
+    source_name: habr_career
+    limit: 20
+  - type: career_site
+    url: https://geekjob.ru/vacancies
+    source_name: geekjob_ru
+    limit: 20
+
+store_backend: sqlite
+job_group_store_backend: sqlite
+job_backend: sqlite
+search_backend: sqlite
+store_path: /data/{tenant_id}/store.db
+job_store_path: /data/{tenant_id}/jobs.db
+
+notify_mode: digest
+notify_batch_size: 10
+
+output:
+  path: /data/{tenant_id}/artifacts/latest.json
