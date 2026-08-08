@@ -12,6 +12,10 @@ if (-not $env:JOB_FTCH_JOB_GROUP_STORE_BACKEND) { $env:JOB_FTCH_JOB_GROUP_STORE_
 if (-not $env:JOB_FTCH_CONFIGS_DIR) { $env:JOB_FTCH_CONFIGS_DIR = "docker/local-mcp/config/tenants" }
 if (-not $env:JOB_FTCH_LLM_BACKEND) { $env:JOB_FTCH_LLM_BACKEND = "openai" }
 if (-not $env:JOB_FTCH_OPENAI_BASE_URL) { $env:JOB_FTCH_OPENAI_BASE_URL = "http://127.0.0.1:8317/v1" }
+# Align with gateway catalog; relevance judge uses RELEVANCE_LLM_MODEL separately.
+if (-not $env:JOB_FTCH_RELEVANCE_LLM_MODEL -and $env:JOB_FTCH_OPENAI_MODEL) {
+  $env:JOB_FTCH_RELEVANCE_LLM_MODEL = $env:JOB_FTCH_OPENAI_MODEL
+}
 
 $HostAddr = if ($env:JOB_FTCH_MCP_HOST) { $env:JOB_FTCH_MCP_HOST } else { "127.0.0.1" }
 $Port = if ($env:JOB_FTCH_MCP_PORT) { $env:JOB_FTCH_MCP_PORT } else { "8000" }

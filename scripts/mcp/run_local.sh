@@ -13,6 +13,10 @@ export JOB_FTCH_JOB_GROUP_STORE_BACKEND="${JOB_FTCH_JOB_GROUP_STORE_BACKEND:-sql
 export JOB_FTCH_CONFIGS_DIR="${JOB_FTCH_CONFIGS_DIR:-docker/local-mcp/config/tenants}"
 export JOB_FTCH_LLM_BACKEND="${JOB_FTCH_LLM_BACKEND:-openai}"
 export JOB_FTCH_OPENAI_BASE_URL="${JOB_FTCH_OPENAI_BASE_URL:-http://127.0.0.1:8317/v1}"
+# Align relevance judge with gateway catalog when OPENAI_MODEL is set.
+if [[ -z "${JOB_FTCH_RELEVANCE_LLM_MODEL:-}" && -n "${JOB_FTCH_OPENAI_MODEL:-}" ]]; then
+  export JOB_FTCH_RELEVANCE_LLM_MODEL="${JOB_FTCH_OPENAI_MODEL}"
+fi
 
 HOST="${JOB_FTCH_MCP_HOST:-127.0.0.1}"
 PORT="${JOB_FTCH_MCP_PORT:-8000}"

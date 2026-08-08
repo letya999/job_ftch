@@ -1,7 +1,7 @@
 ---
 title: "Local MCP container (Codex + CLIProxy + SQLite)"
 description: "One container: job_ftch MCP, SQLite, browsers. LLM via host CLIProxyAPI/Codex sub."
-updated: 2026-08-07
+updated: 2026-08-09
 ---
 # Local MCP container (Codex + CLIProxy + SQLite)
 
@@ -11,6 +11,9 @@ One Docker service runs the **job_ftch MCP server** with:
 - **Chromium** (patchright) for career-site paths
 - **No OpenObserve / Langfuse / OTEL exporters**
 - **LLM only** via OpenAI-compatible HTTP → **CLIProxyAPI on the host** (Codex OAuth subscription)
+- **Default tenant sources**: the canonical 17-source set from
+  `fixtures/sources/ai_jobs.json` (5 Telegram + 12 career sites) in
+  `config/tenants/local_mcp.yaml`
 
 ```text
 Codex CLI ──MCP HTTP──► job_ftch container :8000/mcp
@@ -36,7 +39,21 @@ Check models:
 curl -s -H "Authorization: Bearer ${CLIPROXY_API_KEY}" http://127.0.0.1:8317/v1/models
 ```
 
-Pick a model id for `JOB_FTCH_OPENAI_MODEL`.
+Pick a model id that appears in that list. Set **both**:
+
+| Env | Used by |
+|-----|---------|
+| `JOB_FTCH_OPENAI_MODEL` | extraction / present / general structured LLM |
+| `JOB_FTCH_RELEVANCE_LLM_MODEL` | **relevance judge only** (`TenantRunner` rebuilds a second provider) |
+
+If `RELEVANCE_LLM_MODEL` stays at the default `gpt-4.1-mini` while CLIProxy
+only exposes Codex ids, every judge call returns HTTP 400, decisions
+**DEFER** with `llm_relevance_unavailable`, and ACCEPT stays at 0. Align both
+to the same gateway id (example: `gpt-5.4-mini`).
+
+Telegram sources need Telethon `api_id` / `api_hash` (and session) on the host;
+without them, run career sites only via `source_ids` or disable Telegram
+entries.
 
 ## 2. Container
 
@@ -77,7 +94,9 @@ CLIProxy. Fetch/scrape/sqlite stay local.
 uv sync --extra mcp --extra sqlite --extra openai --extra browser --extra feeds --extra site_scrapers
 export JOB_FTCH_OPENAI_BASE_URL=http://127.0.0.1:8317/v1
 export JOB_FTCH_OPENAI_API_KEY=cliproxy-local-key
-export JOB_FTCH_OPENAI_MODEL=gpt-5.6-codex
+export JOB_FTCH_OPENAI_MODEL=gpt-5.4-mini
+export JOB_FTCH_RELEVANCE_LLM_MODEL=gpt-5.4-mini
+export JOB_FTCH_OPENAI_TIMEOUT_SECONDS=120
 export JOB_FTCH_TRACING_ENABLED=false
 export JOB_FTCH_OPENOBSERVE_ENABLED=false
 

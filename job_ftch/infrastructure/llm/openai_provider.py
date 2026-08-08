@@ -10,11 +10,13 @@ LLM touchpoints (per ADR-019):
    relevance-prompt builder, which has no schema to constrain to).
 
 The structured methods go through the ``instructor.from_provider`` client
-(TOOLS_STRICT mode) which patches ``chat.completions.create`` and requires
-a ``response_model`` for every call. ``generate_text`` cannot use the
-same client because it has no schema — it would fail with
-``AsyncInstructor.create() missing 'response_model'``. We therefore
-hold a second, raw ``AsyncOpenAI`` client alongside the instructor
+(TOOLS mode) which patches ``chat.completions.create`` and requires a
+``response_model`` for every call. TOOLS (not TOOLS_STRICT) is required for
+OpenAI-compatible gateways such as CLIProxyAPI that reject strict function
+schemas when optional Pydantic fields are omitted from ``required``.
+``generate_text`` cannot use the same client because it has no schema — it
+would fail with ``AsyncInstructor.create() missing 'response_model'``. We
+therefore hold a second, raw ``AsyncOpenAI`` client alongside the instructor
 client and use it for free-form text. The two share HTTP settings.
 """
 
@@ -160,9 +162,14 @@ class OpenAIInstructorLLMProvider:
         # an AsyncInstructor that wraps the underlying AsyncOpenAI but
         # rewrites ``.create()`` to require ``response_model``. We use
         # this for extract / classify / present.
+        # TOOLS (not TOOLS_STRICT): CLIProxy/Codex gateways reject strict
+        # function schemas when optional Pydantic fields are omitted from
+        # ``required`` (HTTP 400 invalid_function_parameters). Non-strict
+        # tools still return structured args and work across OpenAI-compatible
+        # proxies used for local subscription routing.
         self._client = instructor.from_provider(
             f"openai/{model}",
-            mode=instructor.Mode.TOOLS_STRICT,
+            mode=instructor.Mode.TOOLS,
             async_client=True,
             api_key=api_key,
             base_url=base_url,

@@ -210,7 +210,14 @@ Service-mode requirements:
 | `JOB_FTCH_LLM_BACKEND` | `openai` |
 | `JOB_FTCH_OPENAI_BASE_URL` | `http://127.0.0.1:8317/v1` |
 | `JOB_FTCH_OPENAI_API_KEY` | CLIProxy client key |
-| `JOB_FTCH_OPENAI_MODEL` | id from `GET /v1/models` (e.g. codex/gpt alias) |
+| `JOB_FTCH_OPENAI_MODEL` | id from `GET /v1/models` (extract/present) |
+| `JOB_FTCH_RELEVANCE_LLM_MODEL` | **same gateway id** (relevance judge; must not stay on cloud-only defaults like `gpt-4.1-mini` when using CLIProxy) |
+| Instructor mode | `TOOLS` (not `TOOLS_STRICT`) for OpenAI-compatible gateways that reject strict tool schemas with optional fields |
+
+`TenantRunner` builds a **second** `OpenAIInstructorLLMProvider` for the
+relevance judge by copying settings and setting `openai_model` to
+`relevance_llm_model`. Misalignment with CLIProxy catalog → HTTP 400 on
+judge calls → `llm_relevance_unavailable` → all candidates DEFERRED.
 
 **Profile B — z.ai GLM Coding Plan (no CLIProxy required)**
 

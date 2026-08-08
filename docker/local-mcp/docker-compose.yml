@@ -35,7 +35,10 @@ services:
       JOB_FTCH_LLM_BACKEND: openai
       JOB_FTCH_OPENAI_BASE_URL: ${JOB_FTCH_OPENAI_BASE_URL:-http://host.docker.internal:8317/v1}
       JOB_FTCH_OPENAI_API_KEY: ${JOB_FTCH_OPENAI_API_KEY:-cliproxy-local-key}
-      JOB_FTCH_OPENAI_MODEL: ${JOB_FTCH_OPENAI_MODEL:-gpt-5.6-codex}
+      # Both must exist on CLIProxy GET /v1/models (judge uses RELEVANCE separately).
+      JOB_FTCH_OPENAI_MODEL: ${JOB_FTCH_OPENAI_MODEL:-gpt-5.4-mini}
+      JOB_FTCH_RELEVANCE_LLM_MODEL: ${JOB_FTCH_RELEVANCE_LLM_MODEL:-gpt-5.4-mini}
+      JOB_FTCH_OPENAI_TIMEOUT_SECONDS: ${JOB_FTCH_OPENAI_TIMEOUT_SECONDS:-120}
     extra_hosts:
       # Docker Desktop (Windows/Mac) + modern Linux compose
       - "host.docker.internal:host-gateway"

@@ -1,7 +1,7 @@
 ---
 title: "MCP adapter"
 description: "FastMCP tenant server exposing pipeline tools and job resources."
-updated: 2026-08-07
+updated: 2026-08-09
 ---
 # MCP adapter
 
@@ -28,7 +28,10 @@ LLM steps only: point OpenAI settings at host CLIProxyAPI (Codex OAuth).
 # Host: CLIProxyAPI on :8317 with Codex login
 export JOB_FTCH_OPENAI_BASE_URL=http://127.0.0.1:8317/v1
 export JOB_FTCH_OPENAI_API_KEY=cliproxy-local-key
-export JOB_FTCH_OPENAI_MODEL=gpt-5.6-codex
+export JOB_FTCH_OPENAI_MODEL=gpt-5.4-mini
+# Required: relevance judge uses this model separately (see TenantRunner)
+export JOB_FTCH_RELEVANCE_LLM_MODEL=gpt-5.4-mini
+export JOB_FTCH_OPENAI_TIMEOUT_SECONDS=120
 export JOB_FTCH_TRACING_ENABLED=false
 export JOB_FTCH_OPENOBSERVE_ENABLED=false
 

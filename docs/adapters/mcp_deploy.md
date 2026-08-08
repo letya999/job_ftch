@@ -1,12 +1,14 @@
 ---
 title: "MCP deployment"
 description: "Three profiles: local process (Win/macOS/Linux/WSL), VPS systemd, Docker."
-updated: 2026-08-07
+updated: 2026-08-09
 ---
 # MCP deployment
 
 Three supported ways to run the job_ftch MCP adapter. LLM steps always use
 `JOB_FTCH_OPENAI_*` (point at host/local CLIProxyAPI for a Codex subscription).
+The relevance judge uses a **second** model setting,
+`JOB_FTCH_RELEVANCE_LLM_MODEL` — both must exist on the gateway.
 Observability stays off in these profiles.
 
 | Profile | When | Process model |
@@ -29,7 +31,10 @@ Default tenant configs for local MCP: `docker/local-mcp/config/tenants`.
 export JOB_FTCH_LLM_BACKEND=openai
 export JOB_FTCH_OPENAI_BASE_URL=http://127.0.0.1:8317/v1   # VPS: use LAN URL of CLIProxy
 export JOB_FTCH_OPENAI_API_KEY=cliproxy-local-key
-export JOB_FTCH_OPENAI_MODEL=gpt-5.6-codex   # must appear in GET /v1/models
+# Both ids must appear in GET /v1/models on the gateway
+export JOB_FTCH_OPENAI_MODEL=gpt-5.4-mini
+export JOB_FTCH_RELEVANCE_LLM_MODEL=gpt-5.4-mini   # judge only; default gpt-4.1-mini is OpenAI cloud
+export JOB_FTCH_OPENAI_TIMEOUT_SECONDS=120
 
 export JOB_FTCH_TRACING_ENABLED=false
 export JOB_FTCH_OPENOBSERVE_ENABLED=false
@@ -39,6 +44,9 @@ export JOB_FTCH_SEARCH_BACKEND=sqlite
 export JOB_FTCH_JOB_GROUP_STORE_BACKEND=sqlite
 export JOB_FTCH_CONFIGS_DIR=docker/local-mcp/config/tenants
 ```
+
+Local tenant `local_mcp` ships sources from `fixtures/sources/ai_jobs.json`
+(17 sources). Telegram entries require Telethon credentials on the host.
 
 Codex CLI client (`~/.codex/config.toml`):
 

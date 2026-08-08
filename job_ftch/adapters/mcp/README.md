@@ -26,7 +26,8 @@ Details: `docker/local-mcp/README.md`.
 uv sync --extra mcp --extra sqlite --extra openai
 export JOB_FTCH_OPENAI_BASE_URL=http://127.0.0.1:8317/v1
 export JOB_FTCH_OPENAI_API_KEY=cliproxy-local-key
-export JOB_FTCH_OPENAI_MODEL=gpt-5.6-codex
+export JOB_FTCH_OPENAI_MODEL=gpt-5.4-mini
+export JOB_FTCH_RELEVANCE_LLM_MODEL=gpt-5.4-mini
 uv run job_ftch mcp-server \
   --configs-dir docker/local-mcp/config/tenants \
   --transport streamable-http \
