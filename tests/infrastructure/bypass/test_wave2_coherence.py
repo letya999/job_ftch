@@ -224,7 +224,7 @@ class TestStealthHardeningClientHints:
 
         assert "platformVersion" in _CLIENT_HINTS_JS
         count = _CLIENT_HINTS_JS.count("%s")
-        assert count == 8, f"Expected 8 string placeholders, got {count}"
+        assert count == 10, f"Expected 10 string placeholders, got {count}"
 
     def test_chromium_shape_js_no_hardware_override(self) -> None:
         from job_ftch.infrastructure.bypass.stealth_hardening import _CHROMIUM_SHAPE_JS

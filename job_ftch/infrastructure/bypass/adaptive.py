@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import tempfile
 from collections import deque
@@ -21,6 +23,10 @@ from job_ftch.application.registry import (
     resolve_bypass,
 )
 from job_ftch.infrastructure.bypass.attempt_budget import AttemptBudget
+from job_ftch.infrastructure.bypass.captcha_models import (
+    CaptchaFailureReason,
+    CaptchaResultKind,
+)
 from job_ftch.infrastructure.bypass.failure_signal import (
     FailureKind,
     HeuristicFailureSignal,
@@ -48,6 +54,55 @@ _SESSION_COOKIE_ALLOWLIST = frozenset({"cf_clearance", "cf_bm", "dd_cookie", "_p
 _MAX_SESSION_COOKIES = 32
 
 
+def _domain_profile_key(domain: str) -> str:
+    """Stable, filesystem-safe directory name for a domain's warm profile."""
+    import hashlib
+
+    return hashlib.sha256(domain.strip().lower().encode("utf-8")).hexdigest()[:16]
+
+
+def _gc_profile_root(root: Path, *, max_bytes: int, ttl_days: int, keep: str | None) -> None:
+    """LRU + TTL garbage-collect the per-domain profile root (best effort).
+
+    Removes profile dirs whose mtime is older than ``ttl_days``; then, while the
+    total size still exceeds ``max_bytes``, evicts least-recently-used dirs. The
+    directory named ``keep`` (the one about to be used) is never removed.
+    """
+    if not root.exists():
+        return
+    import time
+
+    now = time.time()
+    ttl_seconds = max(0, ttl_days) * 86400
+    entries: list[tuple[float, int, Path]] = []
+    for child in root.iterdir():
+        if not child.is_dir() or child.name == keep:
+            continue
+        try:
+            mtime = child.stat().st_mtime
+        except OSError:
+            continue
+        if ttl_seconds and (now - mtime) > ttl_seconds:
+            shutil.rmtree(child, ignore_errors=True)
+            continue
+        size = 0
+        for path in child.rglob("*"):
+            try:
+                if path.is_file():
+                    size += path.stat().st_size
+            except OSError:
+                continue
+        entries.append((mtime, size, child))
+    total = sum(size for _mtime, size, _child in entries)
+    if total <= max_bytes:
+        return
+    for _mtime, size, child in sorted(entries, key=lambda item: item[0]):
+        shutil.rmtree(child, ignore_errors=True)
+        total -= size
+        if total <= max_bytes:
+            break
+
+
 # Default tier order; actual tiers are filtered to those that are
 # currently registered (per ADR-037: registry-driven, no hardcoded
 # bypass dependency). If `cloakbrowser` is not installed the
@@ -55,13 +110,15 @@ _MAX_SESSION_COOKIES = 32
 DEFAULT_TIER_ORDER: tuple[str, ...] = (
     "noop",
     "curl_stealth",
+    "tls_client",
     "stealth_browser",
+    "patchright_browser",
     "nodriver",
     "camoufox",
     "cloak",
 )
 
-OPTIONAL_TIERS: frozenset[str] = frozenset({"camoufox"})
+OPTIONAL_TIERS: frozenset[str] = frozenset({"camoufox", "patchright_browser", "tls_client"})
 
 
 class AdaptiveBypassManager:
@@ -150,6 +207,12 @@ class AdaptiveBypassManager:
                     settings.bypass_max_proxy_rotations_per_operation,
                 )
             ),
+            max_same_route_retries_per_operation=int(
+                self.config.get(
+                    "max_same_route_retries_per_operation",
+                    settings.bypass_max_same_route_retries_per_operation,
+                )
+            ),
         )
         # BehaviorSim is a composable decorator, not a standalone tier:
         # it adds human-like mouse/scroll behavior ON TOP of whatever
@@ -165,6 +228,29 @@ class AdaptiveBypassManager:
         self._obfuscation_metadata: dict[str, Any] = {}
         self._session_memory_enabled = getattr(settings, "session_memory_enabled", False)
         self._session_memory: Any = None
+        self._browser_session_state_enabled = bool(
+            getattr(settings, "browser_session_state_enabled", False)
+        )
+        self._browser_session_state_dir: Path = getattr(
+            settings,
+            "browser_session_state_dir",
+            Path(".runtime/session_states"),
+        )
+        self._configured_profile_dir: Path | None = getattr(settings, "browser_profile_dir", None)
+        self._configured_profile_persistent = bool(
+            getattr(settings, "browser_profile_persistent", False)
+            and self._configured_profile_dir is not None
+        )
+        # TRACK B1: per-domain persistent profiles (default on). One profile dir
+        # per source domain, reused across runs, so clearance cookies and other
+        # warm-session state survive rather than starting cold every launch.
+        self._profile_root: Path = getattr(
+            settings, "browser_profile_root", Path(".runtime/profiles")
+        )
+        self._profile_per_domain = bool(getattr(settings, "browser_profile_per_domain", True))
+        self._profile_max_bytes = int(getattr(settings, "browser_profile_max_bytes", 2 * 1024**3))
+        self._profile_ttl_days = int(getattr(settings, "browser_profile_ttl_days", 30))
+        self._profile_gc_done = False
         try:
             solver_config = {
                 key.removeprefix("captcha_"): value
@@ -222,8 +308,26 @@ class AdaptiveBypassManager:
         self._context: Any = None
         self._route_state = RouteState(engine=self._tiers[0])
         self._failure_window: dict[str, deque[tuple[float, str]]] = {}
+        # Engines that already failed against this source's protection. The
+        # ladder never returns to them until a network/session reset clears the
+        # set, which (with the no-downgrade rule in ``_select_engine``) stops
+        # the stealth_browser<->patchright oscillation that left camoufox/cloak
+        # unreachable (defect B4).
+        self._failed_tiers: set[str] = set()
         self._session_cookies: list[dict[str, Any]] = []
+        # True after an exit-IP change (proxy activate/rotate) invalidates the
+        # IP-bound clearance session. While set, warm cookies from session
+        # memory / persistent state are NOT restored - they belong to the
+        # abandoned IP and would be incoherent on the new one. Cleared once
+        # fresh clearance is captured on the new IP (TRACK B coherence guard).
+        self._session_cookies_invalidated = False
         self._profile_dir: str | None = None
+        self._owns_profile_dir = True
+        self._warmed_domains: set[str] = set()
+        self._observed_challenge_type: str | None = None
+        self._challenge_solution_requires_reload = True
+        self._challenge_solver_terminal = False
+        self._route_transitions: list[dict[str, Any]] = []
         import asyncio
 
         self._profile_lock = asyncio.Lock()
@@ -257,11 +361,19 @@ class AdaptiveBypassManager:
                 self.current_tier_index = self._tiers.index(recommended)
                 self._ensure_strategy()
                 logger.info("bypass_preflight_engine_selected", engine=recommended)
-        if getattr(preflight, "network", "direct") == "proxy" and bool(
-            getattr(context, "proxy_available", False)
-        ):
-            self._route_state = self._route_state.transition(network=NetworkRoute.PROXY)
-            logger.info("bypass_preflight_network_selected", network="proxy")
+        if getattr(preflight, "network", "direct") == "proxy":
+            if bool(getattr(context, "residential_proxy_available", False)):
+                self._route_state = self._route_state.transition(
+                    network=NetworkRoute.RESIDENTIAL_PROXY,
+                    session=SessionMode.STICKY,
+                )
+                logger.info("bypass_preflight_network_selected", network="residential_proxy")
+            elif bool(getattr(context, "proxy_available", False)):
+                self._route_state = self._route_state.transition(
+                    network=NetworkRoute.PROXY,
+                    session=SessionMode.STICKY,
+                )
+                logger.info("bypass_preflight_network_selected", network="proxy")
         self._sync_context_route()
 
     def _sync_context_route(self) -> None:
@@ -372,6 +484,16 @@ class AdaptiveBypassManager:
         return self._capabilities[self.current_name].requires_browser
 
     @property
+    def owns_page_hardening(self) -> bool:
+        """This controller injects persona/JS hardening itself in ``apply_page``.
+
+        ``browser_utils`` checks this flag to avoid also calling
+        ``BypassContext.on_page`` on the same page, which would inject a second
+        conflicting copy of the hardening blob (defect A2).
+        """
+        return True
+
+    @property
     def capability_inventory(self) -> dict[str, BypassCapability]:
         return dict(self._capabilities)
 
@@ -382,6 +504,21 @@ class AdaptiveBypassManager:
     @property
     def available_tiers(self) -> tuple[str, ...]:
         return tuple(self._tiers)
+
+    @property
+    def attempt_telemetry(self) -> list[dict[str, object]]:
+        snapshot = getattr(self._budget, "snapshot", None)
+        if callable(snapshot):
+            return cast("list[dict[str, object]]", snapshot())
+        return []
+
+    @property
+    def route_transition_telemetry(self) -> list[dict[str, Any]]:
+        return [dict(event) for event in self._route_transitions]
+
+    @property
+    def observed_challenge_type(self) -> str | None:
+        return self._observed_challenge_type
 
     @property
     def exhausted(self) -> bool:
@@ -479,44 +616,66 @@ class AdaptiveBypassManager:
             yield page
 
     def activate_proxy(self) -> bool:
-        """Move along the network axis without changing the engine."""
+        """Escalate one step along the network axis (defect B5).
+
+        The ladder is ``direct -> datacenter proxy -> residential proxy``: a
+        datacenter pool is cheaper and is tried first, with residential kept as
+        the heavier fallback. Previously only the residential step existed, so
+        an IP block with no residential pool configured left the network axis
+        dead and answered the block with a heavier browser from the same IP.
+
+        Changing the exit IP invalidates any IP-bound clearance cookies
+        (``cf_clearance`` etc.), so every activation drops the session cookies
+        and starts a fresh session generation. Keeping one exit IP afterwards
+        (stickiness) is a property of the proxy provider, not of this edge.
+        """
         if not self.adaptive_enabled or not self._budget.allow_proxy_rotation():
             return False
-        if self._route_state.network is NetworkRoute.PROXY:
-            return self._activate_residential_proxy()
-        if self.uses_proxy:
+        current = self._route_state.network
+        if current is NetworkRoute.RESIDENTIAL_PROXY:
+            return False  # top of the network ladder
+        residential = bool(getattr(self._context, "residential_proxy_available", False))
+        datacenter = bool(getattr(self._context, "proxy_available", False))
+        if current is NetworkRoute.DIRECT:
+            if datacenter:
+                return self._transition_network(NetworkRoute.PROXY)
+            if residential:
+                return self._transition_network(NetworkRoute.RESIDENTIAL_PROXY)
             return False
-        if not bool(getattr(self._context, "proxy_available", False)):
-            return self._activate_residential_proxy()
-        self._session_cookies.clear()
-        self._budget.note_proxy_rotation()
-        self._route_state = self._route_state.transition(
-            network=NetworkRoute.PROXY,
-            session=SessionMode.FRESH,
-        )
-        self._sync_context_route()
-        self._escalations_total += 1
-        logger.info("bypass_network_transition", engine=self.current_name, network="proxy")
-        return True
+        # current is datacenter PROXY: escalate to residential when available.
+        if residential:
+            return self._transition_network(NetworkRoute.RESIDENTIAL_PROXY)
+        return False
 
-    def _activate_residential_proxy(self) -> bool:
-        """Escalate from datacenter to residential proxy."""
-        if self._route_state.network is NetworkRoute.RESIDENTIAL_PROXY:
-            return False
-        if not bool(getattr(self._context, "residential_proxy_available", False)):
-            return False
+    def _transition_network(self, network: NetworkRoute) -> bool:
+        """Atomically move the network axis, dropping the IP-bound session."""
         self._session_cookies.clear()
+        self._session_cookies_invalidated = True
+        if not self._configured_profile_persistent:
+            self._profile_dir = None
+        # A new exit IP may clear protection that blocked earlier engines, so
+        # let the ladder try them again from the current tier upward.
+        self._failed_tiers.clear()
         self._budget.note_proxy_rotation()
         self._route_state = self._route_state.transition(
-            network=NetworkRoute.RESIDENTIAL_PROXY,
-            session=SessionMode.STICKY,
+            network=network,
+            session=SessionMode.FRESH,
         )
         self._sync_context_route()
         self._escalations_total += 1
         logger.info(
             "bypass_network_transition",
             engine=self.current_name,
-            network="residential_proxy",
+            network=network.value,
+        )
+        self._route_transitions.append(
+            {
+                "axis": "network",
+                "engine": self.current_name,
+                "network": network.value,
+                "session": self._route_state.session.value,
+                "challenge": self._route_state.challenge.value,
+            }
         )
         return True
 
@@ -541,44 +700,102 @@ class AdaptiveBypassManager:
         )
         self._budget.note_proxy_rotation()
         self._session_cookies.clear()
+        self._session_cookies_invalidated = True
         self._route_state = self._route_state.transition(session=SessionMode.FRESH)
         self._sync_context_route()
         logger.info("bypass_proxy_rotated", engine=self.current_name)
+        self._route_transitions.append(
+            {
+                "axis": "network",
+                "engine": self.current_name,
+                "network": self._route_state.network.value,
+                "session": self._route_state.session.value,
+                "challenge": self._route_state.challenge.value,
+            }
+        )
         return True
 
     def _persona_session_memory(self) -> Any:
-        """Lazy per-persona SessionMemory for returning-user simulation (Wave 5.2).
+        """Lazy per-(persona, domain) SessionMemory for returning-user simulation.
 
-        Opt-in via ``JOB_FTCH_SESSION_MEMORY_ENABLED``. Persists only
-        clearance-allowlist cookies keyed by persona, so a later run of the
-        same persona presents "returning user" signals.
+        Opt-in via ``JOB_FTCH_SESSION_MEMORY_ENABLED`` (default on since TRACK B2).
+        Persists only clearance-allowlist cookies keyed by persona AND domain, so
+        a later run of the same persona on the same site presents "returning user"
+        signals without leaking one site's cookies into another.
         """
         if not self._session_memory_enabled:
             return None
         persona_id = getattr(getattr(self._context, "persona", None), "name", "default")
+        domain = self._session_state_domain()
         if (
             self._session_memory is None
             or getattr(self._session_memory, "_persona_id", None) != persona_id
+            or getattr(self._session_memory, "_domain", "") != domain
         ):
             from job_ftch.infrastructure.bypass.session_memory import SessionMemory
 
-            self._session_memory = SessionMemory(persona_id)
+            self._session_memory = SessionMemory(persona_id, domain=domain or None)
         return self._session_memory
 
     def prepare_browser_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Overlay allowlisted source-session cookies onto a browser attempt."""
         prepared = dict(config)
+        context_kwargs = getattr(self._context, "context_kwargs", None)
+        if callable(context_kwargs):
+            persona_kw = context_kwargs(use_proxy=self.uses_proxy)
+            if persona_kw.get("user_agent") and not prepared.get("user_agent"):
+                prepared["user_agent"] = persona_kw["user_agent"]
+                # Session-owning engines can select a different executable
+                # than the profile used to derive this persona.  Preserve the
+                # provenance so they can decline an unverified command-line
+                # UA while still honoring a caller's explicit override.
+                prepared["_persona_user_agent"] = True
+            if persona_kw.get("locale") and not prepared.get("locale"):
+                prepared["locale"] = persona_kw["locale"]
+            if persona_kw.get("timezone_id") and not prepared.get("timezone_id"):
+                prepared["timezone_id"] = persona_kw["timezone_id"]
+            if persona_kw.get("viewport") and not prepared.get("viewport"):
+                prepared["viewport"] = persona_kw["viewport"]
         if prepared.get("persistent_context"):
             if self._profile_dir is None:
-                self._profile_dir = tempfile.mkdtemp(prefix="job_ftch_source_profile_")
+                domain_profile = self._domain_profile_dir()
+                if self._configured_profile_persistent and self._configured_profile_dir:
+                    # Explicit operator override always wins.
+                    profile_dir = self._configured_profile_dir
+                    profile_dir.mkdir(parents=True, exist_ok=True)
+                    self._profile_dir = str(profile_dir)
+                    self._owns_profile_dir = False
+                elif domain_profile is not None:
+                    # TRACK B1/B2: clearance cookies are IP-bound, so keep
+                    # direct/proxy profiles separate while still reusing each
+                    # warm profile across runs for the same route.
+                    route_profile = domain_profile / self._route_state.network.value
+                    route_profile.mkdir(parents=True, exist_ok=True)
+                    self._profile_dir = str(route_profile)
+                    self._owns_profile_dir = False
+                else:
+                    self._profile_dir = tempfile.mkdtemp(prefix="job_ftch_source_profile_")
+                    self._owns_profile_dir = True
                 if os.name != "nt":
                     os.chmod(self._profile_dir, 0o700)
             prepared["_profile_dir"] = self._profile_dir
         configured = list(prepared.get("cookies") or [])
         memory = self._persona_session_memory()
-        restored = list(memory.state.cookies) if memory is not None else []
+        persistent_state = self._load_persistent_session_state()
+        # After an exit-IP change the warm clearance cookies are bound to the
+        # abandoned IP; restoring them onto a new IP is incoherent, so suppress
+        # them until fresh clearance is captured on the new IP.
+        if self._session_cookies_invalidated:
+            restored: list[dict[str, Any]] = []
+            persistent_cookies: list[dict[str, Any]] = []
+        else:
+            restored = list(memory.state.cookies) if memory is not None else []
+            persistent_cookies = list(persistent_state.get("cookies") or [])
+        persistent_user_agent = str(persistent_state.get("user_agent", "") or "")
+        if persistent_user_agent and not prepared.get("user_agent"):
+            prepared["user_agent"] = persistent_user_agent
         by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
-        for cookie in [*restored, *configured, *self._session_cookies]:
+        for cookie in [*persistent_cookies, *restored, *configured, *self._session_cookies]:
             key = (
                 str(cookie.get("name", "")),
                 str(cookie.get("domain", "")),
@@ -587,14 +804,44 @@ class AdaptiveBypassManager:
             by_key[key] = dict(cookie)
         if by_key:
             prepared["cookies"] = list(by_key.values())[:_MAX_SESSION_COOKIES]
+        self._maybe_add_warmup(prepared)
         return prepared
+
+    def _maybe_add_warmup(self, prepared: dict[str, Any]) -> None:
+        """Inject a cold-profile-only warm-up navigation to the domain root (B3).
+
+        On a COLD profile the browser first visits the origin root, then the
+        caller navigates to the deep listing in the same tab, so the Referer
+        chain root -> listing is genuine (browser-native, not injected). Warm
+        profiles get no extra navigation, and the warm-up fires at most once per
+        domain per run. An explicit warmup_url (e.g. session handoff) is honored.
+        """
+        if prepared.get("warmup_url"):
+            return
+        target = str(prepared.get("url") or "")
+        if not target or not self.is_cold_profile():
+            return
+        from urllib.parse import urlsplit, urlunsplit
+
+        parts = urlsplit(target)
+        if not parts.scheme or not parts.netloc:
+            return
+        root = urlunsplit((parts.scheme, parts.netloc, "/", "", ""))
+        if root == target:
+            return  # listing already IS the root; nothing to warm to.
+        if not self.mark_warmed(parts.netloc):
+            return
+        prepared["warmup_url"] = root
 
     async def close(self) -> None:
         """Release source-scoped runtime artifacts after the terminal snapshot."""
         if self._profile_dir is not None:
             profile = Path(self._profile_dir)
+            owns_profile_dir = self._owns_profile_dir
             self._profile_dir = None
-            shutil.rmtree(profile, ignore_errors=True)
+            self._owns_profile_dir = True
+            if owns_profile_dir:
+                shutil.rmtree(profile, ignore_errors=True)
 
     async def capture_session_state(self, page: Any) -> None:
         """Capture only clearance cookies; never persist or log their values."""
@@ -621,6 +868,9 @@ class AdaptiveBypassManager:
                 break
         self._session_cookies = allowed
         if allowed:
+            # Fresh clearance captured on the current IP: the warm session is
+            # valid again for this identity/IP, so re-enable cookie restoration.
+            self._session_cookies_invalidated = False
             self._route_state = self._route_state.transition(session=SessionMode.STICKY)
             self._sync_context_route()
             memory = self._persona_session_memory()
@@ -631,17 +881,156 @@ class AdaptiveBypassManager:
                 memory.state.visit_count += 1
                 memory.state.last_visit_timestamp = time.time()
                 memory.save()
+            await self._save_persistent_session_state(page, allowed)
+
+    def _session_state_domain(self) -> str:
+        domain = str(getattr(self._context, "domain", "") or "").lower()
+        return domain.strip()
+
+    def _domain_profile_dir(self) -> Path | None:
+        """Resolve this source's stable per-domain profile dir (TRACK B1).
+
+        Returns ``None`` when per-domain profiles are disabled or the domain is
+        unknown, in which case the caller falls back to a throwaway tempdir. GC
+        of the profile root runs at most once per controller, lazily.
+        """
+        if not self._profile_per_domain:
+            return None
+        domain = self._session_state_domain()
+        if not domain:
+            return None
+        key = _domain_profile_key(domain)
+        if not self._profile_gc_done:
+            self._profile_gc_done = True
+            try:
+                _gc_profile_root(
+                    self._profile_root,
+                    max_bytes=self._profile_max_bytes,
+                    ttl_days=self._profile_ttl_days,
+                    keep=key,
+                )
+            except OSError:
+                logger.debug("browser_profile_gc_failed")
+        return self._profile_root / key
+
+    def is_cold_profile(self) -> bool:
+        """True when this domain has never been warmed (TRACK B3 signal).
+
+        A profile is cold when the persona/domain session memory reports zero
+        visits AND no per-domain session-state file exists yet. Warm profiles
+        skip the warm-up navigation so warm runs add no extra requests (R6).
+        """
+        memory = self._persona_session_memory()
+        visit_count = int(getattr(getattr(memory, "state", None), "visit_count", 0) or 0)
+        if visit_count > 0:
+            return False
+        state_path = self._session_state_path(self._session_state_domain())
+        return not (state_path is not None and state_path.exists())
+
+    def mark_warmed(self, domain: str) -> bool:
+        """Record a one-shot warm-up for ``domain``; return False if already warmed."""
+        key = domain.strip().lower()
+        if not key or key in self._warmed_domains:
+            return False
+        self._warmed_domains.add(key)
+        return True
+
+    def _session_state_path(self, domain: str) -> Path | None:
+        if not self._browser_session_state_enabled or not domain:
+            return None
+        safe_domain = re.sub(r"[^a-z0-9_.-]+", "_", domain.lower()).strip("._")
+        if not safe_domain:
+            return None
+        return self._browser_session_state_dir / f"{safe_domain}.json"
+
+    def _load_persistent_session_state(self) -> dict[str, Any]:
+        path = self._session_state_path(self._session_state_domain())
+        if path is None or not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        cookies = data.get("cookies")
+        if not isinstance(cookies, list):
+            data["cookies"] = []
+        else:
+            data["cookies"] = [
+                dict(cookie)
+                for cookie in cookies
+                if isinstance(cookie, dict)
+                and str(cookie.get("name", "")).lower() in _SESSION_COOKIE_ALLOWLIST
+            ][:_MAX_SESSION_COOKIES]
+        return data
+
+    async def _save_persistent_session_state(
+        self,
+        page: Any,
+        cookies: list[dict[str, Any]],
+    ) -> None:
+        if not cookies:
+            return
+        domain = self._session_state_domain()
+        if not domain:
+            try:
+                from urllib.parse import urlparse
+
+                domain = urlparse(str(getattr(page, "url", "") or "")).netloc.lower()
+            except Exception:
+                domain = ""
+        path = self._session_state_path(domain)
+        if path is None:
+            return
+        user_agent = ""
+        try:
+            evaluate = getattr(page, "evaluate", None)
+            if callable(evaluate):
+                user_agent = str(await evaluate("navigator.userAgent"))
+        except Exception:
+            user_agent = ""
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(".tmp")
+            tmp_path.write_text(
+                json.dumps(
+                    {
+                        "domain": domain,
+                        "user_agent": user_agent,
+                        "cookies": [dict(cookie) for cookie in cookies][:_MAX_SESSION_COOKIES],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            tmp_path.replace(path)
+        except OSError:
+            logger.debug("browser_session_state_save_failed", domain=domain)
 
     def _select_engine(self, candidates: tuple[str, ...]) -> bool:
-        """Choose the first installed candidate that changes the current engine."""
+        """Choose the first installed candidate that escalates the engine.
+
+        The ladder is monotonic (defect B4): a candidate is rejected if it has
+        already failed for this source, or if it is cheaper than the current
+        engine. Escalation therefore only ever moves to a stronger, not-yet
+        failed tier, so a recurring challenge climbs stealth -> patchright ->
+        camoufox -> cloak instead of oscillating between the two cheapest.
+        """
+        current_cost = self._capabilities[self.current_name].cost
         for candidate in candidates:
             if candidate == self.current_name:
+                continue
+            if candidate in self._failed_tiers:
                 continue
             try:
                 target_index = self._tiers.index(candidate)
             except ValueError:
                 continue
             capability = self._capabilities[candidate]
+            if capability.cost < current_cost:
+                continue
             if not self._capability_allowed(capability):
                 logger.info(
                     "bypass_capability_skipped",
@@ -654,6 +1043,9 @@ class AdaptiveBypassManager:
                 logger.info("bypass_route_budget_exhausted", engine=candidate)
                 continue
             new_name = self.current_name
+            # The engine we are leaving has failed against this protection; do
+            # not return to it until a network/session reset clears the set.
+            self._failed_tiers.add(new_name)
             self.current_tier_index = target_index
             self._ensure_strategy()
             self._budget.note_route_transition(weight=max(1, capability.cost // 10))
@@ -663,6 +1055,16 @@ class AdaptiveBypassManager:
                 from_engine=new_name,
                 to_engine=candidate,
                 network=self._route_state.network.value,
+            )
+            self._route_transitions.append(
+                {
+                    "axis": "engine",
+                    "from_engine": new_name,
+                    "to_engine": candidate,
+                    "network": self._route_state.network.value,
+                    "session": self._route_state.session.value,
+                    "challenge": self._route_state.challenge.value,
+                }
             )
             return True
         return False
@@ -713,11 +1115,39 @@ class AdaptiveBypassManager:
         )
         return changed
 
+    def set_observed_challenge_type(self, challenge_type: str | None) -> None:
+        """Remember monitor-detected challenge type for the next browser solve.
+
+        Some WAF pages return HTTP 200 and expose CAPTCHA evidence in a
+        preflight/monitor detector, but the live browser page later no longer
+        contains an easy-to-detect site marker. Keeping the detector's typed
+        observation lets the solver route to the intended provider instead of
+        falling back to an ``unknown`` DOM guess.
+        """
+        if isinstance(challenge_type, str) and challenge_type.strip():
+            self._observed_challenge_type = challenge_type.strip()
+            self._challenge_solver_terminal = False
+
+    @property
+    def challenge_solution_requires_reload(self) -> bool:
+        """Whether browser navigation should reload after the latest solution."""
+        return self._challenge_solution_requires_reload
+
+    @property
+    def challenge_solver_terminal(self) -> bool:
+        """Whether retrying this solver outcome on another engine is pointless."""
+        return self._challenge_solver_terminal
+
     @staticmethod
     def _captcha_actions(
         body: bytes | None,
         headers: Mapping[str, str] | None,
+        observed_type: str | None = None,
     ) -> tuple[str, ...]:
+        if observed_type == "cloudflare_challenge":
+            return ("cloudflare_challenge", "generic_challenge", "terminal")
+        if observed_type in {"recaptcha", "recaptcha_v3", "turnstile", "hcaptcha"}:
+            return ("generic_challenge", "terminal")
         evidence = (body or b"").decode("utf-8", errors="ignore").lower()
         header_text = " ".join(f"{key}:{value}" for key, value in (headers or {}).items()).lower()
         evidence = f"{evidence} {header_text}"
@@ -739,18 +1169,36 @@ class AdaptiveBypassManager:
         body: bytes | None = None,
         error: BaseException | None = None,
         retry_after: float | None = None,
+        override_kind: FailureKind | None = None,
     ) -> str:
         """Record a failure and escalate if the policy triggers.
 
         Returns the FailureKind that was classified. If escalation
         happened, the manager's strategy is already updated.
+
+        ``override_kind`` lets a caller that has evidence the HTTP-level
+        classifier cannot see (defect B1: a 200 shell with the listing stripped
+        is a *silent block* only the scraper knows is wrong) inject the already
+        determined kind instead of re-deriving it from status/body.
         """
-        kind = self._signal.classify(
+        kind = override_kind or self._signal.classify(
             status_code=status_code,
             headers=headers,
             body=body,
             error=error,
         )
+        if self._observed_challenge_type and kind in {
+            FailureKind.BLOCKED,
+            FailureKind.UNKNOWN,
+        }:
+            kind = FailureKind.CHALLENGE
+        if self._budget.attempt_exhausted():
+            logger.info(
+                "bypass_operation_attempt_budget_exhausted",
+                tier=self.current_name,
+                failure_kind=kind,
+            )
+            return kind
         del retry_after  # Retry-After is consumed by the HTTP RouteBudget layer.
         decision = self._transition_policy.decide(kind)
         capability = self._capabilities[self.current_name]
@@ -764,14 +1212,36 @@ class AdaptiveBypassManager:
             session_generation=self._route_state.generation,
             challenge_action=self._route_state.challenge.value,
         )
-        if kind == FailureKind.OK or kind == FailureKind.UNKNOWN:
+        if kind == FailureKind.OK:
+            return kind
+        if kind == FailureKind.UNKNOWN:
+            # An unrecognised protection response must not be a silent no-op
+            # (defect B2): record it and, once the per-source failure window
+            # crosses the threshold, conservatively escalate to the next engine.
+            self._record_failure(source_id, kind)
+            if self.adaptive_enabled and self._should_escalate(source_id):
+                self.escalate()
             return kind
         if decision.action is TransitionAction.SOLVE_CURRENT_SESSION and self.adaptive_enabled:
-            self._route_state = self._route_state.transition(
-                challenge=ChallengeState.OBSERVED,
-                session=SessionMode.STICKY,
+            if (
+                self._route_state.challenge is not ChallengeState.OBSERVED
+                or self._route_state.session is not SessionMode.STICKY
+            ):
+                self._route_state = self._route_state.transition(
+                    challenge=ChallengeState.OBSERVED,
+                    session=SessionMode.STICKY,
+                )
+            changed = self._select_capability(
+                self._captcha_actions(body, headers, self._observed_challenge_type)
             )
-            self._select_capability(self._captcha_actions(body, headers))
+            if not changed and self._budget.same_route_retry_exhausted():
+                logger.info(
+                    "bypass_challenge_same_route_retry_exhausted",
+                    tier=self.current_name,
+                    failure_kind=kind,
+                    status_code=status_code,
+                )
+                self.escalate()
             return kind
         if decision.action is TransitionAction.ACTIVATE_PROXY:
             # HTTP retry policy owns any bounded Retry-After sleep.  The route
@@ -800,6 +1270,10 @@ class AdaptiveBypassManager:
             if self.adaptive_enabled:
                 self._select_capability(("fingerprint_resistant", "terminal"))
             return kind
+        if decision.action is TransitionAction.ENGINE_DIVERSITY:
+            if self.adaptive_enabled:
+                self._select_capability(("engine_diversity", "terminal"))
+            return kind
         if decision.action is TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK:
             if (
                 self.adaptive_enabled
@@ -827,10 +1301,19 @@ class AdaptiveBypassManager:
                     error=error,
                 )
             return kind
-        if decision.action is TransitionAction.MANAGED_FALLBACK:
-            self._record_failure(source_id, kind)
-            if self.adaptive_enabled and self.exhausted:
-                self._try_managed_fallback()
+        if decision.action is TransitionAction.RETRY_SAME_ROUTE:
+            # Same-route retries belong to the caller's retry loop. Only when
+            # those are exhausted for this operation do we force a route change
+            # (defect B3): the exhaustion guard must escalate off the stuck
+            # route, not forbid every transition as it did before.
+            if self.adaptive_enabled and self._budget.same_route_retry_exhausted():
+                logger.info(
+                    "bypass_same_route_retry_exhausted",
+                    tier=self.current_name,
+                    failure_kind=kind,
+                    status_code=status_code,
+                )
+                self.escalate()
             return kind
         # Server/parser/auth/board-gone failures are not anti-bot evidence.
         return kind
@@ -894,6 +1377,11 @@ class AdaptiveBypassManager:
             )
         return cast("dict[str, Any]", self._current_strategy.apply_browser_args(kwargs))
 
+    @property
+    def requires_process_identity(self) -> bool:
+        """Whether the selected engine needs identity on worker-originated requests."""
+        return bool(getattr(self._current_strategy, "requires_process_identity", False))
+
     async def apply_page(self, page: Any) -> None:
         """Apply the current tier's page hooks, then compose behavior_sim and orchestrator.
 
@@ -903,11 +1391,23 @@ class AdaptiveBypassManager:
         For HTTP-only tiers (noop, curl_stealth) apply_page is never
         called by browser_utils, so the decorator stays dormant.
         """
-        if self._context is not None:
-            await self._context.apply_page(page)
+        # The tier's own page hooks run first (nodriver/stealth_browser CDP
+        # setup, camoufox no-op). Persona/JS hardening is applied exactly once
+        # by ``_apply_per_request_hardening`` below — the previous extra
+        # ``self._context.apply_page(page)`` call has been removed because it
+        # injected a second, conflicting copy of the persona hardening blob.
         await self._current_strategy.apply_page(page)
+        family = self._capabilities[self.current_name].browser_family or "chromium"
+        is_chromium = family.startswith("chromium")
+        # The reCAPTCHA action probe and the Chromium stealth blob are
+        # Blink-specific. Injecting them into a Firefox engine (camoufox) both
+        # fails and destroys camoufox's own C++-level fingerprint coherence, so
+        # they are gated to Chromium-family engines only.
+        if is_chromium:
+            await self._install_recaptcha_action_probe(page)
         await self._behavior_sim.apply_page(page)
-        await self._apply_per_request_hardening(page)
+        if is_chromium:
+            await self._apply_per_request_hardening(page)
 
         from job_ftch.infrastructure.bypass.multi_layer_obfuscation import ObfuscationContext
 
@@ -923,16 +1423,72 @@ class AdaptiveBypassManager:
         self._obfuscation_metadata = ctx.metadata
         self._behavior_sim.update_noise_params(ctx.metadata)
 
-    async def _apply_per_request_hardening(self, page: Any) -> None:
-        """Apply per-request stealth hardening with rotated seeds.
+    async def _install_recaptcha_action_probe(self, page: Any) -> None:
+        """Capture dynamic grecaptcha.execute actions before page scripts run.
 
-        Each navigation gets a fresh canvas/audio seed and performance
-        offset to prevent cross-request fingerprint correlation.
+        reCAPTCHA v3 provider payloads need the page action. Many SPAs do not
+        expose it in the initial HTML; they call grecaptcha.execute from a
+        bundled module after navigation. This hook records those calls without
+        logging tokens, credentials, or page content.
         """
-        import random as _random
+        add_init_script = getattr(page, "add_init_script", None)
+        if not callable(add_init_script):
+            return
+        script = r"""
+        (() => {
+          if (window.__job_ftch_recaptcha_probe_installed) return;
+          window.__job_ftch_recaptcha_probe_installed = true;
+          window.__job_ftch_recaptcha_executes = window.__job_ftch_recaptcha_executes || [];
+          const remember = (sitekey, options) => {
+            try {
+              const action = options && typeof options === 'object' ? String(options.action || '') : '';
+              window.__job_ftch_recaptcha_executes.push({
+                sitekey: sitekey ? String(sitekey) : '',
+                action,
+                ts: Date.now()
+              });
+              if (window.__job_ftch_recaptcha_executes.length > 20) {
+                window.__job_ftch_recaptcha_executes.shift();
+              }
+            } catch (_) {}
+          };
+          const wrap = (grecaptcha) => {
+            if (!grecaptcha || grecaptcha.__job_ftch_wrapped) return grecaptcha;
+            const original = grecaptcha.execute;
+            if (typeof original === 'function') {
+              grecaptcha.execute = function(sitekey, options) {
+                remember(sitekey, options);
+                return original.apply(this, arguments);
+              };
+            }
+            try { Object.defineProperty(grecaptcha, '__job_ftch_wrapped', {value: true}); } catch (_) {}
+            return grecaptcha;
+          };
+          let current = window.grecaptcha;
+          Object.defineProperty(window, 'grecaptcha', {
+            configurable: true,
+            get() { return current; },
+            set(value) { current = wrap(value); }
+          });
+          if (current) current = wrap(current);
+        })();
+        """
+        try:
+            await add_init_script(script)
+        except Exception:
+            return
 
-        canvas_seed = _random.randint(1000, 99999)
-        performance_offset = _random.uniform(-2.0, 2.0)
+    async def _apply_per_request_hardening(self, page: Any) -> None:
+        """Apply stealth hardening with session-stable seeds.
+
+        Fingerprint seeds (canvas/audio/performance) MUST stay constant for
+        the lifetime of a session generation: a real user's canvas and audio
+        hashes do not change between page views, so rotating them per
+        navigation is itself a bot signal (invariant I7). Seeds are therefore
+        derived from the sticky persona, or from the current route-state
+        generation when no persona is bound, and only change on a deliberate
+        session reset (new generation / proxy rotation).
+        """
         try:
             from job_ftch.infrastructure.bypass.stealth_hardening import (
                 apply_stealth_hardening,
@@ -940,7 +1496,16 @@ class AdaptiveBypassManager:
 
             persona = None
             if self._context is not None:
-                persona = getattr(self._context, "browser_persona", None)
+                persona = getattr(self._context, "persona", None)
+            # Stable per-session performance offset, deterministic in the
+            # session generation so it does not flip between navigations.
+            performance_offset = float(
+                ((self._route_state.generation * 2654435761) % 4000) / 1000.0 - 2.0
+            )
+            canvas_seed = (
+                int(getattr(persona, "canvas_seed", 0) or 0)
+                or 1000 + (self._route_state.generation * 2654435761) % 99000
+            )
             if persona is not None:
                 from job_ftch.infrastructure.bypass.stealth_hardening import (
                     apply_persona_hardening,
@@ -964,21 +1529,92 @@ class AdaptiveBypassManager:
 
     async def solve_page_challenge(self, page: Any, *, url: str) -> bool:
         """Run one bounded solver action in the current browser session."""
+        if self._challenge_solver_terminal:
+            return False
         solve_detected = getattr(self._captcha_solver, "solve_detected", None)
         if not callable(solve_detected):
             return False
         proxy_setter = getattr(self._captcha_solver, "set_proxy_url", None)
         if callable(proxy_setter) and self.current_proxy_url:
             proxy_setter(self.current_proxy_url)
+        observed_type = self._observed_challenge_type
+        if (
+            observed_type == "cloudflare_challenge"
+            and not self.uses_proxy
+            and (
+                bool(getattr(self._context, "proxy_available", False))
+                or bool(getattr(self._context, "residential_proxy_available", False))
+            )
+            and self.activate_proxy()
+        ):
+            logger.info(
+                "bypass_captcha_solver_deferred_until_proxy",
+                challenge_type=observed_type,
+                network=self._route_state.network.value,
+            )
+            return False
         self._route_state = self._route_state.transition(
             challenge=ChallengeState.SOLVING,
             session=SessionMode.STICKY,
         )
         self._sync_context_route()
-        result = await solve_detected(page, url=url)
+        solve = getattr(self._captcha_solver, "solve", None)
+        if observed_type and callable(solve):
+            result = await solve(page, challenge_type=observed_type, url=url)
+        else:
+            result = await solve_detected(page, url=url)
         solved = bool(getattr(result, "solved", False))
+        result_kind = getattr(result, "result_kind", None)
+        failure_reason = getattr(result, "failure_reason", None)
+        self._challenge_solution_requires_reload = result_kind is not CaptchaResultKind.TOKEN
+        self._challenge_solver_terminal = failure_reason in {
+            CaptchaFailureReason.UNSUPPORTED_CHALLENGE,
+            CaptchaFailureReason.UNAUTHORIZED_DOMAIN,
+            CaptchaFailureReason.PROVIDER_DISABLED,
+            CaptchaFailureReason.MISSING_CREDENTIAL,
+            CaptchaFailureReason.BUDGET_EXHAUSTED,
+            CaptchaFailureReason.DEADLINE_INSUFFICIENT,
+            CaptchaFailureReason.BACKOFF_ACTIVE,
+        }
+        logger.info(
+            "bypass_captcha_solver_result",
+            solved=solved,
+            challenge_type=getattr(result, "challenge_type", None),
+            result_kind=(
+                getattr(getattr(result, "result_kind", None), "value", None)
+                or getattr(result, "result_kind", None)
+            ),
+            failure_reason=(
+                getattr(getattr(result, "failure_reason", None), "value", None)
+                or getattr(result, "failure_reason", None)
+            ),
+            provider_task_id_present=bool(getattr(result, "provider_task_id", None)),
+            raw_provider_status=getattr(result, "raw_provider_status", None),
+            error=getattr(result, "error", None),
+        )
+        self._route_transitions.append(
+            {
+                "axis": "challenge",
+                "engine": self.current_name,
+                "network": self._route_state.network.value,
+                "challenge_type": (
+                    getattr(result, "challenge_type", None) or observed_type or "unknown"
+                ),
+                "solved": solved,
+                "result_kind": (
+                    getattr(getattr(result, "result_kind", None), "value", None)
+                    or getattr(result, "result_kind", None)
+                ),
+                "failure_reason": (
+                    getattr(getattr(result, "failure_reason", None), "value", None)
+                    or getattr(result, "failure_reason", None)
+                ),
+                "provider_task_id_present": bool(getattr(result, "provider_task_id", None)),
+            }
+        )
         if solved:
             self._route_state = self._route_state.transition(challenge=ChallengeState.NONE)
+            self._observed_challenge_type = None
             self._sync_context_route()
         return solved
 

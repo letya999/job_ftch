@@ -110,37 +110,20 @@ class GraphExecutor:
         return reports[0]
 
     async def run_many(self, item: Any) -> list[ExecutionReport]:
-        seen_items: list[Any] = []
-        try:
-            reports = await self._run_from(item, 0, seen_items)
-        except Exception:
-            for it in seen_items:
-                await self._settle_deferred_dedup_claims(it, commit=False)
-            raise
-        for it in seen_items:
-            await self._settle_deferred_dedup_claims(it, commit=True)
-        return reports
+        return await self._run_from(item, 0)
 
-    async def _settle_deferred_dedup_claims(self, item: Any, *, commit: bool) -> None:
-        """Mirror Pipeline's claim lifecycle for declarative graph executions."""
-        item_id = getattr(item, "stable_id", None)
-        if not item_id:
-            return
-        method_name = "commit_claim" if commit else "release_claim"
-        visited: set[int] = set()
+    def settlement_participants(self) -> tuple[Any, ...]:
+        from job_ftch.application.dedup_settlement import DedupSettlement
+
+        seen: set[int] = set()
+        result: list[Any] = []
         for node in self.factories.values():
-            if id(node) in visited:
-                continue
-            visited.add(id(node))
-            settle = getattr(node, method_name, None)
-            if callable(settle):
-                await settle(str(item_id))
+            if id(node) not in seen and isinstance(node, DedupSettlement):
+                seen.add(id(node))
+                result.append(node)
+        return tuple(result)
 
-    async def _run_from(
-        self, item: Any, start_index: int, seen_items: list[Any] | None = None
-    ) -> list[ExecutionReport]:
-        if seen_items is not None:
-            seen_items.append(item)
+    async def _run_from(self, item: Any, start_index: int) -> list[ExecutionReport]:
         report = ExecutionReport(item=item)
         nodes = {node.id: node for node in self.graph.spec.nodes}
         background: dict[str, asyncio.Task[Any]] = {}
@@ -253,9 +236,7 @@ class GraphExecutor:
                 return [
                     child
                     for candidate in result
-                    for child in await self._run_from(
-                        _materialize(candidate), index + 1, seen_items
-                    )
+                    for child in await self._run_from(_materialize(candidate), index + 1)
                 ]
             if result is None and spec.effect == EffectMode.GATE and not spec.shadow:
                 self._update_event(report, spec.id, outcome="drop", reason="gate_returned_none")

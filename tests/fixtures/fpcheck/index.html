@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>fpcheck</title>
+</head>
+<body>
+<h1>fingerprint self-check</h1>
+<pre id="out">collecting…</pre>
+<script>
+// LOCAL self-check page (no third-party detector). Reads the same identity axes
+// in the window realm and inside classic/module Workers, then exposes all realms
+// via window.__fpcheck so the harness can assert I8 and window == declared.
+function readWebGL() {
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) return { vendor: '', renderer: '' };
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    return {
+      vendor: dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR),
+      renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+    };
+  } catch (e) {
+    return { vendor: '', renderer: '' };
+  }
+}
+
+function readNavigator(nav, extra) {
+  let timezone = '';
+  try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+  return Object.assign({
+    userAgent: nav.userAgent || '',
+    platform: nav.platform || '',
+    hardwareConcurrency: nav.hardwareConcurrency || 0,
+    deviceMemory: nav.deviceMemory || 0,
+    language: nav.language || '',
+    languages: (nav.languages || []).join(','),
+    timezone: timezone,
+  }, extra || {});
+}
+
+const WORKER_SRC = `
+self.onmessage = function() {
+  var tz = '';
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) {}
+  var wg = { vendor: '', renderer: '' };
+  try {
+    var oc = new OffscreenCanvas(1, 1);
+    var gl = oc.getContext('webgl');
+    if (gl) {
+      var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      wg.vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
+      wg.renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    }
+  } catch (e) {}
+  postMessage({
+    userAgent: navigator.userAgent || '',
+    platform: navigator.platform || '',
+    hardwareConcurrency: navigator.hardwareConcurrency || 0,
+    deviceMemory: navigator.deviceMemory || 0,
+    language: navigator.language || '',
+    languages: (navigator.languages || []).join(','),
+    timezone: tz,
+    webglVendor: wg.vendor,
+    webglRenderer: wg.renderer,
+  });
+};
+`;
+
+function collectWorker(options) {
+  return new Promise(function (resolve) {
+    try {
+      const blob = new Blob([WORKER_SRC], { type: 'application/javascript' });
+      const worker = new Worker(URL.createObjectURL(blob), options || {});
+      const timer = setTimeout(function () { resolve({ error: 'worker_timeout' }); }, 3000);
+      worker.onmessage = function (ev) { clearTimeout(timer); resolve(ev.data); };
+      worker.onerror = function () { clearTimeout(timer); resolve({ error: 'worker_error' }); };
+      worker.postMessage('go');
+    } catch (e) {
+      resolve({ error: String(e) });
+    }
+  });
+}
+
+(async function () {
+  const wg = readWebGL();
+  const windowBag = readNavigator(navigator, { webglVendor: wg.vendor, webglRenderer: wg.renderer });
+  const workerBag = await collectWorker();
+  const moduleWorkerBag = await collectWorker({ type: 'module' });
+  window.__fpcheck = { window: windowBag, worker: workerBag, moduleWorker: moduleWorkerBag };
+  document.getElementById('out').textContent = JSON.stringify(window.__fpcheck, null, 2);
+})();
+</script>
+</body>
+</html>

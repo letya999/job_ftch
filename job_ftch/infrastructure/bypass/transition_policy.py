@@ -17,10 +17,10 @@ class TransitionAction(StrEnum):
     ACTIVATE_PROXY_THEN_FALLBACK = "activate_proxy_then_fallback"
     TLS_IMPERSONATION = "tls_impersonation"
     FINGERPRINT_RESISTANT_ENGINE = "fingerprint_resistant_engine"
+    ENGINE_DIVERSITY = "engine_diversity"
     DEBOUNCED_PROXY = "debounced_proxy"
     RETRY_SAME_ROUTE = "retry_same_route"
     CHANGE_EXTRACTOR = "change_extractor"
-    MANAGED_FALLBACK = "managed_fallback"
     TERMINAL = "terminal"
 
 
@@ -34,6 +34,10 @@ class TransitionDecision:
 _DECISIONS: dict[FailureKind, TransitionDecision] = {
     FailureKind.CAPTCHA: TransitionDecision(TransitionAction.SOLVE_CURRENT_SESSION),
     FailureKind.CHALLENGE: TransitionDecision(TransitionAction.SOLVE_CURRENT_SESSION),
+    FailureKind.QRATOR_CHALLENGE: TransitionDecision(
+        TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK,
+        preserves_session=False,
+    ),
     FailureKind.RATE_LIMIT: TransitionDecision(TransitionAction.ACTIVATE_PROXY),
     FailureKind.BLOCKED_IP: TransitionDecision(TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK),
     FailureKind.BLOCKED: TransitionDecision(TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK),
@@ -43,6 +47,22 @@ _DECISIONS: dict[FailureKind, TransitionDecision] = {
         preserves_engine=False,
         preserves_session=False,
     ),
+    FailureKind.BLOCKED_CHROMIUM_FINGERPRINT: TransitionDecision(
+        TransitionAction.ENGINE_DIVERSITY,
+        preserves_engine=False,
+        preserves_session=False,
+    ),
+    # Silent scoring (reCAPTCHA v3 / Akamai / Cloudflare pass-through) returns a
+    # full 200 shell with the listing stripped. Retrying the same parser chain
+    # is useless; the only lever is a fingerprint-resistant engine on a fresh
+    # session, so treat it like a fingerprint block (defect B1).
+    FailureKind.SILENT_BLOCK: TransitionDecision(
+        TransitionAction.FINGERPRINT_RESISTANT_ENGINE,
+        preserves_engine=False,
+        preserves_session=False,
+    ),
+    # A hard paywall is not anti-bot evidence and no route change can clear it.
+    FailureKind.PAYMENT_REQUIRED: TransitionDecision(TransitionAction.TERMINAL),
     FailureKind.TIMEOUT: TransitionDecision(TransitionAction.DEBOUNCED_PROXY),
     FailureKind.DNS_ERROR: TransitionDecision(TransitionAction.DEBOUNCED_PROXY),
     FailureKind.CONNECT_ERROR: TransitionDecision(TransitionAction.DEBOUNCED_PROXY),

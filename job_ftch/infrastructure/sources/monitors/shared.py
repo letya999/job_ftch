@@ -37,28 +37,52 @@ class AtsRedirectException(Exception):
 class BrowserChallengeError(Exception):
     """The browser loaded an anti-bot challenge instead of the requested board."""
 
-    def __init__(self, *, url: str) -> None:
+    def __init__(
+        self,
+        *,
+        url: str,
+        status_code: int | None = None,
+        headers: dict[str, str] | None = None,
+        body: bytes | None = None,
+        challenge_type: str | None = None,
+        confidence: float | None = None,
+        evidence_hash: str | None = None,
+    ) -> None:
         super().__init__(f"blocked browser challenge at {url}")
         self.url = url
+        self.status_code = status_code
+        self.headers = headers or {}
+        self.body = body
+        self.challenge_type = challenge_type
+        self.confidence = confidence
+        self.evidence_hash = evidence_hash
 
 
 def raise_if_browser_challenge(html: str, *, url: str) -> None:
     """Reject a rendered CAPTCHA page before it is treated as a job listing."""
-    from job_ftch.infrastructure.bypass.failure_signal import FailureKind, HeuristicFailureSignal
+    from urllib.parse import urlparse
 
-    kind = HeuristicFailureSignal().classify(
-        status_code=200,
-        body=html.encode("utf-8", errors="ignore"),
-        error=None,
+    from job_ftch.infrastructure.bypass.challenge_classifier import (
+        classify_challenge,
+        emit_challenge_detection,
     )
-    if kind in (
-        FailureKind.CAPTCHA,
-        FailureKind.CHALLENGE,
-        FailureKind.BLOCKED,
-        FailureKind.BLOCKED_IP,
-        FailureKind.BLOCKED_FINGERPRINT,
-    ):
-        raise BrowserChallengeError(url=url)
+
+    body = html.encode("utf-8", errors="ignore")
+    detection = classify_challenge(
+        surface="monitor",
+        status_code=200,
+        body=body,
+    )
+    if detection.detected:
+        emit_challenge_detection(urlparse(url).netloc.lower(), detection)
+        raise BrowserChallengeError(
+            url=url,
+            status_code=200,
+            body=body,
+            challenge_type=detection.challenge_type,
+            confidence=detection.confidence,
+            evidence_hash=detection.evidence_hash,
+        )
 
 
 def slugs_from_url(url: str) -> list[str]:

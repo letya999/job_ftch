@@ -174,23 +174,38 @@ async def fingerprint(url: str, client: httpx.AsyncClient | None = None) -> Site
         log.info("site_board_gone_detected")
         return SiteProfile(SiteClass.SSR, [], {"board_gone": True}, canonical_url=_canonical)
 
+    from job_ftch.infrastructure.bypass.challenge_classifier import classify_challenge
     from job_ftch.infrastructure.bypass.failure_signal import HeuristicFailureSignal
 
-    challenge = (
-        HeuristicFailureSignal()
-        .classify_detailed(
-            status_code=response.status_code,
-            body=body.encode("utf-8", errors="ignore"),
-            error=None,
-        )
-        .challenge
+    body_bytes = body.encode("utf-8", errors="ignore")
+    challenge_outcome = HeuristicFailureSignal().classify_detailed(
+        status_code=response.status_code,
+        body=body_bytes,
+        error=None,
     )
-    if challenge:
+    if challenge_outcome.challenge:
+        challenge_detection = classify_challenge(
+            surface="fingerprinter",
+            status_code=response.status_code,
+            headers=response.headers,
+            body=body_bytes,
+        )
         log.info("site_challenge_detected", status=response.status_code)
+        challenge_confidence = challenge_detection.confidence or (
+            0.82 if challenge_outcome.captcha_type else 0.65
+        )
+        detected_config: dict[str, Any] = {
+            "render": True,
+            "challenge": True,
+            "challenge_confidence": challenge_confidence,
+            "challenge_evidence_hash": challenge_detection.evidence_hash,
+        }
+        if challenge_outcome.captcha_type:
+            detected_config["captcha_type"] = challenge_outcome.captcha_type
         return SiteProfile(
             SiteClass.BLOCKED,
             ["dom", "api_sniffer"],
-            {"render": True, "challenge": True},
+            detected_config,
             canonical_url=_canonical,
         )
 

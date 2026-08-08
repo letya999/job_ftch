@@ -8,6 +8,8 @@ the shared runtime image.
 ## What it does
 
 - On-demand pipeline execution to discover and filter jobs.
+- Tenant scheduler execution with channel publishing.
+- Private owner reports after every completed scheduled run.
 - Resume upload and per-source management.
 
 ### Commands
@@ -22,9 +24,51 @@ the shared runtime image.
   текстовый список показывает все источники целиком.
 - `/run` — Запустить поиск сейчас
 - `/clear` — Очистить историю
+- `/schedule` — Настроить частоту автозапуска и посмотреть последний scheduler status
+- `/channel` — Настроить канал публикации вакансий
 - `/feedback` — Обратная связь на опубликованные вакансии (только админ)
 
-*Note: The scheduler is a separate CLI mode (`job-ftch scheduler`). The bot only runs on-demand via `/run`.*
+### Scheduled runs
+
+The production bot process owns the tenant scheduler loop. A scheduled run uses
+the configured publish owner's profile (`publish_user_id`) so it follows the
+same profile-aware filtering as manual `/run`.
+
+After every completed scheduled run, the bot sends a private report to the
+publish owner chat, not to the public channel. The report reuses the shared
+runtime report buckets used by `/run`:
+
+- `Уже видели` — snapshot/dedup/already-seen drops, including duplicate content.
+- `Не-вакансии` — explicit non-vacancy/content-policy drops.
+- `Низкая релевантность` — relevance-prefilter drops.
+- `Прочие дропы` — remaining controlled drops and operational source drops.
+
+If a run emits zero jobs and there is no pending publish retry window, channel
+publication is skipped deliberately. The scheduler persists that as:
+
+- `bot_scheduler:last_publish_skipped_at`
+- `bot_scheduler:last_publish_skipped_reason`
+
+`/schedule` shows these fields so a successful no-output run does not look like
+a silent publishing failure.
+
+Recovery semantics:
+
+- `last_attempt_at` is written before ingest, while `last_success_at` is written
+  only after ingest completes. On restart, an attempt without a newer success is
+  treated as incomplete and is retried even when its interval has not elapsed.
+- A non-empty `bot_scheduler:pending_publish_since` is a durable delivery intent.
+  It is written before candidate lookup/Telegram calls, so a crash between the
+  run and the first send is recoverable. The scheduler drains this window before
+  starting another ingest run.
+- The window is cleared only when every eligible candidate is either delivered
+  or already present in the publish ledger. Connection, timeout, flood-limit, and
+  partial-send failures keep it pending for the next scheduler iteration.
+- `bot_scheduler:journal` keeps a bounded history of schedule slots. A slot is
+  complete only after both `run_state=succeeded` and `publish_state=succeeded`;
+  incomplete slots are replayed before creating a later slot. The fixed
+  `bot_scheduler:next_due_at` marker prevents a laptop shutdown from silently
+  moving the schedule forward.
 
 ### Обратная связь на вакансии
 

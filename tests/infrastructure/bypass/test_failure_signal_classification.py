@@ -8,6 +8,7 @@ from job_ftch.infrastructure.bypass.failure_signal import (
     FailureKind,
     FetchOutcome,
     HeuristicFailureSignal,
+    _detect_captcha_type,
 )
 
 
@@ -21,10 +22,24 @@ from job_ftch.infrastructure.bypass.failure_signal import (
         (503, b"Service Unavailable", None, FailureKind.SERVER_ERROR),
         (200, b"", None, FailureKind.PARSE_EMPTY),
         (200, b'<div class="cf-turnstile"></div>', None, FailureKind.CHALLENGE),
+        (
+            200,
+            b"himalayas.app Performing security verification. "
+            b"This website uses a security service to protect against malicious bots. "
+            b"Performance and Security by Cloudflare",
+            None,
+            FailureKind.CHALLENGE,
+        ),
         (200, b"<iframe src='hcaptcha.com'></iframe>", None, FailureKind.CAPTCHA),
         (200, b"<script src='recaptcha/api.js'></script>", None, FailureKind.CAPTCHA),
         (200, b"<script src='smartcaptcha'></script>", None, FailureKind.CAPTCHA),
         (200, b"/showcaptcha?retpath=aHR0cHM6Ly9jYXJlZXIuY2lhbi5ydS8=", None, FailureKind.CAPTCHA),
+        (
+            200,
+            b"<script>document.cookie='jsid=1';window.location.reload()</script>Qrator",
+            None,
+            FailureKind.QRATOR_CHALLENGE,
+        ),
         (None, None, ConnectionError("timeout"), FailureKind.TIMEOUT),
         (402, b"Payment Required", None, FailureKind.PAYMENT_REQUIRED),
         (498, b"Anti-bot block", None, FailureKind.BLOCKED),
@@ -65,6 +80,19 @@ def test_429_with_retry_after_header() -> None:
     assert outcome.retry_after_seconds == 120.0
 
 
+def test_qrator_header_is_classified_as_qrator_challenge() -> None:
+    outcome = HeuristicFailureSignal().classify_detailed(
+        status_code=200,
+        headers={"X-Qrator-RequestID": "fixture"},
+        body=b"",
+        error=None,
+    )
+
+    assert outcome.kind is FailureKind.QRATOR_CHALLENGE
+    assert outcome.challenge is True
+    assert outcome.captcha_type == "qrator_jsid"
+
+
 def test_silent_block_triggers_escalation() -> None:
     outcome = FetchOutcome(kind=FailureKind.SILENT_BLOCK)
     assert outcome.should_escalate is True
@@ -75,3 +103,7 @@ def test_payment_required_is_terminal() -> None:
     outcome = FetchOutcome(kind=FailureKind.PAYMENT_REQUIRED)
     assert outcome.should_escalate is False
     assert outcome.retryable is False
+
+
+def test_turnstile_marker_is_normalized_for_solver_routes() -> None:
+    assert _detect_captcha_type('<div class="cf-turnstile"></div>') == "turnstile"

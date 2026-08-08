@@ -27,6 +27,26 @@ ai-repo-safety scan --target .
 
 ## 2. Локальные gates
 
+Короткий исполняемый вход:
+
+```powershell
+just release-checklist
+```
+
+Для точечной диагностики те же проверки разложены по публичным `just`
+командам:
+
+```powershell
+just docs-verify
+just docs-build
+just code-verify
+just architecture-verify
+just security-verify
+just tests-all
+```
+
+Низкоуровневые команды остаются source of truth для CI и отладки:
+
 ```powershell
 uv run python scripts/run_ci_checks.py lint
 uv run python scripts/run_ci_checks.py type
@@ -109,12 +129,19 @@ uv run python scripts/validate_yaml_schemas.py `
 Минимум:
 
 ```powershell
+just eval-filtering
 uv run python scripts/evaluate_classification.py --gate
 uv run python scripts/evaluate_extraction.py --gate
 uv run python scripts/run_ci_checks.py release-contract
 ```
 
 Career-site ingest coverage gate:
+
+```powershell
+just eval-ingest
+```
+
+Эквивалентная низкоуровневая команда:
 
 ```powershell
 uv run python scripts/run_ingest_batch.py `
@@ -127,6 +154,12 @@ uv run python scripts/run_ingest_batch.py `
   --concurrency 10 `
   --gate `
   --min-success-rate 0.65
+```
+
+Publication/card gate:
+
+```powershell
+just eval-publishing
 ```
 
 Для live release candidate:
@@ -150,6 +183,12 @@ Production-shape deploy:
 - `docs/deploy.md`.
 
 Проверка compose:
+
+```powershell
+just docker-prod-verify
+```
+
+Эквивалентные низкоуровневые команды:
 
 ```powershell
 docker build -f docker/runtime/Dockerfile.prod -t job-ftch-runtime:prod .

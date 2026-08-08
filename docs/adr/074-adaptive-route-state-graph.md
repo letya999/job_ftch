@@ -1,7 +1,7 @@
 ---
 title: "074 — Adaptive route-state graph and single execution context"
 description: "**Status:** ACCEPTED"
-updated: 2026-07-24
+updated: 2026-08-05
 ---
 # 074 — Adaptive route-state graph and single execution context
 
@@ -103,6 +103,27 @@ or forbidden engine. Nodriver remains subject to ADR-073.
 
 Cloak is a terminal browser engine and requires enough remaining deadline for
 launch, navigation, extraction and cleanup.
+
+### Parity-calibrated browser ordering
+
+The 2026-08-05 owned parity-lab campaign replaced the assumption that every
+browser tier is universally stronger than the previous one. For a generic
+fingerprint rejection, installed capabilities are tried monotonically by cost:
+
+```text
+patchright_browser -> nodriver -> camoufox -> cloak
+```
+
+Nodriver advertises `fingerprint_resistant` and `generic_challenge` because its
+headed Chromium run completed without hard automation findings after transport,
+input and probe-order coherence fixes. Camoufox additionally advertises
+`engine_diversity`; explicit Chromium/Blink-specific rejection therefore moves
+to the Firefox engine rather than spending another Chromium attempt. Cloak
+remains terminal until equivalent repeated parity evidence justifies a cheaper
+position.
+
+These are capability actions, not backend-name dispatch in the controller.
+TLS, IP/rate, session and parser failures retain their independent route axes.
 
 ### Registry metadata
 

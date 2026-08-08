@@ -1,7 +1,7 @@
 ---
 title: "job_ftch"
 description: "![Python](https://img.shields.io/badge/python-3.12+-blue.svg)"
-updated: 2026-07-24
+updated: 2026-08-02
 ---
 # job_ftch
 
@@ -220,6 +220,8 @@ Useful settings:
 | Ontology compiler | [docs/ontology/compiler.md](docs/ontology/compiler.md) |
 | Tech stack | [docs/tech_stack.md](docs/tech_stack.md) |
 | Runtime and env | [docs/adapters/runtime_and_env.md](docs/adapters/runtime_and_env.md) |
+| Quality gates and CI | [docs/operations/ci-cd.md](docs/operations/ci-cd.md) |
+| Release checklist | [docs/release_checklist.md](docs/release_checklist.md) |
 | Source setup | [docs/sources/setup.md](docs/sources/setup.md) |
 | Examples | [docs/examples.md](docs/examples.md) |
 | Entity map | [docs/entities/README.md](docs/entities/README.md) |

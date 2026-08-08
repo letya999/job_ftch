@@ -12,6 +12,7 @@ import sys
 COMMANDS: dict[str, tuple[tuple[str, ...], ...]] = {
     "lint": (
         ("ruff", "check", "."),
+        (sys.executable, "scripts/check_import_hygiene.py"),
         (sys.executable, "scripts/check_module_boundaries.py"),
         (sys.executable, "scripts/lint_docs.py"),
         (
@@ -25,7 +26,27 @@ COMMANDS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("ruff", "format", "--check", "."),
     ),
     "type": (("mypy", "job_ftch"),),
+    "architecture": (
+        (sys.executable, "scripts/check_import_hygiene.py"),
+        (sys.executable, "scripts/check_module_boundaries.py"),
+        (sys.executable, "scripts/check_config_layers.py"),
+    ),
+    "test-smoke": (
+        (
+            "pytest",
+            "tests/test_smoke.py",
+            "tests/test_suite_guardrails.py",
+            "tests/domain",
+            "tests/unit",
+            "job_ftch/adapters/telegram_bot/tests",
+            "-q",
+            "-o",
+            "addopts=",
+            "--tb=short",
+        ),
+    ),
     "test": (
+        (sys.executable, "scripts/check_test_layout.py"),
         (
             "pytest",
             "tests",
@@ -61,6 +82,25 @@ COMMANDS: dict[str, tuple[tuple[str, ...], ...]] = {
         ),
         (sys.executable, "scripts/evaluate_classification.py", "--gate"),
         (sys.executable, "scripts/evaluate_extraction.py", "--gate"),
+    ),
+    "eval-filtering": (
+        (sys.executable, "scripts/evaluate_classification.py", "--gate"),
+        (
+            "pytest",
+            "tests/test_classification_evaluation.py",
+            "tests/nodes/test_tfidf_logreg_prefilter.py",
+            "tests/eval/test_train_relevance_prefilter.py",
+            "-q",
+        ),
+    ),
+    "eval-publishing": (
+        ("pytest", "tests/publication", "-q"),
+        (
+            sys.executable,
+            "scripts/publication/run_card_eval.py",
+            "--gate",
+            "--allow-missing-fixtures",
+        ),
     ),
 }
 

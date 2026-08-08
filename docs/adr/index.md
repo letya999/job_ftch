@@ -80,11 +80,13 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [ADR-071: Durable delivery and observable runtime degradation](071-durable-delivery-and-runtime-degradation.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
 - [072 — Career-site deadline and global work budgets](072-career-site-deadline-and-global-work-budgets.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
 - [ADR-073: nodriver AGPL-3.0 License Obligations](073-nodriver-agpl-license-risk.md) - **Status:** Accepted (Updated: 2026-07-24)
-- [074 — Adaptive route-state graph and single execution context](074-adaptive-route-state-graph.md) - **Status:** ACCEPTED (Updated: 2026-07-24)
+- [074 — Adaptive route-state graph and single execution context](074-adaptive-route-state-graph.md) - **Status:** ACCEPTED (Updated: 2026-08-05)
 - [075 — Advanced anti-bot evasion techniques](075-advanced-anti-bot-evasion-techniques.md) - **Status:** ACCEPTED (Updated: 2026-07-24)
 - [076 — Next-generation anti-bot evasion techniques](076-next-generation-evasion-techniques.md) - **Status:** ACCEPTED (Updated: 2026-07-24)
 - [077 — Evasion boundaries: protections we do not attempt to bypass](077-evasion-boundaries.md) - **Status:** ACCEPTED (Updated: 2026-07-24)
 - [ADR-078: Trainable TF-IDF + logistic regression prefilter over keyword rules and embeddings](078-trainable-tfidf-logreg-prefilter.md) - Decision record for the trainable relevance prefilter used before the LLM judge. (Updated: 2026-07-26)
+- [079 — Proxy provider pool primitives](079-proxy-provider-pool-primitives.md) - ADR for provider-neutral proxy routing primitives used by adaptive bypass. (Updated: 2026-08-02)
+- [080 - Durable Scheduler Slot Recovery](080-durable-scheduler-slot-recovery.md) - Планировщик Telegram восстанавливает пропущенные ingest-слоты и незавершённую публикацию после сбоя или перезапуска. (Updated: 2026-08-02)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

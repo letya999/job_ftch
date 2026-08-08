@@ -1,0 +1,15 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Repository-specific false positives and archived non-runtime artifacts"
+paths = [
+  '''^fixtures/real_world/failed_parsers_html/''',
+  '''^plans/''',
+  '''^\.env(?:\.[^/]+)?\.example$''',
+  '''^job_ftch/adapters/telegram_bot/\.env(?:\.[^/]+)?\.example$''',
+  '''^deploy/observability/\.env(?:\.[^/]+)?\.example$''',
+  '''^job_ftch/infrastructure/sources/site_parsers/dynamitejobs\.py$''',
+  '''^\.repo-safety[\\/]detect-secrets\.baseline$''',
+  '''^\.secrets\.baseline$''',
+]

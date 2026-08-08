@@ -208,10 +208,18 @@ def minimal_catalog(minimal_profile: SearchProfile) -> ProfileCatalog:
 
 @pytest.fixture(autouse=True)
 def default_test_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Keep unit tests independent from the developer's live services."""
+    """Keep unit tests independent from the developer's live services.
+
+    The product default is OpenAI. Tests keep that default too, but use a
+    synthetic JOB_FTCH_OPENAI_API_KEY so settings construction does not depend
+    on a developer's private .env. Offline network guards still prevent any
+    unmarked test from calling the real OpenAI API.
+    """
     monkeypatch.setenv("JOB_FTCH_STORE_BACKEND", "memory")
     monkeypatch.setenv("JOB_FTCH_JOB_BACKEND", "sqlite")
     monkeypatch.setenv("JOB_FTCH_RELEVANCE_SHOT_BACKEND", "memory")
+    monkeypatch.setenv("JOB_FTCH_OPENAI_API_KEY", "sk-test-offline-pytest-openai-key")
+    monkeypatch.delenv("JOB_FTCH_LLM_BACKEND", raising=False)
     monkeypatch.delenv("JOB_FTCH_VECTOR_BACKEND", raising=False)
     monkeypatch.delenv("JOB_FTCH_QDRANT_URL", raising=False)
     monkeypatch.delenv("JOB_FTCH_QDRANT_API_KEY", raising=False)

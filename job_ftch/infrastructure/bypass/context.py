@@ -20,6 +20,7 @@ from job_ftch.infrastructure.bypass.pacing import get_domain_pacer
 from job_ftch.infrastructure.bypass.persona import (
     BrowserPersona,
     align_persona_version,
+    local_os_family,
     select_persona,
 )
 from job_ftch.infrastructure.bypass.preflight import PreflightResult, run_preflight
@@ -79,7 +80,11 @@ class BypassContext:
         """Align the persona when a route switches browser families."""
         if browser_family is None:
             return
-        self.persona = select_persona(self._domain, browser_family)
+        self.persona = select_persona(
+            self._domain,
+            browser_family,
+            os_family=local_os_family(),
+        )
 
     def align_browser_runtime(self, browser_family: str, reported_version: str) -> None:
         """Use the launched browser's version instead of a declared static version."""
@@ -108,11 +113,15 @@ class BypassContext:
     def residential_proxy_available(self) -> bool:
         """Whether a residential proxy endpoint is configured."""
         rp = self._residential_proxy
-        return bool(getattr(rp, "current_url", None))
+        return bool(getattr(rp, "available", False) or getattr(rp, "current_url", None))
 
     @property
     def current_proxy_url(self) -> str | None:
         active = self._active_proxy
+        current_url_for_domain = getattr(active, "current_url_for_domain", None)
+        if callable(current_url_for_domain):
+            value = current_url_for_domain(self._domain)
+            return str(value) if value else None
         value = getattr(active, "current_url", None)
         return str(value) if value else None
 
@@ -147,9 +156,22 @@ class BypassContext:
         url: str,
         *,
         config: dict[str, Any] | None = None,
+        browser_family: str | None = None,
     ) -> BypassContext:
         domain = urlparse(url).netloc.lower()
-        persona = select_persona(domain)
+        # Default to the Chromium family (defect A5): every browser engine in
+        # the pool except camoufox is Chromium-based, so a family-agnostic
+        # ``select_persona`` gives ~50% of domains a Firefox/Safari persona on a
+        # Chromium engine — an instant cross-check failure (UA says Firefox but
+        # navigator.userAgentData/window.chrome say Chromium). When the caller
+        # knows the real engine family it passes it; otherwise Chromium is the
+        # only coherent default. The adaptive controller re-aligns the persona
+        # via ``set_browser_family`` once a non-Chromium engine is selected.
+        persona = select_persona(
+            domain,
+            browser_family or "chromium",
+            os_family=local_os_family(),
+        )
         pf = run_preflight(url, config=config)
         try:
             proxy = resolve_bypass("proxy")
@@ -194,6 +216,31 @@ class BypassContext:
         Must be called BEFORE first navigation (page.goto).
         """
         await apply_persona_hardening(page, self.persona)
+        self._debug_selfcheck()
+
+    def _debug_selfcheck(self) -> None:
+        """Log any declared-identity incoherence when the debug flag is on.
+
+        Opt-in via ``JOB_FTCH_BYPASS_IDENTITY_SELFCHECK``. Never raises in
+        production - a leak here is a code defect to surface, not a reason to
+        abort a crawl.
+        """
+        try:
+            from job_ftch.config import get_settings
+
+            if not getattr(get_settings(), "bypass_identity_selfcheck", False):
+                return
+            from job_ftch.infrastructure.bypass.identity.coherence import check_identity
+
+            report = check_identity(self.persona)
+            if not report.ok:
+                logger.warning(
+                    "bypass_identity_incoherent",
+                    persona=getattr(self.persona, "name", "?"),
+                    issues=[f"{i.code}:{i.axis}" for i in report.issues],
+                )
+        except Exception:  # never let a debug check affect a crawl
+            logger.debug("bypass_identity_selfcheck_failed")
 
     def record_success(self, url: str) -> None:
         domain = urlparse(url).netloc.lower()

@@ -1,0 +1,101 @@
+# Конфиг лежит рядом со скриптами, а не в корне: пути ниже заданы относительно
+# него. Запуск только через just, чтобы флаг -f не приходилось помнить.
+site_name: job_ftch
+site_description: Async pipeline for Telegram and career-site vacancy ingestion.
+repo_url: https://github.com/letya999/job_ftch
+edit_uri: edit/main/docs/
+
+docs_dir: ../docs
+site_dir: ../.site
+exclude_docs: |
+  adr/README.md
+  entities/README.md
+  nodes/README.md
+  plugin_template/README.md
+
+# Working directories stay outside the documentation site.
+
+theme:
+  name: material
+  language: ru
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Тёмная тема
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Светлая тема
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - def_list
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.caret
+  - pymdownx.mark
+  - pymdownx.tilde
+  # Рендер mermaid без внешних скриптов. Нативная интеграция Material
+  # предпочтительнее плагина mermaid2: она совместима с остальными фичами темы
+  # и не тянет отдельную зависимость.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+plugins:
+  - search:
+      lang: ru
+  # Навигация собирается из структуры папок. Явный nav пришлось бы
+  # синхронизировать руками при каждом новом документе, и он молча
+  # расходился бы с деревом.
+  - awesome-pages
+  # Git-backed modified date is complementary to the repository's `updated`
+  # frontmatter field.
+  - git-revision-date-localized:
+      type: date
+      locale: ru
+      enable_creation_date: false
+      fallback_to_build_date: true
+      # Отсутствие истории у файла не должно ломать сборку: свежий клон и
+      # первый коммит - нормальные состояния, а mkdocs --strict превращает
+      # любое предупреждение в ошибку.
+      strict: false
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    # Repository-level files and generated indexes are checked by
+    # scripts/lint_docs.py; the site build ignores repo-only links.
+    not_found: ignore
+    unrecognized_links: ignore
+    absolute_links: ignore
+    anchors: ignore
+
+strict: true

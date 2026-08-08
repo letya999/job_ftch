@@ -4,6 +4,41 @@ All notable changes to job_ftch are documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.8] - 2026-08-05
+
+Релиз закрывает release-regression подготовку после `0.0.7`: чинит
+диагностические ложные сигналы, стабилизирует bypass timeout coercion,
+подтверждает `/run`-аналог без публикации на каноническом tenant fixture и
+обновляет документацию вокруг 17-source production recipe.
+
+### Добавлено
+
+- **Регрессионные тесты bypass timeout coercion**: `tls-client` и browser timeout
+  normalizer принимают integer-like значения (`15.0`, `"15000.0"`) и передают в
+  нижние клиенты `int`, не провоцируя `timeoutSeconds` JSON-unmarshal errors.
+- **Release diagnostics coverage**: добавлены проверки dry-run публикационного
+  пути, scheduler recovery/status edge cases и pipeline eval artifact fallback.
+- **Tech debt для публичного source registry**: зафиксирован будущий GitHub Pages
+  каталог источников канала и AI-стартапов Центральной Азии по KZ/UZ/TJ/KG с
+  CI-refresh из sanitized DB snapshot при выпуске нового тега.
+
+### Изменено
+
+- **Documentation parity**: `docs/vision.md`, bootstrap fixture comments и
+  generated docs index приведены к текущему production recipe — 17 canonical
+  sources вместо устаревшего упоминания 22.
+- **Generated docs/site hygiene**: MkDocs output (`.site/`, `docs_scripts/.site/`)
+  явно исключён из release diff.
+
+### Исправлено
+
+- **`timeoutSeconds 15.0` в bypass-пути**: TLS/browser launch параметры теперь
+  нормализуются до целых timeout значений до передачи во внешние клиенты.
+- **Pipeline eval artifact persistence**: eval report сохраняется даже при
+  fallback provenance/settlement paths, чтобы regression evidence не терялся.
+- **Bot dry-run publishing diagnostics**: no-publish path сохраняет корректные
+  counters/log context без записи в outbox и без отправки сообщений.
+
 ## [0.0.7] - 2026-08-01
 
 Релиз добивает фактический production-путь публикации и приводит source set к

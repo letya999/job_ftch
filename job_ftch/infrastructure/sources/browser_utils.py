@@ -6,11 +6,13 @@ import os
 import time
 from contextlib import asynccontextmanager, suppress
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import structlog
 
 from job_ftch.application.contracts import BrowserSessionBypass
 from job_ftch.config import get_settings
+from job_ftch.infrastructure.bypass.proxy_pool import ProxyEndpoint
 from job_ftch.infrastructure.sources.shared_limiters import browser_slot
 
 if TYPE_CHECKING:
@@ -20,14 +22,24 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.0.0 Safari/537.36"
-)
+
+def resolve_identity_ua(config: dict[str, Any], persona_kw: dict[str, Any]) -> str | None:
+    """The identity's coherent User-Agent, or ``None`` to keep the real one.
+
+    TRACK A4: the session identity is the sole writer of UA. An explicit config
+    UA wins, then the persona's aligned UA; when neither exists we return
+    ``None`` so the caller omits the override and the engine keeps its real
+    bundled Chromium UA - overriding with a hardcoded constant that cannot match
+    the runtime is itself a fabricated-identity leak.
+    """
+    ua = config.get("user_agent") or persona_kw.get("user_agent")
+    return str(ua) if ua else None
+
 
 DEFAULT_WAIT = "domcontentloaded"
 DEFAULT_WAIT_FALLBACK = "networkidle"
+
+_CHALLENGE_DETECTOR_ATTR = "_job_ftch_challenge_response_detector"
 
 _PATCHRIGHT_CANCELLATION_FIX_ATTR = "_job_ftch_cancellation_safe_inner_send"
 _PATCHRIGHT_ROUTE_FIX_ATTR = "_job_ftch_cancellation_safe_route_handler"
@@ -55,6 +67,54 @@ BROWSER_KEYS = frozenset(
 _BROWSER_CLEANUP_TIMEOUT_SECONDS = 2.0
 _BROWSER_DRIVER_STALE_SECONDS = 180
 _BROWSER_TERMINATE_GRACE_SECONDS = 5.0
+
+
+def normalize_browser_timeout_ms(value: Any) -> int:
+    """Return a Playwright/Patchright-compatible integer timeout in milliseconds.
+
+    Runtime/source configs can carry YAML floats such as ``15.0``. Patchright's
+    Go transport rejects those when they reach a ``timeoutSeconds`` field, so
+    browser-bound timeouts are normalized at the boundary instead of requiring
+    every config source to use integer literals.
+    """
+    if isinstance(value, bool):
+        raise TypeError("browser timeout must be numeric, not bool")
+    if isinstance(value, int):
+        if value <= 0:
+            raise ValueError("browser timeout must be positive")
+        return value
+    if isinstance(value, float):
+        if value <= 0:
+            raise ValueError("browser timeout must be positive")
+        return int(value) if value.is_integer() else int(round(value))
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("browser timeout must not be empty")
+        number = float(stripped)
+        if number <= 0:
+            raise ValueError("browser timeout must be positive")
+        return int(number) if number.is_integer() else int(round(number))
+    raise TypeError(f"unsupported browser timeout type: {type(value).__name__}")
+
+
+async def _solve_page_challenge(controller: Any, page: Any, *, url: str) -> bool:
+    """Solve once and preserve token-bearing page state when required."""
+    if bool(getattr(controller, "challenge_solver_terminal", False)):
+        return False
+    solve = getattr(controller, "solve_page_challenge", None)
+    if not callable(solve):
+        return False
+    return bool(await solve(page, url=url))
+
+
+def _challenge_solution_requires_reload(controller: Any) -> bool:
+    return bool(getattr(controller, "challenge_solution_requires_reload", True))
+
+
+def _browser_proxy(proxy_url: str) -> dict[str, str]:
+    return ProxyEndpoint(url=proxy_url).playwright_proxy()
+
 
 # Substring markers (case-insensitive) matched against a descendant process's
 # name and cmdline to recognise a browser or browser-driver this process
@@ -539,6 +599,9 @@ async def _resolve_bypass_context(config: dict[str, Any]) -> Any:
 
 def _playwright_launcher(pw: Playwright, launch_kwargs: dict[str, Any]) -> Any:
     launch_kwargs.pop("_cloakbrowser_backend", None)
+    launch_kwargs.pop("_patchright_required", None)
+    # Camoufox accepts this high-level option; Playwright/Patchright do not.
+    launch_kwargs.pop("geoip", None)
     browser_engine = str(launch_kwargs.pop("browser_engine", "chromium")).strip().lower()
     if browser_engine == "chromium":
         return pw.chromium
@@ -587,21 +650,29 @@ async def _open_playwright_page(
 
     persona_kw = bypass_ctx.context_kwargs() if bypass_ctx else {}
     context_kwargs: dict[str, Any] = {
-        "user_agent": config.get("user_agent") or persona_kw.get("user_agent", DEFAULT_USER_AGENT),
         "viewport": config.get("viewport")
         or persona_kw.get("viewport", {"width": 1440, "height": 900}),
         "locale": config.get("locale") or persona_kw.get("locale", "en-US"),
         "ignore_https_errors": config.get("skip_ssl", True),
     }
+    identity_ua = resolve_identity_ua(config, persona_kw)
+    if identity_ua:
+        context_kwargs["user_agent"] = identity_ua
+    if bypass_strategy and getattr(bypass_strategy, "requires_process_identity", False):
+        # Context identity does not cover the bootstrap requests of SharedWorker
+        # scripts. Patchright opts in so those process-level requests remain
+        # coherent with the page; other engines keep their native launch path.
+        launch_kwargs["_process_identity_user_agent"] = identity_ua
+        launch_kwargs["_process_identity_locale"] = context_kwargs["locale"]
+    if config.get("timezone_id"):
+        context_kwargs["timezone_id"] = config["timezone_id"]
     if persona_kw.get("timezone_id") and "timezone_id" not in config:
         context_kwargs["timezone_id"] = persona_kw["timezone_id"]
 
     if use_proxy:
-        proxy_url = os.environ.get("JOB_FTCH_HTTP_PROXY")
+        proxy_url = config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY")
         if proxy_url:
-            from patchright.async_api import ProxySettings
-
-            context_kwargs["proxy"] = ProxySettings(server=proxy_url)
+            context_kwargs["proxy"] = _browser_proxy(str(proxy_url))
 
     if bypass_strategy:
         launch_kwargs = bypass_strategy.apply_browser_args(launch_kwargs)
@@ -630,21 +701,31 @@ async def _open_playwright_page(
     if bypass_ctx:
         reported_version = str(getattr(browser, "version", ""))
         bypass_ctx.align_browser_runtime("chromium", reported_version)
-        if not config.get("user_agent"):
-            context_kwargs["user_agent"] = bypass_ctx.persona.ua
+        # The persona may be version-aligned only after the real browser has
+        # launched.  Re-project its UA into the context even when
+        # prepare_browser_config already filled an older persona UA; otherwise
+        # window headers say one Chrome major while workers expose the native
+        # runtime major.
+        context_kwargs["user_agent"] = bypass_ctx.persona.ua
 
     context: BrowserContext = await await_with_source_deadline(
         browser.new_context(**context_kwargs)
     )
 
-    context.set_default_timeout(config.get("timeout", settings.browser_default_timeout_ms))
+    timeout_ms = normalize_browser_timeout_ms(
+        config.get("timeout", settings.browser_default_timeout_ms)
+    )
+    context.set_default_timeout(timeout_ms)
 
     if config.get("cookies"):
         await context.add_cookies(config["cookies"])
 
     page: Page = await await_with_source_deadline(context.new_page())
 
-    if bypass_ctx:
+    # When the adaptive controller owns page hardening it injects the persona
+    # blob itself (once) inside ``apply_page``. Calling ``bypass_ctx.on_page``
+    # as well would inject a second, possibly conflicting copy, so skip it.
+    if bypass_ctx and not getattr(bypass_strategy, "owns_page_hardening", False):
         await bypass_ctx.on_page(page)
     if bypass_strategy:
         await bypass_strategy.apply_page(page)
@@ -656,7 +737,8 @@ async def _open_playwright_page(
                 stats.browser_navigations_attempted += 1
             from job_ftch.infrastructure.network.ssrf_guard import check_ssrf
 
-            await check_ssrf(config["warmup_url"])
+            if not config.get("_allow_private_selfcheck_fixture"):
+                await check_ssrf(config["warmup_url"])
             await page.goto(config["warmup_url"])
         yield page
     finally:
@@ -711,24 +793,26 @@ async def _open_persistent_page(
         "user_data_dir": user_data_dir,
         "headless": headless,
         "args": args,
-        "user_agent": config.get("user_agent") or persona_kw.get("user_agent", DEFAULT_USER_AGENT),
         "viewport": config.get("viewport")
         or persona_kw.get("viewport", {"width": 1440, "height": 900}),
         "locale": config.get("locale") or persona_kw.get("locale", "en-US"),
         "ignore_https_errors": config.get("skip_ssl", True),
         "timeout": settings.browser_context_timeout_ms,
     }
+    identity_ua = resolve_identity_ua(config, persona_kw)
+    if identity_ua:
+        launch_kwargs["user_agent"] = identity_ua
     if channel:
         launch_kwargs["channel"] = channel
+    if config.get("timezone_id"):
+        launch_kwargs["timezone_id"] = config["timezone_id"]
     if persona_kw.get("timezone_id") and "timezone_id" not in config:
         launch_kwargs["timezone_id"] = persona_kw["timezone_id"]
 
     if use_proxy:
-        proxy_url = os.environ.get("JOB_FTCH_HTTP_PROXY")
+        proxy_url = config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY")
         if proxy_url:
-            from patchright.async_api import ProxySettings
-
-            launch_kwargs["proxy"] = ProxySettings(server=proxy_url)
+            launch_kwargs["proxy"] = _browser_proxy(str(proxy_url))
 
     if bypass_strategy:
         launch_kwargs = bypass_strategy.apply_browser_args(launch_kwargs)
@@ -754,7 +838,10 @@ async def _open_persistent_page(
 
     from job_ftch.infrastructure.sources.source_deadline import await_with_source_deadline
 
-    context.set_default_timeout(config.get("timeout", settings.browser_default_timeout_ms))
+    timeout_ms = normalize_browser_timeout_ms(
+        config.get("timeout", settings.browser_default_timeout_ms)
+    )
+    context.set_default_timeout(timeout_ms)
 
     if config.get("cookies"):
         await context.add_cookies(config["cookies"])
@@ -763,7 +850,9 @@ async def _open_persistent_page(
         context.pages[0] if context.pages else await await_with_source_deadline(context.new_page())
     )
 
-    if bypass_ctx:
+    # See note in _open_playwright_page: skip the duplicate persona injection
+    # when the adaptive controller already owns page hardening.
+    if bypass_ctx and not getattr(bypass_strategy, "owns_page_hardening", False):
         await bypass_ctx.on_page(page)
     if bypass_strategy:
         await bypass_strategy.apply_page(page)
@@ -775,7 +864,8 @@ async def _open_persistent_page(
                 stats.browser_navigations_attempted += 1
             from job_ftch.infrastructure.network.ssrf_guard import check_ssrf
 
-            await check_ssrf(config["warmup_url"])
+            if not config.get("_allow_private_selfcheck_fixture"):
+                await check_ssrf(config["warmup_url"])
             await page.goto(config["warmup_url"])
         yield page
     finally:
@@ -804,7 +894,9 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     from job_ftch.config import get_settings
 
     settings = get_settings()
-    timeout = config.get("timeout", settings.browser_default_timeout_ms)
+    timeout = normalize_browser_timeout_ms(
+        config.get("timeout", settings.browser_default_timeout_ms)
+    )
     challenge_retries = config.get("challenge_retries", settings.browser_challenge_retries)
     challenge_wait_ms = config.get("challenge_wait_ms", 6000)
     blocked = (403, 401, 429, 503)
@@ -816,10 +908,19 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     stats = config.get("_pipeline_stats")
     from job_ftch.infrastructure.sources.source_deadline import await_with_source_deadline
 
+    if not config.get("_allow_private_selfcheck_fixture"):
+        await install_challenge_response_detector(
+            page,
+            url=url,
+            controller=config.get("_bypass_strategy"),
+            surface="browser",
+        )
+
     try:
         from job_ftch.infrastructure.network.ssrf_guard import check_ssrf
 
-        await check_ssrf(url)
+        if not config.get("_allow_private_selfcheck_fixture"):
+            await check_ssrf(url)
         if stats is not None:
             stats.browser_navigations_attempted += 1
         resp = await await_with_source_deadline(page.goto(url, wait_until=wait, timeout=timeout))
@@ -846,14 +947,145 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
 
     if resp is not None and resp.status in challenge:
         controller = config.get("_bypass_strategy")
-        solve = getattr(controller, "solve_page_challenge", None)
-        if callable(solve) and await solve(page, url=url):
+        if await _solve_page_challenge(controller, page, url=url) and (
+            _challenge_solution_requires_reload(controller)
+        ):
+            resp = await await_with_source_deadline(
+                page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
+            )
+
+    if resp is not None and resp.status not in blocked and await _page_has_captcha_marker(page):
+        controller = config.get("_bypass_strategy")
+        if await _solve_page_challenge(controller, page, url=url) and (
+            _challenge_solution_requires_reload(controller)
+        ):
+            resp = await await_with_source_deadline(
+                page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
+            )
+
+    # Session-owned engines such as nodriver may not return a Playwright-style
+    # navigation response. In that case the response detector is the only typed
+    # signal that a Cloudflare challenge was seen; honor it before treating an
+    # empty rendered page as a normal discovery miss.
+    await asyncio.sleep(0)
+    controller = config.get("_bypass_strategy")
+    observed = getattr(controller, "observed_challenge_type", None)
+    if isinstance(observed, str) and observed.strip():
+        log.info("browser.observed_challenge_solve", url=url, challenge_type=observed)
+        if await _solve_page_challenge(controller, page, url=url) and (
+            _challenge_solution_requires_reload(controller)
+        ):
             resp = await await_with_source_deadline(
                 page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
             )
 
     if resp is not None and resp.status in blocked:
         raise RuntimeError(f"Browser navigation blocked with status {resp.status}")
+
+
+async def install_challenge_response_detector(
+    page: Any,
+    *,
+    url: str,
+    controller: Any = None,
+    surface: str = "browser",
+) -> None:
+    """Attach a token-safe response classifier to a page once."""
+    if getattr(page, _CHALLENGE_DETECTOR_ATTR, False):
+        return
+    if not hasattr(page, "on"):
+        return
+    setattr(page, _CHALLENGE_DETECTOR_ATTR, True)
+    started_at = time.monotonic()
+
+    async def _inspect_response(response: Any) -> None:
+        try:
+            status_code = int(getattr(response, "status", 0) or 0)
+            headers = dict(getattr(response, "headers", {}) or {})
+            body = await _challenge_probe_body(response, status_code, headers)
+            from job_ftch.infrastructure.bypass.challenge_classifier import (
+                classify_challenge,
+                emit_challenge_detection,
+            )
+
+            detection = classify_challenge(
+                surface=surface,
+                status_code=status_code,
+                headers=headers,
+                body=body,
+                started_at=started_at,
+            )
+            if not detection.detected:
+                return
+            response_url = str(getattr(response, "url", "") or url)
+            emit_challenge_detection(urlparse(response_url).netloc.lower(), detection)
+            setter = getattr(controller, "set_observed_challenge_type", None)
+            if detection.challenge_type and callable(setter):
+                maybe_result = setter(detection.challenge_type)
+                if hasattr(maybe_result, "__await__"):
+                    await maybe_result
+        except Exception as exc:
+            log.debug("browser.challenge_response_detector_failed", error=str(exc))
+
+    def _schedule(response: Any) -> None:
+        task = asyncio.create_task(_inspect_response(response))
+        task.add_done_callback(_swallow_detector_exception)
+
+    page.on("response", _schedule)
+
+
+async def _challenge_probe_body(
+    response: Any, status_code: int, headers: dict[str, str]
+) -> bytes | None:
+    """Read short HTML only when it can improve challenge classification."""
+    content_type = str(headers.get("content-type") or headers.get("Content-Type") or "").lower()
+    request = getattr(response, "request", None)
+    resource_type = str(getattr(request, "resource_type", "") or "").lower()
+    suspicious_status = status_code in {202, 401, 403, 429, 498, 499, 503}
+    document_html = resource_type == "document" and (
+        "text/html" in content_type or "application/xhtml" in content_type or not content_type
+    )
+    if not suspicious_status and not document_html:
+        return None
+    body_fn = getattr(response, "body", None)
+    if not callable(body_fn):
+        return None
+    try:
+        body = await body_fn()
+    except Exception:
+        return None
+    return bytes(body or b"")[:100_000]
+
+
+def _swallow_detector_exception(finished: asyncio.Task[Any]) -> None:
+    with suppress(Exception):
+        finished.exception()
+
+
+async def _page_has_captcha_marker(page: Page) -> bool:
+    try:
+        return bool(
+            await page.evaluate(
+                """
+                () => {
+                  const selectors = [
+                    '.g-recaptcha',
+                    '#g-recaptcha',
+                    '[data-sitekey]',
+                    'iframe[src*="recaptcha"]',
+                    'iframe[src*="hcaptcha"]',
+                    'iframe[src*="turnstile"]',
+                    'script[src*="recaptcha"]',
+                    'script[src*="hcaptcha"]',
+                    'script[src*="turnstile"]'
+                  ];
+                  return selectors.some((selector) => document.querySelector(selector));
+                }
+                """
+            )
+        )
+    except Exception:
+        return False
 
 
 async def dismiss_overlays(page: Page) -> None:

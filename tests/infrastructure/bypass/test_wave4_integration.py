@@ -10,16 +10,35 @@ from job_ftch.infrastructure.bypass.multi_layer_obfuscation import (
 )
 
 
+class _FakeRoute:
+    def __init__(self, resource_type: str) -> None:
+        self.request = type(
+            "_Req", (), {"resource_type": resource_type, "headers": {"user-agent": "ua"}}
+        )()
+        self.continue_headers: dict[str, str] | None = None
+
+    async def continue_(self, headers: dict[str, str] | None = None) -> None:
+        self.continue_headers = headers
+
+
 class _FakePage:
     def __init__(self) -> None:
         self.init_scripts: list[str] = []
         self.headers: dict[str, str] = {}
+        self.route_handler = None
+        self.unrouted = False
 
     async def add_init_script(self, script: str) -> None:
         self.init_scripts.append(script)
 
     async def set_extra_http_headers(self, headers: dict[str, str]) -> None:
         self.headers.update(headers)
+
+    async def route(self, _pattern: str, handler) -> None:  # type: ignore[no-untyped-def]
+        self.route_handler = handler
+
+    async def unroute(self, _pattern: str, _handler) -> None:  # type: ignore[no-untyped-def]
+        self.unrouted = True
 
 
 class TestBypassContextDomain:
@@ -64,7 +83,12 @@ class TestOrchestratorRealEffects:
             page=page,
         )
         await build_default_orchestrator().apply_all(ctx)
-        assert page.headers.get("Referer", "").startswith("http")
+        # TRACK B4: Referer is scoped to the top-level document via a route
+        # handler, not blanket-set on every request.
+        assert page.route_handler is not None
+        doc = _FakeRoute("document")
+        await page.route_handler(doc)
+        assert (doc.continue_headers or {}).get("referer", "").startswith("http")
 
     @pytest.mark.asyncio
     async def test_metadata_artifacts_populated(self) -> None:

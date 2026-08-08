@@ -1,0 +1,39 @@
+# Стиль YAML. Смысл frontmatter проверяет docs_scripts/work_lint.py,
+# здесь только форма. Проверяется весь репозиторий, включая скрытые файлы:
+# конфиг раннера и рабочие файлы ошибаются так же, как остальные.
+extends: default
+
+yaml-files:
+  - "*.yaml"
+  - "*.yml"
+  - ".yamllint"
+
+ignore: |
+  .site/
+  .venv/
+  node_modules/
+
+rules:
+  line-length:
+    max: 100
+    allow-non-breakable-words: true
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: enable
+  empty-lines:
+    max: 2
+  # mkdocs.yml опирается на тег !!python/name, а ключ on в GitHub Actions
+  # обязателен и не является булевым значением.
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+  document-start: disable
+  # Перевод строки в репозитории задан через .gitattributes, git приводит его к
+  # LF при коммите. Проверять рабочую копию бессмысленно: правило срабатывает
+  # только на Windows и только до коммита.
+  new-lines: disable
+  octal-values: enable
+  key-duplicates: enable

@@ -1310,6 +1310,23 @@ async def _build_full_pipeline(
             "graph_hash": graph_executor.graph.graph_hash if graph_executor is not None else None,
         }
     )
+    runtime_ontology = derived_ontology_override or {}
+    build_context.setdefault(
+        "runtime_ontology",
+        {
+            "skills": len(runtime_ontology.get("skills", [])),
+            "roles": len(runtime_ontology.get("roles", [])),
+            "positive_keywords": len(runtime_ontology.get("positive_keywords", [])),
+            "negative_keywords": len(runtime_ontology.get("negative_keywords", [])),
+            "anti_patterns": len(runtime_ontology.get("anti_patterns", [])),
+        },
+    )
+    build_context.setdefault(
+        "runtime_ontology_hash",
+        hashlib.sha256(
+            json.dumps(runtime_ontology, sort_keys=True, default=str).encode()
+        ).hexdigest(),
+    )
     return (
         settings,
         catalog,
@@ -1340,12 +1357,28 @@ async def _run_item_graph(
             "metadata": row.get("metadata") or {},
         }
     )
+    from job_ftch.application.dedup_settlement import (
+        DedupSettlementCoordinator,
+        SettlementOutcome,
+    )
+
+    settlement_participants = getattr(executor, "settlement_participants", None)
+    participants = settlement_participants() if callable(settlement_participants) else ()
+    coordinator = DedupSettlementCoordinator(participants)
     item_id = str(row.get("stable_id", ""))
     token = _CURRENT_ITEM_ID.set(item_id or None)
     try:
         reports = await executor.run_many(raw)
+    except Exception:
+        if item_id:
+            await coordinator.settle(item_id, SettlementOutcome.RELEASE)
+        raise
     finally:
         _CURRENT_ITEM_ID.reset(token)
+    if item_id:
+        has_deferred = any(r.status == "DEFERRED" for r in reports)
+        outcome = SettlementOutcome.RELEASE if has_deferred else SettlementOutcome.COMMIT
+        await coordinator.settle(item_id, outcome)
     candidates: list[dict[str, Any]] = []
     for report in reports:
         item = report.item

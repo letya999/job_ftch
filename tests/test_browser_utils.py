@@ -207,6 +207,7 @@ class _FakeBrowser:
         self.captured = captured
         self.context = _FakeContext()
         self.closed = False
+        self.version = "150.0.0.0"
 
     async def new_context(self, **kwargs: object) -> _FakeContext:
         self.captured["context_kwargs"] = kwargs
@@ -293,6 +294,57 @@ async def test_open_page_applies_bypass_only_to_launch_kwargs(
     assert "args" not in context_kwargs
     assert bypass.page_calls == 1
     assert page.unroute_behaviors == ["ignoreErrors"]
+
+
+@pytest.mark.asyncio
+async def test_open_page_reprojects_runtime_aligned_persona_ua(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_settings() -> SimpleNamespace:
+        return SimpleNamespace(
+            browser_default_timeout_ms=1234,
+            browser_context_timeout_ms=4321,
+            browser_channel="",
+            browser_headless=True,
+            career_site_browser_concurrency=4,
+        )
+
+    class _Persona:
+        ua = "Mozilla/5.0 Chrome/145.0.0.0"
+
+    class _BypassContext:
+        persona = _Persona()
+
+        def context_kwargs(self) -> dict[str, object]:
+            return {"user_agent": self.persona.ua}
+
+        def align_browser_runtime(self, browser_family: str, reported_version: str) -> None:
+            assert browser_family == "chromium"
+            assert reported_version == "150.0.0.0"
+            self.persona.ua = "Mozilla/5.0 Chrome/150.0.0.0"
+
+        async def on_page(self, page: object) -> None:
+            del page
+
+    monkeypatch.setattr("job_ftch.config.get_settings", fake_settings)
+    monkeypatch.setattr("job_ftch.infrastructure.sources.browser_utils.get_settings", fake_settings)
+    fake_async_api = SimpleNamespace(async_playwright=lambda: _FakeAsyncPlaywrightContext(captured))
+    monkeypatch.setitem(sys.modules, "patchright.async_api", fake_async_api)
+
+    async with open_page(
+        {
+            "headless": True,
+            "user_agent": "Mozilla/5.0 Chrome/145.0.0.0",
+            "_bypass_context": _BypassContext(),
+        },
+    ):
+        pass
+
+    context_kwargs = captured["context_kwargs"]
+    assert isinstance(context_kwargs, dict)
+    assert context_kwargs["user_agent"] == "Mozilla/5.0 Chrome/150.0.0.0"
 
 
 @pytest.mark.asyncio

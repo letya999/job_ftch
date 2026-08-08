@@ -10,7 +10,7 @@ This directory contains ADRs for `job_ftch`.
 ## Immutable history
 
 > Note: ADR number 021 is used by two files (career-site monitor/scraper split and
-> module boundary enforcement). Do not reuse 021 for new ADRs; the next free number is 078.
+> module boundary enforcement). Do not reuse 021 for new ADRs; the next free number is 081.
 
 Do not rewrite existing ADR files.
 

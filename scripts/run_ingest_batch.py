@@ -65,6 +65,16 @@ def _parser_name(spec: CareerSiteSpec) -> str | None:
     return parser.__class__.__name__
 
 
+def _ua_family(ua: str) -> str | None:
+    if "Firefox/" in ua:
+        return "firefox"
+    if "Chrome/" in ua or "Chromium/" in ua:
+        return "chromium"
+    if "Safari/" in ua:
+        return "safari"
+    return None
+
+
 def _failure_bucket(
     *,
     item_count: int,
@@ -85,6 +95,31 @@ def _failure_bucket(
         return source_result.terminal_outcome or "partial_with_items"
     if item_count:
         return None
+    error = (source_result.error or "").casefold()
+    zero_reason = str(stats.get("zero_reason") or "")
+    detected = stats.get("detected_monitor_config") or {}
+    has_challenge_evidence = bool(
+        detected.get("challenge")
+        or stats.get("detected_captcha_types")
+        or stats.get("challenge_events")
+    )
+    if "err_tunnel_connection_failed" in error or "tunnel connection failed" in error:
+        return "provider_tunnel_denied"
+    if zero_reason == "soft_403_with_content":
+        return "soft_403_with_content"
+    if zero_reason == "waf_challenge" or (
+        zero_reason in {"blocked_no_bypass_left", "monitor_empty", "all_monitors_exhausted"}
+        and has_challenge_evidence
+    ):
+        return "waf_challenge"
+    if parser_name == "ProtectedBrowserDefaultsParser" and zero_reason == "blocked_no_bypass_left":
+        return "waf_challenge"
+    if zero_reason == "parser_gap":
+        return "parser_gap"
+    if zero_reason == "provider_tunnel_denied":
+        return "provider_tunnel_denied"
+    if source_result.terminal_outcome == "board_gone" or zero_reason == "board_gone":
+        return "stale_url"
     if source_result.terminal_outcome:
         return source_result.terminal_outcome
     if stats.get("zero_reason") == "blocked_no_bypass_left":
@@ -93,7 +128,6 @@ def _failure_bucket(
     # an access-policy outcome, not evidence that a listing was absent.
     if parser_name == "LinkedinParser":
         return "blocked_or_protected"
-    error = (source_result.error or "").casefold()
     if "429" in error:
         return "rate_limited"
     if "401" in error or "403" in error or "503" in error or "blocked" in error:
@@ -137,7 +171,46 @@ def _probe_result(
     )
     bypass_obj = getattr(source, "bypass_strategy", None)
     final_tier = getattr(bypass_obj, "current_name", None)
+    route_state = getattr(bypass_obj, "route_state", None)
+    final_network = getattr(getattr(route_state, "network", None), "value", None)
+    final_session = getattr(getattr(route_state, "session", None), "value", None)
+    final_challenge_state = getattr(getattr(route_state, "challenge", None), "value", None)
     escalations = int(getattr(bypass_obj, "escalations_total", 0) or 0)
+    attempt_telemetry = getattr(bypass_obj, "attempt_telemetry", [])
+    route_transition_telemetry = getattr(bypass_obj, "route_transition_telemetry", [])
+    bypass_ctx = getattr(getattr(source, "_source", source), "_bypass_ctx", None)
+    persona = getattr(bypass_ctx, "persona", None)
+    viewport = None
+    if persona is not None:
+        viewport = {
+            "width": getattr(persona, "viewport_width", None),
+            "height": getattr(persona, "viewport_height", None),
+        }
+    coherence_ok: bool | None = None
+    coherence_issues: list[str] = []
+    if persona is not None:
+        try:
+            from job_ftch.infrastructure.bypass.identity.coherence import check_identity
+
+            coherence_report = check_identity(persona)
+            coherence_ok = coherence_report.ok
+            coherence_issues = [f"{issue.code}:{issue.axis}" for issue in coherence_report.issues]
+        except Exception as exc:
+            coherence_ok = False
+            coherence_issues = [f"check_failed:{exc.__class__.__name__}"]
+    parser_outcome = {
+        "page_opened": bool(
+            stats.get("monitored")
+            or stats.get("rich_emitted")
+            or stats.get("detail_attempted")
+            or len(items) > 0
+        ),
+        "substantial_content": bool(
+            len(items) > 0 or stats.get("scraped") or stats.get("rich_emitted")
+        ),
+        "urls_found": int(stats.get("monitored") or 0),
+        "items_extracted": len(items),
+    }
 
     parser_name = _parser_name(source.spec)
     is_partial = bool(source_result.partial)
@@ -164,7 +237,21 @@ def _probe_result(
         "preflight_error": None,
         "exception": source_result.error,
         "bypass_final_tier": final_tier,
+        "bypass_final_network": final_network,
+        "bypass_final_session": final_session,
+        "bypass_final_challenge_state": final_challenge_state,
         "bypass_escalations": escalations,
+        "bypass_attempts": attempt_telemetry,
+        "bypass_route_transitions": route_transition_telemetry,
+        "fingerprint_audit": {
+            "browser_family": getattr(persona, "browser_family", None),
+            "ua_family": _ua_family(str(getattr(persona, "ua", "") or "")),
+            "timezone": getattr(persona, "timezone", None),
+            "viewport": viewport,
+            "coherent": coherence_ok,
+            "issues": coherence_issues,
+        },
+        "parser_outcome": parser_outcome,
         "evicted": source_result.evicted,
         "eviction_kind": source_result.eviction_kind,
         "terminal_outcome": source_result.terminal_outcome,
@@ -183,6 +270,10 @@ def _probe_result(
                 "final_monitor",
                 "scrape_fallback_used",
                 "zero_reason",
+                "detected_monitor_config",
+                "detected_captcha_types",
+                "challenge_events",
+                "monitor_failure_without_escalation",
             )
         },
         "selection": {"site_class": "not_probed", "recommended_monitors": []},
@@ -275,7 +366,19 @@ def _timeout_result(url: str, *, elapsed_seconds: float) -> dict[str, Any]:
         "preflight_error": None,
         "exception": "TimeoutError: source task exceeded watchdog deadline",
         "bypass_final_tier": None,
+        "bypass_final_network": None,
+        "bypass_final_session": None,
+        "bypass_final_challenge_state": None,
         "bypass_escalations": 0,
+        "bypass_attempts": [],
+        "bypass_route_transitions": [],
+        "fingerprint_audit": {},
+        "parser_outcome": {
+            "page_opened": False,
+            "substantial_content": False,
+            "urls_found": 0,
+            "items_extracted": 0,
+        },
         "evicted": True,
         "eviction_kind": "task_watchdog",
         "terminal_outcome": "deadline_exceeded",
@@ -286,6 +389,18 @@ def _timeout_result(url: str, *, elapsed_seconds: float) -> dict[str, Any]:
         "stats": {},
         "selection": {"site_class": "not_probed", "recommended_monitors": []},
     }
+
+
+def _global_timeout_result(url: str, *, elapsed_seconds: float) -> dict[str, Any]:
+    result = _timeout_result(url, elapsed_seconds=elapsed_seconds)
+    result.update(
+        {
+            "failure_bucket": "global_run_timeout",
+            "exception": "TimeoutError: batch global timeout elapsed before source finalized",
+            "eviction_kind": "global_run_timeout",
+        }
+    )
+    return result
 
 
 def _drain_cancelled_task(task: asyncio.Task[dict[str, Any]]) -> None:
@@ -359,9 +474,11 @@ def _gate_exit_code(results: list[dict[str, Any]], *, min_success_rate: float) -
 async def main() -> int:
     import argparse
 
+    from job_ftch.application.logging import configure_logging
     from job_ftch.config import get_settings
 
     settings = get_settings()
+    configure_logging(settings.log_level)
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default="fixtures/real_world/career_site_ingest_110_urls.yaml")
     parser.add_argument(
@@ -387,6 +504,15 @@ async def main() -> int:
         type=float,
         default=settings.source_hard_cancel_grace_seconds,
         help="Bounded cleanup after the hard deadline.",
+    )
+    parser.add_argument(
+        "--global-timeout",
+        type=float,
+        default=None,
+        help=(
+            "Optional wall-clock budget for the whole batch. Unfinished and not-yet-started "
+            "URLs are finalized as global_run_timeout so the result JSON is complete."
+        ),
     )
     parser.add_argument(
         "--max-items",
@@ -487,27 +613,62 @@ async def main() -> int:
                 json.dumps(_ordered_results(), ensure_ascii=False, indent=2), encoding="utf-8"
             )
 
-    semaphore = asyncio.Semaphore(args.concurrency)
     task_started_at: dict[asyncio.Task[dict[str, Any]], float] = {}
+    abandoned_tasks: set[asyncio.Task[dict[str, Any]]] = set()
 
     async def _bounded(url: str, index: int) -> dict[str, Any]:
-        async with semaphore:
-            task = asyncio.current_task()
-            if task is not None:
-                task_started_at[task] = time.monotonic()
-            return await _probe_one(
-                url=url,
-                source_name=f"ingest_probe_{index}",
-                max_items=args.max_items,
-                timeout_seconds=args.timeout,
-            )
+        task = asyncio.current_task()
+        if task is not None:
+            task_started_at[task] = time.monotonic()
+        return await _probe_one(
+            url=url,
+            source_name=f"ingest_probe_{index}",
+            max_items=args.max_items,
+            timeout_seconds=args.timeout,
+        )
 
     url_index = {url: index for index, url in enumerate(urls)}
     url_by_task: dict[asyncio.Task[dict[str, Any]], str] = {}
-    for url in pending_urls:
-        task = asyncio.create_task(_bounded(url, url_index[url]), name=f"ingest:{url}")
-        task.add_done_callback(_drain_cancelled_task)
-        url_by_task[task] = url
+
+    pending_position = 0
+    batch_started_at = time.monotonic()
+
+    def _start_next_tasks() -> None:
+        nonlocal pending_position
+        while len(url_by_task) < args.concurrency:
+            try:
+                url = pending_urls[pending_position]
+            except IndexError:
+                return
+            pending_position += 1
+            task = asyncio.create_task(_bounded(url, url_index[url]), name=f"ingest:{url}")
+            task.add_done_callback(_drain_cancelled_task)
+            url_by_task[task] = url
+
+    _start_next_tasks()
+
+    def _record_result(result: dict[str, Any]) -> None:
+        nonlocal completed_count
+        completed_count += 1
+        stall_state["ts"] = time.monotonic()  # progress signal for the watchdog
+        results_by_url[str(result["url"])] = result
+        _save_results()
+        all_results = [results_by_url[url] for url in urls if url in results_by_url]
+        ok_so_far = sum(1 for r in all_results if r["parse_status"] == "parsed_ok")
+        print(f"  -> {completed_count}/{len(pending_urls)} new; {ok_so_far}/{len(all_results)} ok")
+
+    def _abandon_overdue_task(task: asyncio.Task[dict[str, Any]]) -> dict[str, Any]:
+        from job_ftch.infrastructure.sources.browser_utils import terminate_browser_descendants
+
+        url = url_by_task.pop(task)
+        task.cancel()
+        abandoned_tasks.add(task)
+        with contextlib.suppress(Exception):
+            terminate_browser_descendants(grace=1.0)
+        return _timeout_result(
+            url,
+            elapsed_seconds=time.monotonic() - task_started_at.get(task, time.monotonic()),
+        )
 
     # Stall watchdog: if the event loop wedges on a hung/uncancellable browser
     # await, the asyncio.wait below never returns and no task is ever cancelled.
@@ -538,26 +699,48 @@ async def main() -> int:
     )
     watchdog_thread.start()
 
-    pending_tasks = set(url_by_task)
     completed_count = 0
-    while pending_tasks:
+
+    def _global_budget_exhausted() -> bool:
+        return (
+            args.global_timeout is not None
+            and time.monotonic() - batch_started_at >= args.global_timeout
+        )
+
+    while url_by_task:
+        if _global_budget_exhausted():
+            for task, url in list(url_by_task.items()):
+                task.cancel()
+                abandoned_tasks.add(task)
+                _record_result(
+                    _global_timeout_result(
+                        url,
+                        elapsed_seconds=time.monotonic()
+                        - task_started_at.get(task, batch_started_at),
+                    )
+                )
+                url_by_task.pop(task, None)
+            for url in pending_urls[pending_position:]:
+                _record_result(
+                    _global_timeout_result(
+                        url,
+                        elapsed_seconds=time.monotonic() - batch_started_at,
+                    )
+                )
+            pending_position = len(pending_urls)
+            break
         watchdog_seconds = args.timeout + args.hard_cancel_grace
         overdue = [
             task
-            for task in pending_tasks
+            for task in url_by_task
             if task in task_started_at
             and time.monotonic() - task_started_at[task] >= watchdog_seconds
         ]
         if overdue:
             task = max(overdue, key=lambda candidate: time.monotonic() - task_started_at[candidate])
-            url = url_by_task[task]
-            task.cancel()
-            result = _timeout_result(
-                url,
-                elapsed_seconds=time.monotonic() - task_started_at[task],
-            )
+            result = _abandon_overdue_task(task)
         else:
-            started_pending = [task for task in pending_tasks if task in task_started_at]
+            started_pending = [task for task in url_by_task if task in task_started_at]
             wait_seconds = (
                 min(
                     watchdog_seconds - (time.monotonic() - task_started_at[task])
@@ -567,24 +750,38 @@ async def main() -> int:
                 else 1.0
             )
             done, _ = await asyncio.wait(
-                pending_tasks,
+                set(url_by_task),
                 timeout=max(0.1, wait_seconds),
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if not done:
                 continue
             task = next(iter(done))
+            url_by_task.pop(task, None)
             result = await task
-        pending_tasks.remove(task)
-        completed_count += 1
-        stall_state["ts"] = time.monotonic()  # progress signal for the watchdog
-        results_by_url[str(result["url"])] = result
-        _save_results()
-        all_results = [results_by_url[url] for url in urls if url in results_by_url]
-        ok_so_far = sum(1 for r in all_results if r["parse_status"] == "parsed_ok")
-        print(f"  -> {completed_count}/{len(pending_urls)} new; {ok_so_far}/{len(all_results)} ok")
+        _record_result(result)
+        _start_next_tasks()
 
     stall_stop.set()
+    if abandoned_tasks:
+        from job_ftch.infrastructure.sources.browser_utils import terminate_browser_descendants
+
+        with contextlib.suppress(Exception):
+            terminate_browser_descendants(grace=1.0)
+        done, pending = await asyncio.wait(
+            abandoned_tasks,
+            timeout=max(0.1, args.hard_cancel_grace),
+            return_when=asyncio.ALL_COMPLETED,
+        )
+        for task in done:
+            _drain_cancelled_task(task)
+        if pending:
+            print(
+                f"  !! {len(pending)} abandoned task(s) still pending after hard-cancel grace; "
+                "forcing process exit after saving results",
+                flush=True,
+            )
+            main._force_exit = True  # type: ignore[attr-defined]
 
     if args.slow_queue_out:
         _write_slow_retry_queue(
@@ -604,6 +801,8 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
+    import os
+
     from job_ftch.infrastructure.sources.browser_utils import terminate_browser_descendants
 
     _exit_code = 0
@@ -614,4 +813,8 @@ if __name__ == "__main__":
         # interpreter can exit; only descendants of THIS process are touched,
         # never the user's own Chrome. See browser_utils for the shared helper.
         terminate_browser_descendants()
+        if getattr(main, "_force_exit", False):
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(_exit_code)
     raise SystemExit(_exit_code)

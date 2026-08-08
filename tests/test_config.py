@@ -38,9 +38,53 @@ def test_quarantine_settings_switch_output_targets() -> None:
     assert quarantine.output_jsonl is True
 
 
-def test_openai_backend_requires_api_key() -> None:
+def test_openai_backend_settings_can_load_without_api_key_for_non_llm_paths() -> None:
+    settings = Settings.model_validate({"llm_backend": "openai", "openai_api_key": None})
+
+    assert settings.llm_backend == "openai"
+    assert settings.openai_api_key is None
+
+
+def test_openai_provider_requires_api_key() -> None:
+    from job_ftch.infrastructure.llm.openai_provider import _build_openai_llm
+
+    settings = Settings.model_validate({"llm_backend": "openai", "openai_api_key": None})
+
     with pytest.raises(ValueError, match="openai_api_key is required"):
-        Settings.model_validate({"llm_backend": "openai", "openai_api_key": None})
+        _build_openai_llm(settings)
+
+
+def test_pytest_default_settings_keep_openai_backend_without_private_env() -> None:
+    from job_ftch.config import get_settings
+
+    settings = get_settings()
+
+    assert settings.llm_backend == "openai"
+    assert settings.openai_api_key is not None
+    assert settings.openai_api_key.get_secret_value() == "sk-test-offline-pytest-openai-key"
+
+
+def test_settings_accept_standard_openai_api_key_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("JOB_FTCH_OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-standard-openai-key")
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.llm_backend == "openai"
+    assert settings.openai_api_key is not None
+    assert settings.openai_api_key.get_secret_value() == "sk-test-standard-openai-key"
+
+
+def test_job_ftch_openai_api_key_env_takes_project_scoped_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JOB_FTCH_OPENAI_API_KEY", "sk-test-project-openai-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-standard-openai-key")
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.openai_api_key is not None
+    assert settings.openai_api_key.get_secret_value() == "sk-test-project-openai-key"
 
 
 def test_review_and_rejected_settings_switch_output_targets() -> None:

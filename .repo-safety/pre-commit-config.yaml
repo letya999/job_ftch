@@ -40,4 +40,4 @@ repos:
           # identities on nearly every line; entropy detection is not useful
           # for them. Gitleaks and the sensitive-file guard still scan them.
           - '--exclude-files'
-          - '^(fixtures[\\/]dataset[\\/](patches|splits)[\\/].*|fixtures[\\/]prefilter[\\/]tfidf_logreg_v1\.json|config[\\/]recipes[\\/].*\.json|config[\\/](legacy_baselines[\\/]historical_86bc192|pipelines[\\/]historical_86bc192)\.yaml)$'
+          - '^(fixtures[\\/]dataset[\\/](patches|splits)[\\/].*|fixtures[\\/]prefilter[\\/]tfidf_logreg_v1\.json|config[\\/]recipes[\\/].*\.json|config[\\/](legacy_baselines[\\/]historical_86bc192|pipelines[\\/]historical_86bc192)\.yaml|tools[\\/]bot_parity_lab[\\/](sample_artifacts[\\/].*|data[\\/]oss_components\.json|checksums\.sha256))$'

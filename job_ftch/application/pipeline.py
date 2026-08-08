@@ -24,6 +24,12 @@ if TYPE_CHECKING:
 import structlog
 from opentelemetry import trace
 
+from job_ftch.application.contracts import FanOutStage
+from job_ftch.application.dedup_settlement import (
+    DedupSettlementCoordinator,
+    SettlementOutcome,
+    collect_settlement_participants,
+)
 from job_ftch.application.drops import RawItemDropped
 from job_ftch.application.item_decision_trace import record_item_decision_trace
 from job_ftch.application.logging import sanitize_string
@@ -256,6 +262,8 @@ class Pipeline[PipelineInput, PipelineOutput]:
         pipeline_item_concurrency: int = 1,
         source_run_id: str | None = None,
         delivery_targets: Sequence[DeliveryTarget[JobRecord]] = (),
+        decision_version: str = "pipeline-v1",
+        tenant_id: str = "default",
     ) -> None:
         if not (
             isinstance(sanitize_node, SanitizeNode)
@@ -283,6 +291,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self._delivery_targets = {target.target_id: target for target in delivery_targets}
         if len(self._delivery_targets) != len(delivery_targets):
             raise ValueError("Delivery target IDs must be unique")
+        self._decision_version = decision_version
+        self._tenant_id = tenant_id
+        self._settlement = DedupSettlementCoordinator(collect_settlement_participants(self._nodes))
         self._logger = structlog.get_logger("job_ftch.pipeline")
         self._tracer = trace.get_tracer("job_ftch.pipeline")
 
@@ -574,7 +585,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 # calls only after node.process() returned, so several concurrent
                 # workers could all pass it at the limit and overshoot the cap.
                 if isinstance(item, RawItem):
-                    await self._record_observation(item, settings)
+                    await self._record_observation(item)
                 if processed_key is not None and await self._store.has_processed(processed_key):
                     result["outcome"] = "already_processed"
                     item_span.set_attribute("job_ftch.result", "already_processed")
@@ -621,7 +632,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
                             item_span.set_attribute("job_ftch.exit_stage", failure_stage)
                             current = None
                             break
-                        if getattr(node, "is_fan_out_stage", False):
+                        if isinstance(node, FanOutStage):
                             if not isinstance(next_item, (list, tuple)):
                                 raise TypeError(
                                     f"fan-out stage {failure_stage} must return a list or tuple"
@@ -764,7 +775,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
             try:
                 for node in nodes:
                     child["failure_stage"] = node.__class__.__name__
-                    if getattr(node, "is_fan_out_stage", False):
+                    if isinstance(node, FanOutStage):
                         raise TypeError("Nested FanOutStage is not supported")
                     next_item = await node.process(current)
                     if next_item is None:
@@ -1103,38 +1114,31 @@ class Pipeline[PipelineInput, PipelineOutput]:
         item_id = getattr(item, "stable_id", None)
         if not item_id:
             return
-        name = "commit_claim" if commit else "release_claim"
-        nodes_to_notify = list(self._nodes)
-        if self._snapshot_filter is not None:
-            nodes_to_notify.append(self._snapshot_filter)
-        for node in nodes_to_notify:
-            method = getattr(node, name, None)
-            if callable(method):
-                await method(str(item_id))
+        outcome = SettlementOutcome.COMMIT if commit else SettlementOutcome.RELEASE
+        await self._settlement.settle(str(item_id), outcome)
 
     async def _enqueue_outbox(
         self, item: object, delivery: object
     ) -> tuple[tuple[str, str, OutboxState], ...]:
         if not isinstance(item, RawItem) or not isinstance(delivery, JobRecord):
             return ()
-        enqueue = getattr(self._store, "enqueue_outbox", None)
-        if not callable(enqueue):
-            return ()
         content_hash = content_hash_for_raw_item(item)
         payload = delivery.model_dump(mode="json") if hasattr(delivery, "model_dump") else {}
         targets: list[tuple[str, str, OutboxState]] = []
         for target_id in self._delivery_targets:
             key = delivery_idempotency_key(
-                content_hash=content_hash, decision_version="pipeline-v1", sink_name=target_id
+                content_hash=content_hash,
+                decision_version=self._decision_version,
+                sink_name=target_id,
             )
-            persisted = await enqueue(
+            persisted = await self._store.enqueue_outbox(
                 OutboxRecord(
                     outbox_id=key,
                     observation_id=str(
                         item.metadata.get("parent_observation_id") or item.stable_id
                     ),
                     content_hash=content_hash,
-                    decision_version="pipeline-v1",
+                    decision_version=self._decision_version,
                     sink_name=target_id,
                     idempotency_key=key,
                     delivery_payload=payload,
@@ -1158,7 +1162,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
 
     async def _recover_pending_outbox(self) -> None:
         """Replay only the still-pending leaf target for each durable record."""
-        if not callable(getattr(self._store, "list_pending_outbox", None)):
+        if not self._delivery_targets:
             return
 
         async def deliver(record: OutboxRecord) -> None:
@@ -1210,33 +1214,17 @@ class Pipeline[PipelineInput, PipelineOutput]:
         await DeferredResolverQueue(self._store).enqueue(task)
         return task.task_id
 
-    async def _record_observation(self, item: RawItem, settings: Any) -> None:
-        """Persist raw input before any suppression or mutable processing.
-
-        Ledger writes are idempotent by ``(tenant, stable_id, content_hash)``;
-        storage assigns the content version.  This keeps the source envelope
-        available when a terminal decision later needs replaying under a new
-        policy version.
-        """
-        record = getattr(self._store, "record_observation", None)
-        if not callable(record):
-            return
+    async def _record_observation(self, item: RawItem) -> None:
+        """Persist raw input before any suppression or mutable processing."""
         content_hash = content_hash_for_raw_item(item)
-        tenant_id = str(
-            getattr(self._store, "tenant_id", None)
-            or getattr(self._store, "_tenant_id", None)
-            or "default"
-        )
         try:
-            await record(
+            await self._store.record_observation(
                 ObservationLedgerEntry(
-                    observation_id=f"{tenant_id}:{item.stable_id}:{content_hash}",
-                    tenant_id=tenant_id,
+                    observation_id=f"{self._tenant_id}:{item.stable_id}:{content_hash}",
+                    tenant_id=self._tenant_id,
                     stable_id=item.stable_id,
                     content_hash=content_hash,
-                    decision_version=str(
-                        getattr(settings, "pipeline_decision_version", "pipeline-v1")
-                    ),
+                    decision_version=self._decision_version,
                     raw_item=item,
                 )
             )

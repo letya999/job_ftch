@@ -16,6 +16,7 @@ from job_ftch.domain import (
 )
 
 if TYPE_CHECKING:
+    from job_ftch.application.contracts import DedupReservation
     from job_ftch.config import Settings
     from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
 
@@ -223,6 +224,21 @@ class InMemoryStore:
     async def release_dedup_claim(self, key: str, owner_id: str) -> None:
         if self._dedup_claims.get(key, (None, None))[0] == owner_id:
             self._dedup_claims.pop(key, None)
+
+    async def compare_and_reserve(
+        self, keys: tuple[str, ...], owner_id: str, *, ttl_seconds: int
+    ) -> DedupReservation:
+        from job_ftch.application.contracts import DedupReservation
+
+        now = datetime.now(UTC)
+        for key in keys:
+            owner, expiry = self._dedup_claims.get(key, ("", datetime.min.replace(tzinfo=UTC)))
+            if owner and expiry > now and owner != owner_id:
+                return DedupReservation(acquired=False, conflicting_key=key)
+        expiry_at = now + timedelta(seconds=ttl_seconds)
+        for key in keys:
+            self._dedup_claims[key] = (owner_id, expiry_at)
+        return DedupReservation(acquired=True, reserved_keys=keys)
 
     async def record_observation(self, entry: ObservationLedgerEntry) -> ObservationLedgerEntry:
         key = f"observation:{entry.tenant_id}:{entry.stable_id}:{entry.content_hash}"

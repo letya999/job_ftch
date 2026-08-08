@@ -13,6 +13,8 @@ Applied via apply_stealth_hardening(page, persona) after page creation.
 
 from __future__ import annotations
 
+import contextlib
+import json
 from typing import Any
 
 import structlog
@@ -156,19 +158,102 @@ _WEBGL_NOISE_JS = """
 (() => {
     const VENDOR = '%s';
     const RENDERER = '%s';
+    if (typeof WebGLRenderingContext === 'undefined') return;
     const origGetParameter = WebGLRenderingContext.prototype.getParameter;
     WebGLRenderingContext.prototype.getParameter = function(pname) {
         if (pname === 37445) return VENDOR;
         if (pname === 37446) return RENDERER;
         return origGetParameter.call(this, pname);
     };
-    const origGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
-    WebGL2RenderingContext.prototype.getParameter = function(pname) {
-        if (pname === 37445) return VENDOR;
-        if (pname === 37446) return RENDERER;
-        return origGetParameter2.call(this, pname);
-    };
+    if (typeof WebGL2RenderingContext !== 'undefined') {
+        const origGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
+        WebGL2RenderingContext.prototype.getParameter = function(pname) {
+            if (pname === 37445) return VENDOR;
+            if (pname === 37446) return RENDERER;
+            return origGetParameter2.call(this, pname);
+        };
+    }
 })();
+"""
+
+_WORKER_WEBGL_BOOTSTRAP_JS = """
+(() => {
+    const WORKER_IDENTITY_PATCH = %s;
+    const resolvedUrl = (scriptURL) => {
+        try {
+            return new URL(String(scriptURL), location.href).href;
+        } catch (e) {
+            return String(scriptURL);
+        }
+    };
+    const makeBootstrapUrl = (scriptURL, options) => {
+        const original = resolvedUrl(scriptURL);
+        const isModule = Boolean(options && options.type === 'module');
+        const bootstrap = isModule
+            ? WORKER_IDENTITY_PATCH + "\\n;import " + JSON.stringify(original) + ";"
+            : WORKER_IDENTITY_PATCH + "\\n;importScripts(" + JSON.stringify(original) + ");";
+        return URL.createObjectURL(new Blob([bootstrap], {type: 'application/javascript'}));
+    };
+    const shouldWrap = (scriptURL, options) => {
+        if (typeof Blob === 'undefined' || typeof URL === 'undefined' || !URL.createObjectURL) return false;
+        try {
+            const url = new URL(String(scriptURL), location.href);
+            return url.protocol === 'blob:' || url.protocol === 'data:' || url.origin === location.origin;
+        } catch (e) {
+            return true;
+        }
+    };
+    const wrapWorkerCtor = (name) => {
+        const NativeWorker = self[name];
+        if (typeof NativeWorker !== 'function') return;
+        const WrappedWorker = function(scriptURL, options) {
+            if (!shouldWrap(scriptURL, options)) {
+                return new NativeWorker(scriptURL, options);
+            }
+            try {
+                return new NativeWorker(makeBootstrapUrl(scriptURL, options), options);
+            } catch (e) {
+                return new NativeWorker(scriptURL, options);
+            }
+        };
+        WrappedWorker.prototype = NativeWorker.prototype;
+        Object.setPrototypeOf(WrappedWorker, NativeWorker);
+        self[name] = WrappedWorker;
+    };
+    wrapWorkerCtor('Worker');
+    wrapWorkerCtor('SharedWorker');
+})();
+"""
+
+_WORKER_NAVIGATOR_JS = """
+(() => {
+    const USER_AGENT = %s;
+    const PLATFORM = %s;
+    const LANGUAGE = '%s';
+    const LANGUAGES = %s;
+    if (typeof navigator === 'undefined') return;
+    const proto = Object.getPrototypeOf(navigator);
+    try {
+        Object.defineProperty(proto, 'userAgent', {get: () => USER_AGENT, configurable: true});
+        Object.defineProperty(proto, 'platform', {get: () => PLATFORM, configurable: true});
+        Object.defineProperty(proto, 'language', {get: () => LANGUAGE, configurable: true});
+        Object.defineProperty(proto, 'languages', {get: () => LANGUAGES.slice(), configurable: true});
+    } catch (e) {}
+})();
+"""
+
+_REALM_COVERAGE_MATRIX = """
+Realm coverage matrix for worker-readable identity axes:
+- userAgent/platform/language/timezone/hardwareConcurrency/deviceMemory:
+  owned by browser context/CDP, worker bootstrap, or left real, so window and
+  Worker stay aligned.
+- WebGL vendor/renderer: page init scripts patch window/frame contexts and the
+  Worker/SharedWorker wrapper prepends the same OffscreenCanvas-readable
+  getParameter override before classic or module same-origin/blob/data worker
+  code runs.
+- UA-CH/chrome/plugins/screen/battery/fonts/media/performance/serviceWorker:
+  window-facing browser API shape only; not used as declared worker identity in
+  the fingerprint self-check oracle.
 """
 
 _CLIENT_HINTS_JS = """
@@ -187,6 +272,12 @@ _CLIENT_HINTS_JS = """
                 bitness: '%s',
                 model: '',
                 uaFullVersion: '%s',
+                fullVersionList: %s.map((entry) => ({
+                    brand: entry.brand,
+                    version: entry.brand === 'Chromium' || entry.brand === 'Google Chrome'
+                        ? '%s'
+                        : entry.version,
+                })),
             }),
         }),
     });
@@ -269,12 +360,14 @@ _WEB_API_SHAPE_JS = """
 (() => {
     if (navigator.permissions && navigator.permissions.query) {
         const nativeQuery = navigator.permissions.query.bind(navigator.permissions);
-        navigator.permissions.query = (descriptor) => {
+        navigator.permissions.query = function query(descriptor) {
             if (descriptor && descriptor.name === 'notifications' && window.Notification) {
-                return Promise.resolve({state: Notification.permission, onchange: null});
+                const state = Notification.permission === 'default' ? 'prompt' : Notification.permission;
+                return Promise.resolve({state, onchange: null});
             }
             return nativeQuery(descriptor);
         };
+        if (window.__markNative) window.__markNative(navigator.permissions.query, 'query');
     }
     if (navigator.getBattery) {
         const battery = Promise.resolve({
@@ -509,6 +602,7 @@ _HEADER_ORDER_JS = """
             }
             return origFetch.call(this, input, init);
         };
+        if (window.__markNative) window.__markNative(window.fetch, 'fetch');
     }
 })();
 """
@@ -538,6 +632,7 @@ _CONNECTION_ISOLATION_JS = """
             const finalInit = Object.assign({}, init || {}, {headers});
             return origFetch.call(this, input, finalInit);
         };
+        if (window.__markNative) window.__markNative(window.fetch, 'fetch');
     }
     if (window.XMLHttpRequest) {
         const origOpen = XMLHttpRequest.prototype.open;
@@ -547,6 +642,7 @@ _CONNECTION_ISOLATION_JS = """
                 this.setRequestHeader('Connection', 'keep-alive');
             } catch (e) {}
         };
+        if (window.__markNative) window.__markNative(XMLHttpRequest.prototype.open, 'open');
     }
 })();
 """
@@ -571,25 +667,10 @@ _NAVIGATOR_OSCPU_JS = """
 })();
 """
 
-_HARDWARE_CONCURRENCY_JS = """
-(() => {
-    const cores = %d;
-    Object.defineProperty(navigator, 'hardwareConcurrency', {
-        get: () => cores,
-        configurable: false,
-    });
-})();
-"""
-
-_DEVICE_MEMORY_JS = """
-(() => {
-    const memory = %d;
-    Object.defineProperty(navigator, 'deviceMemory', {
-        get: () => memory,
-        configurable: false,
-    });
-})();
-"""
+# navigator.hardwareConcurrency / deviceMemory are intentionally NOT spoofed:
+# an init-script override does not reach dedicated Workers, so faking them in the
+# window realm only creates a window-vs-worker divergence (defect A5). See the
+# note at the injection site in ``apply_stealth_hardening``.
 
 _FONT_SPACING_JS = """
 (() => {
@@ -710,7 +791,7 @@ _ERROR_PROTOTYPE_JS = """
     const origEvalError = window.EvalError;
     function sanitizeStack(error) {
         if (error && error.stack && typeof error.stack === 'string') {
-            const lines = error.stack.split('\n');
+            const lines = error.stack.split('\\n');
             const filtered = lines.filter(line =>
                 !line.includes('playwright') &&
                 !line.includes('nodriver') &&
@@ -723,7 +804,7 @@ _ERROR_PROTOTYPE_JS = """
                 !line.includes('webdriver')
             );
             Object.defineProperty(error, 'stack', {
-                get: () => filtered.join('\n'),
+                get: () => filtered.join('\\n'),
                 configurable: true,
             });
         }
@@ -1030,6 +1111,8 @@ async def apply_stealth_hardening(
     device_memory: int = 8,
     navigator_vendor: str = "Google Inc.",
     navigator_oscpu: str = "Windows NT 10.0; Win64; x64",
+    user_agent: str = "",
+    navigator_platform: str = "Win32",
     font_spacing_seed: int = 42,
     font_list: list[str] | None = None,
     speech_voices: list[str] | None = None,
@@ -1044,29 +1127,48 @@ async def apply_stealth_hardening(
     """
     try:
         brands_js = _sec_ch_ua_to_brands_js(sec_ch_ua)
+        webgl_patch = _WEBGL_NOISE_JS % (
+            _webgl_vendor_for_renderer(webgl_renderer).replace("'", "\\'"),
+            webgl_renderer.replace("'", "\\'"),
+        )
+        worker_identity_patch = "\n".join(
+            [
+                webgl_patch,
+                _WORKER_NAVIGATOR_JS
+                % (
+                    json.dumps(user_agent),
+                    json.dumps(navigator_platform),
+                    locale.replace("'", "\\'"),
+                    json.dumps([locale, locale.split("-")[0]]),
+                ),
+            ]
+        )
         scripts = [
             _NATIVE_TOSTRING_GUARD_JS,
             _CANVAS_NOISE_JS % canvas_seed,
             _AUDIO_STABILITY_JS % canvas_seed,
-            _WEBGL_NOISE_JS
-            % (
-                _webgl_vendor_for_renderer(webgl_renderer).replace("'", "\\'"),
-                webgl_renderer.replace("'", "\\'"),
-            ),
-            _TIMEZONE_JS % timezone,
-            _WEBDRIVER_HIDE_JS % locale,
-            _FONT_SPACING_JS % font_spacing_seed,
+            webgl_patch,
+            _WORKER_WEBGL_BOOTSTRAP_JS % json.dumps(worker_identity_patch),
+            # Timezone is deliberately NOT patched in JS here (defect A3). The
+            # old ``_TIMEZONE_JS`` overrode only ``Intl.DateTimeFormat`` and left
+            # ``Date.getTimezoneOffset()`` reporting the host tz, a divergence
+            # anti-bot systems check within a 90-minute tolerance. Timezone is
+            # now owned by the context-level ``timezone_id`` option, which
+            # Playwright applies via CDP to every realm (window + workers) so
+            # Intl and Date stay coherent by construction.
             _WEB_API_SHAPE_JS,
-            _HARDWARE_CONCURRENCY_JS % hardware_concurrency,
-            _DEVICE_MEMORY_JS % device_memory,
+            # navigator.hardwareConcurrency / deviceMemory are deliberately NOT
+            # patched in JS (defect A5, same class as the A3 timezone fix). An
+            # ``add_init_script`` override runs in the window and child frames but
+            # NOT in dedicated Workers, so a Worker reading navigator.* would
+            # report the real value while the window reports the spoofed one - a
+            # window-vs-worker divergence anti-bot systems cross-check. These are
+            # benign scalars, so reporting the real value in every realm is more
+            # coherent than faking a value we cannot enforce in workers.
             _NAVIGATOR_VENDOR_JS % navigator_vendor.replace("'", "\\'"),
             _NAVIGATOR_OSCPU_JS % navigator_oscpu.replace("'", "\\'"),
-            _ERROR_PROTOTYPE_JS,
-            _IFRAME_WEBDRIVER_JS,
-            _STACK_TRACE_JS,
             _GAMEPAD_JS,
             _MEDIA_DEVICES_JS,
-            _STORAGE_ESTIMATE_JS,
             _INTL_LOCALE_JS % locale,
             _CLIPBOARD_JS,
             _MUTATION_OBSERVER_JS,
@@ -1095,11 +1197,12 @@ async def apply_stealth_hardening(
                         architecture,
                         bitness,
                         chrome_version,
+                        brands_js,
+                        chrome_version,
                     ),
                     _CHROMIUM_SHAPE_JS,
                     _HEADER_ORDER_JS,
                     _CONNECTION_ISOLATION_JS,
-                    _CHROME_RUNTIME_JS,
                 ]
             )
         if proxy_active:
@@ -1128,6 +1231,14 @@ async def apply_stealth_hardening(
         scripts.append(_CDP_DETECTION_JS)
         scripts.append(_PERFORMANCE_TIMING_JS % performance_offset)
         scripts.append(_SERVICE_WORKER_STUB_JS)
+        # Idempotency guard (defect A2): ``add_init_script`` registers a script
+        # that Playwright re-runs on every navigation, so calling this function
+        # twice for one page stacks two blobs. Mark the page after the first
+        # successful injection and make any later call a no-op; whichever caller
+        # runs first wins and defines the page's single coherent identity.
+        if getattr(page, "_job_ftch_hardening_done", False):
+            return
+
         combined = "\n".join(scripts)
 
         if hasattr(page, "add_init_script"):
@@ -1136,6 +1247,9 @@ async def apply_stealth_hardening(
             await page.evaluate(combined)
         else:
             logger.debug("stealth_hardening_no_script_injection", page_type=type(page).__name__)
+
+        with contextlib.suppress(Exception):
+            page._job_ftch_hardening_done = True
 
     except Exception as exc:
         logger.warning("stealth_hardening_failed", error=str(exc))
@@ -1184,6 +1298,8 @@ async def apply_persona_hardening(
         device_memory=getattr(persona, "device_memory", 8),
         navigator_vendor=getattr(persona, "navigator_vendor", "Google Inc."),
         navigator_oscpu=getattr(persona, "navigator_oscpu", "Windows NT 10.0; Win64; x64"),
+        user_agent=getattr(persona, "ua", ""),
+        navigator_platform=getattr(persona, "navigator_platform", "Win32"),
         font_spacing_seed=getattr(persona, "font_spacing_seed", 42),
         font_list=getattr(persona, "font_list", None),
         speech_voices=getattr(persona, "speech_voices", None),

@@ -85,6 +85,9 @@ def test_yaml_manifest_overrides_runtime_defaults_and_yandex_browser_config(
         "    url_filter: 'custom\\.tbank/detail/.+'\n"
         "    expand_links:\n"
         "      - 'custom-expand'\n"
+        "    extra:\n"
+        "      monitor: api_sniffer\n"
+        "      bypass_capability: cloudflare_challenge\n"
         "    limit: 7\n"
         "  - name: yandex_jobs\n"
         "    domain_pattern: 'yandex\\.ru/jobs'\n"
@@ -114,6 +117,8 @@ def test_yaml_manifest_overrides_runtime_defaults_and_yandex_browser_config(
 
     assert updated.url_filter == r"custom\.tbank/detail/.+"
     assert updated.monitor_config["expand_links"] == ["custom-expand"]
+    assert updated.monitor_config["monitor"] == "api_sniffer"
+    assert updated.monitor_config["bypass_capability"] == "cloudflare_challenge"
     assert isinstance(parser, YandexJobsParser)
     assert parser._api_path() == "/custom/api"
     assert parser._limit(None, 50) == 7

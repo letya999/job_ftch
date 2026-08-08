@@ -13,6 +13,7 @@ from job_ftch.application import (
     Stage,
     Store,
 )
+from job_ftch.application.contracts import DedupReservation
 from job_ftch.domain import (
     DedupKeyKind,
     DuplicateRecord,
@@ -84,6 +85,12 @@ class MinimalStore:
 
     async def release_dedup_claim(self, key: str, owner_id: str) -> None:
         del key, owner_id
+
+    async def compare_and_reserve(
+        self, keys: tuple[str, ...], owner_id: str, *, ttl_seconds: int
+    ) -> DedupReservation:
+        del owner_id, ttl_seconds
+        return DedupReservation(acquired=True, reserved_keys=keys)
 
     async def record_observation(self, entry: ObservationLedgerEntry) -> ObservationLedgerEntry:
         return entry

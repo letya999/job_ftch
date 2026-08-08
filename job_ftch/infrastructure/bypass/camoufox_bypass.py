@@ -8,6 +8,7 @@ from typing import Any
 
 from job_ftch.application.registry import BypassCapability, register_bypass
 from job_ftch.config import get_settings
+from job_ftch.infrastructure.bypass.proxy_pool import ProxyEndpoint
 
 try:
     from camoufox.async_api import AsyncCamoufox as _ImportedAsyncCamoufox
@@ -49,7 +50,22 @@ class CamoufoxBypass:
         browser_kwargs: dict[str, Any] = {"headless": config.get("headless", True)}
         if self._os_name:
             browser_kwargs["os"] = self._os_name
-        if config.get("locale"):
+        # Camoufox owns its own fingerprint at the C++ level via BrowserForge:
+        # we pass high-level constraints and let it fill a coherent Firefox
+        # identity, instead of injecting our Chromium persona (defect A9).
+        browser_kwargs["humanize"] = True
+        proxy_active = bool(
+            use_proxy and (config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY"))
+        )
+        if proxy_active:
+            # Native geo coherence: Camoufox derives locale/timezone/geolocation
+            # from the proxy exit IP (defect A7), and WebRTC is blocked so the
+            # real IP cannot leak past the proxy.
+            browser_kwargs["geoip"] = True
+            browser_kwargs["block_webrtc"] = True
+        elif config.get("locale"):
+            # Without geoip, honour an explicitly configured locale; with geoip
+            # the exit IP is the single source of truth, so we do not override it.
             browser_kwargs["locale"] = config["locale"]
         if config.get("disable_http2"):
             browser_kwargs["args"] = ["--disable-http2"]
@@ -76,7 +92,7 @@ class CamoufoxBypass:
         if use_proxy:
             proxy_url = config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY")
             if proxy_url:
-                browser_kwargs["proxy"] = {"server": proxy_url}
+                browser_kwargs["proxy"] = ProxyEndpoint(url=str(proxy_url)).playwright_proxy()
 
         try:
             created_context: Any = None
@@ -84,11 +100,13 @@ class CamoufoxBypass:
                 context = browser
                 if not config.get("persistent_context") and hasattr(browser, "new_context"):
                     context_kwargs: dict[str, Any] = {}
-                    if config.get("user_agent"):
-                        context_kwargs["user_agent"] = config["user_agent"]
+                    # Deliberately NOT setting user_agent: forcing our Chromium
+                    # persona's UA onto a Firefox engine is an instant cross-check
+                    # failure (A9). Camoufox's generated UA is authoritative.
                     if isinstance(viewport, dict):
                         context_kwargs["viewport"] = viewport
-                    if config.get("locale"):
+                    # Skip locale override when geoip owns it (proxy active).
+                    if config.get("locale") and not proxy_active:
                         context_kwargs["locale"] = config["locale"]
                     if config.get("skip_ssl"):
                         context_kwargs["ignore_https_errors"] = True
@@ -132,7 +150,9 @@ if _CAMOUFOX_AVAILABLE:
             cost=40,
             browser_family="firefox",
             owns_session=True,
-            challenge_actions=frozenset({"fingerprint_resistant", "generic_challenge"}),
+            challenge_actions=frozenset(
+                {"engine_diversity", "fingerprint_resistant", "generic_challenge"}
+            ),
             min_remaining_seconds=12.0,
         ),
     )(_create_camoufox)

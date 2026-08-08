@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Bot / Browser Parity Lab</title>
+  <link rel="icon" href="/favicon.ico?sid=__SID__">
+  <link rel="stylesheet" href="/static/style.css?sid=__SID__">
+  <script>
+    window.__PARITY_CONFIG__ = Object.freeze({
+      sid: "__SID__",
+      client: "__CLIENT__",
+      family: "__FAMILY__",
+      storageFrameUrl: "__STORAGE_FRAME_URL__",
+      expectedFailure: "__EXPECTED_FAILURE__" === "1",
+      gate: "__GATE__" === "1"
+    });
+  </script>
+  <script defer src="/static/probes/capabilities.js?sid=__SID__"></script>
+  <script defer src="/static/probes/runtime.js?sid=__SID__"></script>
+  <script defer src="/static/probes/rendering.js?sid=__SID__"></script>
+  <script defer src="/static/probes/vendor.js?sid=__SID__"></script>
+  <script defer src="/static/probes/deep.js?sid=__SID__"></script>
+  <script defer src="/static/probes/behavior.js?sid=__SID__"></script>
+  <script defer src="/static/probe.js?sid=__SID__"></script>
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">LOCAL DEFENSIVE PLAYGROUND</p>
+      <h1>Bot / Browser Parity Lab</h1>
+      <p class="lede">This page collects local browser, network, realm, timing, and interaction signals. It never calls an external service.</p>
+    </div>
+    <div class="session-card">
+      <span>Session</span>
+      <code id="session-id">__SID__</code>
+      <span>Client</span>
+      <code>__CLIENT__</code>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel status-panel">
+      <h2>Probe status</h2>
+      <div id="status-grid" class="status-grid">
+        <div><span>Bootstrap</span><strong id="status-bootstrap">starting</strong></div>
+        <div><span>Window runtime</span><strong id="status-window">pending</strong></div>
+        <div><span>Cross-realms</span><strong id="status-realms">pending</strong></div>
+        <div><span>Network graph</span><strong id="status-network">pending</strong></div>
+        <div><span>Behavior</span><strong id="status-behavior">recording</strong></div>
+        <div><span>Report</span><strong id="status-report">not finalized</strong></div>
+      </div>
+      <p id="status-message">Loading local probes…</p>
+      <button id="finish-button" type="button" disabled>Finalize report</button>
+    </section>
+
+    <section class="panel interaction-panel">
+      <h2>Interaction surface</h2>
+      <p>Move the pointer, scroll, focus the field, type a few characters, and click the target before finalizing a manual baseline.</p>
+      <label for="interaction-input">Local test input</label>
+      <input id="interaction-input" autocomplete="off" placeholder="Type here; only key categories/timing are recorded">
+      <button id="interaction-target" type="button">Interaction target</button>
+      <div class="scroll-track" aria-hidden="true">
+        <div>Scroll marker 1</div><div>Scroll marker 2</div><div>Scroll marker 3</div>
+      </div>
+    </section>
+
+    <section class="panel resource-panel">
+      <h2>Fixed resource graph</h2>
+      <p>The page intentionally loads CSS, JavaScript, images, favicon, workers, fetches, redirects, cookies, cache revalidation, beacon, and delayed resources.</p>
+      <div class="resource-row">
+        <img src="/static/pixel.svg?sid=__SID__" alt="Local static resource">
+        <img src="/api/redirect/start?sid=__SID__" alt="Local redirect resource">
+      </div>
+      <pre id="report-summary">Raw artifacts will appear under artifacts/__SID__/</pre>
+    </section>
+
+    <section class="panel details-panel">
+      <h2>Scope</h2>
+      <p>This lab is for auditing browser clients and scrapers you own. It does not decode vendor payloads, query reputation services, or provide bypass instructions.</p>
+    </section>
+  </main>
+
+  <footer>
+    <span>localhost only</span>
+    <span id="secure-context">secure context: unknown</span>
+  </footer>
+</body>
+</html>

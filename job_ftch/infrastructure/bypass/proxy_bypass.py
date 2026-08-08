@@ -32,7 +32,6 @@ from __future__ import annotations
 import os
 import random
 import time
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -42,11 +41,25 @@ import httpx
 import structlog
 
 from job_ftch.application.registry import BypassCapability, register_bypass
+from job_ftch.infrastructure.bypass.proxy_pool import (
+    GatewayProxyEndpointFactory,
+    ProxyEndpoint,
+    ProxyProviderSpec,
+    ProxyRouteRequest,
+    redact_proxy_url,
+)
+from job_ftch.infrastructure.bypass.proxy_pool import (
+    is_domain_allowed as is_proxy_rescue_domain_allowed,
+)
+from job_ftch.infrastructure.bypass.proxy_pool import (
+    normalize_domain as _normalize_domain,
+)
 
 logger = structlog.get_logger("job_ftch.bypass.proxy")
 
 _IP_ENDPOINTS = ("https://api.ipify.org", "https://checkip.amazonaws.com")
 _GEO_ENDPOINT = "https://ipapi.co/json/"
+CAPSOLVER_CHALLENGE_PROXY_ENV = "JOB_FTCH_CAPSOLVER_CHALLENGE_PROXY_LIST"
 _TOR_CONTROL_DEFAULT = "127.0.0.1:9051"
 _TOR_SOCKS5_DEFAULT = "socks5://127.0.0.1:9050"
 
@@ -217,13 +230,6 @@ class GatewayProxyProvider:
     ``http://user-country-us-session-abc123:pass@gate.provider.com:7777``
     """
 
-    _PROVIDER_TEMPLATES: dict[str, str] = {
-        "brightdata": "{user}-country-{country}-session-{session}",
-        "oxylabs": "customer-{user}-cc-{country}-sessid-{session}",
-        "smartproxy": "{user}-cc-{country}-sessid-{session}",
-        "generic": "{user}-country-{country}-session-{session}",
-    }
-
     def __init__(
         self,
         *,
@@ -240,50 +246,34 @@ class GatewayProxyProvider:
         self.password = password
         self.default_country = default_country.upper()
         self.sticky_ttl_seconds = sticky_ttl_seconds
-        self._domain_sessions: dict[str, tuple[str, float]] = {}
-
-    def _get_template(self) -> str:
-        return self._PROVIDER_TEMPLATES.get(
-            self.provider,
-            self._PROVIDER_TEMPLATES["generic"],
+        self._factory = GatewayProxyEndpointFactory(
+            ProxyProviderSpec(
+                name=self.provider,
+                gateway=self.gateway,
+                user=self.user,
+                password=self.password,
+                default_country=self.default_country,
+                sticky_ttl_seconds=self.sticky_ttl_seconds,
+            )
         )
+
+    def _ttl_minutes(self) -> int:
+        return self._factory._ttl_minutes()
 
     def _session_id(self, domain: str) -> str:
-        now = time.monotonic()
-        if domain in self._domain_sessions:
-            session_id, created_at = self._domain_sessions[domain]
-            if (now - created_at) < self.sticky_ttl_seconds:
-                return session_id
-        session_id = uuid.uuid4().hex[:12]
-        self._domain_sessions[domain] = (session_id, now)
-        return session_id
+        return self._factory._session_id(_normalize_domain(domain))
 
     def get_proxy_url(self, *, domain: str = "", country: str = "") -> str:
-        effective_country = (country or self.default_country or "us").lower()
-        session_id = self._session_id(domain) if domain else uuid.uuid4().hex[:12]
-        username = self._get_template().format(
-            user=self.user,
-            country=effective_country,
-            session=session_id,
-        )
-        parsed = urlparse(self.gateway)
-        scheme = parsed.scheme or "http"
-        host = parsed.hostname or self.gateway
-        port = parsed.port or 7777
-        return f"{scheme}://{username}:{self.password}@{host}:{port}"
+        endpoint = self._factory.endpoint_for(ProxyRouteRequest(domain=domain, country=country))
+        return endpoint.url if endpoint else ""
 
     def rotate_session(self, domain: str) -> str:
-        self._domain_sessions.pop(domain, None)
+        self._factory.rotate(domain)
         return self._session_id(domain)
 
     @property
     def active_sessions(self) -> dict[str, str]:
-        now = time.monotonic()
-        return {
-            domain: sid
-            for domain, (sid, created_at) in self._domain_sessions.items()
-            if (now - created_at) < self.sticky_ttl_seconds
-        }
+        return self._factory.active_sessions
 
 
 _cost_tracker: ProxyCostTracker | None = None
@@ -337,12 +327,19 @@ class ProxyBypass:
         for h in self._health_pool:
             if h.total_attempts >= self.PRUNE_MIN_ATTEMPTS and h.ema_score < self.PRUNE_THRESHOLD:
                 logger.warning(
-                    "proxy_pruned", url=h.url, score=h.ema_score, attempts=h.total_attempts
+                    "proxy_pruned",
+                    url=redact_proxy_url(h.url),
+                    score=h.ema_score,
+                    attempts=h.total_attempts,
                 )
                 self._pruned.append(h.url)
                 pruned_count += 1
             elif h.consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES:
-                logger.warning("proxy_pruned_consecutive", url=h.url, streak=h.consecutive_failures)
+                logger.warning(
+                    "proxy_pruned_consecutive",
+                    url=redact_proxy_url(h.url),
+                    streak=h.consecutive_failures,
+                )
                 self._pruned.append(h.url)
                 pruned_count += 1
             else:
@@ -354,7 +351,11 @@ class ProxyBypass:
         self._prune_dead()
         self._current = _select_weighted(self._health_pool)
         if self._current:
-            logger.info("proxy_rotated", proxy=self._current.url, score=self._current.ema_score)
+            logger.info(
+                "proxy_rotated",
+                proxy=redact_proxy_url(self._current.url),
+                score=self._current.ema_score,
+            )
 
     async def apply_http(self, client: Any) -> Any:
         current = self._current
@@ -402,7 +403,7 @@ class ProxyBypass:
 
     def apply_browser_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         if self.current_url:
-            kwargs["proxy"] = {"server": self.current_url}
+            kwargs["proxy"] = ProxyEndpoint(url=self.current_url).playwright_proxy()
         return kwargs
 
     async def apply_page(self, page: Any) -> None:
@@ -421,7 +422,7 @@ class ProxyBypass:
             logger.warning(
                 "proxy_failure",
                 url=url,
-                proxy=self._current.url,
+                proxy=redact_proxy_url(self._current.url),
                 status=status_code,
                 score=self._current.ema_score,
             )
@@ -449,7 +450,9 @@ class ProxyBypass:
                             h.country = country
                 return country
         except Exception as exc:
-            logger.debug("proxy_geo_detect_failed", proxy=proxy_url, error=str(exc))
+            logger.debug(
+                "proxy_geo_detect_failed", proxy=redact_proxy_url(proxy_url), error=str(exc)
+            )
             return None
 
     async def detect_geo_all(self, *, timeout: float = 10.0) -> dict[str, str | None]:
@@ -481,7 +484,9 @@ class ProxyBypass:
                 h.record_success()
             elif result:
                 h.record_failure()
-            results.append({"proxy": h.url, **(result or {"error": "verification failed"})})
+            results.append(
+                {"proxy": redact_proxy_url(h.url), **(result or {"error": "verification failed"})}
+            )
         self._prune_dead()
         return results
 
@@ -503,15 +508,8 @@ class ProxyBypass:
                 if self._health_pool
                 else 0.0
             ),
-            "current": self.current_url,
+            "current": redact_proxy_url(self.current_url) if self.current_url else None,
         }
-
-
-if _load_proxies():
-    register_bypass(
-        "proxy",
-        capability=BypassCapability(cost=5, transport="proxy", supports_proxy=True),
-    )(lambda bypass_config=None: ProxyBypass())
 
 
 async def get_public_ip(
@@ -598,6 +596,7 @@ async def verify_proxy(
 
 def _load_residential_proxies() -> list[str]:
     proxies: list[str] = []
+    proxies.extend(_load_capsolver_cloudflare_proxies())
     yaml_path = Path(__file__).parents[3] / "config" / "proxies.yaml"
     if yaml_path.exists():
         import yaml
@@ -607,6 +606,16 @@ def _load_residential_proxies() -> list[str]:
     env_val = os.environ.get("JOB_FTCH_RESIDENTIAL_PROXY_LIST", "")
     proxies.extend(p.strip() for p in env_val.split(",") if p.strip())
     return list(dict.fromkeys(proxies))
+
+
+def _load_capsolver_cloudflare_proxies() -> list[str]:
+    """Operator-provided static/sticky proxies for CapSolver Cloudflare tasks.
+
+    These are prepended to the residential pool so the browser route and
+    CapSolver's ``AntiCloudflareTask`` use the same compatible endpoint.
+    """
+    env_val = os.environ.get(CAPSOLVER_CHALLENGE_PROXY_ENV, "")
+    return [p.strip() for p in env_val.split(",") if p.strip()]
 
 
 class ResidentialProxyBypass(ProxyBypass):
@@ -647,17 +656,57 @@ class ResidentialProxyBypass(ProxyBypass):
 
         settings = get_settings()
         self._gateway: GatewayProxyProvider | None = None
-        self._strict_geo = settings.proxy_strict_geo
-        if settings.proxy_provider not in ("raw", "") and settings.proxy_gateway:
+        self._strict_geo = bool(getattr(settings, "proxy_strict_geo", False))
+        self._rescue_allow_domains = tuple(getattr(settings, "proxy_rescue_allow_domains", ()))
+        self._rescue_deny_domains = tuple(getattr(settings, "proxy_rescue_deny_domains", ()))
+        provider = getattr(settings, "proxy_provider", "raw")
+        gateway = getattr(settings, "proxy_gateway", "")
+        if provider not in ("raw", "") and gateway:
             self._gateway = GatewayProxyProvider(
-                provider=settings.proxy_provider,
-                gateway=settings.proxy_gateway,
-                user=settings.proxy_user,
-                password=settings.proxy_pass,
-                default_country=settings.proxy_country_default or (self._preferred_geo or ""),
-                sticky_ttl_seconds=settings.proxy_sticky_ttl_seconds,
+                provider=provider,
+                gateway=gateway,
+                user=getattr(settings, "proxy_user", ""),
+                password=getattr(settings, "proxy_pass", ""),
+                default_country=getattr(settings, "proxy_country_default", "")
+                or (self._preferred_geo or ""),
+                sticky_ttl_seconds=getattr(settings, "proxy_sticky_ttl_seconds", 600),
             )
         self._cost = get_cost_tracker()
+
+    @property
+    def available(self) -> bool:
+        return self._gateway is not None or bool(self._health_pool)
+
+    def current_url_for_domain(self, domain: str) -> str | None:
+        current = self._resolve_current(domain)
+        return current.url if current else None
+
+    def get_proxy_for(
+        self,
+        *,
+        domain: str,
+        country: str = "",
+        purpose: str = "ingest",
+    ) -> str | None:
+        del purpose
+        current = self._select_for_domain_with_country(domain, country=country)
+        return current.url if current else None
+
+    def rotate_proxy_for(self, domain: str) -> None:
+        if self._gateway is not None:
+            self._gateway.rotate_session(domain)
+        self._domain_pin.pop(domain, None)
+        self._domain_pin.pop(_normalize_domain(domain), None)
+
+    def proxy_stats(self) -> dict[str, Any]:
+        return self.cost_stats
+
+    def _domain_allowed(self, domain: str) -> bool:
+        return is_proxy_rescue_domain_allowed(
+            domain,
+            allow_domains=self._rescue_allow_domains,
+            deny_domains=self._rescue_deny_domains,
+        )
 
     def _get_proxy_url_for_domain(
         self,
@@ -666,6 +715,9 @@ class ResidentialProxyBypass(ProxyBypass):
         country: str = "",
     ) -> str | None:
         """Return a proxy URL for the domain, preferring gateway mode."""
+        if not self._domain_allowed(domain):
+            logger.info("residential_proxy_domain_not_allowed", domain=_normalize_domain(domain))
+            return None
         if self._gateway is not None:
             effective_country = (
                 country or self._preferred_geo or self._gateway.default_country or ""
@@ -719,6 +771,20 @@ class ResidentialProxyBypass(ProxyBypass):
             self._domain_pin[domain] = chosen
         return chosen
 
+    def _select_for_domain_with_country(
+        self,
+        domain: str,
+        *,
+        country: str = "",
+    ) -> ProxyHealth | None:
+        if self._gateway is not None:
+            url = self._get_proxy_url_for_domain(domain or "", country=country)
+            if url:
+                return ProxyHealth(url=url)
+            if self._strict_geo:
+                return None
+        return self._select_for_domain(domain)
+
     def _resolve_current(self, domain: str | None) -> ProxyHealth | None:
         """Pick the active proxy for a request.
 
@@ -736,6 +802,8 @@ class ResidentialProxyBypass(ProxyBypass):
 
     async def apply_http(self, client: Any) -> Any:
         domain = getattr(client, "_domain_hint", None)
+        if domain and not self._domain_allowed(domain):
+            return client
         if domain and not self._cost.should_allow_request(domain):
             return client
         elif not domain and self._cost.budget_exhausted:
@@ -796,6 +864,8 @@ class ResidentialProxyBypass(ProxyBypass):
 
     def apply_browser_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         domain = kwargs.pop("_domain_hint", None)
+        if domain and not self._domain_allowed(domain):
+            return kwargs
         if (domain and not self._cost.should_allow_request(domain)) or (
             not domain and self._cost.budget_exhausted
         ):
@@ -803,7 +873,7 @@ class ResidentialProxyBypass(ProxyBypass):
 
         current = self._resolve_current(domain)
         if current:
-            kwargs["proxy"] = {"server": current.url}
+            kwargs["proxy"] = ProxyEndpoint(url=current.url).playwright_proxy()
         elif self._strict_geo:
             raise RuntimeError(
                 f"Strict geo-binding enforced, but no suitable proxy found for domain {domain}"
@@ -828,7 +898,7 @@ class ResidentialProxyBypass(ProxyBypass):
             logger.warning(
                 "residential_proxy_failure",
                 url=url,
-                proxy=pinned.url,
+                proxy=redact_proxy_url(pinned.url),
                 status=status_code,
                 score=pinned.ema_score,
             )

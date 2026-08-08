@@ -20,6 +20,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [publication index](publication/index.md)
 - [scripts index](scripts/index.md)
 - [sinks index](sinks/index.md)
+- [tools index](tools/index.md)
 - [unit index](unit/index.md)
 
 ## Files On This Level
@@ -74,6 +75,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_input_hygiene.py](test_input_hygiene.py)
 - [test_job_group_store_clear.py](test_job_group_store_clear.py)
 - [test_job_quality.py](test_job_quality.py)
+- [test_jseek_site_parser.py](test_jseek_site_parser.py)
 - [test_jsonld_scraper_universal.py](test_jsonld_scraper_universal.py)
 - [test_justjoin_site_parser.py](test_justjoin_site_parser.py)
 - [test_kapital_bir_site_parser.py](test_kapital_bir_site_parser.py)

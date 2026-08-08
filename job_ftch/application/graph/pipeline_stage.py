@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from job_ftch.application.dedup_settlement import DedupSettlement
     from job_ftch.application.graph.executor import GraphExecutor
 
 
@@ -38,6 +39,9 @@ class GraphPipelineStage:
         graph = getattr(executor, "graph", None)
         self.graph_hash = str(getattr(graph, "graph_hash", "unknown"))
         self.node_metrics: dict[str, dict[str, Any]] = {}
+
+    def settlement_participants(self) -> tuple[DedupSettlement, ...]:
+        return self._executor.settlement_participants()
 
     async def process(self, item: Any) -> tuple[GraphPipelineResult, ...]:
         reports = await self._executor.run_many(item)

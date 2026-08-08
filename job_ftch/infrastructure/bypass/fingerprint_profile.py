@@ -53,12 +53,16 @@ class FingerprintProfile:
         locale = persona.locale
         timezone = persona.timezone
 
+        # Use curl_cffi's generic aliases (defect A11): pinned versions like the
+        # old ``safari17_5``/``firefox125`` no longer exist in curl_cffi and
+        # hard-failed; the aliases always resolve to the newest shipped build so
+        # the TLS fingerprint stays coherent with the persona's browser family.
         if "Chrome/" in ua:
             impersonate = "chrome"
         elif "Safari/" in ua and "Chrome/" not in ua:
-            impersonate = "safari17_5"
+            impersonate = "safari"
         elif "Firefox/" in ua:
-            impersonate = "firefox125"
+            impersonate = "firefox"
         else:
             impersonate = "chrome"
 
@@ -148,13 +152,18 @@ class FingerprintProfile:
 
 
 _CHROME_MAJOR_RE = re.compile(r"Chrome/(\d+)")
+# Current curl_cffi Chrome targets, newest first. ``_pick_impersonate`` matches
+# a detected Chrome major to the newest target at or below it, so the TLS
+# fingerprint tracks the real browser. Only Chrome targets belong here because
+# the picker is driven by ``_detect_chrome_major``; Safari/Firefox go through
+# the generic alias in ``from_persona``. Kept valid against the installed
+# curl_cffi build (defect A11: the old safari17_5/firefox125 no longer exist).
 _KNOWN_IMPERSONATIONS: tuple[tuple[str, int], ...] = (
+    ("chrome146", 146),
+    ("chrome145", 145),
+    ("chrome142", 142),
+    ("chrome136", 136),
     ("chrome131", 131),
-    ("chrome124", 124),
-    ("chrome120", 120),
-    ("safari17_5", 17),
-    ("safari15_3", 15),
-    ("firefox125", 125),
 )
 
 _PLATFORM_BY_OS: dict[str, tuple[str, str, str, str]] = {
@@ -237,9 +246,15 @@ def patch_curl_bypass(bypass: Any) -> None:
 
 
 def patch_nodriver_bypass(bypass: Any) -> None:
-    """Align a NodriverBypass instance with the canonical profile."""
+    """Apply only runtime-independent profile values to Nodriver.
+
+    Nodriver may select a system Chrome executable that differs from the
+    Playwright/curl runtime used to derive ``get_profile()``. Do not inject
+    that profile's UA before the executable can report its own version: doing
+    so leaves native UA-CH at one major while the command-line UA claims
+    another. An explicit caller UA remains supported by NodriverBypass.
+    """
     profile = get_profile()
-    bypass._browser_args = list(bypass._browser_args or []) + profile.browser_args
     if not bypass._lang:
         bypass._lang = profile.accept_language.split(",")[0]
 

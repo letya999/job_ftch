@@ -5,9 +5,10 @@ from __future__ import annotations
 import functools
 import os
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from pydantic_settings.sources import (
     PydanticBaseSettingsSource,
     YamlConfigSettingsSource,
@@ -159,6 +160,7 @@ class Settings(BaseSettings):
     routing_reranker_accept_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     routing_reranker_review_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     pipeline_decision_version: str = Field(default="pipeline-v1", min_length=1)
+    dedup_cache_max_entries: int = Field(default=10_000, ge=100, le=1_000_000)
     evidence_policy_path: Path = Path("config/evidence_policy.yaml")
     # Optional schema-v2 YAML authority. None keeps the schema-v1 compatibility
     # path until tenant-level parity has been verified.
@@ -221,6 +223,14 @@ class Settings(BaseSettings):
     browser_context_timeout_ms: int = Field(default=120000, gt=0)
     browser_challenge_retries: int = Field(default=1, ge=0)
     browser_challenge_wait_ms: int = Field(default=6000, gt=0)
+    browser_profile_dir: Path | None = None
+    browser_profile_persistent: bool = False
+    browser_profile_root: Path = Path(".runtime/profiles")
+    browser_profile_per_domain: bool = True
+    browser_profile_max_bytes: int = Field(default=2 * 1024**3, gt=0)
+    browser_profile_ttl_days: int = Field(default=30, ge=1, le=365)
+    browser_session_state_enabled: bool = False
+    browser_session_state_dir: Path = Path(".runtime/session_states")
     api_sniffer_settle_seconds: float = Field(default=4.0, gt=0.0, le=60.0)
     api_sniffer_max_pages: int = Field(default=10, gt=0, le=100)
     api_sniffer_default_page_size: int = Field(default=10, gt=0, le=500)
@@ -233,6 +243,7 @@ class Settings(BaseSettings):
     fingerprint_body_scan_max_chars: int = Field(default=100_000, gt=0)
     bypass_timeout_escalate_threshold: int = Field(default=2, ge=1, le=10)
     bypass_max_route_attempts_per_operation: int = Field(default=6, ge=1, le=20)
+    bypass_max_same_route_retries_per_operation: int = Field(default=8, ge=0, le=100)
     bypass_max_listing_browser_launches: int = Field(default=3, ge=0, le=10)
     bypass_max_detail_browser_launches: int = Field(default=1, ge=0, le=5)
     bypass_max_source_browser_launches: int = Field(default=16, ge=0, le=100)
@@ -240,15 +251,36 @@ class Settings(BaseSettings):
     bypass_max_source_proxy_rotations: int = Field(default=8, ge=0, le=50)
     bypass_max_weighted_work_per_source: int = Field(default=500, ge=1, le=10_000)
     bypass_default_requests_per_second: float = Field(default=2.0, ge=0.1, le=20.0)
+    # Background priming (TRACK C). Opt-in, polite: warms clearance sessions
+    # ahead of the live crawl so the crawl hits already-trusted sessions. Never
+    # faster than DomainPacer. Default off => behavior unchanged.
+    bypass_background_priming_enabled: bool = False
+    bypass_priming_state_dir: Path = Path(".runtime/priming")
+    bypass_priming_refresh_window_seconds: int = Field(default=600, ge=0, le=86_400)
+    bypass_priming_max_domains_per_cycle: int = Field(default=20, ge=1, le=500)
+    bypass_priming_settle_seconds: float = Field(default=6.0, ge=0.0, le=120.0)
+    bypass_priming_min_interval_seconds: int = Field(default=1800, ge=0, le=604_800)
+    bypass_priming_prefetch_listings: bool = False
+    # Debug-only: on each page, log any identity-coherence issue (never raises in
+    # prod). Off by default => zero behavior change; used with the self-check.
+    bypass_identity_selfcheck: bool = False
     # CAPTCHA solving. `captcha_provider` is the external provider used when the
     # free browser-wait tier cannot clear a challenge. It only actually fires if
     # it is also listed in `captcha_enabled_providers`; paid providers
-    # (capsolver, 2captcha, anticaptcha) remain wired in code but are omitted
-    # from the default allowlist, so they stay disabled until explicitly enabled.
+    # (capsolver, capmonster, nextcaptcha, 2captcha, anticaptcha) remain wired
+    # in code but are omitted from the default allowlist, so they stay disabled
+    # until explicitly enabled.
     captcha_provider: str = Field(default="nopecha")
     captcha_enabled_providers: list[str] = Field(
         default_factory=lambda: ["browser_wait", "nopecha"]
     )
+    captcha_provider_routes: dict[str, list[str]] = Field(default_factory=dict)
+    # Domains authorized for provider-backed (paid/external) CAPTCHA solving.
+    # Empty = none authorized (safe default). The free passive browser_wait tier
+    # is never gated by this. Comma-separated env list; parent-suffix match.
+    captcha_authorized_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    captcha_solver_timeout_budget_seconds: float = Field(default=40.0, ge=0.0, le=180.0)
+    captcha_solver_backoff_seconds: float = Field(default=300.0, ge=0.0, le=3600.0)
     proxy_provider: str = Field(default="raw")
     proxy_gateway: str = ""
     proxy_user: str = ""
@@ -257,9 +289,11 @@ class Settings(BaseSettings):
     proxy_sticky_ttl_seconds: int = Field(default=600, ge=30, le=3600)
     proxy_gb_budget: float = Field(default=0.0, ge=0.0)
     proxy_per_domain_gb_budget: float = Field(default=0.0, ge=0.0)
+    proxy_rescue_allow_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    proxy_rescue_deny_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
     proxy_strict_geo: bool = False
     robots_enforce: bool = False
-    session_memory_enabled: bool = False
+    session_memory_enabled: bool = True
     monitor_timeout_seconds: float = Field(default=15.0, gt=0.0, le=300.0)
     monitor_max_retries: int = Field(default=3, ge=0, le=10)
     rss_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
@@ -268,7 +302,7 @@ class Settings(BaseSettings):
     fingerprinter_timeout_seconds: float = Field(default=8.0, gt=0.0, le=300.0)
     store_path: Path = Path(".runtime/job_ftch.db")
     store_dsn: SecretStr | None = None
-    http_proxy_list: list[str] = Field(default_factory=list)
+    http_proxy_list: Annotated[list[str], NoDecode] = Field(default_factory=list)
     store_pool_min: int = Field(default=2, gt=0)
     store_pool_max: int = Field(default=10, gt=0)
     store_fallback_on_error: bool = True
@@ -379,6 +413,26 @@ class Settings(BaseSettings):
             file_secret_settings,
         )
 
+    @model_validator(mode="before")
+    @classmethod
+    def apply_standard_openai_env_alias(cls, data: object) -> object:
+        """Accept the standard OpenAI SDK env var as a fallback.
+
+        ``JOB_FTCH_OPENAI_API_KEY`` remains the project-scoped source of truth
+        through pydantic-settings' ``env_prefix``. This fallback only fills the
+        field when no explicit or project-scoped value has already been
+        provided, so tests can still assert that ``openai_api_key=None`` is
+        invalid for the OpenAI backend.
+        """
+        if not isinstance(data, dict) or "openai_api_key" in data:
+            return data
+        fallback = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not fallback:
+            return data
+        merged = dict(data)
+        merged["openai_api_key"] = fallback
+        return merged
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, value: str) -> str:
@@ -439,7 +493,13 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("http_proxy_list", mode="before")
+    @field_validator(
+        "http_proxy_list",
+        "proxy_rescue_allow_domains",
+        "proxy_rescue_deny_domains",
+        "captcha_authorized_domains",
+        mode="before",
+    )
     @classmethod
     def parse_comma_separated_list(cls, value: object) -> list[str]:
         if not value:
@@ -515,13 +575,9 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_dependencies(self) -> Settings:
-        if self.llm_backend == "openai":
-            if self.openai_api_key is None:
-                msg = "openai_api_key is required when llm_backend=openai."
-                raise ValueError(msg)
-            if self.openai_model is None:
-                msg = "openai_model is required when llm_backend=openai."
-                raise ValueError(msg)
+        if self.llm_backend == "openai" and self.openai_model is None:
+            msg = "openai_model is required when llm_backend=openai."
+            raise ValueError(msg)
         if self.posting_backend == "telegram_posting":
             if self.telegram_publish_entity is None:
                 msg = "telegram_publish_entity is required when posting_backend=telegram_posting."

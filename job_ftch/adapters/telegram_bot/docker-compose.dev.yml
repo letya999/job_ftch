@@ -14,6 +14,11 @@ services:
     cap_add:
       - SYS_PTRACE
     restart: unless-stopped
+    # Picked up by the autoheal service below: a wedged-but-alive process keeps
+    # PID 1 running, so restart: unless-stopped never fires; autoheal restarts on
+    # the unhealthy healthcheck status instead.
+    labels:
+      - "autoheal=true"
     env_file:
       - ../../../.env.dev
       - ./.env.dev
@@ -52,6 +57,22 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     shm_size: "1gb"
+
+  # Restarts containers labelled autoheal=true when their healthcheck reports
+  # unhealthy. Closes the gap where restart: unless-stopped only reacts to a
+  # process exit, not to a hung-but-alive process (see incident 2026-08-04).
+  # Has access to the host docker socket, so the image is pinned by version.
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "15"
+      AUTOHEAL_START_PERIOD: "180"
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "30"
+      DOCKER_SOCK: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   postgres:
     image: postgres:16-alpine

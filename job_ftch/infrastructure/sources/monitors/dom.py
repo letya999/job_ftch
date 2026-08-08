@@ -504,7 +504,11 @@ async def discover(
 
     if render:
         try:
-            from job_ftch.infrastructure.sources.browser_utils import BROWSER_KEYS, open_page
+            from job_ftch.infrastructure.sources.browser_utils import (
+                BROWSER_KEYS,
+                install_challenge_response_detector,
+                open_page,
+            )
         except ImportError as exc:
             raise RuntimeError(
                 "patchright is required for DOM monitor with render=true. "
@@ -513,12 +517,21 @@ async def discover(
 
         browser_config = {k: v for k, v in config.items() if k in BROWSER_KEYS}
         async with open_page(browser_config, bypass_strategy=bypass_strategy) as page:
+            await install_challenge_response_detector(
+                page,
+                url=board_url,
+                controller=bypass_strategy,
+                surface="monitor",
+            )
             urls = await _extract_links_rendered(page, board_url, config, url_matcher)
     else:
         html = await fetch_page_text(board_url, client)
         if not html:
             log.warning("dom.fetch_failed", board_url=board_url)
             return set()
+        from job_ftch.infrastructure.sources.monitors.shared import raise_if_browser_challenge
+
+        raise_if_browser_challenge(html, url=board_url)
         if _has_confirmed_empty_board_message(html):
             log.info("dom.confirmed_empty_board", board_url=board_url)
             return MonitorResult(metadata_updates={"confirmed_empty": True})

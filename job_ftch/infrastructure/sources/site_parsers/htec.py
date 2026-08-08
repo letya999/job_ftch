@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import httpx
-
 from job_ftch.application.registry import register_site_parser
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import safe_fetch
@@ -26,6 +24,7 @@ class HtecParser:
     domain_pattern = r"^https?://(?:www\.)?htec\.com/careers(?:/|$)"
     has_custom_parse = True
     terminal_on_empty = True
+    confirmed_empty_on_empty = True
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
@@ -37,10 +36,7 @@ class HtecParser:
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
         del spec
-        try:
-            await safe_fetch(client, _BOARD_URL)
-        except httpx.HTTPStatusError:
-            return
+        await safe_fetch(client, _BOARD_URL)
         # A successful board is intentionally not treated as a job unless it
         # exposes explicit vacancy data.  This keeps career articles out.
         return

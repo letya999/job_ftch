@@ -208,12 +208,19 @@ class TestBuildDefaultOrchestrator:
             def __init__(self) -> None:
                 self.init_scripts: list[str] = []
                 self.headers: dict[str, str] = {}
+                self.route_handler = None
 
             async def add_init_script(self, script: str) -> None:
                 self.init_scripts.append(script)
 
             async def set_extra_http_headers(self, headers: dict[str, str]) -> None:
                 self.headers.update(headers)
+
+            async def route(self, _pattern: str, handler) -> None:  # type: ignore[no-untyped-def]
+                self.route_handler = handler
+
+            async def unroute(self, _pattern: str, _handler) -> None:  # type: ignore[no-untyped-def]
+                return None
 
         page = _FakePage()
         orc = build_default_orchestrator()
@@ -235,7 +242,8 @@ class TestBuildDefaultOrchestrator:
         assert "network_fingerprint" in skipped
         # Layers genuinely applied their effects, not just marker flags.
         assert page.init_scripts, "physical_context must inject a geolocation script"
-        assert page.headers.get("Referer"), "referrer_chain must set a Referer header"
+        # TRACK B4: referrer_chain installs a top-level-document route handler.
+        assert page.route_handler is not None, "referrer_chain must install a Referer route"
         assert "behavioral" in ctx.metadata
         assert "temporal_pacing_seconds" in ctx.metadata
         assert "physical_context" in ctx.metadata

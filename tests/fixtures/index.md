@@ -7,3 +7,4 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 ## Child Indexes
 
 - [extraction index](extraction/index.md)
+- [fpcheck index](fpcheck/index.md)
