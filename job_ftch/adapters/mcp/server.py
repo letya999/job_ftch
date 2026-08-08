@@ -107,6 +107,10 @@ class TenantMCPServer:
         port: int = 8000,
     ) -> None:
         # Lifespan owns TenantRunner startup/shutdown for the process.
+        # stdio rejects host/port kwargs in FastMCP 3.x.
+        if transport == "stdio":
+            self.app.run(transport=transport)
+            return
         self.app.run(transport=transport, host=host, port=port)
 
     def _register_surface(self) -> None:

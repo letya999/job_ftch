@@ -162,6 +162,8 @@ def test_run_delegates_to_fastmcp(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
         "host": "0.0.0.0",
         "port": 9001,
     }
+    server.run(transport="stdio")
+    assert server.app.run_kwargs == {"transport": "stdio"}
 
 
 @pytest.mark.asyncio
