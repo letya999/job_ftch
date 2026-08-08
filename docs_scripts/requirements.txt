@@ -2,8 +2,12 @@
 # давали одинаковый результат. Ставится через just setup.
 
 mkdocs==1.6.1
-mkdocs-material==9.5.49
-pymdown-extensions==11.0.0
+mkdocs-material==9.7.7
+pymdown-extensions==11.0.1
+
+# Security pins for transitive dependencies used by the documentation plugins.
+GitPython==3.1.58
+idna==3.18
 
 # Навигация из структуры папок вместо ручного nav.
 mkdocs-awesome-pages-plugin==2.9.3
