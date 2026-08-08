@@ -121,6 +121,17 @@ async def test_bad_card_skips_job_without_cancelling_batch() -> None:
     assert outcome.target_unusable is False
 
 
+async def test_connection_error_keeps_delivery_retryable() -> None:
+    sender = _Sender(failures={1: ConnectionError("ClientConnectorError: connect call failed")})
+    outcome = await publish_jobs(
+        [_Job("a"), _Job("b")], target="@chan", sender=sender, send_limit=5, sleep=_no_sleep
+    )
+
+    assert outcome.sent == 1
+    assert outcome.had_transient_failure is True
+    assert [job_id for _, job_id in sender.calls] == ["b"]
+
+
 async def test_fatal_target_stops_immediately() -> None:
     sender = _Sender(failures={1: FatalTargetError("bot is not a member of the channel")})
     outcome = await publish_jobs(

@@ -96,6 +96,11 @@ class CloakBrowserBypass:
         if exe_path:
             kwargs["executable_path"] = exe_path
 
+        for key in ("timeout", "timeoutSeconds"):
+            value = kwargs.get(key)
+            if isinstance(value, float) and value.is_integer():
+                kwargs[key] = int(value)
+
         args = kwargs.get("args", []) or []
         args = list(args)
         kwargs["args"] = args

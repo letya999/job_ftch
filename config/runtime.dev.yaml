@@ -37,5 +37,33 @@ pipeline_item_concurrency_adaptive: false
 source_soft_deadline_seconds: 60.0
 source_hard_deadline_seconds: 180.0
 
+captcha_enabled_providers:
+  - browser_wait
+  - nopecha
+  - capsolver
+  - capmonster
+  - nextcaptcha
+captcha_provider_routes:
+  recaptcha:
+    - capsolver
+    - capmonster
+    - nextcaptcha
+    - nopecha
+    - manual_required
+  recaptcha_v3:
+    - capsolver
+    - capmonster
+    - nextcaptcha
+    - manual_required
+  cloudflare_challenge:
+    - browser_wait
+    - manual_required
+  turnstile:
+    - observe
+  hcaptcha:
+    - observe
+  unknown:
+    - observe
+
 openai_model: gpt-4.1-nano
 relevance_llm_model: gpt-4.1-mini

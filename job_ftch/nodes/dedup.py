@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 from uuid import uuid4
-
-from rapidfuzz import fuzz
 
 from job_ftch.application.drops import RawItemDropped
 from job_ftch.domain import (
@@ -36,6 +35,7 @@ class DedupNode:
         title_score_cutoff: float = 85.0,
         defer_commit: bool = False,
         claim_ttl_seconds: int = 300,
+        cache_max_entries: int = 10_000,
     ) -> None:
         self._store = store
         self._near_duplicate_score_cutoff = near_duplicate_score_cutoff
@@ -44,36 +44,42 @@ class DedupNode:
         self._claim_ttl_seconds = claim_ttl_seconds
         self._claim_owner = uuid4().hex
         self._claims: dict[str, tuple[RememberedDedupKey, ...]] = {}
-        self._dedup_cache: dict[str, RememberedDedupKey] = {}
-        self._fingerprint_records: tuple[RememberedDedupKey, ...] | None = None
+        self._dedup_cache: OrderedDict[str, RememberedDedupKey] = OrderedDict()
+        self._cache_max_entries = max(100, cache_max_entries)
         self._lock = asyncio.Lock()
+        self._cache_hits = 0
+        self._cache_misses = 0
+
+    @property
+    def stats(self) -> dict[str, int]:
+        return {
+            "cache_hits": self._cache_hits,
+            "cache_misses": self._cache_misses,
+            "cache_size": len(self._dedup_cache),
+        }
 
     async def process(self, item: RawItem) -> RawItem | None:
-        async with self._lock:
-            duplicate = await self._find_duplicate(item)
-            if duplicate is None:
-                records = self._records_for_item(item)
-                if self._defer_commit:
-                    claim_keys = tuple(
-                        record.key
-                        for record in records
-                        if record.kind in (DedupKeyKind.URL, DedupKeyKind.CONTENT)
-                    )
-                    acquired_keys: list[str] = []
-                    for claim_key in claim_keys:
-                        acquired = await self._store.acquire_dedup_claim(
-                            claim_key, self._claim_owner, ttl_seconds=self._claim_ttl_seconds
-                        )
-                        if not acquired:
-                            for acquired_key in acquired_keys:
-                                await self._store.release_dedup_claim(
-                                    acquired_key, self._claim_owner
-                                )
-                            raise RuntimeError("dedup claim is held; retry item later")
-                        acquired_keys.append(claim_key)
+        duplicate = await self._find_duplicate(item)
+        if duplicate is None:
+            records = self._records_for_item(item)
+            if self._defer_commit:
+                claim_keys = tuple(
+                    record.key
+                    for record in records
+                    if record.kind in (DedupKeyKind.URL, DedupKeyKind.CONTENT)
+                )
+                reservation = await self._store.compare_and_reserve(
+                    claim_keys, self._claim_owner, ttl_seconds=self._claim_ttl_seconds
+                )
+                if not reservation.acquired:
+                    raise RuntimeError("dedup claim is held; retry item later")
+                async with self._lock:
                     self._claims[item.stable_id] = records
-                else:
-                    await self._remember_records(records)
+            else:
+                await self._remember_records(records)
+                async with self._lock:
+                    for record in records:
+                        self._cache_record(record)
         if duplicate is not None:
             await self._store.record_duplicate(duplicate)
             raise RawItemDropped(
@@ -86,12 +92,16 @@ class DedupNode:
     async def commit_claim(self, item_id: str) -> None:
         async with self._lock:
             records = self._claims.pop(item_id, ())
-            await self._remember_records(records)
+        await self._remember_records(records)
+        async with self._lock:
+            for record in records:
+                self._cache_record(record)
             await self._release_claim_records(records)
 
     async def release_claim(self, item_id: str) -> None:
         async with self._lock:
-            await self._release_claim_records(self._claims.pop(item_id, ()))
+            records = self._claims.pop(item_id, ())
+        await self._release_claim_records(records)
 
     async def _release_claim_records(self, records: tuple[RememberedDedupKey, ...]) -> None:
         for record in records:
@@ -102,8 +112,6 @@ class DedupNode:
         item_id = item.stable_id
         url = dedup_url_for_raw_item(item)
         if url is not None:
-            # A URL is a locator.  It becomes an exact raw duplicate only
-            # together with the immutable content version observed there.
             url_key = f"url:{url}:{content_hash_for_raw_item(item)}"
             match = await self._lookup_dedup_key(url_key)
             if match is not None:
@@ -134,52 +142,7 @@ class DedupNode:
                 matched_source_name=match.source_name,
                 details="Raw item matches a previously remembered normalized content signature.",
             )
-        # Near-match similarity is evidence for post-extraction identity
-        # resolution, not safe raw suppression: changed salary, role, or
-        # employment terms frequently share almost all boilerplate.
         return None
-
-    async def _find_near_duplicate(self, item: RawItem) -> DuplicateRecord | None:
-        fingerprint = self._fingerprint_payload(item)
-        if not fingerprint:
-            return None
-        title = dedup_title_for_raw_item(item)
-        best_match: RememberedDedupKey | None = None
-        best_score = 0.0
-        for record in await self._get_fingerprint_records():
-            if record.item_id == item.stable_id or not record.match_text:
-                continue
-            content_score = fuzz.token_set_ratio(fingerprint, record.match_text)
-            if content_score < self._near_duplicate_score_cutoff:
-                continue
-            title_score = (
-                fuzz.ratio(title, record.match_text.split(" || ", maxsplit=1)[0]) if title else 0.0
-            )
-            if title_score < self._title_score_cutoff:
-                continue
-            if content_score > best_score:
-                best_match = record
-                best_score = content_score
-        if best_match is None:
-            return None
-        if best_match.source_kind != item.source_kind or best_match.source_name != item.source_name:
-            # Cross-posted jobs are common. Preserve them long enough for the
-            # later extraction/grouping stages to merge instead of dropping
-            # them at raw-item time.
-            return None
-        return DuplicateRecord(
-            item_id=item.stable_id,
-            source_kind=item.source_kind,
-            source_name=item.source_name,
-            reason=DuplicateRejectionReason.DUPLICATE_NEAR_MATCH,
-            duplicate_key=dedup_content_key_for_raw_item(item),
-            matched_key=best_match.key,
-            matched_item_id=best_match.item_id,
-            matched_source_kind=best_match.source_kind,
-            matched_source_name=best_match.source_name,
-            score=round(best_score, 2),
-            details="Raw item is a near-duplicate of a previously remembered job signal.",
-        )
 
     def _records_for_item(self, item: RawItem) -> tuple[RememberedDedupKey, ...]:
         url = dedup_url_for_raw_item(item)
@@ -218,33 +181,25 @@ class DedupNode:
     async def _remember_records(self, records: tuple[RememberedDedupKey, ...]) -> None:
         for record in records:
             await self._store.remember_dedup_key(record)
-            self._cache_record(record)
 
     async def _lookup_dedup_key(self, key: str) -> RememberedDedupKey | None:
-        cached = self._dedup_cache.get(key)
+        async with self._lock:
+            cached = self._dedup_cache.get(key)
         if cached is not None:
+            self._cache_hits += 1
             return cached
+        self._cache_misses += 1
         record = await self._store.get_dedup_key(key)
         if record is not None:
-            self._cache_record(record)
+            async with self._lock:
+                self._cache_record(record)
         return record
-
-    async def _get_fingerprint_records(self) -> tuple[RememberedDedupKey, ...]:
-        if self._fingerprint_records is None:
-            records = await self._store.list_dedup_keys(DedupKeyKind.FINGERPRINT.value)
-            self._fingerprint_records = tuple(records)
-            for record in records:
-                self._dedup_cache.setdefault(record.key, record)
-        return self._fingerprint_records
 
     def _cache_record(self, record: RememberedDedupKey) -> None:
         self._dedup_cache[record.key] = record
-        if (
-            record.kind is DedupKeyKind.FINGERPRINT
-            and self._fingerprint_records is not None
-            and not any(existing.key == record.key for existing in self._fingerprint_records)
-        ):
-            self._fingerprint_records = (*self._fingerprint_records, record)
+        self._dedup_cache.move_to_end(record.key)
+        while len(self._dedup_cache) > self._cache_max_entries:
+            self._dedup_cache.popitem(last=False)
 
     def _fingerprint_payload(self, item: RawItem) -> str:
         return " || ".join(

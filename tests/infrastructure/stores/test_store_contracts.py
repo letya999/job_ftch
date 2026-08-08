@@ -111,6 +111,19 @@ async def test_dedup_claim_has_one_owner_and_releases(factory: Callable[[], obje
 
 
 @pytest.mark.parametrize("factory", STORE_FACTORIES)
+async def test_compare_and_reserve_is_all_or_nothing(factory: Callable[[], object]) -> None:
+    store = factory()
+    result = await store.compare_and_reserve(("a", "b"), "owner1", ttl_seconds=60)  # type: ignore[union-attr]
+    assert result.acquired is True
+    assert set(result.reserved_keys) == {"a", "b"}
+    result2 = await store.compare_and_reserve(("b", "c"), "owner2", ttl_seconds=60)  # type: ignore[union-attr]
+    assert result2.acquired is False
+    assert result2.conflicting_key == "b"
+    result3 = await store.compare_and_reserve(("d", "e"), "owner2", ttl_seconds=60)  # type: ignore[union-attr]
+    assert result3.acquired is True
+
+
+@pytest.mark.parametrize("factory", STORE_FACTORIES)
 @pytest.mark.integration
 async def test_run_state_namespacing(factory: Callable[[], object]) -> None:
     """set_run_state/get_run_state correctly namespace by source_kind+source_name."""

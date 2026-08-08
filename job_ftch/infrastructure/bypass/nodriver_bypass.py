@@ -7,10 +7,13 @@ import json
 import os
 import shutil
 import tempfile
-from contextlib import asynccontextmanager
+import time
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+import structlog
 
 from job_ftch.application.registry import BypassCapability, register_bypass
 from job_ftch.config import get_settings
@@ -26,10 +29,26 @@ except ImportError:
     _NODRIVER_AVAILABLE = False
 
 
+_PROFILE_LOCKS: dict[str, asyncio.Lock] = {}
+_PROFILE_LOCKS_GUARD = asyncio.Lock()
+logger = structlog.get_logger(__name__)
+
+
+async def _profile_lock_for(user_data_dir: str) -> asyncio.Lock:
+    key = str(Path(user_data_dir).expanduser().resolve())
+    async with _PROFILE_LOCKS_GUARD:
+        lock = _PROFILE_LOCKS.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            _PROFILE_LOCKS[key] = lock
+        return lock
+
+
 class _NodriverResponse:
     def __init__(self, *, url: str, status: int, headers: dict[str, str], body: str) -> None:
         self.url = url
         self.status = status
+        self.headers = dict(headers)
         self._headers = headers
         self._body = body
         self.request: Any = None
@@ -42,6 +61,9 @@ class _NodriverResponse:
 
     async def text(self) -> str:
         return self._body
+
+    async def body(self) -> bytes:
+        return self._body.encode("utf-8", errors="ignore")
 
 
 def _default_browser_executable_path() -> str | None:
@@ -89,14 +111,20 @@ class _NodriverPageAdapter:
         *,
         cookies: list[dict[str, Any]] | None = None,
         viewport: dict[str, Any] | None = None,
+        timezone_id: str | None = None,
     ) -> None:
         self._tab = tab
         self._cookies = list(cookies or [])
         self._viewport = viewport
+        self._timezone_id = timezone_id
+        self._init_scripts: list[str] = []
         self._network_enable_task: asyncio.Task[None] | None = None
         self._cookie_origins: set[str] = set()
 
     async def initialize(self) -> None:
+        if self._timezone_id and cdp is not None:
+            with suppress(Exception):
+                await self._tab.send(cdp.emulation.set_timezone_override(self._timezone_id))
         if not isinstance(self._viewport, dict):
             return
         width = int(self._viewport.get("width", 1440) or 1440)
@@ -194,19 +222,40 @@ class _NodriverPageAdapter:
         if self._network_enable_task is not None:
             await self._network_enable_task
         await self._prime_cookies(url)
-        nav = self._tab.get(url)
-        if timeout is not None:
-            self._tab = await asyncio.wait_for(nav, timeout / 1000)
+        if cdp is not None:
+            nav = self._tab.send(cdp.page.navigate(url))
+            if timeout is not None:
+                await asyncio.wait_for(nav, timeout / 1000)
+            else:
+                await nav
         else:
-            self._tab = await nav
+            nav = self._tab.get(url)
+            if timeout is not None:
+                self._tab = await asyncio.wait_for(nav, timeout / 1000)
+            else:
+                self._tab = await nav
+            for script in self._init_scripts:
+                await self._install_init_script(script)
         await self.wait_for_load_state("domcontentloaded", timeout=timeout)
         return None
+
+    async def add_init_script(self, script: str) -> None:
+        self._init_scripts.append(script)
+        await self._install_init_script(script)
+
+    async def _install_init_script(self, script: str) -> None:
+        if cdp is None:
+            await self.evaluate(script)
+            return
+        await self._tab.send(
+            cdp.page.add_script_to_evaluate_on_new_document(script, run_immediately=True)
+        )
 
     async def content(self) -> str:
         return str(await self._tab.get_content())
 
     async def evaluate(self, expression: str, arg: Any = None) -> Any:
-        final_expression = expression
+        final_expression = _playwright_eval_expression(expression)
         if arg is not None:
             final_expression = f"({expression})({json.dumps(arg)})"
         result = await self._tab.evaluate(
@@ -218,6 +267,58 @@ class _NodriverPageAdapter:
 
     async def click(self, selector: str, timeout: int | None = None) -> None:
         del timeout
+        if cdp is not None:
+            clicked = await self.evaluate(
+                """
+                (sel) => {
+                    const el = document.querySelector(sel);
+                    if (!el) return null;
+                    const rect = el.getBoundingClientRect();
+                    return {
+                        x: Math.max(1, Math.round(rect.left + rect.width / 2)),
+                        y: Math.max(1, Math.round(rect.top + rect.height / 2)),
+                    };
+                }
+                """,
+                selector,
+            )
+            if isinstance(clicked, dict):
+                x = float(clicked.get("x", 1) or 1)
+                y = float(clicked.get("y", 1) or 1)
+                with suppress(Exception):
+                    await self._tab.send(
+                        cdp.input_.dispatch_mouse_event(
+                            "mouseMoved", x=x - 24, y=y - 18, pointer_type="mouse"
+                        )
+                    )
+                    await self._tab.send(
+                        cdp.input_.dispatch_mouse_event(
+                            "mouseMoved", x=x, y=y, pointer_type="mouse"
+                        )
+                    )
+                    await self._tab.send(
+                        cdp.input_.dispatch_mouse_event(
+                            "mousePressed",
+                            x=x,
+                            y=y,
+                            button=cdp.input_.MouseButton.LEFT,
+                            buttons=1,
+                            click_count=1,
+                            pointer_type="mouse",
+                        )
+                    )
+                    await self._tab.send(
+                        cdp.input_.dispatch_mouse_event(
+                            "mouseReleased",
+                            x=x,
+                            y=y,
+                            button=cdp.input_.MouseButton.LEFT,
+                            buttons=0,
+                            click_count=1,
+                            pointer_type="mouse",
+                        )
+                    )
+                    return
         await self.evaluate(
             "(sel) => { const el = document.querySelector(sel); if (el) { el.click(); return true; } return false; }",
             selector,
@@ -254,6 +355,19 @@ class _NodriverPageAdapter:
         except Exception:
             return []
         return [_cookie_to_mapping(cookie) for cookie in cookies]
+
+    async def add_cookies(self, cookies: list[dict[str, Any]]) -> None:
+        if cdp is None:
+            return
+        original = self._cookies
+        try:
+            self._cookies = list(cookies)
+            target_url = self.url or "https://example.test/"
+            origin_key = urlparse(target_url).netloc.lower()
+            self._cookie_origins.discard(origin_key)
+            await self._prime_cookies(target_url)
+        finally:
+            self._cookies = original
 
     async def _prime_cookies(self, url: str) -> None:
         if cdp is None or not self._cookies:
@@ -321,7 +435,10 @@ class NodriverBypass:
         if config.get("skip_ssl"):
             browser_args.append("--ignore-certificate-errors")
         if config.get("user_agent"):
+            browser_args = _without_flag_prefix(browser_args, "--user-agent=")
             browser_args.append(f"--user-agent={config['user_agent']}")
+        if config.get("locale") or self._lang:
+            browser_args = _without_flag_prefix(browser_args, "--lang=")
         cdp_mitigation_args = [
             "--disable-blink-features=AutomationControlled",
             "--disable-features=IsolateOrigins,site-per-process",
@@ -350,12 +467,75 @@ class NodriverBypass:
         if config.get("persistent_context"):
             shared_profile_dir = config.get("_profile_dir")
             user_data_dir = (
-                str(shared_profile_dir)
+                str(Path(shared_profile_dir).expanduser().resolve())
                 if shared_profile_dir
                 else tempfile.mkdtemp(prefix="nodriver_profile_")
             )
             owns_profile_dir = not bool(shared_profile_dir)
 
+        current_user_data_dir = user_data_dir
+        current_owns_profile_dir = owns_profile_dir
+        recovery_attempted = False
+        while True:
+            profile_lock = (
+                await _profile_lock_for(current_user_data_dir) if current_user_data_dir else None
+            )
+            try:
+                if profile_lock is not None:
+                    async with (
+                        profile_lock,
+                        self._open_page_unlocked(
+                            config,
+                            browser_args=browser_args,
+                            user_data_dir=current_user_data_dir,
+                            owns_profile_dir=current_owns_profile_dir,
+                            use_proxy=use_proxy,
+                            viewport=viewport if isinstance(viewport, dict) else None,
+                        ) as page,
+                    ):
+                        yield page
+                    return
+
+                async with self._open_page_unlocked(
+                    config,
+                    browser_args=browser_args,
+                    user_data_dir=current_user_data_dir,
+                    owns_profile_dir=current_owns_profile_dir,
+                    use_proxy=use_proxy,
+                    viewport=viewport if isinstance(viewport, dict) else None,
+                ) as page:
+                    yield page
+                return
+            except Exception as exc:
+                if (
+                    recovery_attempted
+                    or not current_user_data_dir
+                    or current_owns_profile_dir
+                    or not _is_nodriver_connect_failure(exc)
+                ):
+                    raise
+                recovery_attempted = True
+                if _quarantine_profile_dir(current_user_data_dir):
+                    logger.warning(
+                        "nodriver_profile_quarantined_after_connect_failure",
+                        profile_hash=Path(current_user_data_dir).name,
+                    )
+                    continue
+                current_user_data_dir = tempfile.mkdtemp(prefix="nodriver_recovery_profile_")
+                current_owns_profile_dir = True
+                logger.warning("nodriver_profile_recovery_using_temp_profile")
+
+    @asynccontextmanager
+    async def _open_page_unlocked(
+        self,
+        config: dict[str, Any],
+        *,
+        browser_args: list[str],
+        user_data_dir: str | None,
+        owns_profile_dir: bool,
+        use_proxy: bool,
+        viewport: dict[str, Any] | None,
+    ) -> Any:
         browser = await nodriver.start(
             headless=bool(config.get("headless", True)),
             user_data_dir=user_data_dir,
@@ -377,7 +557,8 @@ class NodriverBypass:
         page = _NodriverPageAdapter(
             tab,
             cookies=config.get("cookies"),
-            viewport=viewport if isinstance(viewport, dict) else None,
+            viewport=viewport,
+            timezone_id=str(config.get("timezone_id") or "") or None,
         )
         await page.initialize()
         try:
@@ -424,6 +605,43 @@ def _normalize_headers(raw_headers: Any) -> dict[str, str]:
     if isinstance(raw_headers, dict):
         return {str(key).lower(): str(value) for key, value in raw_headers.items()}
     return {}
+
+
+def _without_flag_prefix(args: list[str], prefix: str) -> list[str]:
+    return [arg for arg in args if not arg.startswith(prefix)]
+
+
+def _is_nodriver_connect_failure(exc: Exception) -> bool:
+    message = str(exc).casefold()
+    return "failed to connect to browser" in message
+
+
+def _playwright_eval_expression(expression: str) -> str:
+    stripped = expression.strip()
+    if stripped.startswith("() =>") or stripped.startswith("async () =>"):
+        return f"({expression})()"
+    if stripped.startswith("function"):
+        return f"({expression})()"
+    return expression
+
+
+def _quarantine_profile_dir(user_data_dir: str) -> bool:
+    path = Path(user_data_dir)
+    if not path.exists():
+        return True
+    quarantine_root = path.parent / "_quarantine"
+    target = quarantine_root / f"{path.name}.{int(time.time())}.{os.getpid()}"
+    try:
+        quarantine_root.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(path), str(target))
+    except OSError as exc:
+        logger.warning(
+            "nodriver_profile_quarantine_failed",
+            profile_hash=path.name,
+            error=exc.__class__.__name__,
+        )
+        return False
+    return True
 
 
 def _materialize_runtime_value(raw: Any) -> Any:
@@ -477,7 +695,14 @@ if _NODRIVER_AVAILABLE:
             cost=30,
             browser_family="chromium_cdp",
             owns_session=True,
-            challenge_actions=frozenset({"cdp_checkbox", "cloudflare_challenge"}),
+            challenge_actions=frozenset(
+                {
+                    "cdp_checkbox",
+                    "cloudflare_challenge",
+                    "fingerprint_resistant",
+                    "generic_challenge",
+                }
+            ),
             legal_gate="adr_073",
             min_remaining_seconds=10.0,
         ),

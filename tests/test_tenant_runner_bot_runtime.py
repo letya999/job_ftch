@@ -142,6 +142,10 @@ async def test_bot_scheduler_status_reads_store_state() -> None:
     await runtime.store.set_run_state("bot_scheduler:last_success_at", "2026-06-30T10:05:00+00:00")
     await runtime.store.set_run_state("bot_scheduler:last_error", "publish failed")
     await runtime.store.set_run_state("bot_scheduler:last_publish_sent", "3")
+    await runtime.store.set_run_state(
+        "bot_scheduler:last_publish_skipped_at", "2026-06-30T14:00:00+00:00"
+    )
+    await runtime.store.set_run_state("bot_scheduler:last_publish_skipped_reason", "no_new_jobs")
 
     status = await runner.get_bot_scheduler_status("bot_runtime")
 
@@ -149,6 +153,8 @@ async def test_bot_scheduler_status_reads_store_state() -> None:
     assert status["last_success_at"] == "2026-06-30T10:05:00+00:00"
     assert status["last_error"] == "publish failed"
     assert status["last_publish_sent"] == "3"
+    assert status["last_publish_skipped_at"] == "2026-06-30T14:00:00+00:00"
+    assert status["last_publish_skipped_reason"] == "no_new_jobs"
 
 
 @pytest.mark.asyncio

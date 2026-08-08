@@ -77,6 +77,8 @@ class SiteParserManifestEntry(BaseModel):
             payload["include_if_detail_page"] = self.include_if_detail_page
         if self.expand_links is not None:
             payload["expand_links"] = self.expand_links
+        if self.extra:
+            payload["extra"] = dict(self.extra)
         return payload
 
 

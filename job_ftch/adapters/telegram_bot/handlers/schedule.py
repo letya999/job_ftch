@@ -101,6 +101,13 @@ async def cmd_schedule(message: Message, runner: TenantRunner, config: TelegramB
                 "Последняя успешная публикация: "
                 f"{_format_timestamp(scheduler_status['last_publish_success_at'])}"
             )
+        if scheduler_status.get("last_publish_skipped_reason"):
+            skipped_at = _format_timestamp(scheduler_status.get("last_publish_skipped_at"))
+            status_lines.append(
+                "Последняя публикация пропущена: "
+                f"{scheduler_status['last_publish_skipped_reason']}"
+                + (f" ({skipped_at})" if skipped_at != "—" else "")
+            )
         if scheduler_status.get("last_error"):
             status_lines.append(f"Ошибка run: {scheduler_status['last_error']}")
         if scheduler_status.get("last_publish_error"):

@@ -1,7 +1,7 @@
 ---
 title: "Правила разработки"
 description: "Короткие рабочие правила для изменений в job_ftch: границы слоёв, зависимости, тесты, документация и release gates."
-updated: 2026-07-28
+updated: 2026-08-02
 ---
 # Правила разработки
 
@@ -25,8 +25,11 @@ updated: 2026-07-28
 Проверка:
 
 ```powershell
-uv run python scripts/check_module_boundaries.py
+just architecture-verify
 ```
+
+Точная проверка и её место среди code/test/release gates описаны в
+[operations/ci-cd](operations/ci-cd.md).
 
 ## Правила pipeline
 
@@ -51,8 +54,8 @@ uv run python scripts/check_module_boundaries.py
 - После добавления/переезда/удаления docs запускать:
 
 ```powershell
-uv run python scripts/build_index_docs.py
-uv run python scripts/lint_docs.py
+just setup-docs
+just docs-verify
 ```
 
 - Generated docs не править руками; использовать generator scripts.
@@ -63,8 +66,12 @@ uv run python scripts/lint_docs.py
 Для локальной итерации:
 
 ```powershell
-uv run pytest tests/test_<module>.py -q -o addopts="" --tb=line
+just tests-path tests/test_<module>.py
 ```
+
+Перед изменением с широким влиянием — `just tests-all`; для быстрой проверки
+основных paths — `just tests-smoke`. Их состав и отличие от GitHub Actions
+описаны в [operations/ci-cd](operations/ci-cd.md).
 
 Перед release использовать [release_checklist](release_checklist.md). Не
 запускать весь suite verbose в foreground в агентном цикле: вывод слишком

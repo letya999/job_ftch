@@ -128,6 +128,31 @@ def test_probe_classifies_scraped_but_unemitted_detail_pages_as_extraction_failu
     )
 
 
+def test_probe_preserves_challenge_evidence_for_empty_monitor_result() -> None:
+    module = _load_script_module()
+    result = SourceFetchResult(
+        source_id="career_site:probe",
+        source_kind="career_site",
+        source_name="probe",
+        failed=True,
+        error="source_zero_yield:monitor_empty",
+    )
+
+    assert (
+        module._failure_bucket(
+            item_count=0,
+            parser_name=None,
+            stats={
+                "zero_reason": "monitor_empty",
+                "detected_captcha_types": ["cloudflare_challenge"],
+                "challenge_events": [{"type": "cloudflare_challenge"}],
+            },
+            source_result=result,
+        )
+        == "waf_challenge"
+    )
+
+
 def test_probe_preserves_protected_primary_outcome_after_deadline() -> None:
     module = _load_script_module()
     result = SourceFetchResult(

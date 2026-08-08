@@ -109,6 +109,15 @@ class FlushableSink(Sink[SinkItem], Protocol[SinkItem]):
         """Finalize buffered writes."""
 
 
+@dataclass(frozen=True, slots=True)
+class DedupReservation:
+    """Result of an atomic compare-and-reserve operation."""
+
+    acquired: bool
+    reserved_keys: tuple[str, ...] = ()
+    conflicting_key: str | None = None
+
+
 @runtime_checkable
 class Store(Protocol):
     async def enqueue_outbox(self, record: OutboxRecord) -> OutboxRecord: ...
@@ -122,6 +131,11 @@ class Store(Protocol):
 
     async def release_dedup_claim(self, key: str, owner_id: str) -> None:
         """Release a temporary claim when it is still owned by ``owner_id``."""
+
+    async def compare_and_reserve(
+        self, keys: tuple[str, ...], owner_id: str, *, ttl_seconds: int
+    ) -> DedupReservation:
+        """Atomically reserve all keys or none. Returns which keys were reserved."""
 
     async def record_observation(self, entry: ObservationLedgerEntry) -> ObservationLedgerEntry:
         """Append a raw observation, returning its stable content version."""
@@ -554,6 +568,24 @@ class IngestMode(Protocol):
 class ProxyManager(Protocol):
     def get_proxy(self) -> str | None:
         """Return the next proxy URL from the pool."""
+
+
+@runtime_checkable
+class ProxyRouter(Protocol):
+    def get_proxy_for(
+        self,
+        *,
+        domain: str,
+        country: str = "",
+        purpose: str = "ingest",
+    ) -> str | None:
+        """Return a policy-allowed proxy URL for a specific domain."""
+
+    def rotate_proxy_for(self, domain: str) -> None:
+        """Invalidate the current sticky proxy/session for a domain."""
+
+    def proxy_stats(self) -> dict[str, Any]:
+        """Return secret-safe proxy pool and budget diagnostics."""
 
 
 @runtime_checkable

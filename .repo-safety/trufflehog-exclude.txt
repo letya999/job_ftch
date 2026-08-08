@@ -10,6 +10,7 @@
 ^tests/infrastructure/bypass/test_attempt_budget\.py$
 ^tests/infrastructure/bypass/test_domain_intel_persistence\.py$
 ^tests/infrastructure/bypass/test_wave3_proxy\.py$
+^tests/infrastructure/bypass/test_captcha_workflow\.py$
 ^job_ftch/infrastructure/bypass/proxy_bypass\.py$
 ^job_ftch/adapters/telegram_bot/tests/test_handlers\.py$
 ^adapters/telegram_bot/tests/test_handlers\.py$

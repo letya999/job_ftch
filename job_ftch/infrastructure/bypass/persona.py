@@ -11,6 +11,7 @@ covering Chrome 120-131, Safari 17, and Firefox 125 across Windows/macOS/Linux.
 from __future__ import annotations
 
 import hashlib
+import platform
 import random
 import re
 from dataclasses import dataclass, replace
@@ -131,21 +132,25 @@ _LOCALES: list[tuple[str, str]] = [
     ("ru-RU", "Europe/Moscow"),
 ]
 
+# Kept current with the shipping browser majors and with curl_cffi's newest
+# impersonate targets (chrome146, firefox147, safari18_4). test_persona_pool_
+# is_not_stale fails if this drifts too far behind, so the pool cannot silently
+# rot the way it did at Chrome 131 for ~20 months.
 _BROWSERS: list[dict[str, Any]] = [
     {
         "family": "chromium",
-        "version": "131",
-        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "ch_ua": '"Chromium";v="131", "Not?A_Brand";v="24", "Google Chrome";v="131"',
+        "version": "146",
+        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "ch_ua": '"Chromium";v="146", "Not?A_Brand";v="24", "Google Chrome";v="146"',
         "nav_win": "Win32",
         "nav_mac": "MacIntel",
         "nav_linux": "Linux x86_64",
     },
     {
         "family": "chromium",
-        "version": "124",
-        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "ch_ua": '"Chromium";v="124", "Not_A Brand";v="8", "Google Chrome";v="124"',
+        "version": "145",
+        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+        "ch_ua": '"Chromium";v="145", "Not_A Brand";v="8", "Google Chrome";v="145"',
         "nav_win": "Win32",
         "nav_mac": "MacIntel",
         "nav_linux": "Linux x86_64",
@@ -153,8 +158,8 @@ _BROWSERS: list[dict[str, Any]] = [
     {
         "family": "safari",
         "supported_os": ("macos",),
-        "version": "safari17",
-        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+        "version": "safari18",
+        "ua_tpl": "Mozilla/5.0 ({platform}) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15",
         "ch_ua": "",
         "nav_win": "MacIntel",
         "nav_mac": "MacIntel",
@@ -162,8 +167,8 @@ _BROWSERS: list[dict[str, Any]] = [
     },
     {
         "family": "firefox",
-        "version": "ff125",
-        "ua_tpl": "Mozilla/5.0 ({platform}; rv:125.0) Gecko/20100101 Firefox/125.0",
+        "version": "ff147",
+        "ua_tpl": "Mozilla/5.0 ({platform}; rv:147.0) Gecko/20100101 Firefox/147.0",
         "ch_ua": "",
         "nav_win": "Win32",
         "nav_mac": "MacIntel",
@@ -392,7 +397,19 @@ def _generate_personas(count: int = 20) -> list[BrowserPersona]:
 
 PERSONA_POOL: list[BrowserPersona] = _generate_personas(20)
 
-_domain_persona_map: dict[tuple[str, str | None, str], BrowserPersona] = {}
+_domain_persona_map: dict[tuple[str, str | None, str, str], BrowserPersona] = {}
+
+
+def local_os_family() -> str:
+    """Return the browser-native OS family for this runtime host."""
+    system = platform.system().lower()
+    if system == "windows":
+        return "windows"
+    if system == "darwin":
+        return "macos"
+    if system == "linux":
+        return "linux"
+    return ""
 
 
 def select_persona(
@@ -400,6 +417,7 @@ def select_persona(
     browser_family: str | None = None,
     *,
     proxy_country: str = "",
+    os_family: str | None = None,
 ) -> BrowserPersona:
     """Select a sticky persona for a domain (consistent within session).
 
@@ -410,8 +428,10 @@ def select_persona(
     normalized_family = {
         "chromium_cdp": "chromium",
         "chromium_patched": "chromium",
+        "chromium_patchright": "chromium",
     }.get(browser_family or "", browser_family)
-    key = (domain, normalized_family, proxy_country.upper())
+    normalized_os = (os_family or "").strip().lower()
+    key = (domain, normalized_family, proxy_country.upper(), normalized_os)
     if key in _domain_persona_map:
         return _domain_persona_map[key]
     candidates = [
@@ -419,10 +439,26 @@ def select_persona(
         for persona in PERSONA_POOL
         if normalized_family is None or persona.browser_family == normalized_family
     ]
+    if normalized_os:
+        platform_by_os = {
+            "windows": "Win32",
+            "macos": "MacIntel",
+            "linux": "Linux x86_64",
+        }
+        expected_platform = platform_by_os.get(normalized_os)
+        os_candidates = [
+            persona
+            for persona in candidates
+            if expected_platform is not None and persona.navigator_platform == expected_platform
+        ]
+        if os_candidates:
+            candidates = os_candidates
     if not candidates:
         candidates = PERSONA_POOL
     idx = int(
-        hashlib.sha256(f"{domain}:{normalized_family}:{proxy_country}".encode()).hexdigest(),
+        hashlib.sha256(
+            f"{domain}:{normalized_family}:{proxy_country}:{normalized_os}".encode()
+        ).hexdigest(),
         16,
     ) % len(candidates)
     persona = candidates[idx]
@@ -453,11 +489,14 @@ def align_persona_version(
     normalized_family = {
         "chromium_cdp": "chromium",
         "chromium_patched": "chromium",
+        "chromium_patchright": "chromium",
     }.get(browser_family, browser_family)
-    match = re.search(r"\d+", reported_version)
+    match = re.search(r"\d+(?:\.\d+){0,3}", reported_version)
     if match is None or normalized_family != persona.browser_family:
         return persona
-    major = match.group(0)
+    runtime_version = match.group(0)
+    major = runtime_version.split(".", maxsplit=1)[0]
+    full_version = runtime_version if "." in runtime_version else f"{major}.0.0.0"
     if normalized_family == "chromium":
         ua = re.sub(r"Chrome/\d+", f"Chrome/{major}", persona.ua)
         client_hints = re.sub(
@@ -475,5 +514,5 @@ def align_persona_version(
         persona,
         ua=ua,
         sec_ch_ua=client_hints,
-        browser_version=major,
+        browser_version=full_version,
     )

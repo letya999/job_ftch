@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "components": [
+    {
+      "id": "fingerprintjs",
+      "name": "FingerprintJS",
+      "version": "5.2.0",
+      "license": "MIT",
+      "source": "https://github.com/fingerprintjs/fingerprintjs",
+      "mode": "local-browser-oracle",
+      "status": "adopted",
+      "namespace": "vendor:fingerprintjs",
+      "asset_path": "paritylab/static/vendor/fingerprintjs-5.2.0.esm.js",
+      "asset_sha256": "1199e961c36958e92e486a94cc6fbc5b1687b483d635019d4130cc722ecab206",
+      "surfaces": ["browser-components", "rendering", "storage", "visitor-hash"]
+    },
+    {
+      "id": "thumbmark",
+      "name": "ThumbmarkJS",
+      "version": "1.10.1",
+      "license": "MIT",
+      "source": "https://github.com/thumbmarkjs/thumbmarkjs",
+      "mode": "local-browser-oracle",
+      "status": "adopted",
+      "namespace": "vendor:thumbmark",
+      "asset_path": "paritylab/static/vendor/thumbmark-1.10.1.esm.js",
+      "asset_sha256": "e3799b505194190ba2f2b28fc5ce22a79bb2cf78e90688aca79ce073c0b293e8",
+      "surfaces": ["audio", "canvas", "fonts", "webgl", "permissions", "screen"]
+    },
+    {
+      "id": "botd",
+      "name": "BotD",
+      "version": "2.0.0",
+      "license": "MIT",
+      "source": "https://github.com/fingerprintjs/BotD",
+      "mode": "local-browser-oracle",
+      "status": "adopted",
+      "namespace": "vendor:botd",
+      "asset_path": "paritylab/static/vendor/botd-2.0.0.esm.js",
+      "asset_sha256": "f438ed251dc7414ece9d4a2b6941441ad9ffae1a1905817f5f0c7366e701dd86",
+      "surfaces": ["automation", "browser-quirks", "detector-verdict"]
+    },
+    {
+      "id": "creep-research",
+      "name": "Creep research corpus",
+      "version": "git-review-required",
+      "license": "MIT+trademark-policy",
+      "source": "https://github.com/abrahamjuliot/creepjs",
+      "mode": "renamed-offline-research-oracle",
+      "status": "review-only",
+      "namespace": "vendor:creep-research",
+      "asset_path": null,
+      "asset_sha256": null,
+      "surfaces": ["prototype-lies", "privacy-resistance", "rendering", "realm-coherence"]
+    }
+  ]
+}

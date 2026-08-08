@@ -1,7 +1,7 @@
 ---
 title: "Архитектура job_ftch"
 description: "Полное описание текущей архитектуры: слои, порты, pipeline, graph runtime, ingest stack, bypass и адаптеры."
-updated: 2026-07-28
+updated: 2026-08-03
 ---
 # Архитектура job_ftch
 
@@ -271,7 +271,7 @@ tiers. Route состоит из независимых осей:
 Для неизвестного сигнала используется консервативный fallback:
 
 ```text
-noop -> curl_stealth -> stealth_browser -> nodriver -> camoufox -> cloak
+noop -> curl_stealth -> tls_client -> stealth_browser -> patchright_browser -> nodriver -> camoufox -> cloak
 ```
 
 Классифицированный сигнал может выбирать capability напрямую:

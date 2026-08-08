@@ -1,0 +1,2455 @@
+{
+  "version": "1.0.0",
+  "surfaces": [
+    {
+      "id": "network.http.semantics",
+      "title": "HTTP request semantics",
+      "family": "network",
+      "status": "implemented",
+      "stability": "high",
+      "description": "Methods, destinations, fetch metadata, redirects, cookies, cache and resource graph.",
+      "collectors": [
+        "server.request_audit"
+      ],
+      "realms": [
+        "edge"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "low"
+    },
+    {
+      "id": "network.http.header_shape",
+      "title": "HTTP header shape",
+      "family": "network",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "Header values, presence, ordering and cross-request coherence.",
+      "collectors": [
+        "server.ordered_headers"
+      ],
+      "realms": [
+        "edge"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "network.http2.frames",
+      "title": "HTTP/2 frame fingerprint",
+      "family": "network",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "Strict preface/frame parsing, SETTINGS, pseudo-header order, connection flow-control and bounded frame sequence.",
+      "collectors": [
+        "observatory.http2"
+      ],
+      "realms": [
+        "edge"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "network.http3.frames",
+      "title": "HTTP/3 request fingerprint",
+      "family": "network",
+      "status": "implemented",
+      "stability": "experimental",
+      "description": "Strict QUIC varints, control/request frame sequence, SETTINGS and bounded QPACK encoder/decoder stream shapes from decrypted streams.",
+      "collectors": [
+        "observatory.http3"
+      ],
+      "realms": [
+        "edge"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "network.tls.client_hello",
+      "title": "TLS ClientHello fingerprint",
+      "family": "transport",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "Versions, ciphers, extensions, groups, signature algorithms, GREASE, SNI and ALPN.",
+      "collectors": [
+        "server.client_hello"
+      ],
+      "realms": [
+        "edge"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "network.tls.lifecycle",
+      "title": "TLS session lifecycle",
+      "family": "transport",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "ClientHello PSK/early-data offers correlated with negotiated version/ALPN, resumption, tickets, key updates, handshake timing and request reuse.",
+      "collectors": [
+        "transport.tls_state",
+        "observatory.tls"
+      ],
+      "realms": [
+        "edge"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "network.quic.transport",
+      "title": "QUIC transport fingerprint",
+      "family": "transport",
+      "status": "implemented",
+      "stability": "experimental",
+      "description": "Normalized transport parameters, version, ALPN, resumption, 0-RTT, retry and migration lifecycle.",
+      "collectors": [
+        "observatory.quic"
+      ],
+      "realms": [
+        "edge"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "network.tcp.ip",
+      "title": "TCP/IP stack fingerprint",
+      "family": "transport",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Privacy-safe normalized SYN/IP evidence: version, initial/observed TTL and hops, MSS, window/scale, ordered options, SACK/timestamps/ECN, retransmissions and bounded pacing.",
+      "collectors": [
+        "observatory.tcpip",
+        "tshark.external"
+      ],
+      "realms": [
+        "host",
+        "edge"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "network.dns.webrtc",
+      "title": "DNS and WebRTC network coherence",
+      "family": "network",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Privacy-safe DNS transport/query aggregates plus SDP shape, ICE state/timing, candidate type/protocol/address class and mDNS behavior without retaining IPs or query labels.",
+      "collectors": [
+        "probe.webrtc",
+        "observatory.dns"
+      ],
+      "realms": [
+        "window",
+        "edge"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "network.ip.reputation",
+      "title": "IP and ASN evidence",
+      "family": "network",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Longest-prefix offline CIDR policy plus optional local MaxMind ASN enrichment with dataset hash, mtime and provider provenance.",
+      "collectors": [
+        "offline.reputation",
+        "maxmind.local"
+      ],
+      "realms": [
+        "edge"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "runtime.identity",
+      "title": "Browser identity and UA-CH",
+      "family": "runtime",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "UA, UA-CH, platform, vendor, locale and timezone coherence.",
+      "collectors": [
+        "probe.runtime"
+      ],
+      "realms": [
+        "window",
+        "iframe",
+        "worker"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "runtime.hardware",
+      "title": "Hardware capability shape",
+      "family": "runtime",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Concurrency, memory, touch, battery and device capability consistency.",
+      "collectors": [
+        "probe.runtime"
+      ],
+      "realms": [
+        "window",
+        "worker"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "runtime.screen",
+      "title": "Screen and viewport topology",
+      "family": "runtime",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "Screen, available area, viewport, outer dimensions, DPR, depth and orientation.",
+      "collectors": [
+        "probe.runtime"
+      ],
+      "realms": [
+        "window"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "runtime.media_queries",
+      "title": "CSS media and preference surfaces",
+      "family": "rendering",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "Color gamut, HDR, contrast, motion, transparency, pointer and hover media queries.",
+      "collectors": [
+        "probe.rendering"
+      ],
+      "realms": [
+        "window",
+        "iframe"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "runtime.permissions",
+      "title": "Permissions and capability state",
+      "family": "runtime",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Permissions API, notification, clipboard, media and sensor capability coherence.",
+      "collectors": [
+        "probe.runtime"
+      ],
+      "realms": [
+        "window"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "runtime.storage",
+      "title": "Storage and partitioning",
+      "family": "runtime",
+      "status": "implemented",
+      "stability": "low",
+      "description": "First-party cookies/storage/quota/cache/worker/OPFS shape correlated with a second-origin iframe receipt and Storage Access API state.",
+      "collectors": [
+        "probe.storage",
+        "probe.embedded-storage",
+        "server.cookie"
+      ],
+      "realms": [
+        "window",
+        "embedded-frame"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "rendering.canvas",
+      "title": "Canvas rendering",
+      "family": "rendering",
+      "status": "implemented",
+      "stability": "low",
+      "description": "2D text, shapes, compositing, readback and stability digests.",
+      "collectors": [
+        "probe.canvas"
+      ],
+      "realms": [
+        "window",
+        "iframe",
+        "worker"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "rendering.webgl",
+      "title": "WebGL capabilities and rendering",
+      "family": "rendering",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Vendor, renderer, extensions, limits, precision and render output.",
+      "collectors": [
+        "probe.webgl"
+      ],
+      "realms": [
+        "window",
+        "iframe",
+        "worker"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "rendering.webgpu",
+      "title": "WebGPU capabilities and rendering",
+      "family": "rendering",
+      "status": "implemented",
+      "stability": "experimental",
+      "description": "Adapter identity, features, limits, preferred format, deterministic WGSL compute execution and mapped buffer readback.",
+      "collectors": [
+        "probe.deep"
+      ],
+      "realms": [
+        "window"
+      ],
+      "browsers": [
+        "chromium",
+        "firefox",
+        "webkit"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "rendering.fonts",
+      "title": "Fonts and text rasterization",
+      "family": "rendering",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Font presence and fallback, cross-script TextMetrics, sampled canvas raster output, emoji and variable-font support.",
+      "collectors": [
+        "probe.window",
+        "probe.deep"
+      ],
+      "realms": [
+        "window",
+        "iframe"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "rendering.geometry",
+      "title": "DOM and ClientRect micro-geometry",
+      "family": "rendering",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Element rects, glyph bounds, SVG geometry, scrollbars, zoom and subpixel behavior.",
+      "collectors": [
+        "probe.geometry"
+      ],
+      "realms": [
+        "window",
+        "iframe"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "rendering.css_defaults",
+      "title": "CSS and native control defaults",
+      "family": "rendering",
+      "status": "implemented",
+      "stability": "low",
+      "description": "UA stylesheet, native controls, computed style and pseudo-element shape.",
+      "collectors": [
+        "probe.rendering"
+      ],
+      "realms": [
+        "window",
+        "iframe"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "media.audio",
+      "title": "Audio processing fingerprint",
+      "family": "media",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Offline audio rendering, base latency and audio API shape.",
+      "collectors": [
+        "probe.audio"
+      ],
+      "realms": [
+        "window"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "media.codecs",
+      "title": "Media codec capability fingerprint",
+      "family": "media",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "canPlayType, MediaCapabilities, WebCodecs, container and codec combinations.",
+      "collectors": [
+        "probe.media"
+      ],
+      "realms": [
+        "window",
+        "worker"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "media.devices",
+      "title": "Media device shape",
+      "family": "media",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Bounded device inventory before/after, kind counts, label/group exposure, supported constraints, capability methods, permission states and devicechange transitions without opening media streams.",
+      "collectors": [
+        "probe.runtime.media-devices"
+      ],
+      "realms": [
+        "window"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "integrity.native_shape",
+      "title": "Native API integrity",
+      "family": "integrity",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "Descriptors, prototypes, own keys, native function strings and wrapper leakage.",
+      "collectors": [
+        "probe.integrity"
+      ],
+      "realms": [
+        "window",
+        "iframe",
+        "worker"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "low"
+    },
+    {
+      "id": "integrity.automation",
+      "title": "Automation runtime artifacts",
+      "family": "integrity",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "webdriver, CDP/WebDriver globals, stack markers and injected bindings.",
+      "collectors": [
+        "probe.integrity"
+      ],
+      "realms": [
+        "window",
+        "iframe"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "low"
+    },
+    {
+      "id": "integrity.timing",
+      "title": "Event loop and timer integrity",
+      "family": "integrity",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Clock resolution and monotonicity, Date/performance drift, microtask/task ordering, animation cadence, timeout jitter, isolation and cross-probe time origins.",
+      "collectors": [
+        "probe.deep",
+        "performance-observer"
+      ],
+      "realms": [
+        "window"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "realm.parity",
+      "title": "Cross-realm parity",
+      "family": "realm",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "Identity, hardware, rendering and API shape across window, iframe and workers.",
+      "collectors": [
+        "probe.realms"
+      ],
+      "realms": [
+        "window",
+        "iframe",
+        "worker",
+        "service-worker"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "behavior.pointer",
+      "title": "Pointer and mouse dynamics",
+      "family": "behavior",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Trajectory, cadence, velocity, acceleration, jerk, curvature and target acquisition.",
+      "collectors": [
+        "probe.behavior"
+      ],
+      "realms": [
+        "window"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "behavior.keyboard",
+      "title": "Keyboard dynamics",
+      "family": "behavior",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Down/up duration, cadence, corrections, repeats and activation causality.",
+      "collectors": [
+        "probe.behavior"
+      ],
+      "realms": [
+        "window"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "behavior.scroll",
+      "title": "Scroll dynamics",
+      "family": "behavior",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Wheel deltas, inertia decay, reversals, quantization and frame alignment.",
+      "collectors": [
+        "probe.behavior"
+      ],
+      "realms": [
+        "window"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "behavior.touch",
+      "title": "Touch and pen dynamics",
+      "family": "behavior",
+      "status": "implemented",
+      "stability": "low",
+      "description": "Pressure, radius, tilt, pointer identity and gesture lifecycle continuity.",
+      "collectors": [
+        "probe.behavior"
+      ],
+      "realms": [
+        "window"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "behavior.causality",
+      "title": "Interaction causality",
+      "family": "behavior",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "Trusted events, activation, focus, visibility, layout target and temporal ordering.",
+      "collectors": [
+        "probe.behavior"
+      ],
+      "realms": [
+        "window"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "behavior.replay",
+      "title": "Behavior replay detection",
+      "family": "behavior",
+      "status": "implemented",
+      "stability": "experimental",
+      "description": "Repeated paths, temporal templates and cross-session event replay.",
+      "collectors": [
+        "analyzer.behavior_replay"
+      ],
+      "realms": [
+        "session"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "session.coherence",
+      "title": "Cross-layer session coherence",
+      "family": "session",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "Network, runtime, realm, transport and behavior identity consistency.",
+      "collectors": [
+        "analyzer.session"
+      ],
+      "realms": [
+        "session"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    },
+    {
+      "id": "session.lifecycle",
+      "title": "Session and challenge lifecycle",
+      "family": "session",
+      "status": "implemented",
+      "stability": "high",
+      "description": "Clearance binding, expiry, replay, challenge escalation and request intent.",
+      "collectors": [
+        "playground.gate"
+      ],
+      "realms": [
+        "session"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "medium"
+    },
+    {
+      "id": "opaque.telemetry",
+      "title": "Opaque payload observations",
+      "family": "telemetry",
+      "status": "implemented",
+      "stability": "medium",
+      "description": "Length, entropy, encoding, key shape and cross-session stability without decoding vendor payloads.",
+      "collectors": [
+        "server.opaque"
+      ],
+      "realms": [
+        "session"
+      ],
+      "browsers": [
+        "all"
+      ],
+      "privacy": "high"
+    }
+  ],
+  "countermeasures": [
+    {
+      "id": "cm.native_browser",
+      "title": "Use native browser execution",
+      "description": "Keep protocol, runtime and resource loading owned by one real browser process.",
+      "validates_with": [
+        "manual baseline parity"
+      ],
+      "limitations": [
+        "Automation control can remain observable."
+      ]
+    },
+    {
+      "id": "cm.coherent_persona",
+      "title": "Project one coherent persona",
+      "description": "Align identity across context, page, workers, transport and session state.",
+      "validates_with": [
+        "cross-realm parity",
+        "cross-layer coherence"
+      ],
+      "limitations": [
+        "Cannot change the browser engine's native protocol stack."
+      ]
+    },
+    {
+      "id": "cm.no_runtime_patch",
+      "title": "Avoid invasive runtime patching",
+      "description": "Prefer native browser capabilities and launch configuration over JS wrappers.",
+      "validates_with": [
+        "native integrity fixtures"
+      ],
+      "limitations": [
+        "May expose default automation properties."
+      ]
+    },
+    {
+      "id": "cm.browser_transport",
+      "title": "Use browser-owned transport",
+      "description": "Let the browser produce TLS, HTTP/2 and HTTP/3 handshakes and connection reuse.",
+      "validates_with": [
+        "transport baseline"
+      ],
+      "limitations": [
+        "Proxy infrastructure can still alter network identity."
+      ]
+    },
+    {
+      "id": "cm.session_binding",
+      "title": "Bind state to one session",
+      "description": "Preserve cookies, clearance, IP and persona throughout a bounded workflow.",
+      "validates_with": [
+        "challenge lifecycle fixtures"
+      ],
+      "limitations": [
+        "Long sessions can encounter natural network changes."
+      ]
+    },
+    {
+      "id": "cm.physical_input",
+      "title": "Use physical input semantics",
+      "description": "Generate input through browser/native pathways with target-aware timing and causal state.",
+      "validates_with": [
+        "behavior baseline corpus"
+      ],
+      "limitations": [
+        "Synthetic input can still differ statistically from humans."
+      ]
+    },
+    {
+      "id": "cm.bounded_rate",
+      "title": "Bound concurrency and rate",
+      "description": "Respect navigation waterfalls, backoff, cache and per-origin budgets.",
+      "validates_with": [
+        "rate and waterfall fixtures"
+      ],
+      "limitations": [
+        "Does not establish human intent."
+      ]
+    },
+    {
+      "id": "cm.honest_capability",
+      "title": "Preserve honest capability shape",
+      "description": "Do not claim hardware, GPU, media or APIs that the environment cannot support consistently.",
+      "validates_with": [
+        "rendering and realm baselines"
+      ],
+      "limitations": [
+        "Container baselines may remain unusual."
+      ]
+    },
+    {
+      "id": "cm.challenge_protocol",
+      "title": "Implement challenge lifecycle correctly",
+      "description": "Execute, bind, expire and revoke owned challenge state without token replay.",
+      "validates_with": [
+        "challenge fixtures"
+      ],
+      "limitations": [
+        "Does not solve third-party challenges."
+      ]
+    },
+    {
+      "id": "cm.authorized_api",
+      "title": "Use an authorized structured API",
+      "description": "Prefer documented or authorized feeds where available.",
+      "validates_with": [
+        "source contract tests"
+      ],
+      "limitations": [
+        "Not available for every source."
+      ]
+    }
+  ],
+  "mechanics": [
+    {
+      "id": "ua_spoofing",
+      "title": "UA and UA-CH spoofing",
+      "category": "identity",
+      "status": "implemented",
+      "description": "Replace declared browser or platform identity.",
+      "observable_consequences": [
+        "realm drift",
+        "network/runtime mismatch",
+        "capability mismatch"
+      ],
+      "surfaces": [
+        "runtime.identity",
+        "realm.parity",
+        "session.coherence"
+      ],
+      "countermeasures": [
+        "cm.coherent_persona",
+        "cm.native_browser"
+      ],
+      "residual_risk": "A coherent declaration can still conflict with transport or rendering."
+    },
+    {
+      "id": "header_replay",
+      "title": "Browser header replay",
+      "category": "network",
+      "status": "implemented",
+      "description": "Copy a browser-like header set into a non-browser client.",
+      "observable_consequences": [
+        "header order drift",
+        "fetch metadata gaps",
+        "collapsed waterfall"
+      ],
+      "surfaces": [
+        "network.http.header_shape",
+        "network.http.semantics"
+      ],
+      "countermeasures": [
+        "cm.browser_transport",
+        "cm.native_browser"
+      ],
+      "residual_risk": "Proxies can legitimately normalize headers."
+    },
+    {
+      "id": "tls_impersonation",
+      "title": "TLS impersonation",
+      "category": "transport",
+      "status": "implemented",
+      "description": "Mimic a browser ClientHello from a non-browser client.",
+      "observable_consequences": [
+        "HTTP/2 mismatch",
+        "runtime absence",
+        "profile version drift"
+      ],
+      "surfaces": [
+        "network.tls.client_hello",
+        "network.http2.frames",
+        "session.coherence"
+      ],
+      "countermeasures": [
+        "cm.browser_transport"
+      ],
+      "residual_risk": "High-quality impersonators can match one protocol layer closely."
+    },
+    {
+      "id": "http2_impersonation",
+      "title": "HTTP/2 fingerprint impersonation",
+      "category": "transport",
+      "status": "implemented",
+      "description": "Mimic SETTINGS and frame behavior.",
+      "observable_consequences": [
+        "frame order drift",
+        "header mismatch",
+        "flow-control mismatch"
+      ],
+      "surfaces": [
+        "network.http2.frames",
+        "session.coherence"
+      ],
+      "countermeasures": [
+        "cm.browser_transport"
+      ],
+      "residual_risk": "A coherent implementation still requires correlation with runtime and resource behavior."
+    },
+    {
+      "id": "quic_impersonation",
+      "title": "QUIC and HTTP/3 impersonation",
+      "category": "transport",
+      "status": "implemented",
+      "description": "Mimic QUIC parameters and HTTP/3 request behavior.",
+      "observable_consequences": [
+        "transport parameter drift",
+        "migration mismatch",
+        "H3 SETTINGS/frame/QPACK shape mismatch"
+      ],
+      "surfaces": [
+        "network.quic.transport",
+        "network.http3.frames"
+      ],
+      "countermeasures": [
+        "cm.browser_transport"
+      ],
+      "residual_risk": "Decrypted stream evidence requires QUIC keys or instrumentation and protocol implementations evolve rapidly."
+    },
+    {
+      "id": "page_only_patch",
+      "title": "Page-only runtime patching",
+      "category": "runtime",
+      "status": "implemented",
+      "description": "Patch only the primary Window realm.",
+      "observable_consequences": [
+        "iframe drift",
+        "worker drift",
+        "native wrapper leakage"
+      ],
+      "surfaces": [
+        "realm.parity",
+        "integrity.native_shape"
+      ],
+      "countermeasures": [
+        "cm.coherent_persona",
+        "cm.no_runtime_patch"
+      ],
+      "residual_risk": "Some isolated worlds are not directly observable."
+    },
+    {
+      "id": "worker_patch_leakage",
+      "title": "Worker projection leakage",
+      "category": "runtime",
+      "status": "implemented",
+      "description": "Fail to project identity into worker realms.",
+      "observable_consequences": [
+        "worker identity mismatch",
+        "OffscreenCanvas mismatch"
+      ],
+      "surfaces": [
+        "realm.parity"
+      ],
+      "countermeasures": [
+        "cm.coherent_persona"
+      ],
+      "residual_risk": "Service-worker lifecycle complicates deterministic capture."
+    },
+    {
+      "id": "webdriver_suppression",
+      "title": "WebDriver disclosure suppression",
+      "category": "automation",
+      "status": "implemented",
+      "description": "Hide navigator.webdriver without removing other automation artifacts.",
+      "observable_consequences": [
+        "descriptor mismatch",
+        "CDP globals",
+        "stack artifacts"
+      ],
+      "surfaces": [
+        "integrity.automation",
+        "integrity.native_shape"
+      ],
+      "countermeasures": [
+        "cm.no_runtime_patch"
+      ],
+      "residual_risk": "Artifacts change with browser and framework releases."
+    },
+    {
+      "id": "cdp_instrumentation",
+      "title": "CDP instrumentation",
+      "category": "automation",
+      "status": "implemented",
+      "description": "Control Chromium through DevTools Protocol.",
+      "observable_consequences": [
+        "injected globals",
+        "bindings",
+        "stack/evaluation markers"
+      ],
+      "surfaces": [
+        "integrity.automation",
+        "integrity.timing"
+      ],
+      "countermeasures": [
+        "cm.native_browser",
+        "cm.no_runtime_patch"
+      ],
+      "residual_risk": "Destructive vendor-specific side channels are intentionally excluded."
+    },
+    {
+      "id": "webgl_spoofing",
+      "title": "WebGL spoofing",
+      "category": "rendering",
+      "status": "implemented",
+      "description": "Patch reported GPU identity or parameters.",
+      "observable_consequences": [
+        "realm mismatch",
+        "renderer/output mismatch",
+        "unsupported capability shape"
+      ],
+      "surfaces": [
+        "rendering.webgl",
+        "realm.parity"
+      ],
+      "countermeasures": [
+        "cm.honest_capability",
+        "cm.no_runtime_patch"
+      ],
+      "residual_risk": "Privacy browsers intentionally randomize or reduce WebGL surfaces."
+    },
+    {
+      "id": "canvas_spoofing",
+      "title": "Canvas spoofing",
+      "category": "rendering",
+      "status": "implemented",
+      "description": "Modify canvas reads or rendering output.",
+      "observable_consequences": [
+        "unstable digest",
+        "realm mismatch",
+        "API integrity drift"
+      ],
+      "surfaces": [
+        "rendering.canvas",
+        "integrity.native_shape",
+        "realm.parity"
+      ],
+      "countermeasures": [
+        "cm.honest_capability",
+        "cm.no_runtime_patch"
+      ],
+      "residual_risk": "Legitimate anti-fingerprinting introduces noise."
+    },
+    {
+      "id": "font_spoofing",
+      "title": "Font and text metric spoofing",
+      "category": "rendering",
+      "status": "implemented",
+      "description": "Forge font presence or glyph metrics.",
+      "observable_consequences": [
+        "fallback inconsistency",
+        "geometry mismatch",
+        "raster mismatch"
+      ],
+      "surfaces": [
+        "rendering.fonts",
+        "rendering.geometry"
+      ],
+      "countermeasures": [
+        "cm.honest_capability"
+      ],
+      "residual_risk": "Fonts vary naturally by OS and language packs; baseline by engine, OS and language pack."
+    },
+    {
+      "id": "geometry_spoofing",
+      "title": "ClientRect and geometry spoofing",
+      "category": "rendering",
+      "status": "implemented",
+      "description": "Alter DOM geometry or inject measurement noise.",
+      "observable_consequences": [
+        "layout constraints fail",
+        "realm instability",
+        "zoom mismatch"
+      ],
+      "surfaces": [
+        "rendering.geometry",
+        "runtime.screen"
+      ],
+      "countermeasures": [
+        "cm.honest_capability"
+      ],
+      "residual_risk": "Zoom and accessibility settings produce legitimate changes."
+    },
+    {
+      "id": "audio_spoofing",
+      "title": "Audio fingerprint spoofing",
+      "category": "media",
+      "status": "implemented",
+      "description": "Patch audio processing output or disable the surface.",
+      "observable_consequences": [
+        "render failure",
+        "latency/output mismatch",
+        "native wrapper leakage"
+      ],
+      "surfaces": [
+        "media.audio",
+        "integrity.native_shape"
+      ],
+      "countermeasures": [
+        "cm.honest_capability",
+        "cm.no_runtime_patch"
+      ],
+      "residual_risk": "Audio availability varies in containers and privacy modes."
+    },
+    {
+      "id": "media_capability_spoofing",
+      "title": "Media capability spoofing",
+      "category": "media",
+      "status": "implemented",
+      "description": "Forge codec and device capability results.",
+      "observable_consequences": [
+        "API matrix inconsistency",
+        "decode failure",
+        "permission/label conflict",
+        "device transition mismatch"
+      ],
+      "surfaces": [
+        "media.codecs",
+        "media.devices"
+      ],
+      "countermeasures": [
+        "cm.honest_capability"
+      ],
+      "residual_risk": "Hardware acceleration, permissions and enterprise policy legitimately affect results."
+    },
+    {
+      "id": "synthetic_pointer",
+      "title": "Synthetic pointer movement",
+      "category": "behavior",
+      "status": "implemented",
+      "description": "Generate mouse or pointer trajectories programmatically.",
+      "observable_consequences": [
+        "regular cadence",
+        "linear paths",
+        "teleports",
+        "target mismatch"
+      ],
+      "surfaces": [
+        "behavior.pointer",
+        "behavior.causality"
+      ],
+      "countermeasures": [
+        "cm.physical_input"
+      ],
+      "residual_risk": "Native automation can emit trusted events."
+    },
+    {
+      "id": "behavior_replay",
+      "title": "Recorded behavior replay",
+      "category": "behavior",
+      "status": "implemented",
+      "description": "Replay previously captured human interactions.",
+      "observable_consequences": [
+        "cross-session templates",
+        "layout mismatch",
+        "repeated timing"
+      ],
+      "surfaces": [
+        "behavior.replay",
+        "behavior.causality"
+      ],
+      "countermeasures": [
+        "cm.physical_input"
+      ],
+      "residual_risk": "Near-match detection uses privacy-safe SimHash and needs multiple eligible sessions."
+    },
+    {
+      "id": "timing_randomization",
+      "title": "Timing randomization",
+      "category": "behavior",
+      "status": "implemented",
+      "description": "Add random delays to scripted actions.",
+      "observable_consequences": [
+        "causal mismatch",
+        "wrong distribution",
+        "resource/action disconnect",
+        "frame locking",
+        "clock inconsistencies"
+      ],
+      "surfaces": [
+        "behavior.causality",
+        "integrity.timing"
+      ],
+      "countermeasures": [
+        "cm.physical_input",
+        "cm.bounded_rate"
+      ],
+      "residual_risk": "Distributional findings require profile-specific baselines and are never proof by themselves."
+    },
+    {
+      "id": "request_burst",
+      "title": "Burst and concurrency shaping",
+      "category": "traffic",
+      "status": "implemented",
+      "description": "Fetch pages or APIs at machine concurrency.",
+      "observable_consequences": [
+        "collapsed waterfall",
+        "rate escalation",
+        "connection anomalies"
+      ],
+      "surfaces": [
+        "network.http.semantics",
+        "session.lifecycle"
+      ],
+      "countermeasures": [
+        "cm.bounded_rate"
+      ],
+      "residual_risk": "Fast legitimate clients and preload can resemble bursts."
+    },
+    {
+      "id": "resource_blocking",
+      "title": "Browser resource blocking",
+      "category": "traffic",
+      "status": "implemented",
+      "description": "Suppress scripts, images, fonts or telemetry resources.",
+      "observable_consequences": [
+        "missing resource graph",
+        "probe absence",
+        "cache anomalies"
+      ],
+      "surfaces": [
+        "network.http.semantics",
+        "session.coherence"
+      ],
+      "countermeasures": [
+        "cm.native_browser"
+      ],
+      "residual_risk": "Content blockers and accessibility tools can be benign."
+    },
+    {
+      "id": "api_harvesting",
+      "title": "Direct API harvesting",
+      "category": "intent",
+      "status": "implemented",
+      "description": "Skip document behavior and enumerate structured endpoints.",
+      "observable_consequences": [
+        "API-first sequence",
+        "missing navigation",
+        "pagination walk"
+      ],
+      "surfaces": [
+        "network.http.semantics",
+        "session.lifecycle"
+      ],
+      "countermeasures": [
+        "cm.authorized_api",
+        "cm.session_binding"
+      ],
+      "residual_risk": "First-party applications may legitimately use APIs directly."
+    },
+    {
+      "id": "trap_avoidance",
+      "title": "Trap and honeypot avoidance",
+      "category": "intent",
+      "status": "implemented",
+      "description": "Detect and avoid hidden links or trap endpoints.",
+      "observable_consequences": [
+        "selective graph traversal",
+        "DOM/network intent mismatch"
+      ],
+      "surfaces": [
+        "session.lifecycle",
+        "network.http.semantics"
+      ],
+      "countermeasures": [
+        "cm.authorized_api"
+      ],
+      "residual_risk": "Accessibility and parser differences affect visibility."
+    },
+    {
+      "id": "cookie_transplant",
+      "title": "Cookie and session transplant",
+      "category": "session",
+      "status": "implemented",
+      "description": "Move state between clients, personas or network origins.",
+      "observable_consequences": [
+        "identity drift",
+        "transaction order mismatch",
+        "binding failure"
+      ],
+      "surfaces": [
+        "runtime.storage",
+        "session.coherence",
+        "session.lifecycle"
+      ],
+      "countermeasures": [
+        "cm.session_binding"
+      ],
+      "residual_risk": "Legitimate browser profile migration can move cookies."
+    },
+    {
+      "id": "clearance_replay",
+      "title": "Clearance token replay",
+      "category": "challenge",
+      "status": "implemented",
+      "description": "Reuse challenge clearance outside its issued session or lifetime.",
+      "observable_consequences": [
+        "signature/binding failure",
+        "expiry",
+        "revocation"
+      ],
+      "surfaces": [
+        "session.lifecycle"
+      ],
+      "countermeasures": [
+        "cm.challenge_protocol",
+        "cm.session_binding"
+      ],
+      "residual_risk": "Distributed deployments require consistent key and clock handling."
+    },
+    {
+      "id": "challenge_outsourcing",
+      "title": "Challenge outsourcing or token injection",
+      "category": "challenge",
+      "status": "knowledge-only",
+      "description": "Obtain a valid answer or token through an external actor.",
+      "observable_consequences": [
+        "behavior discontinuity",
+        "network/persona switch",
+        "token timing anomaly"
+      ],
+      "surfaces": [
+        "session.lifecycle",
+        "session.coherence",
+        "behavior.causality"
+      ],
+      "countermeasures": [
+        "cm.session_binding",
+        "cm.challenge_protocol"
+      ],
+      "residual_risk": "The lab models lifecycle only and does not integrate solving services."
+    },
+    {
+      "id": "proxy_rotation",
+      "title": "Proxy and IP rotation",
+      "category": "network",
+      "status": "implemented",
+      "description": "Change egress identity between requests or sessions.",
+      "observable_consequences": [
+        "IP/session drift",
+        "ASN mismatch",
+        "TLS reuse break"
+      ],
+      "surfaces": [
+        "network.ip.reputation",
+        "session.coherence",
+        "network.tls.lifecycle"
+      ],
+      "countermeasures": [
+        "cm.session_binding"
+      ],
+      "residual_risk": "Mobile and enterprise networks change legitimately."
+    },
+    {
+      "id": "privacy_randomization",
+      "title": "Privacy-browser randomization",
+      "category": "privacy",
+      "status": "implemented",
+      "description": "Reduce or randomize fingerprint surfaces.",
+      "observable_consequences": [
+        "unstable outputs",
+        "reduced entropy",
+        "capability suppression"
+      ],
+      "surfaces": [
+        "rendering.canvas",
+        "rendering.webgl",
+        "runtime.identity",
+        "runtime.screen"
+      ],
+      "countermeasures": [
+        "cm.honest_capability"
+      ],
+      "residual_risk": "Must not be treated as bot evidence by itself."
+    }
+  ],
+  "findings": [
+    {
+      "code": "NET_*",
+      "title": "Network and request finding family",
+      "surface": "network.http.semantics",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "header_replay",
+        "resource_blocking",
+        "request_burst"
+      ],
+      "benign_causes": [
+        "proxy normalization",
+        "privacy or content policy"
+      ],
+      "countermeasures": [
+        "cm.browser_transport",
+        "cm.bounded_rate"
+      ],
+      "fixtures": [
+        "network-shapes"
+      ],
+      "tests": [
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "NET_PROTOCOL_OBSERVATORY_CAPTURED",
+      "title": "Protocol observatory evidence",
+      "surface": "network.http2.frames",
+      "status": "implemented",
+      "default_class": "info",
+      "detects": [
+        "http2_impersonation",
+        "quic_impersonation"
+      ],
+      "benign_causes": [],
+      "countermeasures": [
+        "cm.browser_transport"
+      ],
+      "fixtures": [
+        "http2-settings",
+        "quic-parameters"
+      ],
+      "tests": [
+        "test_observatory_routes",
+        "test_network_observatory"
+      ]
+    },
+    {
+      "code": "NET_HTTP2_FINGERPRINT_DRIFT",
+      "title": "HTTP/2 fingerprint drift",
+      "surface": "network.http2.frames",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "http2_impersonation",
+        "tls_impersonation"
+      ],
+      "benign_causes": [
+        "connection through different intermediaries"
+      ],
+      "countermeasures": [
+        "cm.browser_transport",
+        "cm.session_binding"
+      ],
+      "fixtures": [
+        "http2-settings-drift"
+      ],
+      "tests": [
+        "test_observatory_routes"
+      ]
+    },
+    {
+      "code": "NET_QUIC_*",
+      "title": "QUIC transport findings",
+      "surface": "network.quic.transport",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "quic_impersonation",
+        "proxy_rotation"
+      ],
+      "benign_causes": [
+        "network migration",
+        "server version policy"
+      ],
+      "countermeasures": [
+        "cm.browser_transport",
+        "cm.session_binding"
+      ],
+      "fixtures": [
+        "quic-parameters"
+      ],
+      "tests": [
+        "test_observatory_routes",
+        "test_network_observatory"
+      ]
+    },
+    {
+      "code": "WEBRTC_*",
+      "title": "WebRTC ICE and SDP findings",
+      "surface": "network.dns.webrtc",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "proxy_rotation",
+        "privacy_randomization",
+        "page_only_patch"
+      ],
+      "benign_causes": [
+        "mDNS host masking",
+        "enterprise WebRTC policy",
+        "VPN",
+        "no network interface"
+      ],
+      "countermeasures": [
+        "cm.honest_capability",
+        "cm.session_binding"
+      ],
+      "fixtures": [
+        "webrtc-coherent",
+        "webrtc-conflicting"
+      ],
+      "tests": [
+        "test_webrtc_scoring",
+        "test_probe_modules"
+      ]
+    },
+    {
+      "code": "NET_DNS_*",
+      "title": "DNS transport aggregate findings",
+      "surface": "network.dns.webrtc",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "proxy_rotation",
+        "privacy_randomization"
+      ],
+      "benign_causes": [
+        "resolver policy",
+        "VPN split DNS",
+        "cache"
+      ],
+      "countermeasures": [
+        "cm.session_binding"
+      ],
+      "fixtures": [
+        "dns-redacted-aggregates"
+      ],
+      "tests": [
+        "test_network_observatory",
+        "test_observatory_routes"
+      ]
+    },
+    {
+      "code": "NET_TCP_*",
+      "title": "TCP SYN shape findings",
+      "surface": "network.tcp.ip",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "tls_impersonation",
+        "proxy_rotation"
+      ],
+      "benign_causes": [
+        "kernel update",
+        "NAT or middlebox normalization",
+        "VPN"
+      ],
+      "countermeasures": [
+        "cm.browser_transport",
+        "cm.session_binding"
+      ],
+      "fixtures": [
+        "tcpip-syn-shape"
+      ],
+      "tests": [
+        "test_network_observatory",
+        "test_observatory_routes"
+      ]
+    },
+    {
+      "code": "NET_IP_HOP_*",
+      "title": "IP hop findings",
+      "surface": "network.tcp.ip",
+      "status": "implemented",
+      "default_class": "low",
+      "detects": [
+        "proxy_rotation"
+      ],
+      "benign_causes": [
+        "long network path",
+        "incorrect initial TTL inference"
+      ],
+      "countermeasures": [
+        "cm.session_binding"
+      ],
+      "fixtures": [
+        "tcpip-syn-shape"
+      ],
+      "tests": [
+        "test_network_observatory"
+      ]
+    },
+    {
+      "code": "TLS_*",
+      "title": "TLS finding family",
+      "surface": "network.tls.client_hello",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "tls_impersonation",
+        "proxy_rotation"
+      ],
+      "benign_causes": [
+        "browser upgrade",
+        "middlebox"
+      ],
+      "countermeasures": [
+        "cm.browser_transport"
+      ],
+      "fixtures": [
+        "tls-shapes"
+      ],
+      "tests": [
+        "test_tls",
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "TLS_LIFECYCLE_*",
+      "title": "TLS lifecycle evidence",
+      "surface": "network.tls.lifecycle",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "tls_impersonation",
+        "proxy_rotation",
+        "cookie_transplant"
+      ],
+      "benign_causes": [
+        "session ticket rotation",
+        "middlebox termination"
+      ],
+      "countermeasures": [
+        "cm.browser_transport",
+        "cm.session_binding"
+      ],
+      "fixtures": [
+        "tls-lifecycle"
+      ],
+      "tests": [
+        "test_network_observatory",
+        "test_observatory_routes",
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "HTTP*",
+      "title": "Negotiated HTTP protocol finding family",
+      "surface": "network.http3.frames",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "http2_impersonation",
+        "quic_impersonation"
+      ],
+      "benign_causes": [
+        "server protocol configuration"
+      ],
+      "countermeasures": [
+        "cm.browser_transport"
+      ],
+      "fixtures": [
+        "protocol-distribution"
+      ],
+      "tests": [
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "NET_HTTP3_*",
+      "title": "HTTP/3 frame findings",
+      "surface": "network.http3.frames",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "quic_impersonation"
+      ],
+      "benign_causes": [
+        "incomplete decrypted capture",
+        "connection shutdown race"
+      ],
+      "countermeasures": [
+        "cm.browser_transport"
+      ],
+      "fixtures": [
+        "http3-control-stream",
+        "qpack-stream"
+      ],
+      "tests": [
+        "test_network_observatory",
+        "test_observatory_routes"
+      ]
+    },
+    {
+      "code": "JS_*",
+      "title": "Browser runtime finding family",
+      "surface": "runtime.identity",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "ua_spoofing",
+        "page_only_patch",
+        "webgl_spoofing",
+        "canvas_spoofing",
+        "audio_spoofing"
+      ],
+      "benign_causes": [
+        "privacy hardening",
+        "enterprise policy",
+        "minimal container"
+      ],
+      "countermeasures": [
+        "cm.coherent_persona",
+        "cm.honest_capability",
+        "cm.no_runtime_patch"
+      ],
+      "fixtures": [
+        "runtime-shapes"
+      ],
+      "tests": [
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "CDP_*",
+      "title": "Automation artifact finding family",
+      "surface": "integrity.automation",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "cdp_instrumentation",
+        "webdriver_suppression"
+      ],
+      "benign_causes": [
+        "authorized browser testing"
+      ],
+      "countermeasures": [
+        "cm.no_runtime_patch"
+      ],
+      "fixtures": [
+        "automation-artifacts"
+      ],
+      "tests": [
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "REALM_*",
+      "title": "Cross-realm finding family",
+      "surface": "realm.parity",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "page_only_patch",
+        "worker_patch_leakage",
+        "ua_spoofing"
+      ],
+      "benign_causes": [
+        "realm startup race",
+        "browser implementation difference"
+      ],
+      "countermeasures": [
+        "cm.coherent_persona"
+      ],
+      "fixtures": [
+        "realm-shapes"
+      ],
+      "tests": [
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "BEHAVIOR_*",
+      "title": "Behavior finding family",
+      "surface": "behavior.causality",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "synthetic_pointer",
+        "behavior_replay",
+        "timing_randomization"
+      ],
+      "benign_causes": [
+        "assistive technology",
+        "remote desktop",
+        "short read-only flow"
+      ],
+      "countermeasures": [
+        "cm.physical_input"
+      ],
+      "fixtures": [
+        "behavior-shapes"
+      ],
+      "tests": [
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "TIMING_*",
+      "title": "Event-loop and clock integrity findings",
+      "surface": "integrity.timing",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "timing_randomization",
+        "cdp_instrumentation"
+      ],
+      "benign_causes": [
+        "privacy timer coarsening",
+        "background throttling",
+        "remote desktop",
+        "heavy system load"
+      ],
+      "countermeasures": [
+        "cm.physical_input",
+        "cm.no_runtime_patch"
+      ],
+      "fixtures": [
+        "coherent-timing",
+        "conflicting-timing"
+      ],
+      "tests": [
+        "test_timing_scoring",
+        "test_probe_modules"
+      ]
+    },
+    {
+      "code": "SESSION_*",
+      "title": "Cross-layer session finding family",
+      "surface": "session.coherence",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "cookie_transplant",
+        "ua_spoofing",
+        "proxy_rotation"
+      ],
+      "benign_causes": [
+        "browser startup race",
+        "network migration"
+      ],
+      "countermeasures": [
+        "cm.coherent_persona",
+        "cm.session_binding"
+      ],
+      "fixtures": [
+        "session-shapes"
+      ],
+      "tests": [
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "IP_*",
+      "title": "IP and reputation finding family",
+      "surface": "network.ip.reputation",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "proxy_rotation"
+      ],
+      "benign_causes": [
+        "mobile or enterprise network"
+      ],
+      "countermeasures": [
+        "cm.session_binding"
+      ],
+      "fixtures": [
+        "offline-reputation"
+      ],
+      "tests": [
+        "test_scoring",
+        "test_reputation"
+      ]
+    },
+    {
+      "code": "PLAYGROUND_*",
+      "title": "Owned playground finding family",
+      "surface": "session.lifecycle",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "api_harvesting",
+        "trap_avoidance",
+        "clearance_replay",
+        "challenge_outsourcing"
+      ],
+      "benign_causes": [
+        "authorized scanner",
+        "expired interactive session"
+      ],
+      "countermeasures": [
+        "cm.challenge_protocol",
+        "cm.authorized_api"
+      ],
+      "fixtures": [
+        "playground"
+      ],
+      "tests": [
+        "test_playground_routes",
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "NET_NO_REQUESTS",
+      "title": "No server-observed requests",
+      "surface": "network.http.semantics",
+      "status": "implemented",
+      "default_class": "hard",
+      "detects": [
+        "resource_blocking",
+        "api_harvesting"
+      ],
+      "benign_causes": [
+        "collector failure"
+      ],
+      "countermeasures": [
+        "cm.native_browser"
+      ],
+      "fixtures": [
+        "empty-session"
+      ],
+      "tests": [
+        "test_empty_automated_session_fails_gate"
+      ]
+    },
+    {
+      "code": "NET_SEC_FETCH_ABSENT",
+      "title": "Fetch Metadata absent",
+      "surface": "network.http.header_shape",
+      "status": "implemented",
+      "default_class": "hard",
+      "detects": [
+        "header_replay"
+      ],
+      "benign_causes": [
+        "non-Chromium browser",
+        "proxy normalization"
+      ],
+      "countermeasures": [
+        "cm.browser_transport"
+      ],
+      "fixtures": [
+        "raw-http"
+      ],
+      "tests": [
+        "test_raw_http_shape"
+      ]
+    },
+    {
+      "code": "TLS_FINGERPRINT_DRIFT",
+      "title": "TLS fingerprint drift",
+      "surface": "network.tls.client_hello",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "tls_impersonation",
+        "proxy_rotation"
+      ],
+      "benign_causes": [
+        "multiple browser engines"
+      ],
+      "countermeasures": [
+        "cm.browser_transport",
+        "cm.session_binding"
+      ],
+      "fixtures": [
+        "tls-drift"
+      ],
+      "tests": [
+        "test_tls_drift_ignores_unrelated_control_connections"
+      ]
+    },
+    {
+      "code": "JS_WINDOW_PROBE_MISSING",
+      "title": "Primary runtime probe missing",
+      "surface": "session.coherence",
+      "status": "implemented",
+      "default_class": "hard",
+      "detects": [
+        "resource_blocking",
+        "api_harvesting"
+      ],
+      "benign_causes": [
+        "script policy",
+        "collector failure"
+      ],
+      "countermeasures": [
+        "cm.native_browser"
+      ],
+      "fixtures": [
+        "no-js"
+      ],
+      "tests": [
+        "test_empty_automated_session_fails_gate"
+      ]
+    },
+    {
+      "code": "JS_NAVIGATOR_WEBDRIVER",
+      "title": "WebDriver disclosed",
+      "surface": "integrity.automation",
+      "status": "implemented",
+      "default_class": "hard",
+      "detects": [
+        "webdriver_suppression",
+        "cdp_instrumentation"
+      ],
+      "benign_causes": [
+        "authorized test automation"
+      ],
+      "countermeasures": [
+        "cm.native_browser"
+      ],
+      "fixtures": [
+        "webdriver"
+      ],
+      "tests": [
+        "test_runtime_findings"
+      ]
+    },
+    {
+      "code": "JS_FUNCTION_TOSTRING_PATCHED",
+      "title": "Function.toString patched",
+      "surface": "integrity.native_shape",
+      "status": "implemented",
+      "default_class": "hard",
+      "detects": [
+        "page_only_patch",
+        "webdriver_suppression"
+      ],
+      "benign_causes": [
+        "instrumentation extension"
+      ],
+      "countermeasures": [
+        "cm.no_runtime_patch"
+      ],
+      "fixtures": [
+        "patched-native"
+      ],
+      "tests": [
+        "test_runtime_findings"
+      ]
+    },
+    {
+      "code": "JS_WEBGPU_WORKLOAD_FAILED",
+      "title": "WebGPU compute readback failed",
+      "surface": "rendering.webgpu",
+      "status": "implemented",
+      "default_class": "low",
+      "detects": [
+        "webgl_spoofing",
+        "privacy_randomization"
+      ],
+      "benign_causes": [
+        "driver denylist",
+        "device loss",
+        "feature policy"
+      ],
+      "countermeasures": [
+        "cm.honest_capability"
+      ],
+      "fixtures": [
+        "webgpu-capability"
+      ],
+      "tests": [
+        "test_extended_rendering_probe_emits_webgpu_evidence",
+        "test_deep_probe_covers_planned_physical_surfaces"
+      ]
+    },
+    {
+      "code": "JS_FONT_RENDERING_*",
+      "title": "Font rendering evidence",
+      "surface": "rendering.fonts",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "font_spoofing",
+        "privacy_randomization",
+        "canvas_spoofing"
+      ],
+      "benign_causes": [
+        "font loading policy",
+        "OS font update",
+        "accessibility fonts"
+      ],
+      "countermeasures": [
+        "cm.honest_capability",
+        "cm.coherent_persona"
+      ],
+      "fixtures": [
+        "font-rendering"
+      ],
+      "tests": [
+        "test_extended_rendering_probe_emits_webgpu_evidence",
+        "test_deep_probe_covers_planned_physical_surfaces"
+      ]
+    },
+    {
+      "code": "JS_STORAGE_*",
+      "title": "Storage partition findings",
+      "surface": "runtime.storage",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "cookie_transplant",
+        "privacy_randomization",
+        "page_only_patch"
+      ],
+      "benign_causes": [
+        "third-party cookie blocking",
+        "storage partition policy",
+        "private browsing"
+      ],
+      "countermeasures": [
+        "cm.session_binding",
+        "cm.honest_capability"
+      ],
+      "fixtures": [
+        "second-origin-storage-frame"
+      ],
+      "tests": [
+        "test_app",
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "JS_MEDIA_*",
+      "title": "Media capability and device findings",
+      "surface": "media.devices",
+      "status": "implemented",
+      "default_class": "policy",
+      "detects": [
+        "media_capability_spoofing",
+        "privacy_randomization"
+      ],
+      "benign_causes": [
+        "permission policy",
+        "headless virtual devices",
+        "OS device changes"
+      ],
+      "countermeasures": [
+        "cm.honest_capability"
+      ],
+      "fixtures": [
+        "media-device-shape"
+      ],
+      "tests": [
+        "test_probe_modules",
+        "test_scoring"
+      ]
+    },
+    {
+      "code": "REALM_PARITY_*",
+      "title": "Cross-realm field mismatch",
+      "surface": "realm.parity",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "ua_spoofing",
+        "page_only_patch",
+        "worker_patch_leakage"
+      ],
+      "benign_causes": [
+        "realm startup race"
+      ],
+      "countermeasures": [
+        "cm.coherent_persona"
+      ],
+      "fixtures": [
+        "realm-drift"
+      ],
+      "tests": [
+        "test_cross_realm_findings"
+      ]
+    },
+    {
+      "code": "BEHAVIOR_NO_EVENTS",
+      "title": "No interaction events",
+      "surface": "behavior.causality",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "api_harvesting",
+        "resource_blocking"
+      ],
+      "benign_causes": [
+        "read-only session"
+      ],
+      "countermeasures": [
+        "cm.physical_input"
+      ],
+      "fixtures": [
+        "empty-session"
+      ],
+      "tests": [
+        "test_empty_automated_session_fails_gate"
+      ]
+    },
+    {
+      "code": "BEHAVIOR_ALL_UNTRUSTED",
+      "title": "All events untrusted",
+      "surface": "behavior.causality",
+      "status": "implemented",
+      "default_class": "hard",
+      "detects": [
+        "synthetic_pointer"
+      ],
+      "benign_causes": [
+        "authorized DOM-event test"
+      ],
+      "countermeasures": [
+        "cm.physical_input"
+      ],
+      "fixtures": [
+        "untrusted-events"
+      ],
+      "tests": [
+        "test_behavior_findings"
+      ]
+    },
+    {
+      "code": "BEHAVIOR_POINTER_TELEPORTS",
+      "title": "Pointer teleports",
+      "surface": "behavior.pointer",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "synthetic_pointer"
+      ],
+      "benign_causes": [
+        "remote desktop discontinuity"
+      ],
+      "countermeasures": [
+        "cm.physical_input"
+      ],
+      "fixtures": [
+        "pointer-teleports"
+      ],
+      "tests": [
+        "test_behavior_findings"
+      ]
+    },
+    {
+      "code": "BEHAVIOR_POINTER_CADENCE_REGULAR",
+      "title": "Pointer cadence regular",
+      "surface": "behavior.pointer",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "synthetic_pointer",
+        "behavior_replay"
+      ],
+      "benign_causes": [
+        "event coalescing"
+      ],
+      "countermeasures": [
+        "cm.physical_input"
+      ],
+      "fixtures": [
+        "regular-pointer"
+      ],
+      "tests": [
+        "test_behavior_findings"
+      ]
+    },
+    {
+      "code": "BEHAVIOR_KEYBOARD_ZERO_DWELL",
+      "title": "Near-zero key dwell",
+      "surface": "behavior.keyboard",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "timing_randomization",
+        "behavior_replay"
+      ],
+      "benign_causes": [
+        "event timestamp coarsening",
+        "assistive input"
+      ],
+      "countermeasures": [
+        "cm.physical_input"
+      ],
+      "fixtures": [
+        "zero-dwell-keyboard"
+      ],
+      "tests": [
+        "test_behavior_features"
+      ]
+    },
+    {
+      "code": "BEHAVIOR_SCROLL_FRAME_LOCKED",
+      "title": "Frame-locked scrolling",
+      "surface": "behavior.scroll",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "timing_randomization",
+        "behavior_replay"
+      ],
+      "benign_causes": [
+        "browser event coalescing"
+      ],
+      "countermeasures": [
+        "cm.physical_input"
+      ],
+      "fixtures": [
+        "frame-locked-scroll"
+      ],
+      "tests": [
+        "test_behavior_features"
+      ]
+    },
+    {
+      "code": "BEHAVIOR_CONTACT_CONTINUITY_BROKEN",
+      "title": "Broken contact lifecycle",
+      "surface": "behavior.touch",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "synthetic_pointer"
+      ],
+      "benign_causes": [
+        "lost remote input packets"
+      ],
+      "countermeasures": [
+        "cm.physical_input"
+      ],
+      "fixtures": [
+        "broken-touch-lifecycle"
+      ],
+      "tests": [
+        "test_behavior_features"
+      ]
+    },
+    {
+      "code": "BEHAVIOR_CONTACT_SHAPE_STATIC",
+      "title": "Static contact shape",
+      "surface": "behavior.touch",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "synthetic_pointer",
+        "behavior_replay"
+      ],
+      "benign_causes": [
+        "device pressure quantization"
+      ],
+      "countermeasures": [
+        "cm.physical_input"
+      ],
+      "fixtures": [
+        "static-touch-shape"
+      ],
+      "tests": [
+        "test_behavior_features"
+      ]
+    },
+    {
+      "code": "SESSION_NETWORK_RUNTIME_UA_MISMATCH",
+      "title": "Network/runtime UA mismatch",
+      "surface": "session.coherence",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "ua_spoofing",
+        "cookie_transplant"
+      ],
+      "benign_causes": [
+        "proxy rewrite"
+      ],
+      "countermeasures": [
+        "cm.coherent_persona"
+      ],
+      "fixtures": [
+        "ua-drift"
+      ],
+      "tests": [
+        "test_session_integrity_findings"
+      ]
+    },
+    {
+      "code": "IP_REPUTATION_OFFLINE",
+      "title": "Offline IP evidence",
+      "surface": "network.ip.reputation",
+      "status": "implemented",
+      "default_class": "info",
+      "detects": [
+        "proxy_rotation"
+      ],
+      "benign_causes": [],
+      "countermeasures": [
+        "cm.session_binding"
+      ],
+      "fixtures": [
+        "loopback"
+      ],
+      "tests": [
+        "test_protocol_and_reputation"
+      ]
+    },
+    {
+      "code": "PLAYGROUND_TRAP_HIT",
+      "title": "Owned trap requested",
+      "surface": "session.lifecycle",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "trap_avoidance",
+        "api_harvesting"
+      ],
+      "benign_causes": [
+        "security scanner"
+      ],
+      "countermeasures": [
+        "cm.authorized_api"
+      ],
+      "fixtures": [
+        "trap"
+      ],
+      "tests": [
+        "test_playground_findings"
+      ]
+    },
+    {
+      "code": "PLAYGROUND_CHALLENGE_REJECTED",
+      "title": "Challenge rejected",
+      "surface": "session.lifecycle",
+      "status": "implemented",
+      "default_class": "medium",
+      "detects": [
+        "clearance_replay",
+        "challenge_outsourcing"
+      ],
+      "benign_causes": [
+        "expired user session"
+      ],
+      "countermeasures": [
+        "cm.challenge_protocol"
+      ],
+      "fixtures": [
+        "expired-challenge"
+      ],
+      "tests": [
+        "test_clearance_expiry"
+      ]
+    }
+  ]
+}

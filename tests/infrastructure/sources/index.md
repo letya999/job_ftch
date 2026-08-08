@@ -11,6 +11,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_beeline_parser.py](test_beeline_parser.py)
 - [test_belmeta_parser.py](test_belmeta_parser.py)
 - [test_browser_source.py](test_browser_source.py)
+- [test_browser_utils_timeout.py](test_browser_utils_timeout.py)
 - [test_extraction_dependency_decisions.py](test_extraction_dependency_decisions.py)
 - [test_http_retry_policy.py](test_http_retry_policy.py)
 - [test_ingest_outcome_contract.py](test_ingest_outcome_contract.py)

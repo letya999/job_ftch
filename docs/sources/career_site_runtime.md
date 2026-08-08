@@ -99,6 +99,18 @@ challenge — см. [bypass_and_escalation.md](bypass_and_escalation.md)). Во�
 дальше». Legacy-адаптеры без `handle_failure` используют упрощённый
 `classify_error` + `escalate()`.
 
+Residential-proxy tier включается только как rescue-route после сигналов защиты
+и дополнительно режется настройками `proxy_rescue_allow_domains` /
+`proxy_rescue_deny_domains`. Для DataImpulse первая рабочая политика: RU,
+gateway `gw.dataimpulse.com:823`, 1 GB общий бюджет на процесс/ран,
+0.05 GB per-domain budget, allow:
+`career.habr.com`, `careers.higgsfield.kz`, `www.epam.com`, `careers.epam.com`;
+deny: `tbank.ru`, `rabota.sber.ru`, `*.gov`, `*.gov.ru`, `*.gosuslugi.ru`.
+То есть обычные сайты продолжают ходить direct/browser-tier, а платный трафик
+тратится только на источники, которые раньше стабильно упирались в CAPTCHA или
+IP-block. Provider-neutral proxy primitives описаны в
+[ADR-079](../adr/079-proxy-provider-pool-primitives.md).
+
 ## Discover -> enrich (двухфазная модель)
 
 Успешный монитор даёт `MonitorResult`, который превращается в кандидатов и затем в

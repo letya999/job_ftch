@@ -1,7 +1,7 @@
 ---
 title: "Bypass и escalation path"
 description: "Adaptive bypass для ingest: failure signals, route axes, proxy/session/challenge boundaries и запреты."
-updated: 2026-07-28
+updated: 2026-08-05
 ---
 # Bypass и escalation path
 
@@ -32,8 +32,10 @@ network, browser, parsing, retries и product behavior. Поэтому bypass д
 `bypass="auto"` не должен восприниматься как одна лестница. Runtime route
 состоит из независимых осей:
 
-- transport: plain HTTP, curl impersonation, browser-backed fetch;
-- browser: стандартный browser, stealth browser, альтернативный browser runtime;
+- transport: plain HTTP, `curl_cffi` impersonation, `tls-client` impersonation,
+  browser-backed fetch;
+- browser: стандартный browser, stealth browser, Patchright-backed browser,
+  альтернативный browser runtime;
 - network: direct или proxy;
 - session: чистая сессия, сохранённая сессия, handoff;
 - challenge: wait, checkbox/challenge handling, solver-compatible path.
@@ -46,11 +48,23 @@ transport change, а IP/rate-limit signal сначала должен менят
 Для неизвестного сигнала применяется консервативный fallback:
 
 ```text
-noop -> curl_stealth -> stealth_browser -> nodriver -> camoufox -> cloak
+noop -> curl_stealth -> tls_client -> stealth_browser -> patchright_browser -> nodriver -> camoufox -> cloak
 ```
 
 Это fallback, а не продуктовая стратегия. Если сигнал классифицирован,
 runtime должен идти в подходящую capability напрямую.
+
+Текущая матрица основных tiers:
+
+| Tier | Назначение |
+|---|---|
+| `curl_stealth` | Дешёвый HTTP transport с TLS/HTTP impersonation через `curl_cffi`. |
+| `tls_client` | Альтернативный HTTP transport с domain-sticky TLS client identifier через `tls-client`. |
+| `stealth_browser` | Playwright-compatible browser tier для базового JS/rendering. |
+| `patchright_browser` | Явный Patchright tier для fingerprint/generic challenge сигналов без перехода сразу к session-owning браузерам. |
+| `nodriver` | Session-owning CDP tier для Cloudflare/browser challenge path, с ADR-073 license gate. |
+| `camoufox` | Firefox anti-detect tier для тяжёлых fingerprint случаев. |
+| `cloak` | Last-resort patched Chromium tier. |
 
 ## Proxy
 
@@ -75,6 +89,74 @@ Playwright-compatible tiers используют контракты вроде `
 Session handoff и challenge handling — bounded операции над текущим route.
 Они не должны превращаться в постоянный daemon, бесконечный worker или скрытую
 оркестрацию.
+
+Challenge detection is unified through
+`job_ftch.infrastructure.bypass.challenge_classifier`:
+
+- HTTP/monitor/browser surfaces emit `challenge_detected` telemetry with
+  `domain`, `type`, `confidence`, `surface`, `latency_ms` and an evidence hash;
+- telemetry never includes provider tokens or cookie values;
+- browser response listeners classify status/headers early and set the observed
+  challenge type for the current bypass controller;
+- DOM monitor rejects challenge HTML before link extraction, so a protected page
+  is not misreported as an empty job board.
+
+For Cloudflare browser challenges, the route is intentionally conservative:
+
+- direct-network Cloudflare challenges defer provider solving until a
+  proxy/residential route is active;
+- browser profiles are separated by network route (`direct`, `proxy`,
+  `residential_proxy`) unless an operator explicitly pins a persistent profile;
+- a provider response is not accepted as solved until the browser route has
+  clearance cookies and no classified challenge body remains;
+- CapSolver `AntiCloudflareTask` is allowed only for authorized domains and
+  requires a static/sticky proxy that the provider can reach.
+
+## Qrator / jsid
+
+Qrator обрабатывается как отдельный failure signal:
+
+- headers/body markers (`X-Qrator-*`, `Qrator`, `jsid`, short JS reload shell)
+  классифицируются как `qrator_challenge`;
+- transition policy сначала активирует residential/sticky network route, затем
+  browser fallback при наличии бюджета;
+- generic datacenter proxy route для таких сигналов не считается достаточным.
+
+В проекте намеренно нет hardcoded reverse-engineering solver-а для `jsid` и нет
+приватных Qrator API. Для owned/authorized targets это должен быть явный
+manual/provider integration path с отдельным security/legal review.
+
+## Warmed browser profile
+
+Persistent browser context по умолчанию остаётся source-scoped temp profile.
+Для контролируемого “прогретого” профиля задайте:
+
+```text
+JOB_FTCH_BROWSER_PROFILE_DIR=.runtime/browser_profiles/<source-or-tenant>
+JOB_FTCH_BROWSER_PROFILE_PERSISTENT=true
+```
+
+Профиль должен жить под ignored `.runtime/`, не должен быть личным daily
+профилем оператора и не должен попадать в git.
+
+For storage-state style reuse, keep it opt-in and source-scoped:
+
+```text
+JOB_FTCH_BROWSER_SESSION_STATE_ENABLED=true
+JOB_FTCH_BROWSER_SESSION_STATE_DIR=.runtime/session_states
+```
+
+Only allowlisted clearance cookies and the matching user-agent are persisted.
+Values are never logged.
+
+## Explicit Non-Goals
+
+The project does not implement reCAPTCHA submit/XHR token substitution,
+Cloudflare checkbox automation, generic `cf_clearance` harvesting, or private
+WAF solver integrations as scraper behavior. Official provider-backed
+Cloudflare challenge tasks are limited to owned/explicitly authorized eval
+targets, require domain authorization and proxy compatibility, and must fail
+closed when clearance cannot be verified.
 
 ## Бюджеты и остановка
 

@@ -54,10 +54,20 @@ _TECHNICAL_ZERO_REASONS = {
     "all_monitors_exhausted",
     "blocked_no_bypass_left",
     "all_scrapers_failed",
+    "waf_challenge",
+    "provider_tunnel_denied",
+    "soft_403_with_content",
+    "stale_url",
+    "parser_gap",
 }
 
 _OUTCOME_BY_ZERO_REASON = {
     "blocked_no_bypass_left": "protected",
+    "waf_challenge": "waf_challenge",
+    "provider_tunnel_denied": "provider_tunnel_denied",
+    "soft_403_with_content": "soft_403_with_content",
+    "stale_url": "stale_url",
+    "parser_gap": "parser_gap",
     "all_scrapers_failed": "detail_extraction_failed",
     "all_monitors_exhausted": "listing_discovery_failed",
     "monitor_empty": "unconfirmed_empty",

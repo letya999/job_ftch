@@ -1,3 +1,4 @@
+import contextlib
 import inspect
 import ipaddress
 import socket
@@ -19,6 +20,12 @@ from job_ftch.adapters.telegram_bot.handlers.feedback import build_feedback_mark
 from job_ftch.adapters.telegram_bot.sender import ReplyCardSender, TelegramCardSender
 from job_ftch.adapters.telegram_bot.utils import safe_error_reply
 from job_ftch.application.channel_publisher import publish_jobs
+from job_ftch.application.run_report import (
+    build_runtime_run_report,
+    render_runtime_run_footer,
+    render_runtime_run_report_text,
+    split_drop_buckets,
+)
 from job_ftch.application.vacancy_feedback import is_feedback_enabled
 from job_ftch.domain.models import MatchDecision, PostType
 
@@ -36,12 +43,6 @@ logger = structlog.get_logger(__name__)
 router = Router(name="pipeline")
 _BOT_PUBLISH_FETCH_MULTIPLIER = 20
 _BOT_PUBLISH_FETCH_FLOOR = 100
-# Graph nodes that drop an item because it was already ingested, not because it
-# failed a quality gate.
-_SEEN_DROP_STAGES = frozenset({"dedup", "SnapshotFilterNode"})
-_NON_VACANCY_DROP_STAGES = frozenset(
-    {"sanitize", "garbage", "post_type", "raw_jobness", "jobness", "hard_constraints"}
-)
 
 
 def _host_resolves_to_blocked_ip(hostname: str | None) -> bool:
@@ -145,20 +146,14 @@ def _split_drop_buckets(drop_reasons: "Mapping[str, int]") -> tuple[int, int, in
     Both used to be reported as "не-вакансии", so a run whose candidates were
     all seen before looked identical to a run whose filter rejected everything.
     """
-    already_seen = 0
-    non_vacancy = 0
-    other = 0
-    for reason, count in drop_reasons.items():
-        if count <= 0:
-            continue
-        stage = reason.partition(":")[2] if reason.startswith("node_returned_none") else ""
-        if reason == "already_processed" or stage in _SEEN_DROP_STAGES:
-            already_seen += count
-        elif stage in _NON_VACANCY_DROP_STAGES:
-            non_vacancy += count
-        else:
-            other += count
-    return already_seen, non_vacancy, other
+    buckets = split_drop_buckets(drop_reasons)
+    return buckets.already_seen, buckets.non_vacancy, buckets.low_relevance + buckets.other
+
+
+def _format_runtime_timestamp(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    return value.strip().replace("T", " ")
 
 
 async def run_pipeline_for_chat(
@@ -245,77 +240,37 @@ async def run_pipeline_for_chat(
 
         duration = int(time.monotonic() - t0)
 
-        # Pull stats from RunSummary
-        fetched = getattr(run_result, "fetched", 0)
-        extracted = getattr(run_result, "extracted", 0)
-        duplicates = getattr(run_result, "duplicates", 0)
-        dropped = getattr(run_result, "dropped", 0)
-        emitted = getattr(run_result, "emitted", 0)
-        failed = getattr(run_result, "failed", 0)
-        drop_reasons: dict[str, int] = getattr(run_result, "drop_reasons", {}) or {}
-        source_failures = list(getattr(run_result, "source_failures", []) or [])
-
-        llm_cost_usd = float(getattr(run_result, "llm_cost_usd", 0.0) or 0.0)
-        llm_usage_requests = int(getattr(run_result, "llm_usage_requests", 0) or 0)
-        llm_cost_is_complete = bool(getattr(run_result, "llm_cost_is_complete", True))
-
-        already_seen, non_vacancy, other_drops = _split_drop_buckets(drop_reasons)
-        funnel_parts = [
-            f"📥 Получено:         {fetched}",
-            f"👁 Уже видели:       {already_seen}",
-            f"🚫 Не-вакансии:      {non_vacancy}",
-        ]
-        if other_drops:
-            funnel_parts.append(f"➖ Прочие дропы:     {other_drops}")
-        funnel_parts += [
-            f"🔄 Дубликаты:        {duplicates}",
-            # Not "LLM обработано": this counts every triaged item, and the
-            # default graph triages heuristically. Real LLM volume is the
-            # request count in the footer.
-            f"⚙️ Обработано:       {extracted}",
-            f"⭐ Найдено вакансий: {emitted}",
-        ]
-        funnel_text = "\n".join(funnel_parts)
+        report = build_runtime_run_report(run_result, duration_seconds=duration)
+        emitted = report.emitted
+        already_seen = report.drop_buckets.already_seen
+        funnel_text = render_runtime_run_report_text(report)
 
         # A run drained by dedup measures the not-yet-seen residue, not the
         # selection quality. Saying so prevents reading it as a filter failure.
-        if emitted == 0 and already_seen > 0 and already_seen >= dropped - duplicates:
+        if emitted == 0 and already_seen > 0 and report.seen_dominates_drops:
             funnel_text += (
                 "\n<i>Почти всё уже есть в базе. Для честного замера "
                 "сбрось базу и запусти /run заново.</i>"
             )
+            with contextlib.suppress(Exception):
+                scheduler_status = await runner.get_bot_scheduler_status(tenant_id)
+                last_publish_sent = str(scheduler_status.get("last_publish_sent") or "").strip()
+                last_publish_at = _format_runtime_timestamp(
+                    scheduler_status.get("last_publish_success_at")
+                )
+                if last_publish_sent or last_publish_at:
+                    publish_hint_parts = []
+                    if last_publish_sent:
+                        publish_hint_parts.append(f"отправлено {last_publish_sent}")
+                    if last_publish_at:
+                        publish_hint_parts.append(f"последняя публикация {last_publish_at}")
+                    funnel_text += (
+                        "\n<i>Проверь канал: автопубликация уже проходила ("
+                        + ", ".join(publish_hint_parts)
+                        + ").</i>"
+                    )
 
-        notable_reasons = {
-            k: v
-            for k, v in drop_reasons.items()
-            if v > 0
-            and k
-            in (
-                "telegram_low_signal",
-                "job_out_of_scope",
-                "irrelevant_content",
-                "duplicate_content",
-            )
-        }
-        if notable_reasons:
-            reasons_str = ", ".join(
-                f"{k.replace('_', ' ')}: {v}" for k, v in notable_reasons.items()
-            )
-            funnel_text += f"\n<i>Причины дропа: {reasons_str}</i>"
-        if source_failures:
-            problem_lines = [
-                f"{item.get('source_name') or item.get('source_id')}: {item.get('error')}"
-                for item in source_failures
-            ]
-            funnel_text += "\n<i>Проблемные источники: " + "; ".join(problem_lines) + "</i>"
-
-        footer = f"⏱ {duration}с"
-        if llm_usage_requests and llm_cost_is_complete:
-            footer += f"  •  🤖 {llm_usage_requests} LLM  •  ${llm_cost_usd:.4f}"
-        elif llm_usage_requests:
-            footer += f"  •  🤖 {llm_usage_requests} LLM  •  цена: нет тарифа модели"
-        if failed > 0:
-            footer += f"  •  ошибок: {failed}"
+        footer = render_runtime_run_footer(report)
 
         if emitted == 0:
             delivery_status = "no_routing_accepts"

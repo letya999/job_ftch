@@ -7,6 +7,7 @@ listings from the API response for structured data access.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urljoin, urlparse
 
 import structlog
 
@@ -65,19 +66,27 @@ class RaiffeisenParser:
             open_page,
             safe_content,
         )
+        from job_ftch.infrastructure.sources.site_parsers.helpers import resolve_browser_config
 
-        browser_config = {k: v for k, v in spec.monitor_config.items() if k in BROWSER_KEYS}
-        browser_config.setdefault("headless", True)
-        browser_config.setdefault("stealth", True)
+        bypass_strategy = spec.monitor_config.get("_bypass_strategy")
+        browser_config = resolve_browser_config(
+            spec,
+            bypass_strategy,
+            defaults={"wait": "domcontentloaded", "headless": True, "stealth": True},
+        )
+        for key, value in spec.monitor_config.items():
+            if key in BROWSER_KEYS:
+                browser_config[key] = value
 
-        async with open_page(browser_config) as page:
+        async with open_page(browser_config, bypass_strategy=bypass_strategy) as page:
             await await_with_source_deadline(
                 page.goto(
                     spec.url,
-                    wait_until="networkidle",
+                    wait_until="domcontentloaded",
                     timeout=int(get_settings().career_site_timeout_seconds * 1000),
                 )
             )
+            await page.wait_for_timeout(2500)
             html = await safe_content(page)
 
         items = self._parse_from_rendered_html(html, spec.url, source_name, limit)
@@ -224,6 +233,56 @@ class RaiffeisenParser:
                 )
             )
 
+        if not items:
+            items = self._parse_role_links(parser, url, source_name, limit)
+
+        return items
+
+    def _parse_role_links(
+        self,
+        parser: Any,
+        board_url: str,
+        source_name: str,
+        limit: int,
+    ) -> list[RawItem]:
+        """Fallback for the current public site: role/direction pages."""
+        host = urlparse(board_url).netloc
+        seen: set[str] = set()
+        items: list[RawItem] = []
+        allowed_paths = (
+            "/dgtl",
+            "/sales",
+            "/start",
+            "/about/data/",
+            "/about/tech-lead",
+        )
+        for node in parser.css("a[href]"):
+            href = node.attributes.get("href") or ""
+            job_url = urljoin(board_url, href)
+            parsed = urlparse(job_url)
+            if parsed.netloc != host or not any(parsed.path.startswith(p) for p in allowed_paths):
+                continue
+            title = _clean_text(node.text(separator=" ", strip=True))
+            if not title or len(title) < 3 or job_url in seen:
+                continue
+            seen.add(job_url)
+            items.append(
+                build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=source_name,
+                    external_id=job_url,
+                    url=job_url,
+                    text=title,
+                    metadata={
+                        "board_url": board_url,
+                        "job_url": job_url,
+                        "parser": "raiffeisen_role_links",
+                        "observation_kind": "listing",
+                    },
+                )
+            )
+            if len(items) >= limit:
+                break
         return items
 
     @property

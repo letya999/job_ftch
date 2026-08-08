@@ -110,3 +110,31 @@ def test_attempt_ledger_counts_repeats_and_emits_complete_route_fields() -> None
     assert final["challenge_action"] == "none"
     assert isinstance(final["elapsed_ms"], int)
     assert len(final["url_hash"]) == 16
+
+
+def test_same_route_retry_cap_is_exposed_to_route_controller() -> None:
+    budget = _budget(max_same_route_retries_per_operation=2)
+    token = budget.start_operation("listing", kind="listing", max_browser_launches=1)
+    try:
+        for _ in range(2):
+            budget.log_attempt(
+                source_id="https://example.test/jobs",
+                transport="httpx",
+                browser="chromium",
+                network="direct",
+                failure_kind="challenge",
+                status_code=202,
+            )
+        assert not budget.same_route_retry_exhausted()
+
+        budget.log_attempt(
+            source_id="https://example.test/jobs",
+            transport="httpx",
+            browser="chromium",
+            network="direct",
+            failure_kind="challenge",
+            status_code=202,
+        )
+        assert budget.same_route_retry_exhausted()
+    finally:
+        budget.end_operation(token)

@@ -16,22 +16,21 @@ if TYPE_CHECKING:
     from types import TracebackType
 
 
-# Realistic Chrome-on-Windows UA. httpx has no default User-Agent that mimics
-# a real browser, and a bare/absent UA is an instant bot-fingerprint signal
-# that some career sites reject outright.
-DEFAULT_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.0.0 Safari/537.36"
-)
+def _raw_http_identity_headers() -> dict[str, str]:
+    """Return the naked-httpx browser identity from the shared persona pool."""
+    from job_ftch.infrastructure.bypass.fingerprint_profile import FingerprintProfile
+    from job_ftch.infrastructure.bypass.persona import select_persona
 
-# Real Chrome HTML-fetch Accept header. httpx's own default is ``*/*``, which
-# some sites (e.g. Uber's career pages) reject with HTTP 406. Keeping
-# ``*/*;q=0.8`` at the tail means non-HTML endpoints still match via the
-# wildcard; per-request ``Accept`` overrides from monitor/scraper configs
-# still win (httpx merges client + request headers, per-request wins on
-# conflict).
-DEFAULT_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    persona = select_persona("career-site-raw-http", "chromium")
+    return FingerprintProfile.from_persona(persona).http_headers()
+
+
+DEFAULT_HTTP_HEADERS = _raw_http_identity_headers()
+
+# Kept as public constants for tests/callers, but derived from the shared
+# identity model so raw-httpx no longer carries a parallel hardcoded UA axis.
+DEFAULT_USER_AGENT = DEFAULT_HTTP_HEADERS["User-Agent"]
+DEFAULT_ACCEPT = DEFAULT_HTTP_HEADERS["Accept"]
 
 # Statuses considered transient/retryable in addition to any 5xx: 408 (request
 # timeout), 425 (too early), 429 (rate-limited).
@@ -261,7 +260,7 @@ def build_default_http_client(*, verify_ssl: bool = True) -> _RetryingHttpClient
         max_connections=settings.career_site_max_connections,
     )
     verify: bool | ssl.SSLContext = _make_ssl_context() if verify_ssl else False
-    headers = {"User-Agent": DEFAULT_USER_AGENT, "Accept": DEFAULT_ACCEPT}
+    headers = dict(DEFAULT_HTTP_HEADERS)
     inner_transport = httpx.AsyncHTTPTransport(verify=verify, limits=limits)
     transport = SSRFGuardedTransport(inner_transport)
     return _RetryingHttpClient(

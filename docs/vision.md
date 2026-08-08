@@ -1,7 +1,7 @@
 ---
 title: "Видение job_ftch"
 description: "Назначение, границы и текущее состояние проекта job_ftch."
-updated: 2026-07-28
+updated: 2026-08-05
 ---
 # Видение job_ftch
 
@@ -19,7 +19,7 @@ RSS/API-источников и runtime-добавлений. Система п�
 
 ## Что уже есть
 
-- Production recipe для tenant `ai_jobs`: 22 live sources, 40 profile shots,
+- Production recipe для tenant `ai_jobs`: 17 live sources, 40 profile shots,
   pinned graph, eval gates и release metrics.
 - Multi-tenant runtime через `TenantRunner`.
 - Telegram bot как основной production-shape adapter.

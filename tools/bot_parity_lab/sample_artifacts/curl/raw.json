@@ -1,0 +1,1053 @@
+{
+  "behavior": [],
+  "client_family": "curl-libcurl",
+  "client_name": "curl",
+  "created_at": "2026-08-04T16:40:13.472+00:00",
+  "expected_failure": true,
+  "findings": [
+    {
+      "code": "JS_WINDOW_PROBE_MISSING",
+      "evidence": {},
+      "realms": [],
+      "reason": "The page did not execute or submit the primary browser runtime probe.",
+      "request_ids": [],
+      "severity_score": 40,
+      "signal_class": "hard_bot_signal",
+      "title": "Window JavaScript probe missing"
+    },
+    {
+      "code": "NET_RESOURCE_MISSING_STATIC_PROBE.JS",
+      "evidence": {
+        "missing_path": "/static/probe.js"
+      },
+      "realms": [],
+      "reason": "A normal page load executes a fixed local resource graph; the request is absent.",
+      "request_ids": [],
+      "severity_score": 40,
+      "signal_class": "hard_bot_signal",
+      "title": "Expected resource was not requested: /static/probe.js"
+    },
+    {
+      "code": "NET_SEC_FETCH_ABSENT",
+      "evidence": {
+        "missing": [
+          "sec-fetch-dest",
+          "sec-fetch-mode",
+          "sec-fetch-site",
+          "sec-fetch-user"
+        ]
+      },
+      "realms": [],
+      "reason": "The navigation lacks most Fetch Metadata headers expected from current browsers.",
+      "request_ids": [
+        "3d40ad6e211749ddbebdc634c1d060bb"
+      ],
+      "severity_score": 40,
+      "signal_class": "hard_bot_signal",
+      "title": "Sec-Fetch metadata is absent"
+    },
+    {
+      "code": "NET_UA_NON_BROWSER",
+      "evidence": {
+        "user_agent": "curl/8.10.1"
+      },
+      "realms": [],
+      "reason": "The declared client is a raw HTTP library rather than a browser engine.",
+      "request_ids": [
+        "3d40ad6e211749ddbebdc634c1d060bb"
+      ],
+      "severity_score": 40,
+      "signal_class": "hard_bot_signal",
+      "title": "Non-browser User-Agent"
+    },
+    {
+      "code": "BEHAVIOR_NO_EVENTS",
+      "evidence": {},
+      "realms": [],
+      "reason": "No mouse, pointer, keyboard, scroll, focus, or visibility events were observed.",
+      "request_ids": [],
+      "severity_score": 15,
+      "signal_class": "medium_suspicious",
+      "title": "No interaction events"
+    },
+    {
+      "code": "NET_ACCEPT_ENCODING_MISSING",
+      "evidence": {},
+      "realms": [],
+      "reason": "A browser usually negotiates compressed content encodings.",
+      "request_ids": [
+        "3d40ad6e211749ddbebdc634c1d060bb"
+      ],
+      "severity_score": 15,
+      "signal_class": "medium_suspicious",
+      "title": "Accept-Encoding is missing"
+    },
+    {
+      "code": "NET_ACCEPT_LANGUAGE_MISSING",
+      "evidence": {},
+      "realms": [],
+      "reason": "A browser profile normally sends at least one preferred language.",
+      "request_ids": [
+        "3d40ad6e211749ddbebdc634c1d060bb"
+      ],
+      "severity_score": 15,
+      "signal_class": "medium_suspicious",
+      "title": "Accept-Language is missing"
+    },
+    {
+      "code": "NET_ACCEPT_NAV_MISMATCH",
+      "evidence": {
+        "accept": "*/*"
+      },
+      "realms": [],
+      "reason": "Top-level browser navigation usually advertises HTML and related document formats.",
+      "request_ids": [
+        "3d40ad6e211749ddbebdc634c1d060bb"
+      ],
+      "severity_score": 15,
+      "signal_class": "medium_suspicious",
+      "title": "Navigation Accept header is atypical"
+    },
+    {
+      "code": "NET_RESOURCE_MISSING_API_BEACON",
+      "evidence": {
+        "missing_path": "/api/beacon"
+      },
+      "realms": [],
+      "reason": "A normal page load executes a fixed local resource graph; the request is absent.",
+      "request_ids": [],
+      "severity_score": 15,
+      "signal_class": "medium_suspicious",
+      "title": "Expected resource was not requested: /api/beacon"
+    },
+    {
+      "code": "NET_RESOURCE_MISSING_API_CACHEABLE",
+      "evidence": {
+        "missing_path": "/api/cacheable"
+      },
+      "realms": [],
+      "reason": "A normal page load executes a fixed local resource graph; the request is absent.",
+      "request_ids": [],
+      "severity_score": 15,
+      "signal_class": "medium_suspicious",
+      "title": "Expected resource was not requested: /api/cacheable"
+    },
+    {
+      "code": "NET_RESOURCE_MISSING_STATIC_CLASSIC-WORKER.JS",
+      "evidence": {
+        "missing_path": "/static/classic-worker.js"
+      },
+      "realms": [],
+      "reason": "A normal page load executes a fixed local resource graph; the request is absent.",
+      "request_ids": [],
+      "severity_score": 15,
+      "signal_class": "medium_suspicious",
+      "title": "Expected resource was not requested: /static/classic-worker.js"
+    },
+    {
+      "code": "NET_RESOURCE_MISSING_STATIC_PIXEL.SVG",
+      "evidence": {
+        "missing_path": "/static/pixel.svg"
+      },
+      "realms": [],
+      "reason": "A normal page load executes a fixed local resource graph; the request is absent.",
+      "request_ids": [],
+      "severity_score": 15,
+      "signal_class": "medium_suspicious",
+      "title": "Expected resource was not requested: /static/pixel.svg"
+    },
+    {
+      "code": "NET_RESOURCE_MISSING_STATIC_STYLE.CSS",
+      "evidence": {
+        "missing_path": "/static/style.css"
+      },
+      "realms": [],
+      "reason": "A normal page load executes a fixed local resource graph; the request is absent.",
+      "request_ids": [],
+      "severity_score": 15,
+      "signal_class": "medium_suspicious",
+      "title": "Expected resource was not requested: /static/style.css"
+    },
+    {
+      "code": "NET_RESOURCE_MISSING_FAVICON.ICO",
+      "evidence": {
+        "missing_path": "/favicon.ico"
+      },
+      "realms": [],
+      "reason": "A normal page load executes a fixed local resource graph; the request is absent.",
+      "request_ids": [],
+      "severity_score": 4,
+      "signal_class": "low_entropy_mismatch",
+      "title": "Expected resource was not requested: /favicon.ico"
+    },
+    {
+      "code": "NET_RESOURCE_MISSING_STATIC_MODULE-WORKER.JS",
+      "evidence": {
+        "missing_path": "/static/module-worker.js"
+      },
+      "realms": [],
+      "reason": "A normal page load executes a fixed local resource graph; the request is absent.",
+      "request_ids": [],
+      "severity_score": 4,
+      "signal_class": "low_entropy_mismatch",
+      "title": "Expected resource was not requested: /static/module-worker.js"
+    },
+    {
+      "code": "HTTP_VERSION_DISTRIBUTION",
+      "evidence": {
+        "versions": {
+          "2": 7
+        }
+      },
+      "realms": [],
+      "reason": "The report includes the server-observed HTTP version for every request.",
+      "request_ids": [],
+      "severity_score": 0,
+      "signal_class": "informational",
+      "title": "HTTP protocol distribution captured"
+    },
+    {
+      "code": "IP_REPUTATION_OFFLINE",
+      "evidence": {
+        "asn": null,
+        "cidr": "127.0.0.0/8",
+        "country": null,
+        "ip": "127.0.0.1",
+        "label": "loopback",
+        "network_type": "loopback",
+        "organization": null,
+        "risk": 0,
+        "source": "local-policy",
+        "tags": [
+          "local"
+        ]
+      },
+      "realms": [],
+      "reason": "No public reputation service is queried. The result comes from the supplied CIDR policy and, when configured, a local MaxMind ASN database.",
+      "request_ids": [],
+      "severity_score": 0,
+      "signal_class": "informational",
+      "title": "Offline IP policy match"
+    },
+    {
+      "code": "TLS_FINGERPRINT_CAPTURED",
+      "evidence": {
+        "alpn": [
+          "h2",
+          "http/1.1"
+        ],
+        "cipher_count": 30,
+        "extension_count": 13,
+        "ja3": "32e4b8812cda0c0d50783b438492a769",
+        "ja4": "t13d3013h2_1d37bd780c83_8537cf56674e"
+      },
+      "realms": [],
+      "reason": "The passive local proxy parsed the cleartext ClientHello without terminating or modifying TLS.",
+      "request_ids": [],
+      "severity_score": 0,
+      "signal_class": "informational",
+      "title": "TLS fingerprint captured"
+    }
+  ],
+  "finished_at": "2026-08-04T16:40:13.490+00:00",
+  "gate_enabled": false,
+  "metadata": {
+    "adapter": "curl",
+    "http2": true,
+    "version": "curl 8.10.1 (x86_64-pc-linux-gnu) libcurl/8.10.1 OpenSSL/3.5.5 zlib/1.3.1 brotli/1.1.0 zstd/1.5.7 libidn2/2.3.8 libpsl/0.21.2 nghttp2/1.64.0 librtmp/2.3 OpenLDAP/2.6.10"
+  },
+  "opaque_payloads": [],
+  "probes": [],
+  "requests": [
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 52000,
+      "connection_id": "508777bc1e72447ba1fed15d3203009f",
+      "duration_ms": 1.062657,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "user-agent",
+          "curl/8.10.1"
+        ],
+        [
+          "accept",
+          "*/*"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 1956596903099,
+      "observed_at": "2026-08-04T16:40:13.473+00:00",
+      "path": "/",
+      "query": "sid=curl-1076e7b198e64a659284&client=curl&family=curl-libcurl&expected_failure=1&gate=0",
+      "request_body_bytes": 0,
+      "request_id": "3d40ad6e211749ddbebdc634c1d060bb",
+      "response_body_bytes": 3645,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "cache-control",
+          "no-store"
+        ],
+        [
+          "content-length",
+          "3645"
+        ],
+        [
+          "content-type",
+          "text/html; charset=utf-8"
+        ],
+        [
+          "set-cookie",
+          "parity_sid=curl-1076e7b198e64a659284; Max-Age=3600; Path=/; SameSite=lax; Secure"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "curl-1076e7b198e64a659284",
+      "tls_ja3": "32e4b8812cda0c0d50783b438492a769",
+      "tls_ja4": "t13d3013h2_1d37bd780c83_8537cf56674e"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 52000,
+      "connection_id": "508777bc1e72447ba1fed15d3203009f",
+      "duration_ms": 0.662743,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "user-agent",
+          "curl/8.10.1"
+        ],
+        [
+          "accept",
+          "*/*"
+        ],
+        [
+          "cookie",
+          "parity_sid=curl-1076e7b198e64a659284"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 1956598768277,
+      "observed_at": "2026-08-04T16:40:13.474+00:00",
+      "path": "/api/cookie/set",
+      "query": "sid=curl-1076e7b198e64a659284",
+      "request_body_bytes": 0,
+      "request_id": "fe12b6f109244a0c8366f7e1bde5b39e",
+      "response_body_bytes": 48,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "content-length",
+          "48"
+        ],
+        [
+          "content-type",
+          "application/json"
+        ],
+        [
+          "set-cookie",
+          "lab_cookie=present; Max-Age=600; Path=/; SameSite=lax; Secure"
+        ],
+        [
+          "set-cookie",
+          "strict_cookie=present; HttpOnly; Max-Age=600; Path=/; SameSite=strict; Secure"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "curl-1076e7b198e64a659284",
+      "tls_ja3": "32e4b8812cda0c0d50783b438492a769",
+      "tls_ja4": "t13d3013h2_1d37bd780c83_8537cf56674e"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 52000,
+      "connection_id": "508777bc1e72447ba1fed15d3203009f",
+      "duration_ms": 0.391851,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "user-agent",
+          "curl/8.10.1"
+        ],
+        [
+          "accept",
+          "*/*"
+        ],
+        [
+          "cookie",
+          "strict_cookie=present; lab_cookie=present; parity_sid=curl-1076e7b198e64a659284"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 1956600173172,
+      "observed_at": "2026-08-04T16:40:13.475+00:00",
+      "path": "/api/cookie/echo",
+      "query": "sid=curl-1076e7b198e64a659284",
+      "request_body_bytes": 0,
+      "request_id": "5c3e0f8f5f82425582a341a17d81fb95",
+      "response_body_bytes": 113,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "content-length",
+          "113"
+        ],
+        [
+          "content-type",
+          "application/json"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "curl-1076e7b198e64a659284",
+      "tls_ja3": "32e4b8812cda0c0d50783b438492a769",
+      "tls_ja4": "t13d3013h2_1d37bd780c83_8537cf56674e"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 52000,
+      "connection_id": "508777bc1e72447ba1fed15d3203009f",
+      "duration_ms": 0.498791,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "user-agent",
+          "curl/8.10.1"
+        ],
+        [
+          "accept",
+          "*/*"
+        ],
+        [
+          "cookie",
+          "strict_cookie=present; lab_cookie=present; parity_sid=curl-1076e7b198e64a659284"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 1956601074679,
+      "observed_at": "2026-08-04T16:40:13.476+00:00",
+      "path": "/api/fetch",
+      "query": "sid=curl-1076e7b198e64a659284",
+      "request_body_bytes": 0,
+      "request_id": "43ebb76754a14315b37b947556bb24c5",
+      "response_body_bytes": 378,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "content-length",
+          "378"
+        ],
+        [
+          "content-type",
+          "application/json"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "curl-1076e7b198e64a659284",
+      "tls_ja3": "32e4b8812cda0c0d50783b438492a769",
+      "tls_ja4": "t13d3013h2_1d37bd780c83_8537cf56674e"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 52000,
+      "connection_id": "508777bc1e72447ba1fed15d3203009f",
+      "duration_ms": 0.452591,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "user-agent",
+          "curl/8.10.1"
+        ],
+        [
+          "accept",
+          "*/*"
+        ],
+        [
+          "cookie",
+          "strict_cookie=present; lab_cookie=present; parity_sid=curl-1076e7b198e64a659284"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 1956602089876,
+      "observed_at": "2026-08-04T16:40:13.477+00:00",
+      "path": "/api/redirect/start",
+      "query": "sid=curl-1076e7b198e64a659284",
+      "request_body_bytes": 0,
+      "request_id": "3427a621db294619a27b71e45c92bb90",
+      "response_body_bytes": 0,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "content-length",
+          "0"
+        ],
+        [
+          "location",
+          "/api/redirect/mid?sid=curl-1076e7b198e64a659284"
+        ],
+        [
+          "set-cookie",
+          "redirect_cookie=hop1; Max-Age=300; Path=/; SameSite=lax; Secure"
+        ]
+      ],
+      "response_status": 302,
+      "scheme": "https",
+      "session_id": "curl-1076e7b198e64a659284",
+      "tls_ja3": "32e4b8812cda0c0d50783b438492a769",
+      "tls_ja4": "t13d3013h2_1d37bd780c83_8537cf56674e"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 52000,
+      "connection_id": "508777bc1e72447ba1fed15d3203009f",
+      "duration_ms": 0.3438,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "user-agent",
+          "curl/8.10.1"
+        ],
+        [
+          "accept",
+          "*/*"
+        ],
+        [
+          "cookie",
+          "redirect_cookie=hop1; strict_cookie=present; lab_cookie=present; parity_sid=curl-1076e7b198e64a659284"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 1956602905206,
+      "observed_at": "2026-08-04T16:40:13.478+00:00",
+      "path": "/api/redirect/mid",
+      "query": "sid=curl-1076e7b198e64a659284",
+      "request_body_bytes": 0,
+      "request_id": "721fffa47aa2462a97fd7c0893ca7e25",
+      "response_body_bytes": 0,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "content-length",
+          "0"
+        ],
+        [
+          "location",
+          "/api/redirect/final?sid=curl-1076e7b198e64a659284"
+        ]
+      ],
+      "response_status": 307,
+      "scheme": "https",
+      "session_id": "curl-1076e7b198e64a659284",
+      "tls_ja3": "32e4b8812cda0c0d50783b438492a769",
+      "tls_ja4": "t13d3013h2_1d37bd780c83_8537cf56674e"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 52000,
+      "connection_id": "508777bc1e72447ba1fed15d3203009f",
+      "duration_ms": 0.305133,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "user-agent",
+          "curl/8.10.1"
+        ],
+        [
+          "accept",
+          "*/*"
+        ],
+        [
+          "cookie",
+          "redirect_cookie=hop1; strict_cookie=present; lab_cookie=present; parity_sid=curl-1076e7b198e64a659284"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 1956603580618,
+      "observed_at": "2026-08-04T16:40:13.479+00:00",
+      "path": "/api/redirect/final",
+      "query": "sid=curl-1076e7b198e64a659284",
+      "request_body_bytes": 0,
+      "request_id": "4674903837d74806b68029c97167da48",
+      "response_body_bytes": 110,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "cache-control",
+          "no-store"
+        ],
+        [
+          "content-length",
+          "110"
+        ],
+        [
+          "content-type",
+          "image/svg+xml"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "curl-1076e7b198e64a659284",
+      "tls_ja3": "32e4b8812cda0c0d50783b438492a769",
+      "tls_ja4": "t13d3013h2_1d37bd780c83_8537cf56674e"
+    }
+  ],
+  "session_id": "curl-1076e7b198e64a659284",
+  "summary": {
+    "disposition": "expected_fail",
+    "gate_reason": "Negative control produced medium/high findings as intended.",
+    "hard_count": 4,
+    "info_count": 3,
+    "low_count": 2,
+    "medium_count": 9,
+    "score": 100
+  },
+  "tls_fingerprints": [
+    {
+      "alpn_protocols": [
+        "h2",
+        "http/1.1"
+      ],
+      "backend_source_port": 34844,
+      "cipher_suites": [
+        4866,
+        4867,
+        4865,
+        49196,
+        49200,
+        159,
+        52393,
+        52392,
+        52394,
+        49195,
+        49199,
+        158,
+        49188,
+        49192,
+        107,
+        49187,
+        49191,
+        103,
+        49162,
+        49172,
+        57,
+        49161,
+        49171,
+        51,
+        157,
+        156,
+        61,
+        60,
+        53,
+        47
+      ],
+      "client_host": "127.0.0.1",
+      "client_port": 52000,
+      "connection_id": "508777bc1e72447ba1fed15d3203009f",
+      "ec_point_formats": [
+        0,
+        1,
+        2
+      ],
+      "extension_ids": [
+        65281,
+        0,
+        11,
+        10,
+        16,
+        22,
+        23,
+        49,
+        13,
+        43,
+        45,
+        51,
+        27
+      ],
+      "ja3": "32e4b8812cda0c0d50783b438492a769",
+      "ja3_raw": "771,4866-4867-4865-49196-49200-159-52393-52392-52394-49195-49199-158-49188-49192-107-49187-49191-103-49162-49172-57-49161-49171-51-157-156-61-60-53-47,65281-0-11-10-16-22-23-49-13-43-45-51-27,4588-29-23-30-24-25-256-257,0-1-2",
+      "ja4": "t13d3013h2_1d37bd780c83_8537cf56674e",
+      "ja4_raw": "t13d3013h2_002f,0033,0035,0039,003c,003d,0067,006b,009c,009d,009e,009f,1301,1302,1303,c009,c00a,c013,c014,c023,c024,c027,c028,c02b,c02c,c02f,c030,cca8,cca9,ccaa_000a,000b,000d,0016,0017,001b,002b,002d,0031,0033,ff01_0905,0906,0904,0403,0503,0603,0807,0808,081a,081b,081c,0809,080a,080b,0804,0805,0806,0401,0501,0601,0303,0301,0302,0402,0502,0602",
+      "legacy_version": 771,
+      "observed_at": "2026-08-04T16:40:13.468+00:00",
+      "parse_error": null,
+      "record_version": 769,
+      "server_name": "localhost",
+      "signature_algorithms": [
+        2309,
+        2310,
+        2308,
+        1027,
+        1283,
+        1539,
+        2055,
+        2056,
+        2074,
+        2075,
+        2076,
+        2057,
+        2058,
+        2059,
+        2052,
+        2053,
+        2054,
+        1025,
+        1281,
+        1537,
+        771,
+        769,
+        770,
+        1026,
+        1282,
+        1538
+      ],
+      "supported_groups": [
+        4588,
+        29,
+        23,
+        30,
+        24,
+        25,
+        256,
+        257
+      ],
+      "supported_versions": [
+        772,
+        771
+      ]
+    },
+    {
+      "alpn_protocols": [
+        "h2",
+        "http/1.1"
+      ],
+      "backend_source_port": 34854,
+      "cipher_suites": [
+        4866,
+        4867,
+        4865,
+        49196,
+        49200,
+        159,
+        52393,
+        52392,
+        52394,
+        49195,
+        49199,
+        158,
+        49188,
+        49192,
+        107,
+        49187,
+        49191,
+        103,
+        49162,
+        49172,
+        57,
+        49161,
+        49171,
+        51,
+        157,
+        156,
+        61,
+        60,
+        53,
+        47
+      ],
+      "client_host": "127.0.0.1",
+      "client_port": 52010,
+      "connection_id": "02a662f0e49b4b6bacb0903ef0500448",
+      "ec_point_formats": [
+        0,
+        1,
+        2
+      ],
+      "extension_ids": [
+        65281,
+        0,
+        11,
+        10,
+        16,
+        22,
+        23,
+        49,
+        13,
+        43,
+        45,
+        51,
+        27
+      ],
+      "ja3": "32e4b8812cda0c0d50783b438492a769",
+      "ja3_raw": "771,4866-4867-4865-49196-49200-159-52393-52392-52394-49195-49199-158-49188-49192-107-49187-49191-103-49162-49172-57-49161-49171-51-157-156-61-60-53-47,65281-0-11-10-16-22-23-49-13-43-45-51-27,4588-29-23-30-24-25-256-257,0-1-2",
+      "ja4": "t13d3013h2_1d37bd780c83_8537cf56674e",
+      "ja4_raw": "t13d3013h2_002f,0033,0035,0039,003c,003d,0067,006b,009c,009d,009e,009f,1301,1302,1303,c009,c00a,c013,c014,c023,c024,c027,c028,c02b,c02c,c02f,c030,cca8,cca9,ccaa_000a,000b,000d,0016,0017,001b,002b,002d,0031,0033,ff01_0905,0906,0904,0403,0503,0603,0807,0808,081a,081b,081c,0809,080a,080b,0804,0805,0806,0401,0501,0601,0303,0301,0302,0402,0502,0602",
+      "legacy_version": 771,
+      "observed_at": "2026-08-04T16:40:13.486+00:00",
+      "parse_error": null,
+      "record_version": 769,
+      "server_name": "localhost",
+      "signature_algorithms": [
+        2309,
+        2310,
+        2308,
+        1027,
+        1283,
+        1539,
+        2055,
+        2056,
+        2074,
+        2075,
+        2076,
+        2057,
+        2058,
+        2059,
+        2052,
+        2053,
+        2054,
+        1025,
+        1281,
+        1537,
+        771,
+        769,
+        770,
+        1026,
+        1282,
+        1538
+      ],
+      "supported_groups": [
+        4588,
+        29,
+        23,
+        30,
+        24,
+        25,
+        256,
+        257
+      ],
+      "supported_versions": [
+        772,
+        771
+      ]
+    }
+  ]
+}

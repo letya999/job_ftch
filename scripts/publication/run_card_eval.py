@@ -99,18 +99,32 @@ def main() -> None:
         help="Fixtures directory",
     )
     parser.add_argument("--layout", type=str, default=None, help="Card layout YAML path")
+    parser.add_argument(
+        "--gate", action="store_true", help="Fail on publication quality regression."
+    )
+    parser.add_argument(
+        "--allow-missing-fixtures",
+        action="store_true",
+        help="Treat a missing fixtures directory as a skipped fixture eval.",
+    )
     args = parser.parse_args()
 
     fixtures_dir = Path(args.fixtures)
     if not fixtures_dir.exists():
         print(f"Fixtures directory {fixtures_dir} not found.")
         print("Run scripts/publication/sample_sources.py first to generate fixtures.")
+        if args.allow_missing_fixtures:
+            print("Fixture eval skipped.")
+            return
         sys.exit(1)
 
     layout = load_layout(args.layout)
     fixture_files = sorted(fixtures_dir.glob("*.json"))
     if not fixture_files:
         print(f"No .json fixtures found in {fixtures_dir}")
+        if args.allow_missing_fixtures:
+            print("Fixture eval skipped.")
+            return
         sys.exit(1)
 
     print(f"Evaluating {len(fixture_files)} source fixtures...\n")
@@ -161,6 +175,21 @@ def main() -> None:
         else ""
     )
     print(f"Average field coverage: {coverage_all:.1%}")
+    if args.gate:
+        failures = []
+        if total_all == 0:
+            failures.append("no publication samples")
+        if total_all > 0 and build_all != total_all:
+            failures.append("not every sample builds")
+        if total_all > 0 and render_all != total_all:
+            failures.append("not every sample renders")
+        if sum(m["length_exceeded"] for m in all_metrics):
+            failures.append("at least one rendered card exceeds Telegram length limits")
+        if failures:
+            print("\nGate failed:")
+            for failure in failures:
+                print(f" - {failure}")
+            sys.exit(1)
 
 
 if __name__ == "__main__":

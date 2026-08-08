@@ -1,0 +1,38 @@
+name: Docs
+
+on:
+  push:
+    branches: [main, dev, mvp-release-final]
+  workflow_dispatch:
+  pull_request:
+    branches: [main, dev]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  docs:
+    name: Docs Just Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install project dependencies
+        run: uv sync --all-extras
+
+      - name: Install docs dependencies
+        run: |
+          uv pip install --reinstall-package markupsafe markupsafe
+          uv pip install -r docs_scripts/requirements.txt
+
+      - name: Run docs gates
+        run: |
+          uv run python scripts/build_index_docs.py --check
+          uv run python scripts/lint_docs.py
+          uv run python scripts/check_docs_generated.py
+          uv run mkdocs build --strict -f docs_scripts/mkdocs.yml

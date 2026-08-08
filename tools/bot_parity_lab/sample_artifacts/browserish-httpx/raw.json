@@ -1,0 +1,2003 @@
+{
+  "behavior": [],
+  "client_family": "httpx-header-mimic",
+  "client_name": "browserish-httpx",
+  "created_at": "2026-08-04T16:41:04.408+00:00",
+  "expected_failure": true,
+  "findings": [
+    {
+      "code": "JS_WINDOW_PROBE_MISSING",
+      "evidence": {},
+      "realms": [],
+      "reason": "The page did not execute or submit the primary browser runtime probe.",
+      "request_ids": [],
+      "severity_score": 40,
+      "signal_class": "hard_bot_signal",
+      "title": "Window JavaScript probe missing"
+    },
+    {
+      "code": "BEHAVIOR_NO_EVENTS",
+      "evidence": {},
+      "realms": [],
+      "reason": "No mouse, pointer, keyboard, scroll, focus, or visibility events were observed.",
+      "request_ids": [],
+      "severity_score": 15,
+      "signal_class": "medium_suspicious",
+      "title": "No interaction events"
+    },
+    {
+      "code": "NET_RESOURCE_MISSING_STATIC_CLASSIC-WORKER.JS",
+      "evidence": {
+        "missing_path": "/static/classic-worker.js"
+      },
+      "realms": [],
+      "reason": "A normal page load executes a fixed local resource graph; the request is absent.",
+      "request_ids": [],
+      "severity_score": 15,
+      "signal_class": "medium_suspicious",
+      "title": "Expected resource was not requested: /static/classic-worker.js"
+    },
+    {
+      "code": "NET_CACHE_REVALIDATION_ABSENT",
+      "evidence": {},
+      "realms": [],
+      "reason": "Repeated local cache probes did not produce a conditional request or 304 response.",
+      "request_ids": [
+        "46f6cbc2bbba4ae4b6418bea5ae8862f",
+        "8884fdcabbae44658c84d0d8ab011648"
+      ],
+      "severity_score": 4,
+      "signal_class": "low_entropy_mismatch",
+      "title": "No cache revalidation observed"
+    },
+    {
+      "code": "NET_FETCH_DEST_MISMATCH",
+      "evidence": {
+        "sec_fetch_dest": "document"
+      },
+      "realms": [],
+      "reason": "A JavaScript fetch normally uses Sec-Fetch-Dest: empty.",
+      "request_ids": [
+        "7d95a56effa243e3919552757012ec1b"
+      ],
+      "severity_score": 4,
+      "signal_class": "low_entropy_mismatch",
+      "title": "Fetch request has atypical destination metadata"
+    },
+    {
+      "code": "NET_RESOURCE_MISSING_STATIC_MODULE-WORKER.JS",
+      "evidence": {
+        "missing_path": "/static/module-worker.js"
+      },
+      "realms": [],
+      "reason": "A normal page load executes a fixed local resource graph; the request is absent.",
+      "request_ids": [],
+      "severity_score": 4,
+      "signal_class": "low_entropy_mismatch",
+      "title": "Expected resource was not requested: /static/module-worker.js"
+    },
+    {
+      "code": "HTTP_VERSION_DISTRIBUTION",
+      "evidence": {
+        "versions": {
+          "2": 14
+        }
+      },
+      "realms": [],
+      "reason": "The report includes the server-observed HTTP version for every request.",
+      "request_ids": [],
+      "severity_score": 0,
+      "signal_class": "informational",
+      "title": "HTTP protocol distribution captured"
+    },
+    {
+      "code": "IP_REPUTATION_OFFLINE",
+      "evidence": {
+        "asn": null,
+        "cidr": "127.0.0.0/8",
+        "country": null,
+        "ip": "127.0.0.1",
+        "label": "loopback",
+        "network_type": "loopback",
+        "organization": null,
+        "risk": 0,
+        "source": "local-policy",
+        "tags": [
+          "local"
+        ]
+      },
+      "realms": [],
+      "reason": "No public reputation service is queried. The result comes from the supplied CIDR policy and, when configured, a local MaxMind ASN database.",
+      "request_ids": [],
+      "severity_score": 0,
+      "signal_class": "informational",
+      "title": "Offline IP policy match"
+    },
+    {
+      "code": "TLS_FINGERPRINT_CAPTURED",
+      "evidence": {
+        "alpn": [
+          "http/1.1",
+          "h2"
+        ],
+        "cipher_count": 30,
+        "extension_count": 13,
+        "ja3": "8ecf4858a704c8936042f20a8bedee04",
+        "ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+      },
+      "realms": [],
+      "reason": "The passive local proxy parsed the cleartext ClientHello without terminating or modifying TLS.",
+      "request_ids": [],
+      "severity_score": 0,
+      "signal_class": "informational",
+      "title": "TLS fingerprint captured"
+    }
+  ],
+  "finished_at": "2026-08-04T16:41:04.447+00:00",
+  "gate_enabled": false,
+  "metadata": {
+    "adapter": "httpx",
+    "browserHeadersOnly": true
+  },
+  "opaque_payloads": [],
+  "probes": [],
+  "requests": [
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 1.01779,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007533268615,
+      "observed_at": "2026-08-04T16:41:04.409+00:00",
+      "path": "/",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1&client=browserish-httpx&family=httpx-header-mimic&expected_failure=1&gate=0",
+      "request_body_bytes": 0,
+      "request_id": "5963592efe7a4ebe82dc20625f259c7b",
+      "response_body_bytes": 3771,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "cache-control",
+          "no-store"
+        ],
+        [
+          "content-length",
+          "3771"
+        ],
+        [
+          "content-type",
+          "text/html; charset=utf-8"
+        ],
+        [
+          "set-cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1; Max-Age=3600; Path=/; SameSite=lax; Secure"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 7.975545,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007536428794,
+      "observed_at": "2026-08-04T16:41:04.419+00:00",
+      "path": "/static/style.css",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "5984d291391c49ac9b07dc665b3d019e",
+      "response_body_bytes": 3132,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "cache-control",
+          "public, max-age=60"
+        ],
+        [
+          "content-type",
+          "text/css; charset=utf-8"
+        ],
+        [
+          "accept-ranges",
+          "bytes"
+        ],
+        [
+          "content-length",
+          "3132"
+        ],
+        [
+          "last-modified",
+          "Tue, 04 Aug 2026 16:19:36 GMT"
+        ],
+        [
+          "etag",
+          "\"41e58f4dc14e50c65c1e73c629c636d3\""
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 1.391956,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007545813410,
+      "observed_at": "2026-08-04T16:41:04.422+00:00",
+      "path": "/static/probe.js",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "907581e023b74c6b8cfe89a6625fca39",
+      "response_body_bytes": 43782,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "cache-control",
+          "public, max-age=60"
+        ],
+        [
+          "content-type",
+          "text/javascript; charset=utf-8"
+        ],
+        [
+          "accept-ranges",
+          "bytes"
+        ],
+        [
+          "content-length",
+          "43782"
+        ],
+        [
+          "last-modified",
+          "Tue, 04 Aug 2026 16:22:49 GMT"
+        ],
+        [
+          "etag",
+          "\"096ca9f069d634ce1ae85bcd23bb3bd8\""
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 0.962238,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007548930025,
+      "observed_at": "2026-08-04T16:41:04.425+00:00",
+      "path": "/static/pixel.svg",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "7cc64ef8a2e44a5c825a1393d646f9a8",
+      "response_body_bytes": 332,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "cache-control",
+          "public, max-age=60"
+        ],
+        [
+          "content-type",
+          "image/svg+xml"
+        ],
+        [
+          "accept-ranges",
+          "bytes"
+        ],
+        [
+          "content-length",
+          "332"
+        ],
+        [
+          "last-modified",
+          "Tue, 04 Aug 2026 16:19:36 GMT"
+        ],
+        [
+          "etag",
+          "\"5ed7d754b81f3088652e26e93f5a703e\""
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 0.951021,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007551085914,
+      "observed_at": "2026-08-04T16:41:04.427+00:00",
+      "path": "/favicon.ico",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "652161527332475f91c5dad7bb0f72fe",
+      "response_body_bytes": 400,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "content-type",
+          "image/svg+xml"
+        ],
+        [
+          "accept-ranges",
+          "bytes"
+        ],
+        [
+          "content-length",
+          "400"
+        ],
+        [
+          "last-modified",
+          "Tue, 04 Aug 2026 16:19:36 GMT"
+        ],
+        [
+          "etag",
+          "\"ad8ab1c52ac44181110b7b3c44510c6a\""
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 0.73447,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007553237357,
+      "observed_at": "2026-08-04T16:41:04.429+00:00",
+      "path": "/api/cookie/set",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "1d8ab73a5a7049988763b7884b662bb4",
+      "response_body_bytes": 48,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "content-length",
+          "48"
+        ],
+        [
+          "content-type",
+          "application/json"
+        ],
+        [
+          "set-cookie",
+          "lab_cookie=present; Max-Age=600; Path=/; SameSite=lax; Secure"
+        ],
+        [
+          "set-cookie",
+          "strict_cookie=present; HttpOnly; Max-Age=600; Path=/; SameSite=strict; Secure"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 0.403068,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1; lab_cookie=present; strict_cookie=present"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007555571861,
+      "observed_at": "2026-08-04T16:41:04.431+00:00",
+      "path": "/api/cookie/echo",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "516f6f449697422ea42cfbf86d64060d",
+      "response_body_bytes": 125,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "content-length",
+          "125"
+        ],
+        [
+          "content-type",
+          "application/json"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 0.531499,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1; lab_cookie=present; strict_cookie=present"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007557475135,
+      "observed_at": "2026-08-04T16:41:04.433+00:00",
+      "path": "/api/fetch",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "7d95a56effa243e3919552757012ec1b",
+      "response_body_bytes": 939,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "content-length",
+          "939"
+        ],
+        [
+          "content-type",
+          "application/json"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 0.409548,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1; lab_cookie=present; strict_cookie=present"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007559449405,
+      "observed_at": "2026-08-04T16:41:04.435+00:00",
+      "path": "/api/cacheable",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "46f6cbc2bbba4ae4b6418bea5ae8862f",
+      "response_body_bytes": 20,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "etag",
+          "\"0c478f5f123d388abe6d52d9\""
+        ],
+        [
+          "last-modified",
+          "Tue, 04 Aug 2026 00:00:00 GMT"
+        ],
+        [
+          "cache-control",
+          "public, max-age=0, must-revalidate"
+        ],
+        [
+          "content-length",
+          "20"
+        ],
+        [
+          "content-type",
+          "text/plain; charset=utf-8"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 0.361547,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1; lab_cookie=present; strict_cookie=present"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007561326470,
+      "observed_at": "2026-08-04T16:41:04.437+00:00",
+      "path": "/api/cacheable",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "8884fdcabbae44658c84d0d8ab011648",
+      "response_body_bytes": 20,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "etag",
+          "\"0c478f5f123d388abe6d52d9\""
+        ],
+        [
+          "last-modified",
+          "Tue, 04 Aug 2026 00:00:00 GMT"
+        ],
+        [
+          "cache-control",
+          "public, max-age=0, must-revalidate"
+        ],
+        [
+          "content-length",
+          "20"
+        ],
+        [
+          "content-type",
+          "text/plain; charset=utf-8"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 0.415497,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1; lab_cookie=present; strict_cookie=present"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007563385796,
+      "observed_at": "2026-08-04T16:41:04.439+00:00",
+      "path": "/api/redirect/start",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "bc28cdfc2b10440a8ebeb2c47d2b276b",
+      "response_body_bytes": 0,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "content-length",
+          "0"
+        ],
+        [
+          "location",
+          "/api/redirect/mid?sid=browserish-httpx-d2a201f9f1eb43169ce1"
+        ],
+        [
+          "set-cookie",
+          "redirect_cookie=hop1; Max-Age=300; Path=/; SameSite=lax; Secure"
+        ]
+      ],
+      "response_status": 302,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 0.395948,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1; lab_cookie=present; strict_cookie=present; redirect_cookie=hop1"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007565337547,
+      "observed_at": "2026-08-04T16:41:04.441+00:00",
+      "path": "/api/redirect/mid",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "d810574f1e5441b6922753f7699d2ba2",
+      "response_body_bytes": 0,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "content-length",
+          "0"
+        ],
+        [
+          "location",
+          "/api/redirect/final?sid=browserish-httpx-d2a201f9f1eb43169ce1"
+        ]
+      ],
+      "response_status": 307,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 0.391441,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1; lab_cookie=present; strict_cookie=present; redirect_cookie=hop1"
+        ]
+      ],
+      "http_version": "2",
+      "method": "GET",
+      "monotonic_ns": 2007567144719,
+      "observed_at": "2026-08-04T16:41:04.442+00:00",
+      "path": "/api/redirect/final",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 0,
+      "request_id": "1d7b4dfa056e44f49976bf04a5e9b5f6",
+      "response_body_bytes": 110,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "cache-control",
+          "no-store"
+        ],
+        [
+          "content-length",
+          "110"
+        ],
+        [
+          "content-type",
+          "image/svg+xml"
+        ]
+      ],
+      "response_status": 200,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    },
+    {
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "duration_ms": 0.455225,
+      "headers": [
+        [
+          "host",
+          "localhost:8443"
+        ],
+        [
+          "sec-ch-ua",
+          "\"Chromium\";v=\"151\", \"Not.A/Brand\";v=\"24\""
+        ],
+        [
+          "sec-ch-ua-mobile",
+          "?0"
+        ],
+        [
+          "sec-ch-ua-platform",
+          "\"Windows\""
+        ],
+        [
+          "upgrade-insecure-requests",
+          "1"
+        ],
+        [
+          "user-agent",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+        ],
+        [
+          "accept",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        ],
+        [
+          "sec-fetch-site",
+          "none"
+        ],
+        [
+          "sec-fetch-mode",
+          "navigate"
+        ],
+        [
+          "sec-fetch-user",
+          "?1"
+        ],
+        [
+          "sec-fetch-dest",
+          "document"
+        ],
+        [
+          "accept-encoding",
+          "gzip, deflate, br, zstd"
+        ],
+        [
+          "accept-language",
+          "en-US,en;q=0.9"
+        ],
+        [
+          "content-length",
+          "12"
+        ],
+        [
+          "cookie",
+          "parity_sid=browserish-httpx-d2a201f9f1eb43169ce1; lab_cookie=present; strict_cookie=present; redirect_cookie=hop1"
+        ]
+      ],
+      "http_version": "2",
+      "method": "POST",
+      "monotonic_ns": 2007569168873,
+      "observed_at": "2026-08-04T16:41:04.444+00:00",
+      "path": "/api/beacon",
+      "query": "sid=browserish-httpx-d2a201f9f1eb43169ce1",
+      "request_body_bytes": 12,
+      "request_id": "e7a9e36dc6934df38fbe2f179fd07dbc",
+      "response_body_bytes": 0,
+      "response_headers": [
+        [
+          "x-content-type-options",
+          "nosniff"
+        ],
+        [
+          "referrer-policy",
+          "same-origin"
+        ],
+        [
+          "permissions-policy",
+          "camera=(), microphone=(), geolocation=(), payment=()"
+        ],
+        [
+          "cross-origin-opener-policy",
+          "same-origin"
+        ],
+        [
+          "cross-origin-resource-policy",
+          "same-origin"
+        ],
+        [
+          "server-timing",
+          "paritylab;dur=1"
+        ],
+        [
+          "alt-svc",
+          "h3=\":8443\"; ma=60"
+        ],
+        [
+          "x-beacon-bytes",
+          "12"
+        ],
+        [
+          "cache-control",
+          "no-store"
+        ]
+      ],
+      "response_status": 204,
+      "scheme": "https",
+      "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+      "tls_ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "tls_ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b"
+    }
+  ],
+  "session_id": "browserish-httpx-d2a201f9f1eb43169ce1",
+  "summary": {
+    "disposition": "expected_fail",
+    "gate_reason": "Negative control produced medium/high findings as intended.",
+    "hard_count": 1,
+    "info_count": 3,
+    "low_count": 3,
+    "medium_count": 2,
+    "score": 82
+  },
+  "tls_fingerprints": [
+    {
+      "alpn_protocols": [
+        "http/1.1",
+        "h2"
+      ],
+      "backend_source_port": 52464,
+      "cipher_suites": [
+        4866,
+        4867,
+        4865,
+        49196,
+        49200,
+        159,
+        52393,
+        52392,
+        52394,
+        49195,
+        49199,
+        158,
+        49188,
+        49192,
+        107,
+        49187,
+        49191,
+        103,
+        49162,
+        49172,
+        57,
+        49161,
+        49171,
+        51,
+        157,
+        156,
+        61,
+        60,
+        53,
+        47
+      ],
+      "client_host": "127.0.0.1",
+      "client_port": 37900,
+      "connection_id": "392b3b59d32348108496c519b67ca0e4",
+      "ec_point_formats": [
+        0,
+        1,
+        2
+      ],
+      "extension_ids": [
+        65281,
+        0,
+        11,
+        10,
+        35,
+        16,
+        22,
+        23,
+        13,
+        43,
+        45,
+        51,
+        27
+      ],
+      "ja3": "8ecf4858a704c8936042f20a8bedee04",
+      "ja3_raw": "771,4866-4867-4865-49196-49200-159-52393-52392-52394-49195-49199-158-49188-49192-107-49187-49191-103-49162-49172-57-49161-49171-51-157-156-61-60-53-47,65281-0-11-10-35-16-22-23-13-43-45-51-27,4588-29-23-30-24-25-256-257,0-1-2",
+      "ja4": "t13d3013h1_1d37bd780c83_ecd0401ec68b",
+      "ja4_raw": "t13d3013h1_002f,0033,0035,0039,003c,003d,0067,006b,009c,009d,009e,009f,1301,1302,1303,c009,c00a,c013,c014,c023,c024,c027,c028,c02b,c02c,c02f,c030,cca8,cca9,ccaa_000a,000b,000d,0016,0017,001b,0023,002b,002d,0033,ff01_0905,0906,0904,0403,0503,0603,0807,0808,081a,081b,081c,0809,080a,080b,0804,0805,0806,0401,0501,0601,0303,0301,0302,0402,0502,0602",
+      "legacy_version": 771,
+      "observed_at": "2026-08-04T16:41:04.405+00:00",
+      "parse_error": null,
+      "record_version": 769,
+      "server_name": "localhost",
+      "signature_algorithms": [
+        2309,
+        2310,
+        2308,
+        1027,
+        1283,
+        1539,
+        2055,
+        2056,
+        2074,
+        2075,
+        2076,
+        2057,
+        2058,
+        2059,
+        2052,
+        2053,
+        2054,
+        1025,
+        1281,
+        1537,
+        771,
+        769,
+        770,
+        1026,
+        1282,
+        1538
+      ],
+      "supported_groups": [
+        4588,
+        29,
+        23,
+        30,
+        24,
+        25,
+        256,
+        257
+      ],
+      "supported_versions": [
+        772,
+        771
+      ]
+    }
+  ]
+}

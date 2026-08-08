@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import structlog
 
-from job_ftch.application.registry import resolve_bypass
+from job_ftch.application.registry import list_bypass_capabilities, resolve_bypass
 
 logger = structlog.get_logger("job_ftch.bypass.risk_router")
 
@@ -75,6 +75,18 @@ _TIER_THRESHOLDS: list[tuple[float, str]] = [
 ]
 
 
+def _capability_tier(action: str, fallback: str) -> str:
+    candidates = sorted(
+        (
+            (name, capability)
+            for name, capability in list_bypass_capabilities().items()
+            if action in capability.challenge_actions and capability.requires_browser
+        ),
+        key=lambda item: item[1].cost,
+    )
+    return candidates[0][0] if candidates else fallback
+
+
 class RiskRouter:
     """Registry-driven risk-based bypass tier selector.
 
@@ -113,7 +125,16 @@ class RiskRouter:
         rep = self.get_reputation(url)
         if rep.total_attempts < _MIN_PRESELECT_OBSERVATIONS:
             return "noop"
+        available = list_bypass_capabilities()
+        if (
+            rep.last_tier in available
+            and rep.total_successes > 0
+            and rep.last_success_at >= rep.last_failure_at
+        ):
+            return rep.last_tier
         score = rep.decayed_score(self._half_life)
+        if score >= 0.50:
+            return _capability_tier("fingerprint_resistant", "nodriver")
         for threshold, tier in self._thresholds:
             if score < threshold:
                 return tier

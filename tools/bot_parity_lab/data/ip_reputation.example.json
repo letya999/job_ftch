@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "description": "Longest-prefix local policy. Extend with owned proxy/datacenter/mobile/VPN ranges.",
+  "networks": [
+    {"cidr": "127.0.0.0/8", "label": "loopback", "risk": 0, "source": "local-policy", "network_type": "loopback", "tags": ["local"]},
+    {"cidr": "::1/128", "label": "loopback", "risk": 0, "source": "local-policy", "network_type": "loopback", "tags": ["local"]},
+    {"cidr": "10.0.0.0/8", "label": "private", "risk": 5, "source": "local-policy", "network_type": "private"},
+    {"cidr": "172.16.0.0/12", "label": "private", "risk": 5, "source": "local-policy", "network_type": "private"},
+    {"cidr": "192.168.0.0/16", "label": "private", "risk": 5, "source": "local-policy", "network_type": "private"}
+  ]
+}

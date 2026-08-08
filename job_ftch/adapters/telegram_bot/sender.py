@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING
 import structlog
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 
-from job_ftch.adapters.telegram_bot.formatter import format_vacancy_card
 from job_ftch.application.channel_publisher import FatalTargetError, TransientSendError
 from job_ftch.publication.card import build_card
 from job_ftch.publication.layout import CardLayout, load_layout
@@ -39,21 +38,24 @@ def _translate(error: Exception) -> Exception:
 
 
 def _render_with_layout(job: Job, layout: CardLayout, profile: str) -> str:
-    """Render the YAML card, degrading to the legacy card on any failure.
+    """Render every publication through the YAML card layout.
 
-    A card that cannot be built or fails validation must not drop the job: fall
-    back to ``format_vacancy_card`` and log, so the failure is visible instead of
-    silently swallowed the way the missing-layout default used to swallow it.
+    Cards that are structurally valid use the normal layout. Cards that fail
+    the public-vacancy substance gate still use the same layout, but are marked
+    for readers instead of falling back to the removed legacy formatter.
+    Technical rendering errors are raised to the publisher and are never
+    replaced with a differently formatted message.
     """
-    try:
-        card = build_card(job)
-        if not validate_card(card, layout).ok:
-            logger.warning("card_validation_failed", job=str(getattr(job, "title", "")))
-            return format_vacancy_card(job)
-        return render_card(card, layout, profile=profile)
-    except Exception as exc:  # noqa: BLE001 - never lose a job over a render error
-        logger.warning("card_render_failed", error=str(exc))
-        return format_vacancy_card(job)
+    card = build_card(job)
+    outcome = validate_card(card, layout)
+    if not outcome.ok:
+        logger.warning(
+            "card_validation_failed_marked",
+            job=str(getattr(job, "title", "")),
+            reason=outcome.reject_reason,
+        )
+        return f"⚠️ <i>Требует проверки</i>\n\n{render_card(card, layout, profile=profile)}"
+    return render_card(card, layout, profile=profile)
 
 
 class TelegramCardSender:
@@ -64,8 +66,8 @@ class TelegramCardSender:
 
     The YAML-driven renderer (``config/publication/card.yaml``) is loaded by
     default, matching ``TelegramPostingSink``; pass an explicit ``layout`` to
-    override it. ``_render`` still degrades to the legacy card only if a layout
-    cannot be resolved or a card fails validation.
+    override it. Validation failures remain in this renderer and are marked
+    for readers instead of changing format.
     """
 
     def __init__(

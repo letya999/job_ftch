@@ -40,16 +40,62 @@ def _load_curl_session() -> tuple[Any | None, BaseException | None]:
 _CurlSession, _IMPORT_ERROR = _load_curl_session()
 _CURL_AVAILABLE = _CurlSession is not None
 
-_CHROME_IMPERSONATION_POOL: tuple[str, ...] = (
-    "chrome",
-    "chrome131",
-    "chrome124",
-)
 
-_NON_CHROME_IMPERSONATION: dict[str, str] = {
-    "safari": "safari17_5",
-    "firefox": "firefox125",
-}
+def _supported_impersonate_targets() -> frozenset[str]:
+    """Return curl_cffi's supported impersonate targets, or empty if unknown.
+
+    curl_cffi enumerates its targets in ``BrowserTypeLiteral``. Reading it lets
+    us drop any target this installed build does not know (defect A11: the old
+    ``safari17_5``/``firefox125`` constants no longer exist in curl_cffi and
+    hard-failed every Safari/Firefox persona) and self-heal across upgrades.
+    """
+    import builtins
+    import typing
+
+    had_any = hasattr(builtins, "Any")
+    previous = getattr(builtins, "Any", None)
+    builtins.__dict__.setdefault("Any", typing.Any)
+    try:
+        from curl_cffi.requests.impersonate import BrowserTypeLiteral
+
+        return frozenset(str(arg) for arg in typing.get_args(BrowserTypeLiteral))
+    except Exception:  # pragma: no cover - version/dependency specific
+        return frozenset()
+    finally:
+        if not had_any:
+            builtins.__dict__.pop("Any", None)
+        elif previous is not None:
+            builtins.__dict__["Any"] = previous
+
+
+_SUPPORTED_TARGETS: frozenset[str] = _supported_impersonate_targets()
+
+
+def _coerce_target(target: str, generic_alias: str) -> str:
+    """Fall back to a generic alias when a pinned target is unsupported.
+
+    Generic aliases (``chrome``/``firefox``/``safari``) always resolve to the
+    newest build curl_cffi ships, so an unknown pinned version degrades to the
+    freshest coherent fingerprint instead of raising.
+    """
+    if not _SUPPORTED_TARGETS:
+        return target
+    if target in _SUPPORTED_TARGETS:
+        return target
+    return generic_alias if generic_alias in _SUPPORTED_TARGETS else target
+
+
+# The curl transport always impersonates Chromium: after the persona-family
+# fix (A5) the HTTP path uses a Chromium persona, so Chrome UA/headers stay
+# coherent with a Chrome JA3/JA4. Non-Chromium personas only ever run on the
+# camoufox browser tier, never here, so a Safari/Firefox target pool would be
+# dead. Callers that genuinely need a non-Chrome target pass an explicit
+# ``impersonate`` config value, which ``_select_impersonate`` returns verbatim.
+_CHROME_IMPERSONATION_POOL: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        _coerce_target(target, "chrome") for target in ("chrome", "chrome146", "chrome145")
+    )
+)
 
 _CHROME_H2_SETTINGS: dict[str, Any] = {
     "SETTINGS_MAX_CONCURRENT_STREAMS": 1000,
@@ -64,9 +110,14 @@ def _select_impersonate(url: str, default: str) -> str:
 
     If default is not 'chrome' (auto), FingerprintProfile already set it explicitly.
     Otherwise rotate per-domain via a stable SHA-256 hash for sticky selection.
+    An explicit target is still validated against the installed curl_cffi build
+    so a stale pin degrades to a generic alias instead of raising (defect A11).
     """
     if default != "chrome":
-        return default
+        generic = (
+            "safari" if "safari" in default else "firefox" if "firefox" in default else "chrome"
+        )
+        return _coerce_target(default, generic)
 
     import hashlib
     from urllib.parse import urlparse
@@ -85,8 +136,8 @@ class CurlBypass:
     Bypasses Cloudflare on pure HTTP fetch without needing a browser.
 
     Supports impersonation rotation: when no explicit impersonate is configured,
-    selects a sticky per-domain target from a pool of browser fingerprints
-    (chrome131, chrome124, safari17_5, firefox125, etc.).
+    selects a sticky per-domain target from a pool of current Chrome
+    fingerprints, validated against the installed curl_cffi build.
 
     HTTP/2 fingerprint is controlled via curl_cffi's impersonation profiles,
     which already include correct SETTINGS frame order, WINDOW_UPDATE, and

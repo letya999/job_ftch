@@ -1,7 +1,7 @@
 ---
 title: "job_ftch — agent instructions"
 description: "Async pipeline: Telegram channels/groups/comments + career sites → structured JSON vacancies."
-updated: 2026-07-24
+updated: 2026-08-02
 ---
 # job_ftch — agent instructions
 
@@ -17,6 +17,7 @@ Async pipeline: Telegram channels/groups/comments + career sites → structured 
 | [docs/recipes/pipeline_recipe.md](docs/recipes/pipeline_recipe.md) | Зафиксированный production-рецепт: тестовый пользователь, тенант, граф, модели, 40 shots, 17 источников, датасеты, метрики и regression gates. |
 | [docs/tech_stack.md](docs/tech_stack.md) | Chosen libs and why. Check before adding any dependency. |
 | [docs/rules.md](docs/rules.md) | Development process: research → design → implement → verify. |
+| [docs/operations/ci-cd.md](docs/operations/ci-cd.md) | Which local quality gate to run, how it maps to GitHub Actions, and what remains CI-only. |
 | [docs/adr/](docs/adr/) | All past architectural decisions. Read before making a new one. |
 
 ## How to work
@@ -29,7 +30,7 @@ Async pipeline: Telegram channels/groups/comments + career sites → structured 
 ## Hard rules
 
 - `domain/` has zero imports outside `pydantic` and stdlib. No exceptions.
-- `application/` has no infrastructure imports except a small set of composition-root/runtime modules (builder, pipeline, tenant runner, source inputs). CI check: `uv run python scripts/check_module_boundaries.py` — the script is the source of truth for the exact exception list, do not duplicate it here.
+- `application/` has no infrastructure imports except a small set of composition-root/runtime modules (builder, pipeline, tenant runner, source inputs). Run `just architecture-verify`; `scripts/check_module_boundaries.py` remains the source of truth for the exact exception list, do not duplicate it here.
 - `SanitizeNode` is always first in any pipeline chain.
 - Type changes happen only via `Stage[In, Out]`. No ad hoc `isinstance` / union routing in core.
 - No credentials in code. `.env` only.

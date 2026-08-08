@@ -1,7 +1,7 @@
 ---
 title: "Как поддерживать документацию"
 description: "Как обновлять Markdown-документацию, ADR и generated docs в этом репозитории."
-updated: 2026-07-27
+updated: 2026-08-02
 ---
 # Как поддерживать документацию
 
@@ -103,16 +103,32 @@ uv run python scripts/stale_docs.py --days 90
 ## Рекомендуемый локальный цикл
 
 ```bash
-uv run python scripts/build_index_docs.py
-uv run python scripts/check_docs_generated.py
-uv run python scripts/lint_docs.py
+just setup-docs
+just docs-verify
 ```
 
-Если менялись конфигурационные или архитектурные документы, полезно дополнительно
-прогнать связанный набор проверок проекта.
+`docs-verify` — полный gate: актуальность индексов, Markdown metadata,
+generated reference docs и `mkdocs build --strict`. Он повторяет
+`.github/workflows/docs.yml`. Для одной строгой сборки без остальных проверок
+используйте `just docs-build`.
+
+Если добавился, переехал или удалён Markdown-файл, сначала пересоберите
+индексы, затем проверьте их:
+
+```bash
+uv run python scripts/build_index_docs.py
+just docs-verify
+```
+
+Для выбора code, architecture, test и release gates смотрите
+[operations/ci-cd](../operations/ci-cd.md). Если документация меняется вместе
+с runtime/config, прочитайте [operations/configuration](../operations/configuration.md)
+и включите соответствующий `just` gate из CI/CD карты.
 
 ## Что уже проверяет CI
 
-- `uv run python scripts/run_ci_checks.py lint` включает `scripts/lint_docs.py`.
-- `uv run python scripts/build_index_docs.py --check` используется как проверка,
-  что committed `index.md` не устарели.
+- `.github/workflows/docs.yml` выполняет тот же полный набор, что и
+  `just docs-verify`.
+- `uv run python scripts/run_ci_checks.py lint` также включает
+  `scripts/lint_docs.py`, но не заменяет docs gate: в нём нет
+  `check_docs_generated.py` и строгой MkDocs-сборки.
