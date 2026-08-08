@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -79,10 +80,12 @@ class TenantMCPServer:
         self.base_settings = base_settings or get_settings()
         self.name = name
         self.runner: TenantRunner | None = None
+        self._startup_lock: asyncio.Lock | None = None
 
         @asynccontextmanager
         async def _lifespan(_app: Any) -> Any:
-            await self.startup()
+            # Keep initialize() fast for Codex Desktop: list_tools must not wait on
+            # store/LLM/graph bootstrap. Runner starts on first tool call.
             try:
                 yield {}
             finally:
@@ -103,8 +106,13 @@ class TenantMCPServer:
     async def startup(self) -> None:
         if self.runner is not None:
             return
-        tenants = load_tenants(self.configs_dir)
-        self.runner = TenantRunner.from_tenants(tenants, base_settings=self.base_settings)
+        if self._startup_lock is None:
+            self._startup_lock = asyncio.Lock()
+        async with self._startup_lock:
+            if self.runner is not None:
+                return
+            tenants = load_tenants(self.configs_dir)
+            self.runner = TenantRunner.from_tenants(tenants, base_settings=self.base_settings)
 
     async def shutdown(self) -> None:
         if self.runner is None:
@@ -121,10 +129,12 @@ class TenantMCPServer:
     ) -> None:
         # Lifespan owns TenantRunner startup/shutdown for the process.
         # stdio rejects host/port kwargs in FastMCP 3.x.
+        # Keep stdio quiet: FastMCP banner/emoji on stderr confuses some hosts
+        # and adds noise in Codex Desktop MCP logs.
         if transport == "stdio":
-            self.app.run(transport=transport)
+            self.app.run(transport=transport, show_banner=False)
             return
-        self.app.run(transport=transport, host=host, port=port)
+        self.app.run(transport=transport, host=host, port=port, show_banner=False)
 
     def _register_surface(self) -> None:
         """Register bot-parity product tools; expand with ops/admin surface."""
@@ -144,19 +154,19 @@ class TenantMCPServer:
         @tool(annotations=ro)
         async def list_tenants() -> list[dict[str, Any]]:
             """List loaded tenants (like /tenant)."""
-            tenants = await self._require_runner().list_tenants()
+            tenants = await (await self._require_runner()).list_tenants()
             return [tenant.model_dump(mode="json") for tenant in tenants]
 
         @tool(annotations=ro)
         async def get_status(tenant_id: str) -> dict[str, Any] | None:
             """Latest run status for a tenant (like /status)."""
-            summary = await self._require_runner().get_status(tenant_id)
+            summary = await (await self._require_runner()).get_status(tenant_id)
             return None if summary is None else summary.as_dict()
 
         @tool(annotations=ro)
         async def list_sources(tenant_id: str) -> list[dict[str, Any]]:
             """List sources with health/status embedded (like /sources)."""
-            return await self._require_runner().list_sources(tenant_id)
+            return await (await self._require_runner()).list_sources(tenant_id)
 
         @tool(annotations=write)
         async def upsert_source(
@@ -168,7 +178,7 @@ class TenantMCPServer:
         ) -> dict[str, Any]:
             """Add a source, or change one by replace_source_id (disable old + add new)."""
             return await upsert_source_action(
-                self._require_runner(),
+                await self._require_runner(),
                 tenant_id=tenant_id,
                 link=link,
                 source_type=source_type,
@@ -183,7 +193,7 @@ class TenantMCPServer:
             enabled: bool = True,
         ) -> dict[str, Any]:
             """Enable or disable a source (bot toggle)."""
-            return await self._require_runner().set_source_enabled(
+            return await (await self._require_runner()).set_source_enabled(
                 tenant_id, source_id, enabled=enabled
             )
 
@@ -210,7 +220,7 @@ class TenantMCPServer:
                 msg = "kind must be 'resume' or 'job'"
                 raise ValueError(msg)
             return await add_shots(
-                self._require_runner(),
+                await self._require_runner(),
                 tenant_id=tenant_id,
                 user_id=user_id,
                 polarity=polarity,  # type: ignore[arg-type]
@@ -228,7 +238,7 @@ class TenantMCPServer:
         ) -> dict[str, Any]:
             """List positive/negative resume and job shots (like /examples)."""
             return await list_shots_action(
-                self._require_runner(),
+                await self._require_runner(),
                 tenant_id=tenant_id,
                 user_id=user_id,
                 profile_id=profile_id,
@@ -251,7 +261,7 @@ class TenantMCPServer:
                 msg = "kind must be 'resume' or 'job'"
                 raise ValueError(msg)
             return await remove_shot_action(
-                self._require_runner(),
+                await self._require_runner(),
                 tenant_id=tenant_id,
                 user_id=user_id,
                 polarity=polarity,  # type: ignore[arg-type]
@@ -263,7 +273,7 @@ class TenantMCPServer:
         @tool(annotations=write)
         async def run_pipeline(tenant_id: str) -> dict[str, Any]:
             """Run ingest/decision pipeline for one tenant (like /run)."""
-            summary = await self._require_runner().run_tenant(tenant_id)
+            summary = await (await self._require_runner()).run_tenant(tenant_id)
             return summary.as_dict()
 
         @tool(annotations=ro)
@@ -298,7 +308,7 @@ class TenantMCPServer:
                 ]
             )
             fetch_limit = min(100, limit * 5 if has_filters else limit)
-            groups = await self._require_runner().search_jobs(
+            groups = await (await self._require_runner()).search_jobs(
                 query or "",
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -327,7 +337,7 @@ class TenantMCPServer:
         ) -> dict[str, Any]:
             """List compact REVIEW outcomes for a tenant (requires review_output.backend=store)."""
             limit = min(max(limit, 1), 200)
-            return await self._require_runner().list_review_jobs(
+            return await (await self._require_runner()).list_review_jobs(
                 tenant_id,
                 run_id=run_id,
                 limit=limit,
@@ -348,7 +358,7 @@ class TenantMCPServer:
             outcome: dropped|failed|quarantined. reason e.g. policy_reject.
             """
             limit = min(max(limit, 1), 200)
-            return await self._require_runner().list_rejected(
+            return await (await self._require_runner()).list_rejected(
                 tenant_id,
                 run_id=run_id,
                 limit=limit,
@@ -365,7 +375,7 @@ class TenantMCPServer:
         @tool(annotations=destructive)
         async def clear_history(tenant_id: str) -> dict[str, Any]:
             """Clear run history / dedup / jobs so next /run is fresh (like /clear)."""
-            runner = self._require_runner()
+            runner = await self._require_runner()
             try:
                 counts = await runner.clear_run_data(tenant_id)
                 return {"tenant_id": tenant_id, "mode": "clear_run_data", "counts": counts}
@@ -388,7 +398,7 @@ class TenantMCPServer:
         ) -> dict[str, Any]:
             """Alias of upsert_source without replace (add only)."""
             result = await upsert_source_action(
-                self._require_runner(),
+                await self._require_runner(),
                 tenant_id=tenant_id,
                 link=link,
                 source_type=source_type,
@@ -399,7 +409,7 @@ class TenantMCPServer:
         @tool(annotations=destructive)
         async def disable_source(tenant_id: str, source_id: str) -> dict[str, Any]:
             """Alias of set_source_enabled(enabled=false)."""
-            return await self._require_runner().set_source_enabled(
+            return await (await self._require_runner()).set_source_enabled(
                 tenant_id, source_id, enabled=False
             )
 
@@ -408,32 +418,32 @@ class TenantMCPServer:
             @tool(annotations=write)
             async def run_all_pipelines() -> list[dict[str, Any]]:
                 """Run pipeline for every tenant (ops)."""
-                summaries = await self._require_runner().run_all()
+                summaries = await (await self._require_runner()).run_all()
                 return [summary.as_dict() for summary in summaries]
 
             @tool(annotations=ro)
             async def list_source_health(tenant_id: str) -> list[dict[str, Any]]:
                 """Per-source health only (prefer list_sources)."""
-                return await self._require_runner().list_source_health(tenant_id)
+                return await (await self._require_runner()).list_source_health(tenant_id)
 
             @tool(annotations=ro)
             async def list_runs(
                 tenant_id: str | None = None, limit: int = 20
             ) -> list[dict[str, Any]]:
                 """Recent pipeline runs."""
-                summaries = await self._require_runner().list_runs(tenant_id=tenant_id, limit=limit)
+                summaries = await (await self._require_runner()).list_runs(tenant_id=tenant_id, limit=limit)
                 return [summary.as_dict() for summary in summaries]
 
             @tool(annotations=ro)
             async def get_run(run_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
                 """One run by id."""
-                summary = await self._require_runner().get_run(run_id, tenant_id=tenant_id)
+                summary = await (await self._require_runner()).get_run(run_id, tenant_id=tenant_id)
                 return None if summary is None else summary.as_dict()
 
             @tool(annotations=ro)
             async def get_job(job_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
                 """One job by id."""
-                job = await self._require_runner().get_job(job_id, tenant_id=tenant_id)
+                job = await (await self._require_runner()).get_job(job_id, tenant_id=tenant_id)
                 return None if job is None else job.model_dump(mode="json")
 
             @tool(annotations=ro)
@@ -442,7 +452,7 @@ class TenantMCPServer:
                 tenant_id: str | None = None,
             ) -> dict[str, Any] | None:
                 """Job lineage (debug)."""
-                lineage = await self._require_runner().get_job_lineage(job_id, tenant_id=tenant_id)
+                lineage = await (await self._require_runner()).get_job_lineage(job_id, tenant_id=tenant_id)
                 return None if lineage is None else lineage.model_dump(mode="json")
 
         if surface == "admin":
@@ -450,7 +460,7 @@ class TenantMCPServer:
             @tool(annotations=ro)
             async def list_profiles(tenant_id: str, user_id: str) -> list[dict[str, Any]]:
                 """List candidate profiles (admin). Prefer list_shots for examples."""
-                return await self._require_runner().list_candidate_profiles(tenant_id, user_id)
+                return await (await self._require_runner()).list_candidate_profiles(tenant_id, user_id)
 
             @tool(annotations=write)
             async def save_profile(
@@ -465,7 +475,7 @@ class TenantMCPServer:
                     profile_id=profile_id,
                     payload={"summary": summary, "name": profile_id},
                 )
-                saved = await self._require_runner().save_candidate_profile(
+                saved = await (await self._require_runner()).save_candidate_profile(
                     tenant_id,
                     ManagedCandidateProfile(
                         user_id=user_id,
@@ -474,7 +484,7 @@ class TenantMCPServer:
                         updated_at=datetime.now(UTC),
                     ),
                 )
-                await self._require_runner().set_active_candidate_profile(
+                await (await self._require_runner()).set_active_candidate_profile(
                     tenant_id, user_id, profile_id
                 )
                 return saved
@@ -486,7 +496,7 @@ class TenantMCPServer:
                 profile_id: str,
             ) -> dict[str, Any]:
                 """Activate a profile (admin)."""
-                return await self._require_runner().set_active_candidate_profile(
+                return await (await self._require_runner()).set_active_candidate_profile(
                     tenant_id,
                     user_id,
                     profile_id,
@@ -495,11 +505,11 @@ class TenantMCPServer:
             @tool(annotations=destructive)
             async def reset_tenant(tenant_id: str) -> None:
                 """Full tenant namespace reset (admin destructive). Prefer clear_history."""
-                await self._require_runner().reset_tenant(tenant_id)
+                await (await self._require_runner()).reset_tenant(tenant_id)
 
         @self.app.resource("jobs://{tenant_id}/latest")
         async def latest_jobs_resource(tenant_id: str) -> str:
-            jobs = await self._require_runner().latest_jobs(tenant_id, limit=10)
+            jobs = await (await self._require_runner()).latest_jobs(tenant_id, limit=10)
             return json.dumps(
                 [job.model_dump(mode="json") for job in jobs],
                 ensure_ascii=False,
@@ -508,7 +518,7 @@ class TenantMCPServer:
 
         @self.app.resource("jobs://{tenant_id}/run_summary")
         async def run_summary_resource(tenant_id: str) -> str:
-            summary = await self._require_runner().get_status(tenant_id)
+            summary = await (await self._require_runner()).get_status(tenant_id)
             return json.dumps(
                 None if summary is None else summary.as_dict(),
                 ensure_ascii=False,
@@ -517,15 +527,17 @@ class TenantMCPServer:
 
         @self.app.resource("config://{tenant_id}")
         async def config_resource(tenant_id: str) -> str:
-            config = await self._require_runner().get_config(tenant_id)
+            config = await (await self._require_runner()).get_config(tenant_id)
             return json.dumps(config, ensure_ascii=False, default=_json_default)
 
     async def _probe_llm_backend(self) -> dict[str, Any]:
         return await probe_llm_backend(self.base_settings)
 
-    def _require_runner(self) -> TenantRunner:
+    async def _require_runner(self) -> TenantRunner:
+        """Lazy-start TenantRunner so MCP initialize/list_tools stays fast."""
+        await self.startup()
         if self.runner is None:
-            msg = "TenantMCPServer.startup() must run before using MCP tools."
+            msg = "TenantMCPServer.startup() failed to create TenantRunner."
             raise RuntimeError(msg)
         return self.runner
 
