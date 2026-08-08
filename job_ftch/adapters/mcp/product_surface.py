@@ -88,6 +88,17 @@ async def ensure_managed_profile(
     return cast("ManagedCandidateProfile", loaded)
 
 
+def _strip_shell_noise(text: str) -> str:
+    """Drop accidental shell/Codex exec wrappers from pasted shot bodies."""
+    cleaned = text.strip()
+    if cleaned.startswith("Exit code:"):
+        marker = "\nOutput:\n"
+        idx = cleaned.find(marker)
+        if idx >= 0:
+            cleaned = cleaned[idx + len(marker) :].strip()
+    return cleaned
+
+
 async def add_shots(
     runner: Any,
     *,
@@ -99,12 +110,18 @@ async def add_shots(
     texts: list[str] | None = None,
     profile_id: str | None = None,
 ) -> dict[str, Any]:
-    """Add one or many positive/negative resume/job shots (bot parity)."""
+    """Add one or many positive/negative resume/job shots (bot parity).
+
+    Same side-effects as Telegram bot handlers:
+    profile persist, ontology enrichment (LLM or heuristic), optional
+    embeddings, and shot-store mirror for scorers.
+    """
     items: list[str] = []
     if text and text.strip():
-        items.append(text.strip())
+        items.append(_strip_shell_noise(text))
     if texts:
-        items.extend(t.strip() for t in texts if t and t.strip())
+        items.extend(_strip_shell_noise(t) for t in texts if t and t.strip())
+    items = [item for item in items if item]
     if not items:
         msg = "Provide non-empty text or texts[]"
         raise ValueError(msg)
@@ -116,9 +133,25 @@ async def add_shots(
     role = shot_role(user_id=user_id, tenant_id=tenant_id, kind=kind, polarity=polarity)
     label = polarity
     sync_errors: list[str] = []
+    ontology_errors: list[str] = []
+    runtime = runner.get_runtime(tenant_id)
+
+    from job_ftch.application.ontology_enrichment import (
+        add_example_to_profile_with_enrichment,
+    )
 
     for item in items:
-        managed = add_example_to_profile(managed, item, kind=ekind)
+        try:
+            managed = await add_example_to_profile_with_enrichment(
+                managed,
+                item,
+                kind=ekind,
+                llm=getattr(runtime, "llm_provider", None),
+                ontology_store=getattr(runtime, "ontology_store", None),
+            )
+        except Exception as exc:  # noqa: BLE001 - still persist example text
+            ontology_errors.append(f"{type(exc).__name__}: {exc}")
+            managed = add_example_to_profile(managed, item, kind=ekind)
         try:
             await remove_shot_async(text=item, role=role)
             await add_shot_async(
@@ -131,7 +164,29 @@ async def add_shots(
         except Exception as exc:  # noqa: BLE001 - profile still persisted
             sync_errors.append(f"{type(exc).__name__}: {exc}")
 
+    embedding_provider = getattr(runtime, "embedding_provider", None)
+    if embedding_provider is not None:
+        try:
+            from job_ftch.application.profile_inputs import embed_profile_examples
+
+            managed = await embed_profile_examples(managed, embedding_provider)
+        except Exception as exc:  # noqa: BLE001
+            sync_errors.append(f"embed:{type(exc).__name__}: {exc}")
+
     await runner.save_and_activate_candidate_profile(tenant_id, managed)
+
+    # Full profile mirror (same as bot document path) for scorer visibility.
+    try:
+        from job_ftch.application.shot_sync import sync_profile_to_shot_store
+
+        await sync_profile_to_shot_store(
+            profile=managed,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        sync_errors.append(f"sync_profile:{type(exc).__name__}: {exc}")
+
     examples = list_examples(managed)
     return {
         "tenant_id": tenant_id,
@@ -142,6 +197,9 @@ async def add_shots(
         "added": len(items),
         "counts": {k: len(v) for k, v in examples.items()},
         "shot_sync_errors": sync_errors,
+        "ontology_errors": ontology_errors,
+        "ontology_store": runtime.ontology_store is not None,
+        "embedding_provider": embedding_provider is not None,
     }
 
 
