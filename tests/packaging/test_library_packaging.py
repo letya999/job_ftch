@@ -141,7 +141,7 @@ def test_fastapi_adapter_registers_routes(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_mcp_adapter_registers_tool_and_resource(monkeypatch: pytest.MonkeyPatch) -> None:
     # create_mcp_server is a deprecated shim over TenantMCPServer.
-    # TenantMCPServer registers 18 tools and 3 resources.
+    # Core surface: 14 tools (+ aliases) and 3 resources.
     registered: dict[str, object] = {"tools": 0, "resources": 0, "uris": []}
 
     class FakeMCP:
@@ -183,8 +183,8 @@ def test_mcp_adapter_registers_tool_and_resource(monkeypatch: pytest.MonkeyPatch
         assert any(issubclass(warning.category, DeprecationWarning) for warning in w)
 
     assert server.name == "job_ftch"
-    # TenantMCPServer surface: 18 tools, 3 resources
-    assert registered["tools"] == 18
+    # Core surface: 14 tools, 3 resources (default JOB_FTCH_MCP_SURFACE=core)
+    assert registered["tools"] == 14
     assert registered["resources"] == 3
     uris = cast("list[str]", registered["uris"])
     assert any("jobs://" in uri for uri in uris)

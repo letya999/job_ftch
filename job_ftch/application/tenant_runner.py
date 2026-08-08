@@ -1187,6 +1187,16 @@ class TenantRunner:
         raise RuntimeError(msg)
 
     async def disable_source(self, tenant_id: str, source_id: str) -> dict[str, Any]:
+        return await self.set_source_enabled(tenant_id, source_id, enabled=False)
+
+    async def set_source_enabled(
+        self,
+        tenant_id: str,
+        source_id: str,
+        *,
+        enabled: bool,
+    ) -> dict[str, Any]:
+        """Enable or disable a config/runtime source by id."""
         runtime = self.get_runtime(tenant_id)
         await self._ensure_runtime_sources_loaded(runtime)
         base_ids = {source_spec_identifier(item) for item in runtime.base_sources}
@@ -1197,11 +1207,11 @@ class TenantRunner:
 
         previous_runtime_record = runtime_record
         if runtime_record is not None:
-            runtime_record = runtime_record.model_copy(update={"enabled": False})
+            runtime_record = runtime_record.model_copy(update={"enabled": enabled})
         try:
             if runtime_record is not None:
                 await runtime.store.save_runtime_source(runtime_record)
-            await runtime.store.set_source_disabled(source_id, True)
+            await runtime.store.set_source_disabled(source_id, not enabled)
         except Exception:
             if previous_runtime_record is not None:
                 with suppress(Exception):
@@ -1210,13 +1220,16 @@ class TenantRunner:
             raise
         if runtime_record is not None:
             runtime.runtime_sources[source_id] = runtime_record
-        runtime.disabled_source_ids.add(source_id)
+        if enabled:
+            runtime.disabled_source_ids.discard(source_id)
+        else:
+            runtime.disabled_source_ids.add(source_id)
         self._apply_runtime_sources(runtime)
         payloads = await self.list_sources(tenant_id)
         for payload in payloads:
             if payload["source_id"] == source_id:
                 return payload
-        msg = f"Failed to disable source: {source_id}"
+        msg = f"Failed to update source enabled={enabled}: {source_id}"
         raise RuntimeError(msg)
 
     async def clear_sources(self, tenant_id: str) -> None:

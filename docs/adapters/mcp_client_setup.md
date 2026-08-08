@@ -38,20 +38,33 @@ uv run job_ftch mcp-server \
   --port 8000
 ```
 
-## Tools
+## Tools (product core, default)
 
-- `run_pipeline(tenant_id)`
-- `run_all_pipelines()`
-- `get_status(tenant_id)`
-- `list_source_health(tenant_id)` / `list_sources(tenant_id)`
-- `add_source` / `disable_source`
-- `list_profiles` / `save_profile` / `activate_profile`
-- `list_runs(tenant_id, limit)` / `get_run(run_id, tenant_id)`
-- `search_jobs(query, tenant_id, limit)`
-- `get_job(job_id, tenant_id)` / `get_job_lineage(job_id, tenant_id)`
-- `list_tenants()`
-- `llm_backend_health()` — probe OpenAI-compatible gateway (CLIProxy)
-- `reset_tenant(tenant_id)` (destructive)
+`JOB_FTCH_MCP_SURFACE=core` (default) mirrors the Telegram bot loop:
+
+| Tool | Bot analog |
+|------|------------|
+| `list_tenants` | `/tenant` |
+| `get_status` | `/status` |
+| `list_sources` | `/sources` (health embedded) |
+| `upsert_source` | add URL; set `replace_source_id` to change |
+| `set_source_enabled` | source toggle |
+| `add_shot` | `/positive`, `/negative`, `/positive_job`, `/negative_job` |
+| `list_shots` / `remove_shot` | `/examples` delete |
+| `run_pipeline` | `/run` |
+| `search_jobs` | catalog search + filters (`company`, `location`, `work_mode`, `language`, `source_name`, `min_score`, `routing_decision`) |
+| `llm_backend_health` | gateway probe |
+| `clear_history` | `/clear` (destructive) |
+
+Aliases: `add_source`, `disable_source`.
+
+### Surfaces
+
+| `JOB_FTCH_MCP_SURFACE` | Extra tools |
+|------------------------|-------------|
+| `core` (default) | product loop only |
+| `ops` | + `list_runs`, `get_run`, `get_job`, `get_job_lineage`, `run_all_pipelines`, `list_source_health` |
+| `admin` | ops + `list/save/activate_profile`, `reset_tenant` |
 
 ## Resources
 

@@ -10,8 +10,21 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import urljoin
 
+from job_ftch.adapters.mcp.product_surface import (
+    add_shots,
+    filter_job_groups,
+    resolve_surface,
+)
+from job_ftch.adapters.mcp.product_surface import (
+    list_shots as list_shots_action,
+)
+from job_ftch.adapters.mcp.product_surface import (
+    remove_shot as remove_shot_action,
+)
+from job_ftch.adapters.mcp.product_surface import (
+    upsert_source as upsert_source_action,
+)
 from job_ftch.application.profile_inputs import build_candidate_profile_from_payload
-from job_ftch.application.source_inputs import build_source_spec_from_input
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.config import Settings, get_settings
@@ -114,6 +127,8 @@ class TenantMCPServer:
         self.app.run(transport=transport, host=host, port=port)
 
     def _register_surface(self) -> None:
+        """Register bot-parity product tools; expand with ops/admin surface."""
+        surface = resolve_surface()
         ro = _tool_annotations(read_only=True, idempotent=True)
         write = _tool_annotations(read_only=False, open_world=True)
         destructive = _tool_annotations(destructive=True, open_world=True)
@@ -124,34 +139,206 @@ class TenantMCPServer:
                 return self.app.tool
             return self.app.tool(annotations=annotations)
 
-        @tool(annotations=write)
-        async def run_pipeline(tenant_id: str) -> dict[str, Any]:
-            """Run the full ingest/decision pipeline for one tenant."""
-            summary = await self._require_runner().run_tenant(tenant_id)
-            return summary.as_dict()
+        # --- core product loop (Telegram bot parity) ----------------------
 
-        @tool(annotations=write)
-        async def run_all_pipelines() -> list[dict[str, Any]]:
-            """Run the pipeline for every loaded tenant."""
-            summaries = await self._require_runner().run_all()
-            return [summary.as_dict() for summary in summaries]
+        @tool(annotations=ro)
+        async def list_tenants() -> list[dict[str, Any]]:
+            """List loaded tenants (like /tenant)."""
+            tenants = await self._require_runner().list_tenants()
+            return [tenant.model_dump(mode="json") for tenant in tenants]
 
         @tool(annotations=ro)
         async def get_status(tenant_id: str) -> dict[str, Any] | None:
-            """Return the latest run status for a tenant."""
+            """Latest run status for a tenant (like /status)."""
             summary = await self._require_runner().get_status(tenant_id)
             return None if summary is None else summary.as_dict()
 
         @tool(annotations=ro)
-        async def list_source_health(tenant_id: str) -> list[dict[str, Any]]:
-            """List per-source health for a tenant."""
-            return await self._require_runner().list_source_health(tenant_id)
-
-        @tool(annotations=ro)
         async def list_sources(tenant_id: str) -> list[dict[str, Any]]:
-            """List configured sources for a tenant."""
+            """List sources with health/status embedded (like /sources)."""
             return await self._require_runner().list_sources(tenant_id)
 
+        @tool(annotations=write)
+        async def upsert_source(
+            tenant_id: str,
+            link: str,
+            source_type: str | None = None,
+            limit: int = 100,
+            replace_source_id: str | None = None,
+        ) -> dict[str, Any]:
+            """Add a source, or change one by replace_source_id (disable old + add new)."""
+            return await upsert_source_action(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                link=link,
+                source_type=source_type,
+                limit=limit,
+                replace_source_id=replace_source_id,
+            )
+
+        @tool(annotations=write)
+        async def set_source_enabled(
+            tenant_id: str,
+            source_id: str,
+            enabled: bool = True,
+        ) -> dict[str, Any]:
+            """Enable or disable a source (bot toggle)."""
+            return await self._require_runner().set_source_enabled(
+                tenant_id, source_id, enabled=enabled
+            )
+
+        @tool(annotations=write)
+        async def add_shot(
+            tenant_id: str,
+            polarity: str,
+            kind: str,
+            text: str | None = None,
+            texts: list[str] | None = None,
+            user_id: str = "mcp",
+            profile_id: str | None = None,
+        ) -> dict[str, Any]:
+            """Add positive/negative resume or job shot(s) (like /positive, /negative_job).
+
+            polarity: positive|negative
+            kind: resume|job
+            Provide text and/or texts[] for batch.
+            """
+            if polarity not in {"positive", "negative"}:
+                msg = "polarity must be 'positive' or 'negative'"
+                raise ValueError(msg)
+            if kind not in {"resume", "job"}:
+                msg = "kind must be 'resume' or 'job'"
+                raise ValueError(msg)
+            return await add_shots(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                polarity=polarity,  # type: ignore[arg-type]
+                kind=kind,  # type: ignore[arg-type]
+                text=text,
+                texts=texts,
+                profile_id=profile_id,
+            )
+
+        @tool(annotations=ro)
+        async def list_shots(
+            tenant_id: str,
+            user_id: str = "mcp",
+            profile_id: str | None = None,
+        ) -> dict[str, Any]:
+            """List positive/negative resume and job shots (like /examples)."""
+            return await list_shots_action(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                profile_id=profile_id,
+            )
+
+        @tool(annotations=write)
+        async def remove_shot(
+            tenant_id: str,
+            polarity: str,
+            kind: str,
+            index: int,
+            user_id: str = "mcp",
+            profile_id: str | None = None,
+        ) -> dict[str, Any]:
+            """Remove one shot by polarity/kind/index (bot examples delete)."""
+            if polarity not in {"positive", "negative"}:
+                msg = "polarity must be 'positive' or 'negative'"
+                raise ValueError(msg)
+            if kind not in {"resume", "job"}:
+                msg = "kind must be 'resume' or 'job'"
+                raise ValueError(msg)
+            return await remove_shot_action(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                polarity=polarity,  # type: ignore[arg-type]
+                kind=kind,  # type: ignore[arg-type]
+                index=index,
+                profile_id=profile_id,
+            )
+
+        @tool(annotations=write)
+        async def run_pipeline(tenant_id: str) -> dict[str, Any]:
+            """Run ingest/decision pipeline for one tenant (like /run)."""
+            summary = await self._require_runner().run_tenant(tenant_id)
+            return summary.as_dict()
+
+        @tool(annotations=ro)
+        async def search_jobs(
+            query: str = "",
+            tenant_id: str | None = None,
+            user_id: str | None = None,
+            limit: int = 20,
+            company: str | None = None,
+            location: str | None = None,
+            work_mode: str | None = None,
+            language: str | None = None,
+            source_name: str | None = None,
+            min_score: float | None = None,
+            routing_decision: str | None = None,
+        ) -> list[dict[str, Any]]:
+            """Search vacancies with optional filters (company, location, work_mode, …).
+
+            Filters are applied after FTS/catalog search. Over-fetch when filters set.
+            """
+            limit = min(max(limit, 1), 100)
+            has_filters = any(
+                [
+                    company,
+                    location,
+                    work_mode,
+                    language,
+                    source_name,
+                    min_score is not None,
+                    routing_decision,
+                ]
+            )
+            fetch_limit = min(100, limit * 5 if has_filters else limit)
+            groups = await self._require_runner().search_jobs(
+                query or "",
+                tenant_id=tenant_id,
+                user_id=user_id,
+                limit=fetch_limit,
+            )
+            if not has_filters:
+                return [group.model_dump(mode="json") for group in groups[:limit]]
+            return filter_job_groups(
+                groups,
+                limit=limit,
+                company=company,
+                location=location,
+                work_mode=work_mode,
+                language=language,
+                source_name=source_name,
+                min_score=min_score,
+                routing_decision=routing_decision,
+            )
+
+        @tool(annotations=ro)
+        async def llm_backend_health() -> dict[str, Any]:
+            """Probe OpenAI-compatible LLM gateway (CLIProxy). No generation."""
+            return await self._probe_llm_backend()
+
+        @tool(annotations=destructive)
+        async def clear_history(tenant_id: str) -> dict[str, Any]:
+            """Clear run history / dedup / jobs so next /run is fresh (like /clear)."""
+            runner = self._require_runner()
+            try:
+                counts = await runner.clear_run_data(tenant_id)
+                return {"tenant_id": tenant_id, "mode": "clear_run_data", "counts": counts}
+            except RuntimeError as exc:
+                # Multi-tenant runners restrict clear_run_data; fall back to store reset.
+                await runner.reset_tenant(tenant_id)
+                return {
+                    "tenant_id": tenant_id,
+                    "mode": "reset_tenant",
+                    "note": str(exc),
+                }
+
+        # Compat aliases used by earlier agents / docs
         @tool(annotations=write)
         async def add_source(
             tenant_id: str,
@@ -159,130 +346,116 @@ class TenantMCPServer:
             source_type: str | None = None,
             limit: int = 100,
         ) -> dict[str, Any]:
-            """Add a source (URL/entity) to a tenant at runtime."""
-            runner = self._require_runner()
-            spec = await build_source_spec_from_input(
-                link,
-                auth_provider=runner.get_runtime(tenant_id).auth_provider,
+            """Alias of upsert_source without replace (add only)."""
+            result = await upsert_source_action(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                link=link,
                 source_type=source_type,
                 limit=limit,
             )
-            return await runner.add_source_spec(
-                tenant_id,
-                spec,
-                added_via="mcp",
-                input_value=link,
-            )
+            return cast("dict[str, Any]", result["source"])
 
         @tool(annotations=destructive)
         async def disable_source(tenant_id: str, source_id: str) -> dict[str, Any]:
-            """Disable a source by id."""
-            return await self._require_runner().disable_source(tenant_id, source_id)
-
-        @tool(annotations=ro)
-        async def list_profiles(tenant_id: str, user_id: str) -> list[dict[str, Any]]:
-            """List candidate profiles for a user in a tenant."""
-            return await self._require_runner().list_candidate_profiles(tenant_id, user_id)
-
-        @tool(annotations=write)
-        async def save_profile(
-            tenant_id: str,
-            user_id: str,
-            profile_id: str,
-            summary: str,
-        ) -> dict[str, Any]:
-            """Create/update a candidate profile and mark it active."""
-            profile = build_candidate_profile_from_payload(
-                user_id=user_id,
-                profile_id=profile_id,
-                payload={"summary": summary, "name": profile_id},
+            """Alias of set_source_enabled(enabled=false)."""
+            return await self._require_runner().set_source_enabled(
+                tenant_id, source_id, enabled=False
             )
-            saved = await self._require_runner().save_candidate_profile(
-                tenant_id,
-                ManagedCandidateProfile(
+
+        if surface in {"ops", "admin"}:
+
+            @tool(annotations=write)
+            async def run_all_pipelines() -> list[dict[str, Any]]:
+                """Run pipeline for every tenant (ops)."""
+                summaries = await self._require_runner().run_all()
+                return [summary.as_dict() for summary in summaries]
+
+            @tool(annotations=ro)
+            async def list_source_health(tenant_id: str) -> list[dict[str, Any]]:
+                """Per-source health only (prefer list_sources)."""
+                return await self._require_runner().list_source_health(tenant_id)
+
+            @tool(annotations=ro)
+            async def list_runs(
+                tenant_id: str | None = None, limit: int = 20
+            ) -> list[dict[str, Any]]:
+                """Recent pipeline runs."""
+                summaries = await self._require_runner().list_runs(tenant_id=tenant_id, limit=limit)
+                return [summary.as_dict() for summary in summaries]
+
+            @tool(annotations=ro)
+            async def get_run(run_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
+                """One run by id."""
+                summary = await self._require_runner().get_run(run_id, tenant_id=tenant_id)
+                return None if summary is None else summary.as_dict()
+
+            @tool(annotations=ro)
+            async def get_job(job_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
+                """One job by id."""
+                job = await self._require_runner().get_job(job_id, tenant_id=tenant_id)
+                return None if job is None else job.model_dump(mode="json")
+
+            @tool(annotations=ro)
+            async def get_job_lineage(
+                job_id: str,
+                tenant_id: str | None = None,
+            ) -> dict[str, Any] | None:
+                """Job lineage (debug)."""
+                lineage = await self._require_runner().get_job_lineage(job_id, tenant_id=tenant_id)
+                return None if lineage is None else lineage.model_dump(mode="json")
+
+        if surface == "admin":
+
+            @tool(annotations=ro)
+            async def list_profiles(tenant_id: str, user_id: str) -> list[dict[str, Any]]:
+                """List candidate profiles (admin). Prefer list_shots for examples."""
+                return await self._require_runner().list_candidate_profiles(tenant_id, user_id)
+
+            @tool(annotations=write)
+            async def save_profile(
+                tenant_id: str,
+                user_id: str,
+                profile_id: str,
+                summary: str,
+            ) -> dict[str, Any]:
+                """Create/update profile metadata (admin). Prefer add_shot for examples."""
+                profile = build_candidate_profile_from_payload(
                     user_id=user_id,
                     profile_id=profile_id,
-                    profile=profile,
-                    updated_at=datetime.now(UTC),
-                ),
-            )
-            await self._require_runner().set_active_candidate_profile(
-                tenant_id, user_id, profile_id
-            )
-            return saved
+                    payload={"summary": summary, "name": profile_id},
+                )
+                saved = await self._require_runner().save_candidate_profile(
+                    tenant_id,
+                    ManagedCandidateProfile(
+                        user_id=user_id,
+                        profile_id=profile_id,
+                        profile=profile,
+                        updated_at=datetime.now(UTC),
+                    ),
+                )
+                await self._require_runner().set_active_candidate_profile(
+                    tenant_id, user_id, profile_id
+                )
+                return saved
 
-        @tool(annotations=write)
-        async def activate_profile(
-            tenant_id: str,
-            user_id: str,
-            profile_id: str,
-        ) -> dict[str, Any]:
-            """Set the active candidate profile for a user."""
-            return await self._require_runner().set_active_candidate_profile(
-                tenant_id,
-                user_id,
-                profile_id,
-            )
+            @tool(annotations=write)
+            async def activate_profile(
+                tenant_id: str,
+                user_id: str,
+                profile_id: str,
+            ) -> dict[str, Any]:
+                """Activate a profile (admin)."""
+                return await self._require_runner().set_active_candidate_profile(
+                    tenant_id,
+                    user_id,
+                    profile_id,
+                )
 
-        @tool(annotations=ro)
-        async def list_runs(tenant_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
-            """List recent pipeline runs."""
-            summaries = await self._require_runner().list_runs(tenant_id=tenant_id, limit=limit)
-            return [summary.as_dict() for summary in summaries]
-
-        @tool(annotations=ro)
-        async def get_run(run_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
-            """Fetch one run by id."""
-            summary = await self._require_runner().get_run(run_id, tenant_id=tenant_id)
-            return None if summary is None else summary.as_dict()
-
-        @tool(annotations=ro)
-        async def list_tenants() -> list[dict[str, Any]]:
-            """List loaded tenants."""
-            tenants = await self._require_runner().list_tenants()
-            return [tenant.model_dump(mode="json") for tenant in tenants]
-
-        @tool(annotations=ro)
-        async def search_jobs(
-            query: str,
-            tenant_id: str | None = None,
-            user_id: str | None = None,
-            limit: int = 20,
-        ) -> list[dict[str, Any]]:
-            """Search the job catalog for a tenant (or all)."""
-            limit = min(limit, 100)
-            groups = await self._require_runner().search_jobs(
-                query, tenant_id=tenant_id, user_id=user_id, limit=limit
-            )
-            return [group.model_dump(mode="json") for group in groups]
-
-        @tool(annotations=ro)
-        async def get_job(job_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
-            """Fetch one job by id."""
-            job = await self._require_runner().get_job(job_id, tenant_id=tenant_id)
-            return None if job is None else job.model_dump(mode="json")
-
-        @tool(annotations=ro)
-        async def get_job_lineage(
-            job_id: str,
-            tenant_id: str | None = None,
-        ) -> dict[str, Any] | None:
-            """Fetch lineage for one job."""
-            lineage = await self._require_runner().get_job_lineage(job_id, tenant_id=tenant_id)
-            return None if lineage is None else lineage.model_dump(mode="json")
-
-        @tool(annotations=destructive)
-        async def reset_tenant(tenant_id: str) -> None:
-            """Reset tenant store namespace (destructive)."""
-            await self._require_runner().reset_tenant(tenant_id)
-
-        @tool(annotations=ro)
-        async def llm_backend_health() -> dict[str, Any]:
-            """Probe configured OpenAI-compatible LLM gateway (e.g. CLIProxyAPI).
-
-            Does not call models for generation. Secrets are never returned.
-            """
-            return await self._probe_llm_backend()
+            @tool(annotations=destructive)
+            async def reset_tenant(tenant_id: str) -> None:
+                """Full tenant namespace reset (admin destructive). Prefer clear_history."""
+                await self._require_runner().reset_tenant(tenant_id)
 
         @self.app.resource("jobs://{tenant_id}/latest")
         async def latest_jobs_resource(tenant_id: str) -> str:

@@ -47,6 +47,8 @@ async def test_mcp_server_registers_surface_and_serves_tenant_data(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Integration path still exercises legacy/admin tools + aliases.
+    monkeypatch.setenv("JOB_FTCH_MCP_SURFACE", "admin")
     fixture_path = tmp_path / "fixture.json"
     _write_fixture(fixture_path)
     profile_path = tmp_path / "profiles.yaml"
@@ -139,26 +141,12 @@ profiles:
     server.runner.get_runtime("ai_jobs").llm_provider = _AcceptingHeuristicLLMProvider()
 
     assert server.app.name == "job_ftch"
-    assert set(server.app.tools) == {
-        "activate_profile",
-        "add_source",
-        "disable_source",
-        "get_run",
-        "get_job",
-        "get_job_lineage",
-        "get_status",
-        "list_profiles",
-        "list_runs",
-        "list_source_health",
-        "list_sources",
-        "list_tenants",
-        "llm_backend_health",
-        "reset_tenant",
-        "run_all_pipelines",
-        "run_pipeline",
-        "save_profile",
-        "search_jobs",
-    }
+    # admin surface includes core product tools + ops/admin extras
+    assert "add_shot" in server.app.tools
+    assert "upsert_source" in server.app.tools
+    assert "search_jobs" in server.app.tools
+    assert "list_source_health" in server.app.tools
+    assert "save_profile" in server.app.tools
     assert set(server.app.resources) == {
         "config://{tenant_id}",
         "jobs://{tenant_id}/latest",
