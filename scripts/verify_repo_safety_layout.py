@@ -15,6 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 EXPECTED_PRESENT = (
+    # Gitleaks discovers this bridge config automatically when invoked outside
+    # the GitHub workflow; its rules remain owned by .repo-safety/gitleaks.toml.
+    ".gitleaks.toml",
     ".repo-safety/pre-commit-config.yaml",
     ".repo-safety/gitleaks.toml",
     ".repo-safety/detect-secrets.baseline",
@@ -25,7 +28,6 @@ EXPECTED_PRESENT = (
 
 EXPECTED_ABSENT = (
     ".pre-commit-config.yaml",
-    ".gitleaks.toml",
     ".secrets.baseline",
     ".semgrepignore",
     "bandit.yaml",
