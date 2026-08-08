@@ -3,7 +3,7 @@
 
 mkdocs==1.6.1
 mkdocs-material==9.5.49
-pymdown-extensions==11.0.0
+pymdown-extensions==11.0.1
 
 # Навигация из структуры папок вместо ручного nav.
 mkdocs-awesome-pages-plugin==2.9.3
