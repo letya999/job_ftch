@@ -46,7 +46,7 @@ from job_ftch.application.source_assessment import (
     create_source_assessment_service,
     load_source_assessment,
 )
-from job_ftch.config import get_settings
+from job_ftch.config import get_settings, resolve_outcome_lane_backend
 from job_ftch.domain import (
     JobGroup,
     JobLineage,
@@ -567,8 +567,12 @@ class TenantRunner:
                 catalog=catalog,
                 bgem3_provider=tenant_bgem3_provider,
             )
-            output_sink, main_sink, review_sink, posting_sink = build_output_sinks(tenant_settings)
-            rejected_counted, rejected_sink = build_rejected_sink(tenant_settings)
+            output_sink, main_sink, review_sink, posting_sink = build_output_sinks(
+                tenant_settings, store=tenant_store
+            )
+            rejected_counted, rejected_sink = build_rejected_sink(
+                tenant_settings, store=tenant_store
+            )
             builder = PipelineBuilder()
             builder.sources(tenant.sources)
             builder.auth(auth)
@@ -705,7 +709,9 @@ class TenantRunner:
                 pass
 
         if updated:
-            output_sink, main_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
+            output_sink, main_sink, review_sink, posting_sink = build_output_sinks(
+                runtime.settings, store=runtime.store
+            )
             runtime.builder.clear_sinks().sink(output_sink)
             runtime.builder.with_delivery_targets(
                 build_delivery_targets(runtime.settings, posting_sink)
@@ -1029,8 +1035,12 @@ class TenantRunner:
                 },
             )
             nodes = [GraphPipelineStage(executor)]
-        output_sink, main_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
-        rejected_counted, rejected_sink = build_rejected_sink(runtime.settings)
+        output_sink, main_sink, review_sink, posting_sink = build_output_sinks(
+            runtime.settings, store=runtime.store
+        )
+        rejected_counted, rejected_sink = build_rejected_sink(
+            runtime.settings, store=runtime.store
+        )
         if _snapshot_filter is None:
             msg = "build_nodes() must return SnapshotFilterNode when run_id is set"
             raise RuntimeError(msg)
@@ -1995,6 +2005,90 @@ class TenantRunner:
             ):
                 return True
         return False
+
+    def _outcome_store_enabled(self, tenant_id: str, lane: str) -> bool:
+        settings = self.get_runtime(tenant_id).settings
+        lane_backend = (
+            settings.review_output_backend
+            if lane == "review"
+            else settings.rejected_output_backend
+        )
+        _file, write_store = resolve_outcome_lane_backend(lane_backend, settings.sink_backend)
+        return write_store
+
+    async def list_review_jobs(
+        self,
+        tenant_id: str,
+        *,
+        run_id: str | None = None,
+        limit: int = 50,
+        source_name: str | None = None,
+    ) -> dict[str, Any]:
+        """List compact REVIEW rows when review_output_backend includes store."""
+        enabled = self._outcome_store_enabled(tenant_id, "review")
+        if not enabled:
+            return {
+                "enabled": False,
+                "tenant_id": tenant_id,
+                "lane": "review",
+                "items": [],
+                "note": "Set review_output.backend to store|both to persist REVIEW outcomes.",
+            }
+        store = self.get_runtime(tenant_id).store
+        items = await store.list_operational_outcomes(
+            "review",
+            run_id=run_id,
+            limit=limit,
+            source_name=source_name,
+        )
+        return {
+            "enabled": True,
+            "tenant_id": tenant_id,
+            "lane": "review",
+            "run_id": run_id or (items[0].get("source_run_id") if items else None),
+            "count": len(items),
+            "items": items,
+        }
+
+    async def list_rejected(
+        self,
+        tenant_id: str,
+        *,
+        run_id: str | None = None,
+        limit: int = 50,
+        outcome: str | None = None,
+        reason: str | None = None,
+        source_name: str | None = None,
+    ) -> dict[str, Any]:
+        """List compact REJECTED rows when rejected_output_backend includes store."""
+        enabled = self._outcome_store_enabled(tenant_id, "rejected")
+        if not enabled:
+            return {
+                "enabled": False,
+                "tenant_id": tenant_id,
+                "lane": "rejected",
+                "items": [],
+                "note": (
+                    "Set rejected_output.backend to store|both to persist REJECTED outcomes."
+                ),
+            }
+        store = self.get_runtime(tenant_id).store
+        items = await store.list_operational_outcomes(
+            "rejected",
+            run_id=run_id,
+            limit=limit,
+            outcome=outcome,
+            reason=reason,
+            source_name=source_name,
+        )
+        return {
+            "enabled": True,
+            "tenant_id": tenant_id,
+            "lane": "rejected",
+            "run_id": run_id or (items[0].get("source_run_id") if items else None),
+            "count": len(items),
+            "items": items,
+        }
 
     async def search_jobs(
         self,

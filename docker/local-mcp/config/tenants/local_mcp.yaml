@@ -23,5 +23,20 @@ job_store_path: /data/{tenant_id}/jobs.db
 notify_mode: digest
 notify_batch_size: 10
 
+# ACCEPT catalog dump is optional; triage lanes go to store (MCP list_* tools).
+sink_backend: none
 output:
+  backend: none
   path: /data/{tenant_id}/artifacts/latest.json
+
+review_output:
+  backend: store
+  path: /data/{tenant_id}/artifacts/review.jsonl
+  jsonl: true
+  schema_version: job_ftch.review.v1
+
+rejected_output:
+  backend: store
+  path: /data/{tenant_id}/artifacts/rejected.jsonl
+  jsonl: true
+  schema_version: job_ftch.rejected.v1

@@ -288,6 +288,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self._rejected_sink = rejected_sink
         self._item_concurrency = max(1, pipeline_item_concurrency)
         self._source_run_id = source_run_id
+        self._active_source_run_id: str | None = source_run_id
         self._delivery_targets = {target.target_id: target for target in delivery_targets}
         if len(self._delivery_targets) != len(delivery_targets):
             raise ValueError("Delivery target IDs must be unique")
@@ -301,6 +302,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         settings = get_settings()
         summary = RunSummary()
         summary.source_run_id = self._source_run_id or uuid4().hex
+        self._active_source_run_id = summary.source_run_id
         await self._recover_pending_outbox()
         await self._set_run_state("pipeline.started_at", summary.started_at.isoformat())
         await self._set_run_state("pipeline.status", "running")
@@ -1486,6 +1488,16 @@ class Pipeline[PipelineInput, PipelineOutput]:
         payload = (
             item.model_dump(mode="json") if hasattr(item, "model_dump") else {"item": str(item)}
         )
+        merged_trace = dict(trace or {})
+        run_id = self._optional_str(getattr(self, "_active_source_run_id", None))
+        if run_id is None:
+            run_id = self._optional_str(self._source_run_id)
+        if run_id is None:
+            metadata = getattr(item, "metadata", None)
+            if isinstance(metadata, dict):
+                run_id = self._optional_str(metadata.get("source_run_id"))
+        if run_id is not None:
+            merged_trace.setdefault("source_run_id", run_id)
         rejected = RejectedItem(
             outcome=outcome,
             reason=reason,
@@ -1496,7 +1508,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
             source_name=self._optional_str(getattr(item, "source_name", None)),
             stable_id=self._optional_str(getattr(item, "stable_id", None)),
             raw_item_id=self._optional_str(getattr(item, "raw_item_id", None)),
-            trace=trace or {},
+            trace=merged_trace,
             snapshot=cast("dict[str, object]", payload),
         )
         try:

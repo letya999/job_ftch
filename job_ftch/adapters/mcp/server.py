@@ -280,8 +280,9 @@ class TenantMCPServer:
             min_score: float | None = None,
             routing_decision: str | None = None,
         ) -> list[dict[str, Any]]:
-            """Search vacancies with optional filters (company, location, work_mode, …).
+            """Search ACCEPT catalog vacancies (JobGroups). Not REVIEW/REJECTED.
 
+            For borderline or dropped items use list_review_jobs / list_rejected.
             Filters are applied after FTS/catalog search. Over-fetch when filters set.
             """
             limit = min(max(limit, 1), 100)
@@ -315,6 +316,45 @@ class TenantMCPServer:
                 source_name=source_name,
                 min_score=min_score,
                 routing_decision=routing_decision,
+            )
+
+        @tool(annotations=ro)
+        async def list_review_jobs(
+            tenant_id: str,
+            run_id: str | None = None,
+            limit: int = 50,
+            source_name: str | None = None,
+        ) -> dict[str, Any]:
+            """List compact REVIEW outcomes for a tenant (requires review_output.backend=store)."""
+            limit = min(max(limit, 1), 200)
+            return await self._require_runner().list_review_jobs(
+                tenant_id,
+                run_id=run_id,
+                limit=limit,
+                source_name=source_name,
+            )
+
+        @tool(annotations=ro)
+        async def list_rejected(
+            tenant_id: str,
+            run_id: str | None = None,
+            limit: int = 50,
+            outcome: str | None = None,
+            reason: str | None = None,
+            source_name: str | None = None,
+        ) -> dict[str, Any]:
+            """List compact REJECTED outcomes (requires rejected_output.backend=store).
+
+            outcome: dropped|failed|quarantined. reason e.g. policy_reject.
+            """
+            limit = min(max(limit, 1), 200)
+            return await self._require_runner().list_rejected(
+                tenant_id,
+                run_id=run_id,
+                limit=limit,
+                outcome=outcome,
+                reason=reason,
+                source_name=source_name,
             )
 
         @tool(annotations=ro)

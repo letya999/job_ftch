@@ -63,7 +63,10 @@ Restart Codex. From the agent:
 1. `llm_backend_health` — gateway reachable, model listed
 2. `list_tenants` — should show `local_mcp`
 3. `run_pipeline` with `tenant_id=local_mcp`
-4. `search_jobs` with a query
+4. `search_jobs` — ACCEPT catalog only (may be empty if nothing accepted)
+5. `list_review_jobs` / `list_rejected` — compact operational outcomes
+   (enabled for this tenant via `review_output.backend: store` and
+   `rejected_output.backend: store`)
 
 Only extract/classify/present LLM calls use the Codex subscription through
 CLIProxy. Fetch/scrape/sqlite stay local.

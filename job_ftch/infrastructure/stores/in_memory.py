@@ -145,6 +145,9 @@ class InMemoryStore:
             "bot_publish:",
             "bot_scheduler:last_publish",
             "bot_scheduler:pending_publish_since",
+            "outcome:",
+            "outcome_ids:",
+            "outcome_run_order:",
         )
         kv_keys = [
             key
@@ -156,7 +159,13 @@ class InMemoryStore:
             for key in self._sets
             if any(
                 key.startswith(f"{prefix}{suffix}")
-                for suffix in ("processed", "dedup_keys", "dup_records", "source_health_ids")
+                for suffix in (
+                    "processed",
+                    "dedup_keys",
+                    "dup_records",
+                    "source_health_ids",
+                    "outcome_ids:",
+                )
             )
         ]
         observation_prefix = f"observation:{tenant_id}:"

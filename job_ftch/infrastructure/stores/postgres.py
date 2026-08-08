@@ -241,11 +241,20 @@ class PostgreSQLStore(SQLStoreAdapter):
                 "bot_publish:%",
                 "bot_scheduler:last_publish%",
                 "bot_scheduler:pending_publish_since",
+                "outcome:%",
+                "outcome_ids:%",
+                "outcome_run_order:%",
             )
         )
         set_patterns = tuple(
             f"{prefix}{suffix}"
-            for suffix in ("processed%", "dedup_keys%", "dup_records%", "source_health_ids")
+            for suffix in (
+                "processed%",
+                "dedup_keys%",
+                "dup_records%",
+                "source_health_ids",
+                "outcome_ids:%",
+            )
         )
         pool = await self._ensure_initialized()
         async with pool.acquire() as conn, conn.transaction():
