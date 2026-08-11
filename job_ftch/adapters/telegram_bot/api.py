@@ -291,6 +291,174 @@ def create_app(
         )
         return explanation_to_public_dict(explanation)
 
+    @app.post("/pipeline/search-sessions")
+    @limiter.limit("5/minute")
+    async def create_search_session(
+        request: Any,
+        payload: dict[str, Any],
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """Create a resume-driven search session."""
+        del request
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        from job_ftch.application.search_session import session_to_public_dict
+
+        tenant_id = str(payload.get("tenant_id") or "").strip()
+        if not tenant_id:
+            raise HTTPException(status_code=400, detail="tenant_id is required")
+        source_scope = payload.get("source_scope")
+        if source_scope is not None and not isinstance(source_scope, list):
+            raise HTTPException(status_code=400, detail="source_scope must be a list of source ids")
+        session = await runner.create_search_session(
+            tenant_id,
+            user_id=str(payload["user_id"]) if payload.get("user_id") is not None else None,
+            profile_id=(
+                str(payload["profile_id"]) if payload.get("profile_id") is not None else None
+            ),
+            source_scope=[str(item) for item in source_scope] if source_scope else None,
+            max_items=payload.get("max_items"),
+            max_sources=payload.get("max_sources"),
+            result_limit=int(payload.get("result_limit") or 20),
+        )
+        return session_to_public_dict(session)
+
+    @app.post("/pipeline/search-sessions/{session_id}/plan")
+    @limiter.limit("5/minute")
+    async def plan_search_session(
+        request: Any,
+        session_id: str,
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        del request
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        from job_ftch.application.search_session import session_to_public_dict
+
+        session = await runner.plan_source_routes(session_id)
+        return session_to_public_dict(session)
+
+    @app.post("/pipeline/search-sessions/{session_id}/approve")
+    @limiter.limit("5/minute")
+    async def approve_search_session(
+        request: Any,
+        session_id: str,
+        payload: dict[str, Any],
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        del request
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        from job_ftch.application.search_session import session_to_public_dict
+
+        approved_sources = payload.get("approved_source_ids")
+        approved_caps = payload.get("approved_capability_ids")
+        session = await runner.approve_search_session(
+            session_id,
+            approved_source_ids=(
+                [str(item) for item in approved_sources] if isinstance(approved_sources, list) else None
+            ),
+            approved_capability_ids=(
+                [str(item) for item in approved_caps] if isinstance(approved_caps, list) else None
+            ),
+            approve_all_sensitive=bool(payload.get("approve_all_sensitive")),
+            note=str(payload["note"]) if payload.get("note") is not None else None,
+        )
+        return session_to_public_dict(session)
+
+    @app.post("/pipeline/search-sessions/{session_id}/run")
+    @limiter.limit("3/minute")
+    async def run_search_session(
+        request: Any,
+        session_id: str,
+        payload: dict[str, Any] | None = None,
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        del request
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        from job_ftch.application.search_session import session_to_public_dict
+
+        body = payload or {}
+        session = await runner.run_search_session(
+            session_id,
+            skip_pipeline=bool(body.get("skip_pipeline")),
+        )
+        return session_to_public_dict(session)
+
+    @app.get("/pipeline/search-sessions/{session_id}")
+    @limiter.limit("10/minute")
+    async def get_search_session(
+        request: Any,
+        session_id: str,
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        del request
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        from job_ftch.application.search_session import session_to_public_dict
+
+        session = await runner.get_search_session_status(session_id)
+        return session_to_public_dict(session)
+
+    @app.get("/pipeline/search-sessions/{session_id}/results")
+    @limiter.limit("10/minute")
+    async def list_search_session_results(
+        request: Any,
+        session_id: str,
+        limit: int = 20,
+        x_api_key: str | None = Header(default=None),
+    ) -> list[dict[str, Any]]:
+        del request
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        refs = await runner.list_search_results(session_id, limit=limit)
+        return [ref.model_dump(mode="json") for ref in refs]
+
+    @app.get("/pipeline/search-sessions/{session_id}/explain")
+    @limiter.limit("10/minute")
+    async def explain_search_session(
+        request: Any,
+        session_id: str,
+        source_id: str | None = None,
+        job_id: str | None = None,
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        del request
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        from job_ftch.application.search_session import explanation_to_dict
+
+        explanation = await runner.explain_search_session(
+            session_id,
+            source_id=source_id,
+            job_id=job_id,
+        )
+        return explanation_to_dict(explanation)
+
+    @app.post("/pipeline/search-sessions/{session_id}/cancel")
+    @limiter.limit("5/minute")
+    async def cancel_search_session(
+        request: Any,
+        session_id: str,
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        del request
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        from job_ftch.application.search_session import session_to_public_dict
+
+        session = await runner.cancel_search_session(session_id)
+        return session_to_public_dict(session)
+
     @app.get("/pipeline/sources/{tenant_id}")
     @limiter.limit("10/minute")
     async def pipeline_sources(

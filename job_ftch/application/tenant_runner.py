@@ -1862,6 +1862,135 @@ class TenantRunner:
             requested_bypass=bypass,
         )
 
+    async def create_search_session(
+        self,
+        tenant_id: str,
+        *,
+        user_id: str | None = None,
+        profile_id: str | None = None,
+        source_scope: Sequence[str] | None = None,
+        max_items: int | None = None,
+        max_sources: int | None = None,
+        result_limit: int = 20,
+        deadline_seconds: float | None = None,
+    ) -> Any:
+        """Create a resume-driven search session for high-level agent workflows."""
+        from job_ftch.application.search_session import create_search_session
+        from job_ftch.domain.search_session import SearchSessionBudgets
+
+        return await create_search_session(
+            self,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            profile_id=profile_id,
+            source_scope=source_scope,
+            budgets=SearchSessionBudgets(
+                max_items=max_items,
+                max_sources=max_sources,
+                result_limit=result_limit,
+                deadline_seconds=deadline_seconds,
+            ),
+        )
+
+    async def plan_source_routes(self, session_id: str) -> Any:
+        """Plan per-source browser/bypass routes for a search session."""
+        from job_ftch.application.search_session import plan_source_routes
+
+        return await plan_source_routes(self, session_id)
+
+    async def approve_search_session(
+        self,
+        session_id: str,
+        *,
+        approved_source_ids: Sequence[str] | None = None,
+        approved_capability_ids: Sequence[str] | None = None,
+        approve_all_sensitive: bool = False,
+        note: str | None = None,
+    ) -> Any:
+        """Record approvals for sensitive routes before running a session."""
+        from job_ftch.application.search_session import approve_search_session
+
+        return await approve_search_session(
+            self,
+            session_id,
+            approved_source_ids=approved_source_ids,
+            approved_capability_ids=approved_capability_ids,
+            approve_all_sensitive=approve_all_sensitive,
+            note=note,
+        )
+
+    async def run_search_session(
+        self,
+        session_id: str,
+        *,
+        skip_pipeline: bool = False,
+    ) -> Any:
+        """Run an approved search session via existing tenant pipeline/search APIs."""
+        from job_ftch.application.search_session import run_search_session
+
+        return await run_search_session(self, session_id, skip_pipeline=skip_pipeline)
+
+    async def get_search_session_status(self, session_id: str) -> Any:
+        """Return search session status and route plan state."""
+        from job_ftch.application.search_session import get_search_session_status
+
+        return await get_search_session_status(self, session_id)
+
+    async def list_search_results(
+        self,
+        session_id: str,
+        *,
+        limit: int | None = None,
+    ) -> list[Any]:
+        """List ranked job result refs for a search session."""
+        from job_ftch.application.search_session import list_search_results
+
+        return await list_search_results(self, session_id, limit=limit)
+
+    async def explain_search_session(
+        self,
+        session_id: str,
+        *,
+        source_id: str | None = None,
+        job_id: str | None = None,
+    ) -> Any:
+        """Explain rejected/degraded sources or non-selected jobs in a session."""
+        from job_ftch.application.search_session import explain_rejected_or_degraded
+
+        return await explain_rejected_or_degraded(
+            self,
+            session_id,
+            source_id=source_id,
+            job_id=job_id,
+        )
+
+    async def cancel_search_session(self, session_id: str) -> Any:
+        """Cancel a search session (cooperative if a run is in flight)."""
+        from job_ftch.application.search_session import cancel_search_session
+
+        return await cancel_search_session(self, session_id)
+
+    async def ingest_resume(
+        self,
+        tenant_id: str,
+        *,
+        user_id: str,
+        resume_text: str,
+        profile_id: str | None = None,
+        activate: bool = True,
+    ) -> ManagedCandidateProfile:
+        """Ingest resume text into a managed candidate profile for search sessions."""
+        from job_ftch.application.search_session import ingest_resume
+
+        return await ingest_resume(
+            self,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            resume_text=resume_text,
+            profile_id=profile_id,
+            activate=activate,
+        )
+
     async def save_candidate_profile(
         self,
         tenant_id: str,
