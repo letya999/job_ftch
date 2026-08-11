@@ -76,6 +76,11 @@ DEFAULT_SESSION_PRIVACY_NOTES: tuple[str, ...] = (
     "manual_challenge diagnostics allow only source_id, source_label, route_id, reason_code, "
     "user_action_hint, deadline/budget flags; never cookies, tokens, proxy endpoints, browser "
     "profile paths, raw HTML/traces, private tenant/user ids, or resume text",
+    "public/explain payloads scrub sensitive-looking free-text values in notes/provenance/"
+    "evidence/reasons (proxy URLs, cookie/token headers, browser paths, HTML, internal endpoints) "
+    "without over-redacting route/source/capability ids",
+    "job explain lineage evidence is trimmed to source kind/name/stages/timestamps and presence "
+    "flags; tenant/user/raw_item/run ids and full provenance blobs are omitted",
     "needs_manual means human/operator action is required; approval is not automatic bypass",
     "results reuse existing pipeline/search decisions; no separate relevance logic",
 )

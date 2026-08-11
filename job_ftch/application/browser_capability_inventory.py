@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from job_ftch.application.registry import BypassCapability, list_bypass_capabilities
 from job_ftch.config import Settings, get_settings
@@ -233,9 +233,7 @@ def _engine_availability(
         return "unavailable", "proxy provider or list is not configured"
     if name == "captcha_solver":
         secrets = _captcha_secret_states(settings)
-        paid_present = any(
-            item.present and item.label not in {"browser_wait"} for item in secrets
-        )
+        paid_present = any(item.present and item.label not in {"browser_wait"} for item in secrets)
         wait_present = any(item.label == "browser_wait" and item.present for item in secrets)
         if paid_present:
             return "available", None
@@ -433,9 +431,7 @@ def _aggregate_group(
 
     if group == "disabled_unavailable":
         unavailable = [
-            item
-            for item in engines
-            if item.availability in {"unavailable", "disabled", "degraded"}
+            item for item in engines if item.availability in {"unavailable", "disabled", "degraded"}
         ]
         if not unavailable:
             return BrowserCapabilityEntry(
@@ -596,9 +592,7 @@ def build_browser_capability_inventory(
 
     # Inventory lists group summaries first, then concrete engines.
     capabilities = tuple(group_entries + engine_entries)
-    fallback = tuple(name for name in DEFAULT_FALLBACK_ORDER if name in present) or (
-        "noop",
-    )
+    fallback = tuple(name for name in DEFAULT_FALLBACK_ORDER if name in present) or ("noop",)
     notes = (
         "inventory is read-only and does not start browsers",
         "secret values and proxy endpoints are never included",
@@ -694,11 +688,7 @@ def explain_route_plan(
         for item in inventory.capabilities
         if item.engine is not None and item.id.startswith("engine:")
     }
-    groups = {
-        item.group: item
-        for item in inventory.capabilities
-        if item.id.startswith("group:")
-    }
+    groups = {item.group: item for item in inventory.capabilities if item.id.startswith("group:")}
     bypass = _requested_bypass(source, requested_bypass)
     kind = _source_kind(source)
     notes = list(_assessment_hints(source))
@@ -774,11 +764,7 @@ def explain_route_plan(
             preferred_groups = ["direct_http", "stealth_http_tls", "browser"]
 
         assessment = source.get("assessment") if isinstance(source, Mapping) else None
-        freshness = (
-            assessment.get("freshness")
-            if isinstance(assessment, Mapping)
-            else None
-        )
+        freshness = assessment.get("freshness") if isinstance(assessment, Mapping) else None
         if isinstance(freshness, Mapping) and freshness.get("probe_blocked"):
             preferred_groups = ["stealth_http_tls", "browser", "proxy_backed", "direct_http"]
             notes.append("probe_blocked shifts preference toward stealth/browser/proxy")
@@ -807,8 +793,9 @@ def explain_route_plan(
         )
 
         for entry in ranked:
-            status = _status_for(entry)
-            if selected_id is None and status == "available":
+            entry_status = _status_for(entry)
+            entry_available = entry_status == "available"
+            if selected_id is None and entry_available:
                 selected_id = entry.id
                 selected_group = entry.group
                 diagnostics.append(
@@ -825,14 +812,17 @@ def explain_route_plan(
             else:
                 reason = entry.reason or (
                     "available but lower priority than selected route"
-                    if status == "available"
+                    if entry_available
                     else entry.availability
+                )
+                diagnostic_status: RouteDiagnosticStatus = (
+                    "skipped" if entry_available else entry_status
                 )
                 diagnostics.append(
                     RouteCapabilityDiagnostic(
                         capability_id=entry.id,
                         group=entry.group,
-                        status="skipped" if status == "available" else status,
+                        status=diagnostic_status,
                         reason=_safe_reason(reason),
                         cost=entry.cost,
                         risk=entry.risk,
@@ -845,18 +835,18 @@ def explain_route_plan(
         if any(item.capability_id == entry.id for item in diagnostics):
             continue
         if selected_group == group_name and selected_id and selected_id.startswith("group:"):
-            status: RouteDiagnosticStatus = "selected"
+            group_status: RouteDiagnosticStatus = "selected"
             reason = "selected capability group"
         else:
-            status = _status_for(entry)
-            if status == "available" and selected_id is not None:
-                status = "skipped"
+            group_status = _status_for(entry)
+            if group_status == "available" and selected_id is not None:
+                group_status = "skipped"
             reason = entry.reason or entry.availability
         diagnostics.append(
             RouteCapabilityDiagnostic(
                 capability_id=entry.id,
                 group=entry.group,
-                status=status,
+                status=group_status,
                 reason=_safe_reason(reason),
                 cost=entry.cost,
                 risk=entry.risk,
@@ -889,13 +879,13 @@ def explain_route_plan(
 def inventory_to_public_dict(inventory: BrowserCapabilityInventory) -> dict[str, Any]:
     """Serialize inventory with an explicit denylist of sensitive keys."""
     payload = inventory.model_dump(mode="json")
-    return _redact_payload(payload)
+    return cast("dict[str, Any]", _redact_payload(payload))
 
 
 def explanation_to_public_dict(explanation: RoutePlanExplanation) -> dict[str, Any]:
     """Serialize route explanation with sensitive-key scrubbing."""
     payload = explanation.model_dump(mode="json")
-    return _redact_payload(payload)
+    return cast("dict[str, Any]", _redact_payload(payload))
 
 
 def _redact_payload(value: Any) -> Any:

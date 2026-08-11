@@ -16,7 +16,7 @@ import html
 import re
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import parse_qsl, urljoin, urlparse, urlunparse
 
 import structlog
@@ -172,7 +172,7 @@ def public_failure_code_for(
     raw = getattr(value, "value", value)
     text = str(raw).strip().casefold().replace("-", "_").replace(" ", "_")
     if text in _PUBLIC_FAILURE_CODES:
-        return text  # narrowed to GetmatchFailureKind members
+        return cast("GetmatchFailureKind", text)
     return None
 
 
@@ -839,7 +839,10 @@ class GetmatchParser:
                     status_code=status_code,
                     expected="detail",
                 )
-                if kind in {GetmatchPageKind.AUTH_WALL, GetmatchPageKind.CHALLENGE} and emitted == 0:
+                if (
+                    kind in {GetmatchPageKind.AUTH_WALL, GetmatchPageKind.CHALLENGE}
+                    and emitted == 0
+                ):
                     _raise_for_kind(
                         kind,
                         url=detail_url,

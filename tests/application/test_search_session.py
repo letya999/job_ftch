@@ -35,6 +35,8 @@ from job_ftch.domain.browser_capability_inventory import (
     RoutePlanExplanation,
 )
 from job_ftch.domain.candidate import CandidateIdentity, CandidateProfile
+from job_ftch.domain.lineage import JobLineage
+from job_ftch.domain.models import ProvenanceTrail
 from job_ftch.domain.profile import SearchProfile
 from job_ftch.domain.search_session import SearchSessionBudgets
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
@@ -123,9 +125,7 @@ class _FakeRunner:
                 "degraded": False,
             },
         ]
-        self.run_tenant = AsyncMock(
-            return_value=self._summary(fetched=2, emitted=1, failed=0)
-        )
+        self.run_tenant = AsyncMock(return_value=self._summary(fetched=2, emitted=1, failed=0))
         self.latest_jobs = AsyncMock(return_value=[_job()])
         self.get_job_lineage = AsyncMock(return_value=None)
 
@@ -244,9 +244,7 @@ class _FakeRunner:
                         engine="captcha_solver",
                     ),
                 ),
-                notes=(
-                    "manual challenge route selected; no automated login or cookie harvest",
-                ),
+                notes=("manual challenge route selected; no automated login or cookie harvest",),
             )
         if kind == "browser":
             return RoutePlanExplanation(
@@ -320,7 +318,12 @@ async def test_create_plan_approve_run_status_results_explain(
         tenant_id="ai_jobs",
         user_id="u1",
         profile_id="p1",
-        source_scope=["debug:fixture", "career_site:example", "browser:spa", "career_site:disabled"],
+        source_scope=[
+            "debug:fixture",
+            "career_site:example",
+            "browser:spa",
+            "career_site:disabled",
+        ],
         budgets=SearchSessionBudgets(result_limit=5, max_items=10),
     )
     assert session.status == "created"
@@ -545,6 +548,153 @@ async def test_public_dict_redacts_sensitive_keys(
 
 
 @pytest.mark.asyncio
+async def test_public_dict_scrubs_sensitive_string_values(
+    runner_with_profile: _FakeRunner,
+) -> None:
+    """Value scrubbing covers secrets in free text, not only sensitive keys."""
+    runner = runner_with_profile
+    session = await create_search_session(
+        runner,  # type: ignore[arg-type]
+        tenant_id="ai_jobs",
+        user_id="u1",
+        source_scope=["debug:fixture"],
+    )
+    proxy_prefix = "socks5://" + "user" + ":" + "pass" + "@"
+    session.notes = (
+        f"proxy {proxy_prefix}10.0.0.5:1080 leaked",
+        "cookie=sessionid=abc; path=/",
+        "Authorization: Bearer super-secret-token-value",
+        "profile under C:\\Users\\operator\\.runtime\\browser",
+        "<html><body>challenge page</body></html>",
+        "internal endpoint 192.168.10.20:8443",
+        "host svc.internal:9000",
+        "safe status note without secrets",
+    )
+    session.provenance = {
+        "operator_note": "token=abc123secret",
+        "resume_text": "should be dropped by key denylist",
+        "route_id": "engine:captcha_solver",
+        "source_id": "career_site:example",
+        "ok": True,
+    }
+    session.error = "failed via https://intranet.corp/jobs?token=leak"
+    await runner.get_runtime("ai_jobs").store.save_search_session(session)
+    reloaded = await get_search_session_status(runner, session.session_id)  # type: ignore[arg-type]
+    public = session_to_public_dict(reloaded)
+    blob = str(public).lower()
+
+    assert "socks5://" not in blob
+    assert "10.0.0.5" not in blob
+    assert "cookie=sessionid" not in blob
+    assert "bearer super-secret" not in blob
+    assert "c:\\users\\operator" not in blob
+    assert "<html" not in blob
+    assert "192.168.10.20" not in blob
+    assert "svc.internal" not in blob
+    assert "https://intranet.corp" not in blob
+    assert "token=abc123secret" not in blob
+    assert "resume_text" not in public.get("provenance", {})
+
+    # Allowed public identifiers must survive redaction.
+    assert public["provenance"]["route_id"] == "engine:captcha_solver"
+    assert public["provenance"]["source_id"] == "career_site:example"
+    assert public["provenance"]["ok"] is True
+    assert "safe status note without secrets" in public["notes"]
+    # Privacy documentation must not self-redact.
+    assert any("cookies" in note for note in public.get("privacy_notes", []))
+    assert any("lineage evidence is trimmed" in note for note in public.get("privacy_notes", []))
+
+
+@pytest.mark.asyncio
+async def test_job_explain_uses_trimmed_lineage_evidence(
+    runner_with_profile: _FakeRunner,
+) -> None:
+    runner = runner_with_profile
+    lineage = JobLineage(
+        tenant_id="ai_jobs",
+        job_id="job-1",
+        group_id="group-private-1",
+        raw_item_id="raw-private-xyz",
+        source_record_id="record-private-9",
+        source_run_id="run-private-abc",
+        source_kind=SourceKind.DEBUG,
+        source_name="fixture",
+        source_url="https://example.com/jobs/1?token=should-not-appear",
+        canonical_url="https://example.com/jobs/1",
+        fetched_at=datetime(2026, 8, 1, 12, 0, tzinfo=UTC),
+        posted_at=datetime(2026, 7, 30, 9, 0, tzinfo=UTC),
+        pipeline_stages=("source_fetch", "sanitize", "extraction"),
+        provenance=ProvenanceTrail(extraction=("title", "company")),
+        group_job_ids=("job-1", "job-2-private"),
+        group_source_count=2,
+    )
+    runner.get_job_lineage = AsyncMock(return_value=lineage)
+
+    session = await create_search_session(
+        runner,  # type: ignore[arg-type]
+        tenant_id="ai_jobs",
+        user_id="u1",
+        source_scope=["debug:fixture"],
+    )
+    await plan_source_routes(runner, session.session_id)  # type: ignore[arg-type]
+    await run_search_session(runner, session.session_id)  # type: ignore[arg-type]
+
+    explained = await explain_rejected_or_degraded(
+        runner,  # type: ignore[arg-type]
+        session.session_id,
+        job_id="job-1",
+    )
+    payload = explanation_to_dict(explained)
+    evidence = payload["evidence"]
+    public_lineage = evidence["lineage"]
+
+    assert public_lineage["source_kind"] == "debug"
+    assert public_lineage["source_name"] == "fixture"
+    assert public_lineage["pipeline_stages"] == [
+        "source_fetch",
+        "sanitize",
+        "extraction",
+    ]
+    assert public_lineage["group_source_count"] == 2
+    assert public_lineage["has_group"] is True
+    assert public_lineage["has_source_url"] is True
+    assert public_lineage["has_canonical_url"] is True
+    assert public_lineage["provenance_present"] is True
+    assert public_lineage["fetched_at"] is not None
+    assert public_lineage["posted_at"] is not None
+
+    denied_keys = {
+        "tenant_id",
+        "job_id",
+        "group_id",
+        "raw_item_id",
+        "source_record_id",
+        "source_run_id",
+        "source_url",
+        "canonical_url",
+        "group_job_ids",
+        "provenance",
+        "user_id",
+    }
+    assert denied_keys.isdisjoint(public_lineage.keys())
+
+    blob = str(payload).lower()
+    assert "raw-private-xyz" not in blob
+    assert "run-private-abc" not in blob
+    assert "record-private-9" not in blob
+    assert "group-private-1" not in blob
+    assert "job-2-private" not in blob
+    assert "token=should-not-appear" not in blob
+    assert "https://example.com" not in blob
+    assert '"tenant_id"' not in str(payload)
+    assert any("source_name=fixture" in reason for reason in payload["reasons"])
+    assert any("source_kind=debug" in reason for reason in payload["reasons"])
+    assert not any("raw_item_id=" in reason for reason in payload["reasons"])
+    assert not any("source_run_id=" in reason for reason in payload["reasons"])
+    assert any("lineage evidence is trimmed" in note for note in payload["notes"])
+
+
+@pytest.mark.asyncio
 async def test_unknown_source_in_scope_is_skipped(
     runner_with_profile: _FakeRunner,
 ) -> None:
@@ -657,7 +807,9 @@ async def test_manual_challenge_route_is_needs_manual_not_auto_run(
     )
     assert public_manual["status"] == "needs_manual"
     assert public_manual["manual_challenge"]["source_label"] == "walled-public"
-    assert any("manual_challenge diagnostics allow only" in note for note in public["privacy_notes"])
+    assert any(
+        "manual_challenge diagnostics allow only" in note for note in public["privacy_notes"]
+    )
 
 
 @pytest.mark.asyncio

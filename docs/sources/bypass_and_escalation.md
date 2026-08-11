@@ -103,6 +103,13 @@ source status instead of claiming automatic bypass:
   approval flags, `deadline_seconds` / `budget_note`;
 - denied on that payload: cookies, tokens, proxy endpoints, browser profile or
   executable paths, raw HTML/traces, private tenant/user ids, resume text;
+- `session_to_public_dict` / `explanation_to_dict` also scrub free-text values
+  that look like secrets (proxy URLs, cookie/token headers, browser paths, HTML
+  bodies, internal network endpoints), aligned with browser capability inventory
+  redaction; route/source/capability ids stay intact;
+- job explain evidence uses a trimmed lineage shape (source kind/name/stages/
+  timestamps and presence flags only) — not full `JobLineage` with tenant/user/
+  raw_item/run ids or provenance blobs;
 - `approve_search_session` records operator consent/budget acknowledgment;
   approved `needs_manual` routes are **not** auto-executed by
   `run_search_session`;

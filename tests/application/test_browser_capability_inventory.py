@@ -72,11 +72,7 @@ def test_inventory_includes_required_capability_groups() -> None:
         registered=_registered(),
     )
     assert inventory.status == "ok"
-    groups = {
-        item.group
-        for item in inventory.capabilities
-        if item.id.startswith("group:")
-    }
+    groups = {item.group for item in inventory.capabilities if item.id.startswith("group:")}
     assert groups == {
         "direct_http",
         "stealth_http_tls",
@@ -116,7 +112,9 @@ def test_proxy_available_when_list_configured_without_exposing_urls() -> None:
     inventory = build_browser_capability_inventory(settings, registered=_registered())
     proxy = next(item for item in inventory.capabilities if item.id == "group:proxy_backed")
     assert proxy.availability == "available"
-    assert any(secret.label == "http_proxy_list" and secret.present for secret in proxy.required_secrets)
+    assert any(
+        secret.label == "http_proxy_list" and secret.present for secret in proxy.required_secrets
+    )
 
     payload = inventory_to_public_dict(inventory)
     serialized = str(payload).lower()
@@ -129,12 +127,12 @@ def test_missing_captcha_secret_is_degraded_or_unavailable(
     monkeypatch.delenv("NOPECHA_API_KEY", raising=False)
     monkeypatch.delenv("CAPSOLVER_API_KEY", raising=False)
     inventory = build_browser_capability_inventory(
-        _settings(captcha_provider="nopecha", captcha_enabled_providers=["nopecha", "browser_wait"]),
+        _settings(
+            captcha_provider="nopecha", captcha_enabled_providers=["nopecha", "browser_wait"]
+        ),
         registered=_registered(),
     )
-    challenge = next(
-        item for item in inventory.capabilities if item.id == "group:manual_challenge"
-    )
+    challenge = next(item for item in inventory.capabilities if item.id == "group:manual_challenge")
     assert challenge.availability in {"degraded", "unavailable"}
     labels = {item.label: item.present for item in challenge.required_secrets}
     assert labels.get("nopecha") is False
@@ -149,9 +147,7 @@ def test_captcha_secret_present_marks_provider_available(
         _settings(captcha_provider="nopecha", captcha_enabled_providers=["nopecha"]),
         registered=_registered(),
     )
-    challenge = next(
-        item for item in inventory.capabilities if item.id == "group:manual_challenge"
-    )
+    challenge = next(item for item in inventory.capabilities if item.id == "group:manual_challenge")
     assert challenge.availability == "available"
     payload = inventory_to_public_dict(inventory)
     assert "not-a-real-secret-value" not in str(payload)
@@ -162,9 +158,7 @@ def test_persistent_session_disabled_by_default() -> None:
         _settings(browser_session_state_enabled=False, browser_profile_persistent=False),
         registered=_registered(),
     )
-    session = next(
-        item for item in inventory.capabilities if item.id == "group:persistent_session"
-    )
+    session = next(item for item in inventory.capabilities if item.id == "group:persistent_session")
     assert session.availability == "disabled"
     assert session.requires_approval is True
 
@@ -174,9 +168,7 @@ def test_persistent_session_available_when_enabled() -> None:
         _settings(browser_session_state_enabled=True),
         registered=_registered(),
     )
-    session = next(
-        item for item in inventory.capabilities if item.id == "group:persistent_session"
-    )
+    session = next(item for item in inventory.capabilities if item.id == "group:persistent_session")
     assert session.availability == "available"
     assert session.supports_session is True
 
@@ -186,9 +178,7 @@ def test_unregistered_engine_is_unavailable_with_reason() -> None:
         _settings(),
         registered={"noop": BypassCapability(cost=0)},
     )
-    camoufox = next(
-        item for item in inventory.capabilities if item.id == "engine:camoufox"
-    )
+    camoufox = next(item for item in inventory.capabilities if item.id == "engine:camoufox")
     assert camoufox.availability == "unavailable"
     assert camoufox.reason is not None
     assert "not registered" in camoufox.reason

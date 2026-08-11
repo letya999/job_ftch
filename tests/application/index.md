@@ -8,6 +8,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 
 - [__init__.py](__init__.py)
 - [test_bot_shots_to_scorer.py](test_bot_shots_to_scorer.py)
+- [test_browser_capability_inventory.py](test_browser_capability_inventory.py)
 - [test_builder_contracts.py](test_builder_contracts.py)
 - [test_capability_preflight.py](test_capability_preflight.py)
 - [test_channel_publisher.py](test_channel_publisher.py)
@@ -57,6 +58,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_scheduler.py](test_scheduler.py)
 - [test_scheduler_journal.py](test_scheduler_journal.py)
 - [test_search_expansion.py](test_search_expansion.py)
+- [test_search_session.py](test_search_session.py)
 - [test_shadow.py](test_shadow.py)
 - [test_shot_sync_qdrant.py](test_shot_sync_qdrant.py)
 - [test_source_loading.py](test_source_loading.py)

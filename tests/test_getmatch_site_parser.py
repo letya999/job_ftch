@@ -58,7 +58,9 @@ class _FakeClient:
         self._responses = responses
         self.calls: list[str] = []
 
-    async def get(self, url: str, *, follow_redirects: bool = True, **kwargs: object) -> _FakeResponse:
+    async def get(
+        self, url: str, *, follow_redirects: bool = True, **kwargs: object
+    ) -> _FakeResponse:
         del follow_redirects, kwargs
         self.calls.append(url)
         if url not in self._responses:
@@ -211,7 +213,9 @@ async def test_spa_listing_with_jobs_and_empty_translation_is_not_empty() -> Non
 
     client = _FakeClient(
         {
-            "https://getmatch.ru/vacancies": _FakeResponse(listing, "https://getmatch.ru/vacancies"),
+            "https://getmatch.ru/vacancies": _FakeResponse(
+                listing, "https://getmatch.ru/vacancies"
+            ),
             "https://getmatch.ru/vacancies/35178-senior-ai-engineer-ai-agenty": _FakeResponse(
                 detail,
                 "https://getmatch.ru/vacancies/35178-senior-ai-engineer-ai-agenty",
@@ -264,7 +268,9 @@ async def test_parser_uses_sitemap_when_listing_has_no_cards() -> None:
     sitemap = _read("site_parsers", "getmatch", "sitemap.xml")
     client = _FakeClient(
         {
-            "https://getmatch.ru/vacancies": _FakeResponse(spa_shell, "https://getmatch.ru/vacancies"),
+            "https://getmatch.ru/vacancies": _FakeResponse(
+                spa_shell, "https://getmatch.ru/vacancies"
+            ),
             "https://getmatch.ru/sitemap.xml": _FakeResponse(
                 sitemap,
                 "https://getmatch.ru/sitemap.xml",
@@ -396,7 +402,10 @@ def test_getmatch_terminal_errors_feed_public_failure_reason() -> None:
     cases = (
         ("layout_changed", "GetmatchIngestError: layout_changed: sitemap missing locs"),
         ("auth_wall", "GetmatchIngestError: auth_wall: listing requires authentication"),
-        ("challenge_required", "challenge_required: blocked browser challenge at https://getmatch.ru"),
+        (
+            "challenge_required",
+            "challenge_required: blocked browser challenge at https://getmatch.ru",
+        ),
         ("parser_error", "GetmatchIngestError: parser_error: failed to fetch sitemap"),
         ("empty_result", "empty_result"),
     )

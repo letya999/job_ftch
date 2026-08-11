@@ -13,6 +13,7 @@ login automation, or credential harvesting.
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
         BrowserCapabilityEntry,
         RoutePlanExplanation,
     )
+    from job_ftch.domain.lineage import JobLineage
 
 logger = structlog.get_logger(__name__)
 
@@ -57,12 +59,64 @@ _SENSITIVE_GROUPS = frozenset(
     }
 )
 
+# Key denylist for public/explain payloads (substring match on key names).
+_SENSITIVE_KEY_MARKERS = (
+    "cookie",
+    "token",
+    "password",
+    "secret",
+    "proxy_url",
+    "authorization",
+    "profile_path",
+    "executable",
+    "api_key",
+    "resume_text",
+    "raw_text",
+    "raw_html",
+    "cookie_jar",
+)
+
+# Value scrubbing aligned with browser_capability_inventory, plus HTML and
+# internal-network markers. Intentionally avoids natural-language phrases that
+# appear in privacy_notes (e.g. "resume body", "cookies") so documentation is
+# not self-redacted. Route ids / source ids / capability labels stay intact.
+_SENSITIVE_SNIPPET_MARKERS = (
+    "http://",
+    "https://",
+    "socks5://",
+    "socks4://",
+    "bearer ",
+    "cookie=",
+    "set-cookie:",
+    "authorization:",
+    "api_key",
+    "token=",
+    "password=",
+    ".runtime/",
+    "c:\\",
+    "/home/",
+    "/users/",
+    "<html",
+    "<!doctype",
+    "<script",
+    "</body>",
+    "</html>",
+)
+
+_PRIVATE_NETWORK_RE = re.compile(
+    r"(?i)\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"127\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"localhost|"
+    r"[a-z0-9][a-z0-9.-]*\.(?:local|internal|lan|corp))"
+    r"(?::\d{2,5})?\b"
+)
+
 # Routes that require human-in-the-loop; never auto-executed by run_search_session.
 _MANUAL_GROUPS = frozenset({"manual_challenge"})
 
-_TERMINAL_STATUSES: frozenset[SearchSessionStatus] = frozenset(
-    {"completed", "cancelled", "failed"}
-)
+_TERMINAL_STATUSES: frozenset[SearchSessionStatus] = frozenset({"completed", "cancelled", "failed"})
 
 _MANUAL_ACTION_HINTS: dict[ManualChallengeReasonCode, str] = {
     "login_required": (
@@ -109,42 +163,95 @@ def _new_session_id() -> str:
 
 
 def session_to_public_dict(session: SearchSession) -> dict[str, Any]:
-    """Serialize session state with sensitive-key scrubbing."""
+    """Serialize session state with sensitive-key and value scrubbing."""
     payload = session.model_dump(mode="json")
-    return _redact_payload(payload)
+    return cast("dict[str, Any]", _redact_payload(payload))
 
 
 def explanation_to_dict(explanation: SearchSessionExplanation) -> dict[str, Any]:
-    return _redact_payload(explanation.model_dump(mode="json"))
+    """Serialize explain payload with sensitive-key and value scrubbing."""
+    return cast("dict[str, Any]", _redact_payload(explanation.model_dump(mode="json")))
+
+
+def _string_looks_sensitive(text: str) -> bool:
+    """Return True when a free-text value should not leave the public surface."""
+    lowered = text.lower()
+    if any(marker in lowered for marker in _SENSITIVE_SNIPPET_MARKERS):
+        return True
+    return _PRIVATE_NETWORK_RE.search(text) is not None
 
 
 def _redact_payload(value: Any) -> Any:
+    """Redact public/explain payloads by sensitive keys and sensitive-looking values.
+
+    Key denylist drops secret-bearing fields entirely. String values that look
+    like cookies/tokens/proxy URLs/browser paths/HTML/internal endpoints are
+    replaced with ``redacted``. Allowed public identifiers (route ids, source
+    ids, capability labels, status codes) are left intact.
+    """
     if isinstance(value, dict):
         redacted: dict[str, Any] = {}
         for key, nested in value.items():
             lowered = str(key).lower()
-            if any(
-                marker in lowered
-                for marker in (
-                    "cookie",
-                    "token",
-                    "password",
-                    "secret",
-                    "proxy_url",
-                    "authorization",
-                    "profile_path",
-                    "executable",
-                    "api_key",
-                    "resume_text",
-                    "raw_text",
-                )
-            ):
+            if any(marker in lowered for marker in _SENSITIVE_KEY_MARKERS):
                 continue
             redacted[str(key)] = _redact_payload(nested)
         return redacted
     if isinstance(value, list | tuple):
         return [_redact_payload(item) for item in value]
+    if isinstance(value, str):
+        if _string_looks_sensitive(value):
+            return "redacted"
+        return value
     return value
+
+
+def _public_lineage_evidence(lineage: JobLineage) -> dict[str, Any]:
+    """Trim JobLineage to a small public-safe explain evidence shape.
+
+    Keeps useful source/job provenance (kind, name, stages, timestamps, group
+    presence) while omitting tenant/user/private ids, raw item/run ids, full
+    provenance trails, sibling job id lists, and raw URL blobs.
+    """
+    source_kind = getattr(lineage, "source_kind", None)
+    kind_text = getattr(source_kind, "value", source_kind)
+    fetched_at = getattr(lineage, "fetched_at", None)
+    posted_at = getattr(lineage, "posted_at", None)
+    stages = getattr(lineage, "pipeline_stages", ()) or ()
+    group_id = getattr(lineage, "group_id", None)
+    group_job_ids = getattr(lineage, "group_job_ids", ()) or ()
+    provenance = getattr(lineage, "provenance", None)
+    provenance_present = False
+    if provenance is not None:
+        for field_name in ("extraction", "normalization", "merge"):
+            if getattr(provenance, field_name, ()):
+                provenance_present = True
+                break
+        if not provenance_present and isinstance(provenance, dict):
+            provenance_present = any(
+                bool(provenance.get(name)) for name in ("extraction", "normalization", "merge")
+            )
+
+    def _iso(value: Any) -> str | None:
+        if value is None:
+            return None
+        if hasattr(value, "isoformat"):
+            return str(value.isoformat())
+        text = str(value).strip()
+        return text or None
+
+    return {
+        "source_kind": str(kind_text) if kind_text is not None else None,
+        "source_name": getattr(lineage, "source_name", None),
+        "pipeline_stages": [str(stage) for stage in stages],
+        "group_source_count": int(getattr(lineage, "group_source_count", 1) or 1),
+        "has_group": bool(group_id or group_job_ids),
+        "has_source_url": getattr(lineage, "source_url", None) is not None,
+        "has_canonical_url": getattr(lineage, "canonical_url", None) is not None,
+        "fetched_at": _iso(fetched_at),
+        "posted_at": _iso(posted_at),
+        "provenance_present": provenance_present,
+    }
 
 
 async def _load_session(runner: TenantRunner, session_id: str) -> SearchSession:
@@ -434,7 +541,9 @@ async def plan_source_routes(
             route_plan.append(
                 SourceRoutePlanEntry(
                     source_id=source_id,
-                    source_kind=explanation.source_kind or str(source.get("source_kind") or "") or None,
+                    source_kind=explanation.source_kind
+                    or str(source.get("source_kind") or "")
+                    or None,
                     source_name=str(source.get("source_name") or "") or None,
                     enabled=True,
                     status="failed",
@@ -513,8 +622,12 @@ async def plan_source_routes(
     session.notes = (
         *(session.notes or ()),
         f"planned {len(route_plan)} source route(s)",
-        "awaiting approval for sensitive routes" if needs_approval else "no sensitive approval required",
-        f"{manual_count} source(s) need manual challenge handling" if manual_count else "no manual challenge routes",
+        "awaiting approval for sensitive routes"
+        if needs_approval
+        else "no sensitive approval required",
+        f"{manual_count} source(s) need manual challenge handling"
+        if manual_count
+        else "no manual challenge routes",
     )
     session.provenance = {
         **(session.provenance or {}),
@@ -567,8 +680,7 @@ async def approve_search_session(
                         update={"approved": True}
                     )
                 updates["reason"] = (
-                    entry.reason
-                    or "manual challenge acknowledged; waiting for operator action"
+                    entry.reason or "manual challenge acknowledged; waiting for operator action"
                 )
             updated_plan.append(entry.model_copy(update=updates))
         else:
@@ -664,8 +776,7 @@ def _apply_run_outcomes(
                 entry.model_copy(
                     update={
                         "status": "needs_manual",
-                        "reason": entry.reason
-                        or "manual challenge still requires operator action",
+                        "reason": entry.reason or "manual challenge still requires operator action",
                     }
                 )
             )
@@ -773,9 +884,8 @@ async def run_search_session(
             if item.requires_approval and not item.approved and item.enabled
         ]
         if pending:
-            msg = (
-                "sensitive routes require approve_search_session before run: "
-                + ", ".join(pending[:10])
+            msg = "sensitive routes require approve_search_session before run: " + ", ".join(
+                pending[:10]
             )
             raise SearchSessionError(msg)
         session = await approve_search_session(
@@ -877,8 +987,7 @@ async def run_search_session(
         complete_note = f"run completed with {len(session.result_refs)} result(s)"
         if manual_n:
             complete_note = (
-                f"{complete_note}; {manual_n} source(s) still needs_manual "
-                "(not auto-executed)"
+                f"{complete_note}; {manual_n} source(s) still needs_manual (not auto-executed)"
             )
         session.notes = (*(session.notes or ()), complete_note)
         return await _save_session(runner, session)
@@ -944,21 +1053,21 @@ async def explain_rejected_or_degraded(
                 reasons=("source not part of this session route plan",),
                 notes=("re-run plan_source_routes if source was added later",),
             )
-        reasons = [r for r in (entry.reason, entry.error) if r]
+        source_reasons = [r for r in (entry.reason, entry.error) if r]
         if entry.status == "skipped" and entry.requires_approval and not entry.approved:
-            reasons.append("sensitive route was not approved")
+            source_reasons.append("sensitive route was not approved")
         if entry.status == "needs_manual":
-            reasons.append("source requires human-in-the-loop login/challenge handling")
+            source_reasons.append("source requires human-in-the-loop login/challenge handling")
             if entry.manual_challenge is not None:
-                reasons.append(f"reason_code={entry.manual_challenge.reason_code}")
+                source_reasons.append(f"reason_code={entry.manual_challenge.reason_code}")
                 if not entry.manual_challenge.approved:
-                    reasons.append("manual challenge not yet approved by operator")
+                    source_reasons.append("manual challenge not yet approved by operator")
                 else:
-                    reasons.append(
+                    source_reasons.append(
                         "manual challenge approved as consent only; automatic bypass not performed"
                     )
         if entry.source_id in session.degraded_source_ids:
-            reasons.append("source marked degraded after run")
+            source_reasons.append("source marked degraded after run")
         # Refresh route diagnostics for currency without executing browsers.
         explanation = await runner.explain_browser_route(session.tenant_id, source_id)
         public_route = explanation_to_public_dict(explanation)
@@ -970,21 +1079,21 @@ async def explain_rejected_or_degraded(
             "route": public_route,
             "rejected_summary": dict(session.rejected_summary),
         }
-        notes = list(entry.route_notes) + list(explanation.notes)
+        source_notes = list(entry.route_notes) + list(explanation.notes)
         if entry.manual_challenge is not None:
             # Public-safe HITL payload only (no tenant/user ids, cookies, tokens).
             evidence["manual_challenge"] = entry.manual_challenge.model_dump(mode="json")
-            notes.append(entry.manual_challenge.user_action_hint)
+            source_notes.append(entry.manual_challenge.user_action_hint)
             if entry.manual_challenge.budget_note:
-                notes.append(entry.manual_challenge.budget_note)
+                source_notes.append(entry.manual_challenge.budget_note)
         return SearchSessionExplanation(
             session_id=session_id,
             target_type="source",
             target_id=source_id,
             status=entry.status,
-            reasons=tuple(reasons) or ("no explicit rejection reason recorded",),
+            reasons=tuple(source_reasons) or ("no explicit rejection reason recorded",),
             diagnostics=entry.diagnostics or explanation.diagnostics,
-            notes=tuple(notes),
+            notes=tuple(source_notes),
             evidence=evidence,
         )
 
@@ -993,7 +1102,7 @@ async def explain_rejected_or_degraded(
     lineage = await runner.get_job_lineage(job_id, tenant_id=session.tenant_id)
     reasons: list[str] = []
     notes: list[str] = []
-    evidence: dict[str, object] = {"in_session_results": ref is not None}
+    job_evidence: dict[str, object] = {"in_session_results": ref is not None}
     if ref is None:
         reasons.append("job is not in session result set")
         notes.append("job may have been filtered by existing relevance/evidence pipeline")
@@ -1002,15 +1111,24 @@ async def explain_rejected_or_degraded(
             reasons.append(f"routing_decision={ref.routing_decision}")
         if ref.best_score is not None:
             reasons.append(f"best_score={ref.best_score}")
-        evidence["result_ref"] = ref.model_dump(mode="json")
+        job_evidence["result_ref"] = ref.model_dump(mode="json")
     if lineage is not None:
-        evidence["lineage"] = lineage.model_dump(mode="json")
-        for key in ("source_run_id", "source_name", "raw_item_id", "group_id"):
-            value = getattr(lineage, key, None)
-            if value:
-                reasons.append(f"{key}={value}")
+        # Authenticated explain still must not dump tenant/private ids or raw
+        # lineage/provenance blobs into session-facing evidence.
+        public_lineage = _public_lineage_evidence(lineage)
+        job_evidence["lineage"] = public_lineage
+        source_name = public_lineage.get("source_name")
+        source_kind = public_lineage.get("source_kind")
+        if source_name:
+            reasons.append(f"source_name={source_name}")
+        if source_kind:
+            reasons.append(f"source_kind={source_kind}")
+        notes.append(
+            "lineage evidence is trimmed: source kind/name/stages/timestamps only; "
+            "tenant/user/raw_item/run ids and full provenance are omitted"
+        )
     if session.rejected_summary:
-        evidence["session_rejected_summary"] = dict(session.rejected_summary)
+        job_evidence["session_rejected_summary"] = dict(session.rejected_summary)
         notes.append("session rejected_summary aggregates pipeline drop reasons for the run")
     return SearchSessionExplanation(
         session_id=session_id,
@@ -1019,7 +1137,7 @@ async def explain_rejected_or_degraded(
         status="selected" if ref is not None else "not_selected",
         reasons=tuple(reasons) or ("no additional decision evidence available",),
         notes=tuple(notes),
-        evidence=evidence,
+        evidence=job_evidence,
     )
 
 

@@ -359,7 +359,9 @@ def create_app(
         session = await runner.approve_search_session(
             session_id,
             approved_source_ids=(
-                [str(item) for item in approved_sources] if isinstance(approved_sources, list) else None
+                [str(item) for item in approved_sources]
+                if isinstance(approved_sources, list)
+                else None
             ),
             approved_capability_ids=(
                 [str(item) for item in approved_caps] if isinstance(approved_caps, list) else None

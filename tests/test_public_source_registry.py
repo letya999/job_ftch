@@ -184,10 +184,7 @@ def test_failure_reason_redacts_internal_network_endpoints() -> None:
             "enabled": True,
             "status": "failing",
             "degraded": True,
-            "last_error": (
-                "timeout talking to 10.0.0.5:3128 via "
-                "internal-db.local:5432"
-            ),
+            "last_error": ("timeout talking to 10.0.0.5:3128 via internal-db.local:5432"),
             "last_error_kind": None,
             "last_run_at": "2026-08-01T12:00:00+00:00",
         }
