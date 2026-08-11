@@ -270,6 +270,24 @@ def _extract_allowlisted_code(text: str) -> str | None:
     return None
 
 
+def extract_public_failure_code(value: object) -> str | None:
+    """Return an allowlisted public failure code from free text or a kind token.
+
+    Used by source-health writers and public sanitizer so parser terminal
+    reasons (for example ``layout_changed: ...`` from Getmatch) stay explainable
+    without inventing a broader result schema.
+    """
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    if not text:
+        return None
+    normalized = _normalize_public_code(text)
+    if normalized is not None and normalized in PUBLIC_FAILURE_REASON_CODES:
+        return normalized
+    return _extract_allowlisted_code(text)
+
+
 def _sanitize_failure_reason(value: object) -> str | None:
     """Redact free-text failure details for public consumers."""
     if value is None:
@@ -290,6 +308,11 @@ def _sanitize_failure_reason(value: object) -> str | None:
     return text
 
 
+# Catch-all runtime kind written when a more specific parser code was not
+# preserved on ``last_error_kind``. Prefer a specific free-text code instead.
+_GENERIC_FAILURE_KINDS: frozenset[str] = frozenset({"source_fetch_failed", "error", "failed"})
+
+
 def _public_failure_reason(
     listing: Mapping[str, Any],
     *,
@@ -299,16 +322,35 @@ def _public_failure_reason(
     """Build an explainable public failure reason from runtime health fields.
 
     Preference order (all existing fields; no new tracker/schema):
-    1. allowlisted ``last_error_kind``
+    1. specific allowlisted ``last_error_kind`` (not catch-all)
     2. allowlisted code extracted from ``last_error`` free text
-    3. sanitized free text (paths/secrets redacted)
-    4. status-derived code for degraded/paused sources with no error payload
+    3. catch-all ``last_error_kind`` (``source_fetch_failed``) when no better code
+    4. sanitized free text (paths/secrets redacted)
+    5. status-derived code for degraded/paused sources with no error payload
     """
     kind_code = _normalize_public_code(listing.get("last_error_kind"))
+    last_error = listing.get("last_error")
+    text_code = extract_public_failure_code(last_error) if last_error is not None else None
+
+    # Specific free-text codes (layout_changed, auth_wall, …) win over the
+    # generic source_fetch_failed kind that older health writers hard-code.
+    if (
+        kind_code is not None
+        and kind_code in _GENERIC_FAILURE_KINDS
+        and text_code is not None
+        and text_code not in _GENERIC_FAILURE_KINDS
+    ):
+        return text_code
+
+    if kind_code is not None and kind_code not in _GENERIC_FAILURE_KINDS:
+        return kind_code
+
+    if text_code is not None:
+        return text_code
+
     if kind_code is not None:
         return kind_code
 
-    last_error = listing.get("last_error")
     if last_error is not None and str(last_error).strip():
         return _sanitize_failure_reason(last_error)
 

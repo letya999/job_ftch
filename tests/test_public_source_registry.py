@@ -209,9 +209,23 @@ def test_public_health_status_enabled_disabled_degraded_candidate() -> None:
     )
     assert degraded is not None
     assert degraded.status == "degraded"
-    # Prefer allowlisted last_error_kind over free-text paths.
+    # Catch-all kind still preferred over free-text paths that have no code.
     assert degraded.public_failure_reason == "source_fetch_failed"
     assert degraded.last_checked_at is not None
+
+    # Specific free-text code wins over catch-all source_fetch_failed so
+    # Getmatch-style "layout_changed: …" errors stay explainable.
+    specific = sanitize_source_listing(
+        _base_listing(
+            status="failing",
+            degraded=True,
+            last_error_kind="source_fetch_failed",
+            last_error="GetmatchIngestError: layout_changed: sitemap missing locs",
+            last_success_at=None,
+        )
+    )
+    assert specific is not None
+    assert specific.public_failure_reason == "layout_changed"
 
     # No health timestamps and pending status → candidate (no recent check).
     candidate = sanitize_source_listing(

@@ -4,6 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from job_ftch.application.public_source_registry import (
+    extract_public_failure_code,
+    sanitize_source_listing,
+)
 from job_ftch.application.registry import resolve_site_parser
 from job_ftch.domain import SourceKind
 from job_ftch.domain.source_spec import CareerSiteSpec
@@ -17,6 +21,7 @@ from job_ftch.infrastructure.sources.site_parsers.getmatch import (
     extract_vacancy_urls_from_html,
     extract_vacancy_urls_from_sitemap,
     item_from_detail_html,
+    public_failure_code_for,
     vacancy_id_from_url,
 )
 
@@ -172,6 +177,53 @@ def test_listing_translation_empty_text_is_not_empty_state() -> None:
     assert classify_getmatch_payload(html, expected="listing") is GetmatchPageKind.LISTING
 
 
+def test_public_failure_code_for_maps_terminal_kinds() -> None:
+    """Typed helper: only terminal Getmatch kinds become public diagnostics codes."""
+    assert public_failure_code_for(GetmatchPageKind.EMPTY) == "empty_result"
+    assert public_failure_code_for(GetmatchPageKind.LAYOUT_CHANGED) == "layout_changed"
+    assert public_failure_code_for(GetmatchPageKind.CHALLENGE) == "challenge_required"
+    assert public_failure_code_for(GetmatchPageKind.AUTH_WALL) == "auth_wall"
+    assert public_failure_code_for(GetmatchPageKind.LISTING) is None
+    assert public_failure_code_for(GetmatchPageKind.DETAIL) is None
+    err = GetmatchIngestError("parser_error", "sitemap fetch failed", url="https://getmatch.ru")
+    assert public_failure_code_for(err) == "parser_error"
+    # Exception string form is what SourceFetchResult.error / last_error carry.
+    assert extract_public_failure_code(str(err)) == "parser_error"
+
+
+@pytest.mark.asyncio
+async def test_spa_listing_with_jobs_and_empty_translation_is_not_empty() -> None:
+    """Regression: SPA template 'Вакансий не найдено' must not zero-yield when cards exist."""
+    listing = """
+    <html><head><title>Вакансии — getmatch</title></head>
+    <body>
+      <h1>Вакансии</h1>
+      <div class="b-filter">Изменить фильтры</div>
+      <script id="__NEXT_DATA__" type="application/json">
+      {"pageTitle":"Вакансии","seoFilters":{},"list":{"empty":"Вакансий не найдено"}}
+      </script>
+      <a href="/vacancies/35178-senior-ai-engineer-ai-agenty">Senior AI Engineer</a>
+    </body></html>
+    """
+    detail = _read("site_parsers", "getmatch", "detail.html")
+    assert classify_getmatch_payload(listing, expected="listing") is GetmatchPageKind.LISTING
+    assert public_failure_code_for(classify_getmatch_payload(listing, expected="listing")) is None
+
+    client = _FakeClient(
+        {
+            "https://getmatch.ru/vacancies": _FakeResponse(listing, "https://getmatch.ru/vacancies"),
+            "https://getmatch.ru/vacancies/35178-senior-ai-engineer-ai-agenty": _FakeResponse(
+                detail,
+                "https://getmatch.ru/vacancies/35178-senior-ai-engineer-ai-agenty",
+            ),
+        }
+    )
+    spec = CareerSiteSpec(url="https://getmatch.ru/vacancies", source_name="getmatch", limit=3)
+    items = [item async for item in GetmatchParser().parse(spec, client)]
+    assert len(items) == 1
+    assert items[0].external_id == "35178"
+
+
 @pytest.mark.asyncio
 async def test_parser_emits_items_from_listing_and_detail() -> None:
     listing = _read("site_parsers", "getmatch", "listing.html")
@@ -238,10 +290,16 @@ async def test_parser_uses_sitemap_when_listing_has_no_cards() -> None:
 
 @pytest.mark.asyncio
 async def test_empty_listing_is_not_parser_failure() -> None:
+    """Real empty UI is empty_result semantics, not parser_error."""
+    empty_html = _read("site_parsers", "getmatch", "listing_empty.html")
+    kind = classify_getmatch_payload(empty_html, expected="listing")
+    assert kind is GetmatchPageKind.EMPTY
+    assert public_failure_code_for(kind) == "empty_result"
+
     client = _FakeClient(
         {
             "https://getmatch.ru/vacancies": _FakeResponse(
-                _read("site_parsers", "getmatch", "listing_empty.html"),
+                empty_html,
                 "https://getmatch.ru/vacancies",
             )
         }
@@ -250,6 +308,7 @@ async def test_empty_listing_is_not_parser_failure() -> None:
 
     items = [item async for item in GetmatchParser().parse(spec, client)]
 
+    # Empty yield is success path (confirmed_empty_on_empty); not a raised parser_error.
     assert items == []
 
 
@@ -274,6 +333,10 @@ async def test_layout_changed_is_degraded_not_successful_zero_yield() -> None:
         _ = [item async for item in GetmatchParser().parse(spec, client)]
 
     assert exc_info.value.kind == "layout_changed"
+    assert public_failure_code_for(exc_info.value) == "layout_changed"
+    # Composite stores ``ClassName: layout_changed: …``; public extractor keeps the code.
+    composite_error = f"{type(exc_info.value).__name__}: {exc_info.value}"
+    assert extract_public_failure_code(composite_error) == "layout_changed"
 
 
 @pytest.mark.asyncio
@@ -290,6 +353,12 @@ async def test_challenge_raises_browser_challenge_error() -> None:
 
     with pytest.raises(BrowserChallengeError):
         _ = [item async for item in GetmatchParser().parse(spec, client)]
+
+    # CareerSiteSource wraps exhausted challenge as challenge_required free text
+    # (see site parser terminal path) so public health can map it.
+    wrapped = "challenge_required: blocked browser challenge at https://getmatch.ru/vacancies"
+    assert extract_public_failure_code(wrapped) == "challenge_required"
+    assert public_failure_code_for(GetmatchPageKind.CHALLENGE) == "challenge_required"
 
 
 @pytest.mark.asyncio
@@ -311,7 +380,93 @@ async def test_auth_wall_json_is_explainable() -> None:
         _ = [item async for item in GetmatchParser().parse(spec, client)]
 
     assert exc_info.value.kind == "auth_wall"
+    assert public_failure_code_for(exc_info.value) == "auth_wall"
     assert "authentication" in str(exc_info.value).lower() or "auth" in exc_info.value.kind
+    assert extract_public_failure_code(str(exc_info.value)) == "auth_wall"
+
+
+def test_getmatch_terminal_errors_feed_public_failure_reason() -> None:
+    """End-to-end of existing health fields → public registry codes.
+
+    Architecture note: SiteParser does not return a diagnostic result object.
+    Reasons propagate via GetmatchIngestError.kind / free-text last_error that
+    already carries ``"{kind}: …"``. Public sanitizer prefers specific codes
+    even when last_error_kind was the generic source_fetch_failed catch-all.
+    """
+    cases = (
+        ("layout_changed", "GetmatchIngestError: layout_changed: sitemap missing locs"),
+        ("auth_wall", "GetmatchIngestError: auth_wall: listing requires authentication"),
+        ("challenge_required", "challenge_required: blocked browser challenge at https://getmatch.ru"),
+        ("parser_error", "GetmatchIngestError: parser_error: failed to fetch sitemap"),
+        ("empty_result", "empty_result"),
+    )
+    for code, last_error in cases:
+        entry = sanitize_source_listing(
+            {
+                "source_id": "career_site:getmatch",
+                "kind": "career_site",
+                "enabled": True,
+                "status": "failing",
+                "degraded": True,
+                "public_name": "Getmatch",
+                "locator": "https://getmatch.ru/vacancies",
+                "last_error_kind": "source_fetch_failed",
+                "last_error": last_error,
+                "last_run_at": "2026-08-11T12:00:00+00:00",
+                "last_success_at": None,
+            }
+        )
+        assert entry is not None, code
+        assert entry.public_failure_reason == code, code
+        assert entry.status == "degraded"
+
+
+@pytest.mark.asyncio
+async def test_source_health_writer_preserves_getmatch_error_kind(
+    tmp_path: Path,
+) -> None:
+    """TenantRunner last_error_kind extracts allowlisted code from free text."""
+    from datetime import UTC, datetime
+
+    from job_ftch.application.pipeline import RunSummary, SourceRunStats
+    from job_ftch.application.tenant_runner import TenantRunner
+    from job_ftch.config import Settings
+    from job_ftch.domain import TenantConfig
+
+    fixture = tmp_path / "fixture.json"
+    fixture.write_text("[]", encoding="utf-8")
+    tenant_id = "test_getmatch_health_kind"
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": tenant_id,
+            "display_name": "Getmatch Health Kind",
+            "sources": [{"type": "local_fixture", "path": fixture.as_posix()}],
+            "store_backend": "sqlite",
+            "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+        }
+    )
+    runner = TenantRunner.from_tenants([tenant], base_settings=Settings())
+    runtime = runner.get_runtime(tenant_id)
+    source_id = "career_site:getmatch"
+    summary = RunSummary(started_at=datetime.now(UTC), finished_at=datetime.now(UTC))
+    summary.by_source_id[source_id] = SourceRunStats(fetched=0, emitted=0, failed=1)
+    summary.source_failures.append(
+        {
+            "source_id": source_id,
+            "source_kind": "career_site",
+            "source_name": "getmatch",
+            "error": "GetmatchIngestError: layout_changed: sitemap missing vacancy loc entries",
+        }
+    )
+    await runner._update_source_health(runtime, summary)
+    health = await runtime.store.get_source_health(source_id)
+    assert health is not None
+    assert health.last_error_kind == "layout_changed"
+    assert health.last_error is not None
+    assert "layout_changed" in health.last_error
+    await runner.close()
 
 
 def test_build_search_urls_are_runtime_configurable() -> None:

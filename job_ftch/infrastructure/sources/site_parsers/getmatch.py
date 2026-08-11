@@ -121,7 +121,14 @@ class GetmatchPageKind(StrEnum):
 
 
 class GetmatchIngestError(RuntimeError):
-    """Explainable Getmatch ingest failure for source health / diagnostics."""
+    """Explainable Getmatch ingest failure for source health / diagnostics.
+
+    SiteParser protocol still yields only ``RawItem`` streams. Terminal or
+    degraded reasons therefore ride on this exception's ``kind`` (and the
+    ``"{kind}: {message}"`` string form) so existing ``SourceFetchResult.error``
+    / ``SourceHealth.last_error`` paths can surface allowlisted public codes
+    without a broader parser-result schema.
+    """
 
     def __init__(
         self,
@@ -134,6 +141,39 @@ class GetmatchIngestError(RuntimeError):
         self.kind = kind
         self.url = url
         self.public_reason = message
+
+
+_PUBLIC_FAILURE_CODES: frozenset[str] = frozenset(
+    {
+        "empty_result",
+        "layout_changed",
+        "challenge_required",
+        "auth_wall",
+        "parser_error",
+        "deadline",
+    }
+)
+
+
+def public_failure_code_for(
+    value: GetmatchFailureKind | GetmatchPageKind | GetmatchIngestError | str | None,
+) -> GetmatchFailureKind | None:
+    """Map a Getmatch classification/error to a public-safe failure code.
+
+    Returns one of the allowlisted diagnostics codes used by public source
+    health (``empty_result``, ``layout_changed``, ``challenge_required``,
+    ``auth_wall``, ``parser_error``, ``deadline``), or ``None`` for non-terminal
+    page kinds such as listing/detail.
+    """
+    if value is None:
+        return None
+    if isinstance(value, GetmatchIngestError):
+        return value.kind
+    raw = getattr(value, "value", value)
+    text = str(raw).strip().casefold().replace("-", "_").replace(" ", "_")
+    if text in _PUBLIC_FAILURE_CODES:
+        return text  # narrowed to GetmatchFailureKind members
+    return None
 
 
 def canonicalize_vacancy_url(url: str) -> str | None:

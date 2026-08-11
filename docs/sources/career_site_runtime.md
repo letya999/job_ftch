@@ -56,7 +56,13 @@ bypass используются как стартовая точка: `bypass_st
 
 - `confirmed_empty_on_empty` -> `CONFIRMED_EMPTY`;
 - `terminal_on_empty` -> `BLOCKED_NO_BYPASS_LEFT`;
-- protected error (401/403/429) -> `BLOCKED_NO_BYPASS_LEFT`.
+- protected error (401/403/429) -> `BLOCKED_NO_BYPASS_LEFT`;
+- exception with `kind` in
+  `{empty_result, layout_changed, auth_wall, parser_error, deadline, challenge_required}`
+  (например `GetmatchIngestError`) -> terminal; empty is non-failing, others re-raise
+  so `SourceFetchResult.error` keeps the allowlisted code;
+- exhausted `BrowserChallengeError` after bypass -> re-raise as
+  `challenge_required: …` free text (same error path, no new schema).
 
 Если parser отдал элементы или выставил терминальный флаг — `fetch()` завершается.
 

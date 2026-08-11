@@ -79,12 +79,14 @@ fixture source of truth **не** используются.
 
 `public_failure_reason` (приоритет):
 
-1. allowlisted machine code из `last_error_kind` (например `layout_changed`,
-   `auth_wall`, `challenge_required`, `empty_result`, `parser_error`,
-   `deadline`, `source_fetch_failed`);
-2. allowlisted code, если он явно встречается в free-text `last_error`;
-3. sanitized free text (paths → `[path]`, secret-like → `redacted`);
-4. для degraded без error payload — status-derived code (`paused`,
+1. **specific** allowlisted machine code из `last_error_kind` (например
+   `layout_changed`, `auth_wall`, `challenge_required`, `empty_result`,
+   `parser_error`, `deadline`);
+2. allowlisted code, если он явно встречается в free-text `last_error`
+   (в том числе когда `last_error_kind` — catch-all `source_fetch_failed`);
+3. catch-all `source_fetch_failed` / generic kind, если более точного code нет;
+4. sanitized free text (paths → `[path]`, secret-like → `redacted`);
+5. для degraded без error payload — status-derived code (`paused`,
    `degraded`, …).
 
 Непубликуемые детали (cookies, tokens, proxy endpoints, browser profile paths,
@@ -92,6 +94,24 @@ raw HTML/traces, tenant/user ids, private Telegram entities, resume data)
 sanitizer отбрасывает или заменяет на `redacted`. Если отдельное runtime
 состояние нельзя выразить текущими полями health/listing без широкой schema
 work, оно **не** выдумывается в storage: только document/test note.
+
+### Parser terminal reasons (Getmatch / site parsers)
+
+`SiteParser` по-прежнему отдаёт только stream `RawItem`. Explainable terminal
+states (empty / layout / challenge / auth / parser_error) **не** расширяют
+parser result schema: они едут как:
+
+- `GetmatchIngestError.kind` + строка `"{kind}: {message}"` →
+  `SourceFetchResult.error` → `SourceHealth.last_error` /
+  `last_error_kind` (writer извлекает allowlisted code из free text);
+- `BrowserChallengeError` после исчерпания bypass → free-text
+  `challenge_required: …` на том же error path;
+- истинный empty listing → `confirmed_empty` / zero yield **без** failure
+  (это не `parser_error`).
+
+Ограничение: silent zero-yield через generic monitor fallback для terminal
+parser kinds запрещён в career-site site-parser path, но полный typed
+`ParserDiagnosticResult` в протоколе SiteParser **не** вводится.
 
 ### No-JS fallback
 

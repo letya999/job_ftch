@@ -1627,10 +1627,28 @@ class TenantRunner:
             )
             failure_payload = failure_by_id.get(source_id)
             if failure_payload is not None:
+                # Prefer an allowlisted parser/health code already present on
+                # the failure payload or embedded in free text (e.g.
+                # "layout_changed: …" from GetmatchIngestError). Fall back to
+                # the generic source_fetch_failed only when nothing specific
+                # is available — no new schema fields.
+                from job_ftch.application.public_source_registry import (
+                    extract_public_failure_code,
+                )
+
+                raw_error = failure_payload.get("error")
+                raw_kind = failure_payload.get("error_kind") or failure_payload.get(
+                    "last_error_kind"
+                )
+                error_kind = (
+                    extract_public_failure_code(raw_kind)
+                    or extract_public_failure_code(raw_error)
+                    or "source_fetch_failed"
+                )
                 payload = payload.model_copy(
                     update={
-                        "last_error": failure_payload.get("error"),
-                        "last_error_kind": "source_fetch_failed",
+                        "last_error": raw_error,
+                        "last_error_kind": error_kind,
                         "last_error_at": finished_at.isoformat(),
                     }
                 )

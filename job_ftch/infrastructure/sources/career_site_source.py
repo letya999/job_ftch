@@ -872,7 +872,10 @@ class CareerSiteSource(Source["RawItem"]):
                             return
                         break  # Parsed but found 0 items, break out of bypass loop
                 except Exception as exc:
-                    from job_ftch.infrastructure.sources.monitors.shared import BoardGoneError
+                    from job_ftch.infrastructure.sources.monitors.shared import (
+                        BoardGoneError,
+                        BrowserChallengeError,
+                    )
 
                     if isinstance(exc, BoardGoneError):
                         logger.info("site_parser_board_gone", url=self.spec.url)
@@ -901,6 +904,58 @@ class CareerSiteSource(Source["RawItem"]):
                         for partial_item in self._dedupe_parser_items(attempt_items):
                             yield partial_item
                         return
+                    # SiteParser yields RawItems only; explainable terminal
+                    # reasons ride on exception.kind / BrowserChallengeError.
+                    # Do not fall through to generic monitors for those —
+                    # that would turn layout_changed/auth_wall into a silent
+                    # successful zero-yield.
+                    parser_kind = getattr(exc, "kind", None)
+                    if isinstance(parser_kind, str):
+                        parser_kind = parser_kind.strip().casefold()
+                    else:
+                        parser_kind = None
+                    if parser_kind == "empty_result":
+                        self.stats.zero_reason = ZeroYieldReason.CONFIRMED_EMPTY
+                        self._parser_failure_is_terminal = True
+                        logger.info(
+                            "site_parser_confirmed_empty",
+                            url=self.spec.url,
+                            kind=parser_kind,
+                        )
+                        return
+                    if parser_kind in {
+                        "layout_changed",
+                        "auth_wall",
+                        "parser_error",
+                        "deadline",
+                        "challenge_required",
+                    }:
+                        self._parser_failure_is_terminal = True
+                        logger.warning(
+                            "site_parser_failed_terminal",
+                            url=self.spec.url,
+                            kind=parser_kind,
+                            error=str(exc),
+                        )
+                        raise
+                    if isinstance(exc, BrowserChallengeError):
+                        self.stats.zero_reason = (
+                            self.stats.zero_reason or ZeroYieldReason.WAF_CHALLENGE
+                        )
+                        self._parser_failure_is_terminal = True
+                        challenge_url = getattr(exc, "url", None) or self.spec.url
+                        logger.warning(
+                            "site_parser_failed_terminal",
+                            url=self.spec.url,
+                            kind="challenge_required",
+                            error=str(exc),
+                        )
+                        # Embed allowlisted public code in the error string so
+                        # SourceFetchResult.error / last_error keep explainability
+                        # without a broader result schema.
+                        raise RuntimeError(
+                            f"challenge_required: blocked browser challenge at {challenge_url}"
+                        ) from exc
                     if _is_protected_source_error(exc):
                         self.stats.zero_reason = (
                             self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
