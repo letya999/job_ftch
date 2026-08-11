@@ -13,7 +13,7 @@ import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from job_ftch.domain.public_source_registry import (
     PublicRegistryStatus,
@@ -68,6 +68,17 @@ _SECRETISH_RE = re.compile(
     r"bearer\s+[a-z0-9._\-]{8,}|[a-f0-9]{32,})"
 )
 _PATH_RE = re.compile(r"(?i)([a-z]:\\|/)[^\s]{8,}")
+_PRIVATE_IP_RE = re.compile(
+    r"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"127\.\d{1,3}\.\d{1,3}\.\d{1,3})"
+    r"(?::\d{2,5})?\b"
+)
+_HOST_PORT_RE = re.compile(
+    r"(?i)\b(?:localhost|[a-z0-9][a-z0-9.-]*\.(?:local|internal|lan|corp))"
+    r"(?::\d{2,5})?\b"
+)
 _SAFE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{1,48}$")
 _MAX_FAILURE_REASON_LEN = 160
 _MAX_ROUTE_SUMMARY_LEN = 80
@@ -133,6 +144,21 @@ def _is_public_url(value: str) -> bool:
     return bool(parsed.netloc) and "@" not in parsed.netloc
 
 
+def _public_url_for_display(value: str) -> str | None:
+    """Return a public URL safe for unauthenticated docs/API display.
+
+    Runtime locators may include filters or accidental credentials in query
+    strings. The public registry only needs a stable source homepage/listing
+    URL, so query and fragment are dropped fail-closed instead of trying to
+    classify which params are safe.
+    """
+    text = value.strip()
+    if not _is_public_url(text):
+        return None
+    parsed = urlsplit(text)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", "", ""))
+
+
 def _is_public_telegram_handle(entity: str) -> bool:
     text = entity.strip()
     if not text:
@@ -186,8 +212,9 @@ def _public_locator_fields(
             return None, None, True
         return f"https://t.me/{handle.lstrip('@')}", handle, False
 
-    if _is_public_url(candidate):
-        return candidate.strip(), None, False
+    public_url = _public_url_for_display(candidate)
+    if public_url is not None:
+        return public_url, None, False
 
     # Non-URL locators (e.g. lever company slug) stay as name only.
     return None, None, False
@@ -301,6 +328,8 @@ def _sanitize_failure_reason(value: object) -> str | None:
     if _SECRETISH_RE.search(text):
         return "redacted"
     text = _PATH_RE.sub("[path]", text)
+    text = _PRIVATE_IP_RE.sub("[network]", text)
+    text = _HOST_PORT_RE.sub("[network]", text)
     if _SECRETISH_RE.search(text):
         return "redacted"
     if len(text) > _MAX_FAILURE_REASON_LEN:

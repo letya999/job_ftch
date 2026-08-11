@@ -57,7 +57,7 @@ GET /public/tenants/{tenant_slug}/sources.json
 | `source_id` | Стабильный публичный идентификатор |
 | `kind` | Тип источника (`career_site`, `telegram_channel`, …) |
 | `public_name` | Отображаемое имя |
-| `public_url` / `public_handle` | Публичный URL или Telegram handle, если сам источник публичный |
+| `public_url` / `public_handle` | Публичный URL или Telegram handle, если сам источник публичный; URL query/fragment не публикуются |
 | `enabled` / `status` | `enabled`, `disabled`, `degraded`, `candidate` |
 | `category` / `region` | Опциональные публичные метки |
 | `last_success_at` / `last_checked_at` | Health timestamps |
@@ -85,7 +85,8 @@ fixture source of truth **не** используются.
 2. allowlisted code, если он явно встречается в free-text `last_error`
    (в том числе когда `last_error_kind` — catch-all `source_fetch_failed`);
 3. catch-all `source_fetch_failed` / generic kind, если более точного code нет;
-4. sanitized free text (paths → `[path]`, secret-like → `redacted`);
+4. sanitized free text (paths → `[path]`, internal network endpoints →
+   `[network]`, secret-like → `redacted`);
 5. для degraded без error payload — status-derived code (`paused`,
    `degraded`, …).
 
@@ -94,6 +95,10 @@ raw HTML/traces, tenant/user ids, private Telegram entities, resume data)
 sanitizer отбрасывает или заменяет на `redacted`. Если отдельное runtime
 состояние нельзя выразить текущими полями health/listing без широкой schema
 work, оно **не** выдумывается в storage: только document/test note.
+
+Для публичных URL registry публикует только scheme/host/path. Query string и
+fragment считаются runtime деталями: они могут содержать фильтры, debug flags
+или accidental tokens, поэтому в unauthenticated payload не попадают.
 
 ### Parser terminal reasons (Getmatch / site parsers)
 

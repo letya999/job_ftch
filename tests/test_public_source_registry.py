@@ -157,6 +157,50 @@ def test_sanitize_failure_reason_redacts_secrets_and_paths() -> None:
     assert entry.public_failure_reason == "redacted"
 
 
+def test_public_url_strips_query_and_fragment() -> None:
+    entry = sanitize_source_listing(
+        {
+            "source_id": "career_site:with_query",
+            "source_kind": "career_site",
+            "source_name": "with_query",
+            "locator": "https://example.com/jobs?token=should-not-publish#debug",
+            "enabled": True,
+            "status": "ok",
+            "last_success_at": "2026-08-01T12:00:00+00:00",
+        }
+    )
+
+    assert entry is not None
+    assert entry.public_url == "https://example.com/jobs"
+
+
+def test_failure_reason_redacts_internal_network_endpoints() -> None:
+    entry = sanitize_source_listing(
+        {
+            "source_id": "career_site:internal_error",
+            "source_kind": "career_site",
+            "source_name": "internal_error",
+            "locator": "https://example.com/jobs",
+            "enabled": True,
+            "status": "failing",
+            "degraded": True,
+            "last_error": (
+                "timeout talking to 10.0.0.5:3128 via "
+                "internal-db.local:5432"
+            ),
+            "last_error_kind": None,
+            "last_run_at": "2026-08-01T12:00:00+00:00",
+        }
+    )
+
+    assert entry is not None
+    assert entry.public_failure_reason is not None
+    assert "10.0.0.5" not in entry.public_failure_reason
+    assert "3128" not in entry.public_failure_reason
+    assert "internal-db.local" not in entry.public_failure_reason
+    assert entry.public_failure_reason.count("[network]") == 2
+
+
 def _base_listing(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "source_id": "career_site:health_probe",

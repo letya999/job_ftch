@@ -469,4 +469,3 @@ Before handoff:
 - for code changes run relevant unit tests and architecture checks;
 - run `uv run ai-repo-safety scan --target .` before commit;
 - report changed files, checks run, and remaining risks.
-
