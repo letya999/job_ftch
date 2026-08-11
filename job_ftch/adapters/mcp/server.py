@@ -173,6 +173,34 @@ class TenantMCPServer:
             return [tenant.model_dump(mode="json") for tenant in tenants]
 
         @self.app.tool
+        async def list_browser_capabilities() -> dict[str, Any]:
+            """Read-only inventory of browser/bypass routes and their availability."""
+            from job_ftch.application.browser_capability_inventory import (
+                inventory_to_public_dict,
+            )
+
+            inventory = self._require_runner().list_browser_capabilities()
+            return inventory_to_public_dict(inventory)
+
+        @self.app.tool
+        async def explain_browser_route(
+            tenant_id: str | None = None,
+            source_id: str | None = None,
+            bypass: str | None = None,
+        ) -> dict[str, Any]:
+            """Explain why a browser/bypass route is selected or unavailable."""
+            from job_ftch.application.browser_capability_inventory import (
+                explanation_to_public_dict,
+            )
+
+            explanation = await self._require_runner().explain_browser_route(
+                tenant_id,
+                source_id,
+                bypass=bypass,
+            )
+            return explanation_to_public_dict(explanation)
+
+        @self.app.tool
         async def search_jobs(
             query: str,
             tenant_id: str | None = None,

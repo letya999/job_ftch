@@ -46,7 +46,7 @@ from job_ftch.application.source_assessment import (
     create_source_assessment_service,
     load_source_assessment,
 )
-from job_ftch.config import get_settings
+from job_ftch.config import Settings, get_settings
 from job_ftch.domain import (
     JobGroup,
     JobLineage,
@@ -60,6 +60,10 @@ from job_ftch.domain import (
     source_spec_identifier,
     source_spec_locator,
     source_spec_name,
+)
+from job_ftch.domain.browser_capability_inventory import (
+    BrowserCapabilityInventory,
+    RoutePlanExplanation,
 )
 from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
 
@@ -75,7 +79,6 @@ if TYPE_CHECKING:
         Store,
         VectorBackend,
     )
-    from job_ftch.config import Settings
     from job_ftch.domain.public_source_registry import PublicSourceRegistry
     from job_ftch.domain.source_spec import SourceSpec
     from job_ftch.nodes.snapshot_filter import SnapshotFilterNode
@@ -1802,6 +1805,62 @@ class TenantRunner:
         from job_ftch.application.public_source_registry import list_public_sources_for_runner
 
         return await list_public_sources_for_runner(self, tenant_id, allowlist=allowlist)
+
+    def _settings_for_inventory(self, tenant_id: str | None = None) -> Settings:
+        if tenant_id is not None and tenant_id in self._runtimes:
+            return self._runtimes[tenant_id].settings
+        if self._runtimes:
+            return next(iter(self._runtimes.values())).settings
+        return get_settings()
+
+    def list_browser_capabilities(
+        self,
+        tenant_id: str | None = None,
+    ) -> BrowserCapabilityInventory:
+        """Return a read-only browser/bypass capability inventory.
+
+        Reuses registry capabilities and settings budgets. Does not start
+        browsers, open sessions, or expose secret values.
+        """
+        from job_ftch.application.browser_capability_inventory import (
+            build_browser_capability_inventory,
+        )
+
+        return build_browser_capability_inventory(self._settings_for_inventory(tenant_id))
+
+    async def explain_browser_route(
+        self,
+        tenant_id: str | None = None,
+        source_id: str | None = None,
+        *,
+        bypass: str | None = None,
+    ) -> RoutePlanExplanation:
+        """Explain route selection/unavailability for a source without executing it."""
+        from job_ftch.application.browser_capability_inventory import explain_route_plan
+
+        source_payload: dict[str, Any] | None = None
+        if tenant_id and source_id:
+            sources = await self.list_sources(tenant_id)
+            for item in sources:
+                if str(item.get("source_id") or "") == source_id:
+                    source_payload = item
+                    break
+            if source_payload is None:
+                return RoutePlanExplanation(
+                    generated_at=datetime.now(UTC),
+                    source_id=source_id,
+                    requested_bypass=bypass,
+                    error="source not found",
+                )
+        elif tenant_id and bypass is None:
+            # Tenant-scoped default plan without a specific source.
+            source_payload = {"kind": "career_site"}
+        return explain_route_plan(
+            settings=self._settings_for_inventory(tenant_id),
+            source=source_payload,
+            source_id=source_id,
+            requested_bypass=bypass,
+        )
 
     async def save_candidate_profile(
         self,

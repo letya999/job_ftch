@@ -249,6 +249,48 @@ def create_app(
         summary = await runner.get_status(tenant_id)
         return None if summary is None else summary.as_dict()
 
+    @app.get("/pipeline/browser-capabilities")
+    @limiter.limit("10/minute")
+    async def pipeline_browser_capabilities(
+        request: Any,
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """Read-only browser/bypass capability inventory (no execution)."""
+        del request
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        from job_ftch.application.browser_capability_inventory import (
+            inventory_to_public_dict,
+        )
+
+        return inventory_to_public_dict(runner.list_browser_capabilities())
+
+    @app.get("/pipeline/browser-routes")
+    @limiter.limit("10/minute")
+    async def pipeline_browser_routes(
+        request: Any,
+        tenant_id: str | None = None,
+        source_id: str | None = None,
+        bypass: str | None = None,
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """Route planner diagnostics for a source/spec (read-only)."""
+        del request
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        from job_ftch.application.browser_capability_inventory import (
+            explanation_to_public_dict,
+        )
+
+        explanation = await runner.explain_browser_route(
+            tenant_id,
+            source_id,
+            bypass=bypass,
+        )
+        return explanation_to_public_dict(explanation)
+
     @app.get("/pipeline/sources/{tenant_id}")
     @limiter.limit("10/minute")
     async def pipeline_sources(
