@@ -3,6 +3,17 @@
 These models are intentionally narrow: only fields that may appear on a public
 docs site or unauthenticated JSON endpoint. Private credentials, tenant/user
 ids, raw specs, and debug metadata must never be added here.
+
+Public source health statuses (``PublicSourceStatus``) are derived at read time
+from runtime listing/health fields. They do not introduce a separate tracker:
+
+- ``enabled``: source is on and recently observed healthy enough to publish
+- ``disabled``: operator disabled the source
+- ``degraded``: runtime degraded/failing/paused/error, or known error kind
+- ``candidate``: pending / never checked / no recent health observation
+
+``public_failure_reason`` prefers allowlisted machine codes (for example
+``layout_changed``, ``auth_wall``, ``source_fetch_failed``) over free text.
 """
 
 from __future__ import annotations
@@ -17,7 +28,13 @@ PublicRegistryStatus = Literal["ok", "error", "stale"]
 
 
 class PublicSourceRegistryEntry(BaseModel):
-    """One public-safe source row for docs/API consumers."""
+    """One public-safe source row for docs/API consumers.
+
+    Diagnostics fields (``status``, timestamps, ``public_failure_reason``,
+    ``parser_route_summary``) are health explainers only. They must stay free of
+    tenant/user ids, cookies, tokens, proxy endpoints, browser profile paths,
+    raw HTML/traces, resume data, and private Telegram identities.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

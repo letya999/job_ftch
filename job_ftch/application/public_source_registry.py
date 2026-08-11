@@ -68,7 +68,37 @@ _SECRETISH_RE = re.compile(
     r"bearer\s+[a-z0-9._\-]{8,}|[a-f0-9]{32,})"
 )
 _PATH_RE = re.compile(r"(?i)([a-z]:\\|/)[^\s]{8,}")
+_SAFE_CODE_RE = re.compile(r"^[a-z][a-z0-9_]{1,48}$")
 _MAX_FAILURE_REASON_LEN = 160
+_MAX_ROUTE_SUMMARY_LEN = 80
+
+# Public-safe diagnostics codes. Prefer these over free-text last_error so the
+# public registry can explain health without leaking paths, tokens, or traces.
+PUBLIC_FAILURE_REASON_CODES: frozenset[str] = frozenset(
+    {
+        "empty_result",
+        "layout_changed",
+        "challenge_required",
+        "auth_wall",
+        "parser_error",
+        "deadline",
+        "source_fetch_failed",
+        "degraded",
+        "paused",
+        "unhealthy",
+        "failing",
+        "error",
+        "redacted",
+    }
+)
+
+_DEGRADED_RUNTIME_STATUSES: frozenset[str] = frozenset(
+    {"failing", "degraded", "paused", "unhealthy", "error"}
+)
+_CANDIDATE_RUNTIME_STATUSES: frozenset[str] = frozenset({"pending", "candidate", "unknown", ""})
+_ENABLED_RUNTIME_STATUSES: frozenset[str] = frozenset(
+    {"ok", "healthy", "active", "success", "enabled"}
+)
 
 
 def is_public_tenant(
@@ -163,29 +193,149 @@ def _public_locator_fields(
     return None, None, False
 
 
+def _has_recent_check(listing: Mapping[str, Any]) -> bool:
+    """True when runtime listing carries any check/success timestamp."""
+    for key in ("last_run_at", "last_started_at", "last_checked_at", "last_success_at"):
+        if _parse_datetime(listing.get(key)) is not None:
+            return True
+    return False
+
+
 def _map_public_status(*, enabled: bool, listing: Mapping[str, Any]) -> PublicSourceStatus:
+    """Map runtime listing fields to a public-safe health status.
+
+    Representable states (no new storage; uses existing listing/health fields):
+
+    - ``disabled``: operator disabled the source
+    - ``degraded``: degraded flag, failing/paused/unhealthy runtime status, or
+      a known ``last_error_kind``
+    - ``candidate``: never checked / pending / no recent health observation
+    - ``enabled``: enabled and observed healthy enough for public consumers
+    """
     if not enabled:
         return "disabled"
+
     raw_status = str(listing.get("status") or "").strip().casefold()
-    degraded = bool(listing.get("degraded"))
-    if degraded or raw_status in {"failing", "degraded", "paused", "unhealthy"}:
+    degraded_flag = bool(listing.get("degraded"))
+    error_kind = str(listing.get("last_error_kind") or "").strip().casefold()
+    has_public_error_kind = bool(error_kind) and (
+        error_kind in PUBLIC_FAILURE_REASON_CODES or bool(_SAFE_CODE_RE.fullmatch(error_kind))
+    )
+
+    if degraded_flag or has_public_error_kind or raw_status in _DEGRADED_RUNTIME_STATUSES:
         return "degraded"
-    if raw_status in {"pending", "candidate", "unknown", ""}:
+
+    if raw_status in _CANDIDATE_RUNTIME_STATUSES:
         return "candidate"
-    return "enabled"
+
+    # Enabled but never observed: explainable "no recent check" without a new
+    # storage field. Represented as candidate (not invented as a fifth status).
+    if not _has_recent_check(listing):
+        return "candidate"
+
+    if raw_status in _ENABLED_RUNTIME_STATUSES:
+        return "enabled"
+
+    # Unknown non-empty runtime status with a check: keep enabled only when a
+    # success timestamp exists; otherwise treat as not yet proven.
+    if _parse_datetime(listing.get("last_success_at")) is not None:
+        return "enabled"
+    return "candidate"
+
+
+def _normalize_public_code(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().casefold().replace("-", "_").replace(" ", "_")
+    if not text:
+        return None
+    if text in PUBLIC_FAILURE_REASON_CODES:
+        return text
+    if _SAFE_CODE_RE.fullmatch(text) and not _SECRETISH_RE.search(text):
+        # Stable machine codes from runtime (e.g. future kinds) are public-safe
+        # when they look like snake_case tokens without secret markers.
+        return text
+    return None
+
+
+def _extract_allowlisted_code(text: str) -> str | None:
+    """Return a known public failure code embedded in free text, if any."""
+    lowered = text.casefold()
+    # Longer codes first so layout_changed wins over changed, etc.
+    for code in sorted(PUBLIC_FAILURE_REASON_CODES, key=len, reverse=True):
+        if code == "redacted":
+            continue
+        if re.search(rf"(?<![a-z0-9_]){re.escape(code)}(?![a-z0-9_])", lowered):
+            return code
+    return None
 
 
 def _sanitize_failure_reason(value: object) -> str | None:
+    """Redact free-text failure details for public consumers."""
     if value is None:
         return None
     text = " ".join(str(value).split())
     if not text:
         return None
+    allowlisted = _extract_allowlisted_code(text)
+    if allowlisted is not None:
+        return allowlisted
     if _SECRETISH_RE.search(text):
         return "redacted"
     text = _PATH_RE.sub("[path]", text)
+    if _SECRETISH_RE.search(text):
+        return "redacted"
     if len(text) > _MAX_FAILURE_REASON_LEN:
         text = text[: _MAX_FAILURE_REASON_LEN - 1].rstrip() + "…"
+    return text
+
+
+def _public_failure_reason(
+    listing: Mapping[str, Any],
+    *,
+    enabled: bool,
+    public_status: PublicSourceStatus,
+) -> str | None:
+    """Build an explainable public failure reason from runtime health fields.
+
+    Preference order (all existing fields; no new tracker/schema):
+    1. allowlisted ``last_error_kind``
+    2. allowlisted code extracted from ``last_error`` free text
+    3. sanitized free text (paths/secrets redacted)
+    4. status-derived code for degraded/paused sources with no error payload
+    """
+    kind_code = _normalize_public_code(listing.get("last_error_kind"))
+    if kind_code is not None:
+        return kind_code
+
+    last_error = listing.get("last_error")
+    if last_error is not None and str(last_error).strip():
+        return _sanitize_failure_reason(last_error)
+
+    if not enabled:
+        return None
+
+    if public_status == "degraded":
+        raw_status = str(listing.get("status") or "").strip().casefold()
+        status_code = _normalize_public_code(raw_status)
+        if status_code is not None and status_code in PUBLIC_FAILURE_REASON_CODES:
+            return status_code
+        if bool(listing.get("degraded")):
+            return "degraded"
+        return "error"
+
+    return None
+
+
+def _sanitize_route_summary(value: str) -> str | None:
+    text = " ".join(value.split())
+    if not text:
+        return None
+    if _SECRETISH_RE.search(text):
+        return "redacted"
+    text = _PATH_RE.sub("[path]", text)
+    if len(text) > _MAX_ROUTE_SUMMARY_LEN:
+        text = text[: _MAX_ROUTE_SUMMARY_LEN - 1].rstrip() + "…"
     return text
 
 
@@ -194,7 +344,7 @@ def _parser_route_summary(listing: Mapping[str, Any], spec: Mapping[str, Any] | 
     if isinstance(requirements, Mapping):
         reason = requirements.get("browser_reason")
         if isinstance(reason, str) and reason.strip():
-            return reason.strip()[:80]
+            return _sanitize_route_summary(reason.strip())
         if requirements.get("browser_required"):
             return "browser"
 
@@ -204,15 +354,15 @@ def _parser_route_summary(listing: Mapping[str, Any], spec: Mapping[str, Any] | 
         if isinstance(monitors, list) and monitors:
             first = str(monitors[0]).strip()
             if first:
-                return f"monitor={first}"[:80]
+                return _sanitize_route_summary(f"monitor={first}")
 
     if isinstance(spec, Mapping):
         monitor = spec.get("monitor")
         if isinstance(monitor, str) and monitor.strip() and monitor.strip() != "auto":
-            return f"monitor={monitor.strip()}"[:80]
+            return _sanitize_route_summary(f"monitor={monitor.strip()}")
         scraper = spec.get("scraper")
         if isinstance(scraper, str) and scraper.strip():
-            return f"scraper={scraper.strip()}"[:80]
+            return _sanitize_route_summary(f"scraper={scraper.strip()}")
     return None
 
 
@@ -250,7 +400,9 @@ def sanitize_source_listing(listing: Mapping[str, Any]) -> PublicSourceRegistryE
     )
 
     public_name = listing.get("source_name")
-    name = str(public_name).strip() if isinstance(public_name, str) and public_name.strip() else None
+    name = (
+        str(public_name).strip() if isinstance(public_name, str) and public_name.strip() else None
+    )
     if private_identity:
         source_id = _redacted_source_id(kind, locator_text, original_id)
         name = kind.replace("_", " ")
@@ -267,11 +419,11 @@ def sanitize_source_listing(listing: Mapping[str, Any]) -> PublicSourceRegistryE
         if region is None and isinstance(spec_map.get("region"), str):
             region = spec_map.get("region")
 
-    last_error = listing.get("last_error")
-    failure = (
-        None
-        if enabled is False and not last_error
-        else _sanitize_failure_reason(last_error)
+    public_status = _map_public_status(enabled=enabled, listing=listing)
+    failure = _public_failure_reason(
+        listing,
+        enabled=enabled,
+        public_status=public_status,
     )
 
     return PublicSourceRegistryEntry(
@@ -281,12 +433,14 @@ def sanitize_source_listing(listing: Mapping[str, Any]) -> PublicSourceRegistryE
         public_url=public_url,
         public_handle=public_handle,
         enabled=enabled,
-        status=_map_public_status(enabled=enabled, listing=listing),
+        status=public_status,
         category=str(category).strip() if isinstance(category, str) and category.strip() else None,
         region=str(region).strip() if isinstance(region, str) and region.strip() else None,
         last_success_at=_parse_datetime(listing.get("last_success_at")),
         last_checked_at=_parse_datetime(
-            listing.get("last_run_at") or listing.get("last_started_at") or listing.get("last_checked_at")
+            listing.get("last_run_at")
+            or listing.get("last_started_at")
+            or listing.get("last_checked_at")
         ),
         public_failure_reason=failure,
         parser_route_summary=_parser_route_summary(listing, spec_map),
@@ -343,7 +497,7 @@ def public_registry_error(
 
 
 def assert_public_safe_payload(payload: Mapping[str, Any]) -> None:
-    """Raise AssertionError if a serialized registry still carries denylist keys."""
+    """Raise AssertionError if a serialized registry still carries denylist keys/values."""
 
     def _walk(node: object, path: str) -> None:
         if isinstance(node, Mapping):
@@ -369,6 +523,17 @@ def assert_public_safe_payload(payload: Mapping[str, Any]) -> None:
         elif isinstance(node, (list, tuple)):
             for index, item in enumerate(node):
                 _walk(item, f"{path}[{index}]")
+        elif isinstance(node, str):
+            # Values may still carry secrets if sanitizer regresses.
+            # Allow the single public token "redacted"; block bearer/token blobs.
+            lowered = node.casefold()
+            if (
+                lowered != "redacted"
+                and lowered not in PUBLIC_FAILURE_REASON_CODES
+                and _SECRETISH_RE.search(node)
+            ):
+                msg = f"sensitive value leaked at {path}"
+                raise AssertionError(msg)
 
     _walk(payload, "root")
 

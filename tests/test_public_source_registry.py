@@ -17,6 +17,7 @@ from job_ftch.adapters.telegram_bot.public_sources import (
 )
 from job_ftch.application.public_source_registry import (
     DEFAULT_PUBLIC_TENANT_ALLOWLIST,
+    PUBLIC_FAILURE_REASON_CODES,
     assert_public_safe_payload,
     build_public_source_registry,
     is_public_tenant,
@@ -154,6 +155,176 @@ def test_sanitize_failure_reason_redacts_secrets_and_paths() -> None:
     assert entry is not None
     assert entry.status == "degraded"
     assert entry.public_failure_reason == "redacted"
+
+
+def _base_listing(**overrides: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "source_id": "career_site:health_probe",
+        "source_kind": "career_site",
+        "source_name": "health_probe",
+        "locator": "https://example.com/health-probe",
+        "enabled": True,
+        "status": "ok",
+        "degraded": False,
+        "last_success_at": "2026-08-01T12:00:00+00:00",
+        "last_run_at": "2026-08-01T12:05:00+00:00",
+        "last_error": None,
+        "last_error_kind": None,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_public_health_status_enabled_disabled_degraded_candidate() -> None:
+    """Explainable public statuses use existing listing/health fields only."""
+    enabled = sanitize_source_listing(_base_listing())
+    assert enabled is not None
+    assert enabled.enabled is True
+    assert enabled.status == "enabled"
+    assert enabled.last_success_at is not None
+    assert enabled.last_checked_at is not None
+    assert enabled.public_failure_reason is None
+
+    disabled = sanitize_source_listing(
+        _base_listing(
+            enabled=False,
+            status="disabled",
+            last_error=None,
+            last_error_kind=None,
+        )
+    )
+    assert disabled is not None
+    assert disabled.enabled is False
+    assert disabled.status == "disabled"
+    assert disabled.public_failure_reason is None
+
+    degraded = sanitize_source_listing(
+        _base_listing(
+            status="failing",
+            degraded=True,
+            last_error_kind="source_fetch_failed",
+            last_error="internal stack at /var/log/job_ftch/trace.log",
+            last_success_at=None,
+        )
+    )
+    assert degraded is not None
+    assert degraded.status == "degraded"
+    # Prefer allowlisted last_error_kind over free-text paths.
+    assert degraded.public_failure_reason == "source_fetch_failed"
+    assert degraded.last_checked_at is not None
+
+    # No health timestamps and pending status → candidate (no recent check).
+    candidate = sanitize_source_listing(
+        {
+            "source_id": "career_site:new_source",
+            "source_kind": "career_site",
+            "source_name": "new_source",
+            "locator": "https://example.com/new",
+            "enabled": True,
+            "status": "pending",
+            "degraded": False,
+        }
+    )
+    assert candidate is not None
+    assert candidate.status == "candidate"
+    assert candidate.last_checked_at is None
+    assert candidate.last_success_at is None
+    assert candidate.public_failure_reason is None
+
+    # Enabled with unknown status and no check timestamps also maps to candidate.
+    never_checked = sanitize_source_listing(
+        {
+            "source_id": "career_site:never_checked",
+            "source_kind": "career_site",
+            "source_name": "never_checked",
+            "locator": "https://example.com/never",
+            "enabled": True,
+            "status": "ok",
+            "degraded": False,
+        }
+    )
+    assert never_checked is not None
+    assert never_checked.status == "candidate"
+
+
+def test_public_failure_reason_allowlist_and_status_fallback() -> None:
+    assert "layout_changed" in PUBLIC_FAILURE_REASON_CODES
+    assert "auth_wall" in PUBLIC_FAILURE_REASON_CODES
+    assert "empty_result" in PUBLIC_FAILURE_REASON_CODES
+
+    kind_entry = sanitize_source_listing(
+        _base_listing(
+            status="degraded",
+            degraded=True,
+            last_error_kind="layout_changed",
+            last_error="parser saw unexpected DOM token=should_not_leak",
+        )
+    )
+    assert kind_entry is not None
+    assert kind_entry.status == "degraded"
+    assert kind_entry.public_failure_reason == "layout_changed"
+
+    text_code = sanitize_source_listing(
+        _base_listing(
+            status="failing",
+            degraded=True,
+            last_error_kind=None,
+            last_error="ingest stopped: auth_wall on listing page",
+        )
+    )
+    assert text_code is not None
+    assert text_code.public_failure_reason == "auth_wall"
+
+    # Degraded with no error payload still explains via status-derived code.
+    status_only = sanitize_source_listing(
+        _base_listing(
+            status="paused",
+            degraded=False,
+            last_error=None,
+            last_error_kind=None,
+        )
+    )
+    assert status_only is not None
+    assert status_only.status == "degraded"
+    assert status_only.public_failure_reason == "paused"
+
+    path_only = sanitize_source_listing(
+        _base_listing(
+            status="failing",
+            degraded=True,
+            last_error="failed reading C:\\Users\\User\\.runtime\\browser-profile\\Default",
+            last_error_kind=None,
+        )
+    )
+    assert path_only is not None
+    assert path_only.public_failure_reason is not None
+    assert "Users" not in path_only.public_failure_reason
+    assert "browser-profile" not in path_only.public_failure_reason
+    assert (
+        "[path]" in path_only.public_failure_reason or path_only.public_failure_reason == "redacted"
+    )
+
+
+def test_parser_route_summary_is_sanitized() -> None:
+    entry = sanitize_source_listing(
+        _base_listing(
+            requirements={
+                "browser_required": True,
+                "browser_reason": "monitor=browser token=abc123secret",
+            },
+            spec={"type": "career_site", "url": "https://example.com/health-probe"},
+        )
+    )
+    assert entry is not None
+    assert entry.parser_route_summary == "redacted"
+
+    clean = sanitize_source_listing(
+        _base_listing(
+            requirements={"browser_required": True, "browser_reason": "monitor=browser"},
+        )
+    )
+    assert clean is not None
+    assert clean.parser_route_summary == "monitor=browser"
 
 
 def test_registry_envelope_has_timestamp_and_count() -> None:

@@ -61,8 +61,37 @@ GET /public/tenants/{tenant_slug}/sources.json
 | `enabled` / `status` | `enabled`, `disabled`, `degraded`, `candidate` |
 | `category` / `region` | Опциональные публичные метки |
 | `last_success_at` / `last_checked_at` | Health timestamps |
-| `public_failure_reason` | Короткая безопасная причина сбоя |
+| `public_failure_reason` | Короткая безопасная причина сбоя (prefer allowlisted code) |
 | `parser_route_summary` | Краткий публичный маршрут парсера/monitor |
+
+## Public health / diagnostics contract
+
+Статусы и причины строятся **на чтении** из того же runtime listing, что и
+bot/API/MCP (`list_sources` + source health). Отдельный tracker, scheduler или
+fixture source of truth **не** используются.
+
+| `status` | Когда | Что ещё смотреть |
+|---|---|---|
+| `enabled` | Источник включён и есть недавнее health-наблюдение без degraded/error | `last_success_at`, `last_checked_at` |
+| `disabled` | Оператор отключил источник | `enabled=false`; failure reason обычно пустой |
+| `degraded` | Runtime `degraded` / `failing` / `paused` / `unhealthy` / `error`, либо известный `last_error_kind` | `public_failure_reason` |
+| `candidate` | `pending` / ещё не проверялся / нет timestamps health | `last_*` = null; не путать с «тихо успешным нулём» |
+
+`public_failure_reason` (приоритет):
+
+1. allowlisted machine code из `last_error_kind` (например `layout_changed`,
+   `auth_wall`, `challenge_required`, `empty_result`, `parser_error`,
+   `deadline`, `source_fetch_failed`);
+2. allowlisted code, если он явно встречается в free-text `last_error`;
+3. sanitized free text (paths → `[path]`, secret-like → `redacted`);
+4. для degraded без error payload — status-derived code (`paused`,
+   `degraded`, …).
+
+Непубликуемые детали (cookies, tokens, proxy endpoints, browser profile paths,
+raw HTML/traces, tenant/user ids, private Telegram entities, resume data)
+sanitizer отбрасывает или заменяет на `redacted`. Если отдельное runtime
+состояние нельзя выразить текущими полями health/listing без широкой schema
+work, оно **не** выдумывается в storage: только document/test note.
 
 ### No-JS fallback
 
