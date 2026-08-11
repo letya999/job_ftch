@@ -76,6 +76,7 @@ if TYPE_CHECKING:
         VectorBackend,
     )
     from job_ftch.config import Settings
+    from job_ftch.domain.public_source_registry import PublicSourceRegistry
     from job_ftch.domain.source_spec import SourceSpec
     from job_ftch.nodes.snapshot_filter import SnapshotFilterNode
 
@@ -1786,6 +1787,21 @@ class TenantRunner:
             )
         payloads.sort(key=lambda item: str(item["source_id"]))
         return payloads
+
+    async def list_public_sources(
+        self,
+        tenant_id: str,
+        *,
+        allowlist: frozenset[str] | None = None,
+    ) -> PublicSourceRegistry:
+        """Return a public-safe source registry built from runtime store state.
+
+        Uses the same ``list_sources`` path as bot/API/MCP. Never reads fixtures.
+        Tenants outside the allowlist receive an explicit error envelope.
+        """
+        from job_ftch.application.public_source_registry import list_public_sources_for_runner
+
+        return await list_public_sources_for_runner(self, tenant_id, allowlist=allowlist)
 
     async def save_candidate_profile(
         self,

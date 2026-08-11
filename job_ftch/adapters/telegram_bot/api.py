@@ -15,6 +15,7 @@ from slowapi.util import get_remote_address
 
 from job_ftch.adapters.telegram_bot.config import load_bot_config
 from job_ftch.adapters.telegram_bot.main import build_bot, build_dispatcher
+from job_ftch.adapters.telegram_bot.public_sources import mount_public_source_routes
 from job_ftch.application.profile_inputs import build_candidate_profile_from_payload
 from job_ftch.application.source_inputs import build_source_spec_from_input
 from job_ftch.application.tenant_loader import load_tenants
@@ -210,6 +211,9 @@ def create_app(
             "tenant_count": len(tenants),
             "tenants": tenants,
         }
+
+    # Public-safe runtime source registry (no API key; allowlisted tenants only).
+    mount_public_source_routes(app, runner, limiter=limiter)
 
     @app.post("/pipeline/run")
     @limiter.limit("5/minute")
