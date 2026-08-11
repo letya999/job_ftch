@@ -85,6 +85,21 @@ async def test_location_work_mode_normalization_detects_remote() -> None:
 
 
 @pytest.mark.asyncio
+async def test_location_work_mode_normalization_corrects_known_city_country_conflict() -> None:
+    node = LocationWorkModeNormalizationNode()
+
+    job = await node.process(_record(location="Warsaw / Russia"))
+
+    assert job is not None
+    assert job.location == "Варшава, Польша"
+    assert job.city == "Варшава"
+    assert job.country == "Польша"
+    assert "country:Россия->Польша" in job.provenance.normalization
+    assert job.metadata["geo_normalized_location"] == "Варшава, Польша"
+    assert "country:Россия->Польша" in job.metadata["geo_normalization_steps"]
+
+
+@pytest.mark.asyncio
 async def test_compensation_parsing_node_reads_salary_from_description() -> None:
     node = CompensationParsingNode()
 

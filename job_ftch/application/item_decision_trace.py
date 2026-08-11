@@ -84,6 +84,9 @@ def _record_item_decision_trace(
         _set(span, "job_ftch.best_score", getattr(subject, "best_score", None))
         _set(span, "job_ftch.relevance_score", getattr(subject, "relevance_score", None))
         _set(span, "job_ftch.quality_score", getattr(subject, "quality_score", None))
+        _set(span, "job_ftch.geo.location", getattr(subject, "location", ""))
+        _set(span, "job_ftch.geo.city", getattr(subject, "city", ""))
+        _set(span, "job_ftch.geo.country", getattr(subject, "country", ""))
 
         if isinstance(metadata, dict):
             _set_metadata(span, metadata)
@@ -149,6 +152,10 @@ def _set_metadata(span: Any, metadata: Mapping[str, Any]) -> None:
         metadata.get("semantic_prefilter_best_score"),
     )
     _set(span, "job_ftch.decision_reasons", _json_list(metadata.get("decision_reasons")))
+    _set(span, "job_ftch.geo.normalized_location", metadata.get("geo_normalized_location") or "")
+    _set(span, "job_ftch.geo.normalized_city", metadata.get("geo_normalized_city") or "")
+    _set(span, "job_ftch.geo.normalized_country", metadata.get("geo_normalized_country") or "")
+    _set(span, "job_ftch.geo.normalization_steps", _json_list(metadata.get("geo_normalization_steps")))
 
     snapshots = metadata.get("ontology_snapshots")
     if isinstance(snapshots, Mapping):

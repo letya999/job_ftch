@@ -209,6 +209,10 @@ class TestGeoNormalisation:
     def test_country_field_may_hold_a_list(self) -> None:
         assert format_geo(_job(country="United Kingdom, United States")) == "Великобритания, США"
 
+    def test_known_city_corrects_conflicting_country(self) -> None:
+        assert format_geo(_job(location="Warsaw / Russia")) == "Варшава, Польша"
+        assert format_geo(_job(city="Warszawa", country="Россия")) == "Варшава, Польша"
+
     def test_unknown_place_passes_through(self) -> None:
         """The table normalises; it must not drop places it does not know."""
         assert format_geo(_job(location="Bonnatal, Germany")) == "Bonnatal, Германия"
