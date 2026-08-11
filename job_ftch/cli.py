@@ -557,8 +557,8 @@ def _run_mcp_server(settings: Settings, args: argparse.Namespace) -> None:
         msg = "--configs-dir or JOB_FTCH_CONFIGS_DIR is required for mcp-server."
         raise ValueError(msg)
     # stdio MCP must not emit logs on stdout (JSON-RPC). Route structlog to stderr.
-    from job_ftch.application.logging import configure_logging
     from job_ftch.adapters.mcp.server import create_server
+    from job_ftch.application.logging import configure_logging
 
     configure_logging(settings.log_level)
     server = create_server(configs_dir=settings.configs_dir, base_settings=settings)
