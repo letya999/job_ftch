@@ -90,6 +90,28 @@ Session handoff и challenge handling — bounded операции над тек
 Они не должны превращаться в постоянный daemon, бесконечный worker или скрытую
 оркестрацию.
 
+### Search session human-in-the-loop contract
+
+Resume-driven search sessions surface login/challenge needs as an explicit
+source status instead of claiming automatic bypass:
+
+- route/status: `needs_manual` when the planned capability group is
+  `manual_challenge` (or equivalent HITL route);
+- session field: `needs_manual_source_ids`;
+- per-route public-safe payload: `manual_challenge` with allowed fields only —
+  `source_id`, `source_label`, `route_id`, `reason_code`, `user_action_hint`,
+  approval flags, `deadline_seconds` / `budget_note`;
+- denied on that payload: cookies, tokens, proxy endpoints, browser profile or
+  executable paths, raw HTML/traces, private tenant/user ids, resume text;
+- `approve_search_session` records operator consent/budget acknowledgment;
+  approved `needs_manual` routes are **not** auto-executed by
+  `run_search_session`;
+- MCP/API surfaces reuse existing session status serialization
+  (`get_search_session_status` / `session_to_public_dict`) and
+  `explain_search_session` for diagnostics.
+
+This is a contract/plumbing boundary, not a CAPTCHA solver or credential vault.
+
 Challenge detection is unified through
 `job_ftch.infrastructure.bypass.challenge_classifier`:
 

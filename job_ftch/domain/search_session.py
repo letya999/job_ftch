@@ -5,6 +5,11 @@ routes, run existing pipeline/search primitives, and explain degraded/rejected
 outcomes". Privacy: session state may hold tenant/user/profile identifiers and
 route diagnostics, but never resume body text, cookies, tokens, proxy URLs, or
 browser profile paths.
+
+Manual challenge (HITL) contract: when a source route needs login/challenge or
+operator help, the route is reported as ``needs_manual`` with public-safe
+``ManualChallengeInfo``. Approval records consent/budget acknowledgment only;
+it does not claim automated CAPTCHA/login bypass.
 """
 
 from __future__ import annotations
@@ -42,9 +47,36 @@ SourceSessionStatus = Literal[
     "no_results",
 ]
 
+ManualChallengeReasonCode = Literal[
+    "login_required",
+    "challenge_required",
+    "captcha_required",
+    "auth_wall",
+    "manual_route_selected",
+    "operator_approval_required",
+]
+
+# Fields allowed on public manual-challenge diagnostics (contract denylist is
+# documented in DEFAULT_SESSION_PRIVACY_NOTES and ManualChallengeInfo docstring).
+MANUAL_CHALLENGE_PUBLIC_FIELDS: tuple[str, ...] = (
+    "source_id",
+    "source_label",
+    "route_id",
+    "reason_code",
+    "user_action_hint",
+    "requires_approval",
+    "approved",
+    "deadline_seconds",
+    "budget_note",
+)
+
 DEFAULT_SESSION_PRIVACY_NOTES: tuple[str, ...] = (
     "session stores tenant/user/profile identifiers only; resume body is not stored on the session",
     "route diagnostics are public-safe and must not include cookies, tokens, proxy URLs, or profile paths",
+    "manual_challenge diagnostics allow only source_id, source_label, route_id, reason_code, "
+    "user_action_hint, deadline/budget flags; never cookies, tokens, proxy endpoints, browser "
+    "profile paths, raw HTML/traces, private tenant/user ids, or resume text",
+    "needs_manual means human/operator action is required; approval is not automatic bypass",
     "results reuse existing pipeline/search decisions; no separate relevance logic",
 )
 
@@ -61,7 +93,12 @@ class SearchSessionBudgets(BaseModel):
 
 
 class SearchSessionApproval(BaseModel):
-    """User/operator approvals for sensitive routes and budgets."""
+    """User/operator approvals for sensitive routes and budgets.
+
+    Approval acknowledges cost/risk and budgets. For ``needs_manual`` routes it
+    records operator consent to proceed with a human-in-the-loop challenge; it
+    does not store credentials or mean the system can solve login/CAPTCHA alone.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -70,6 +107,27 @@ class SearchSessionApproval(BaseModel):
     approve_all_sensitive: bool = False
     note: str | None = None
     approved_at: datetime | None = None
+
+
+class ManualChallengeInfo(BaseModel):
+    """Public-safe human-in-the-loop challenge diagnostics for one source route.
+
+    Allowed fields only. Must never carry cookies, tokens, proxy endpoints,
+    browser profile/executable paths, raw HTML/traces, private tenant/user ids,
+    or resume text.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source_id: str
+    source_label: str | None = None
+    route_id: str | None = None
+    reason_code: ManualChallengeReasonCode
+    user_action_hint: str
+    requires_approval: bool = True
+    approved: bool = False
+    deadline_seconds: float | None = Field(default=None, ge=0.0)
+    budget_note: str | None = None
 
 
 class SourceRoutePlanEntry(BaseModel):
@@ -91,6 +149,7 @@ class SourceRoutePlanEntry(BaseModel):
     diagnostics: tuple[RouteCapabilityDiagnostic, ...] = ()
     route_notes: tuple[str, ...] = ()
     error: str | None = None
+    manual_challenge: ManualChallengeInfo | None = None
 
 
 class SearchResultRef(BaseModel):
@@ -141,6 +200,7 @@ class SearchSession(BaseModel):
     result_refs: tuple[SearchResultRef, ...] = ()
     rejected_summary: dict[str, int] = Field(default_factory=dict)
     degraded_source_ids: tuple[str, ...] = ()
+    needs_manual_source_ids: tuple[str, ...] = ()
     error: str | None = None
     cancel_requested: bool = False
     created_at: datetime

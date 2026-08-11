@@ -26,12 +26,12 @@ updated: 2026-08-11
 
 ## Next
 
-- Human-in-the-loop сценарии для login / challenge: явные шаги подтверждения,
-  без обещания «обойти любой антибот».
 - Live regression checks по парсерам: ловить layout change, empty result и
   challenge/auth wall как объяснимые состояния, а не «тихий ноль».
 - Улучшать resume-driven search session: маршруты источников, бюджеты,
   rejected/degraded summary для пользователя.
+- Операторский UX для manual challenge (headed session handoff) поверх
+  уже зафиксированного `needs_manual` контракта search session.
 
 ## Later
 
@@ -76,6 +76,9 @@ updated: 2026-08-11
   почему).
 - Resume-driven search session: высокоуровневый workflow поиска вакансий
   под профиль/резюме поверх существующего pipeline.
+- Human-in-the-loop contract для login/challenge в search session: статус
+  `needs_manual`, public-safe diagnostics (`reason_code`, `user_action_hint`,
+  budget/deadline), approval как согласие, а не automatic bypass.
 
 ---
 

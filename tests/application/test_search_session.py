@@ -107,6 +107,14 @@ class _FakeRunner:
                 "degraded": False,
             },
             {
+                "source_id": "challenge:walled",
+                "source_kind": "career_site",
+                "source_name": "walled-public",
+                "enabled": True,
+                "status": "ok",
+                "degraded": False,
+            },
+            {
                 "source_id": "career_site:disabled",
                 "source_kind": "career_site",
                 "source_name": "disabled",
@@ -174,6 +182,30 @@ class _FakeRunner:
                     description="browser group",
                     requires_approval=True,
                 ),
+                BrowserCapabilityEntry(
+                    id="engine:captcha_solver",
+                    group="manual_challenge",
+                    availability="degraded",
+                    reason="provider secrets missing; passive browser_wait only",
+                    cost=50,
+                    risk="critical",
+                    description="challenge path",
+                    requires_approval=True,
+                    engine="captcha_solver",
+                    hard_timeout_seconds=90.0,
+                    supports_js=True,
+                ),
+                BrowserCapabilityEntry(
+                    id="group:manual_challenge",
+                    group="manual_challenge",
+                    availability="degraded",
+                    reason="provider secrets missing; passive browser_wait only",
+                    cost=15,
+                    risk="medium",
+                    description="manual challenge group",
+                    requires_approval=True,
+                    hard_timeout_seconds=90.0,
+                ),
             ),
         )
 
@@ -193,6 +225,29 @@ class _FakeRunner:
                 error="source not found",
             )
         kind = str(source.get("source_kind") or "career_site")
+        if source_id == "challenge:walled":
+            return RoutePlanExplanation(
+                generated_at=datetime.now(UTC),
+                source_id=source_id,
+                source_kind=kind,
+                selected_capability_id="engine:captcha_solver",
+                selected_group="manual_challenge",
+                fallback_order=("noop", "stealth_browser", "captcha_solver"),
+                diagnostics=(
+                    RouteCapabilityDiagnostic(
+                        capability_id="engine:captcha_solver",
+                        group="manual_challenge",
+                        status="selected",
+                        reason="challenge_required: interactive captcha wall",
+                        cost=50,
+                        risk="critical",
+                        engine="captcha_solver",
+                    ),
+                ),
+                notes=(
+                    "manual challenge route selected; no automated login or cookie harvest",
+                ),
+            )
         if kind == "browser":
             return RoutePlanExplanation(
                 generated_at=datetime.now(UTC),
@@ -503,3 +558,129 @@ async def test_unknown_source_in_scope_is_skipped(
     planned = await plan_source_routes(runner, session.session_id)  # type: ignore[arg-type]
     assert planned.route_plan[0].status == "skipped"
     assert planned.route_plan[0].enabled is False
+
+
+@pytest.mark.asyncio
+async def test_manual_challenge_route_is_needs_manual_not_auto_run(
+    runner_with_profile: _FakeRunner,
+) -> None:
+    """HITL login/challenge stays needs_manual; approval is consent, not bypass."""
+    runner = runner_with_profile
+    session = await create_search_session(
+        runner,  # type: ignore[arg-type]
+        tenant_id="ai_jobs",
+        user_id="u1",
+        source_scope=["debug:fixture", "challenge:walled"],
+        budgets=SearchSessionBudgets(result_limit=5, deadline_seconds=120.0),
+    )
+    planned = await plan_source_routes(runner, session.session_id)  # type: ignore[arg-type]
+    assert planned.status == "awaiting_approval"
+    by_id = {item.source_id: item for item in planned.route_plan}
+    manual = by_id["challenge:walled"]
+    assert manual.status == "needs_manual"
+    assert manual.requires_approval is True
+    assert manual.manual_challenge is not None
+    assert manual.manual_challenge.source_id == "challenge:walled"
+    assert manual.manual_challenge.source_label == "walled-public"
+    assert manual.manual_challenge.route_id == "engine:captcha_solver"
+    assert manual.manual_challenge.reason_code in {
+        "captcha_required",
+        "challenge_required",
+        "manual_route_selected",
+    }
+    assert manual.manual_challenge.user_action_hint
+    assert manual.manual_challenge.deadline_seconds == 120.0
+    assert "challenge:walled" in planned.needs_manual_source_ids
+    # Manual routes must not be treated as auto-runnable pipeline sources.
+    assert "challenge:walled" not in planned.selected_source_ids
+    assert "debug:fixture" in planned.selected_source_ids
+
+    approved = await approve_search_session(
+        runner,  # type: ignore[arg-type]
+        session.session_id,
+        approve_all_sensitive=True,
+        note="operator acknowledges manual challenge budget",
+    )
+    by_id = {item.source_id: item for item in approved.route_plan}
+    manual = by_id["challenge:walled"]
+    assert manual.approved is True
+    assert manual.status == "needs_manual"
+    assert manual.manual_challenge is not None
+    assert manual.manual_challenge.approved is True
+    assert "challenge:walled" in approved.needs_manual_source_ids
+    assert "challenge:walled" not in approved.selected_source_ids
+
+    ran = await run_search_session(runner, session.session_id)  # type: ignore[arg-type]
+    assert ran.status == "completed"
+    call_kwargs = runner.run_tenant.await_args.kwargs
+    assert "challenge:walled" not in set(call_kwargs["source_ids"])
+    assert set(call_kwargs["source_ids"]) == {"debug:fixture"}
+    by_id = {item.source_id: item for item in ran.route_plan}
+    assert by_id["challenge:walled"].status == "needs_manual"
+    assert "challenge:walled" in ran.needs_manual_source_ids
+    assert any("needs_manual" in note for note in ran.notes)
+
+    explained = await explain_rejected_or_degraded(
+        runner,  # type: ignore[arg-type]
+        session.session_id,
+        source_id="challenge:walled",
+    )
+    assert explained.status == "needs_manual"
+    assert any("human-in-the-loop" in reason for reason in explained.reasons)
+    payload = explanation_to_dict(explained)
+    challenge = payload["evidence"]["manual_challenge"]
+    assert challenge["source_id"] == "challenge:walled"
+    assert challenge["route_id"] == "engine:captcha_solver"
+    assert "reason_code" in challenge
+    assert "user_action_hint" in challenge
+    assert "deadline_seconds" in challenge
+    # Denied fields must never appear on manual challenge diagnostics.
+    denied = (
+        "cookie",
+        "cookies",
+        "token",
+        "proxy",
+        "proxy_url",
+        "profile_path",
+        "executable",
+        "resume_text",
+        "raw_html",
+        "tenant_id",
+        "user_id",
+    )
+    for key in denied:
+        assert key not in challenge
+    public = session_to_public_dict(ran)
+    assert "challenge:walled" in public["needs_manual_source_ids"]
+    public_manual = next(
+        item for item in public["route_plan"] if item["source_id"] == "challenge:walled"
+    )
+    assert public_manual["status"] == "needs_manual"
+    assert public_manual["manual_challenge"]["source_label"] == "walled-public"
+    assert any("manual_challenge diagnostics allow only" in note for note in public["privacy_notes"])
+
+
+@pytest.mark.asyncio
+async def test_unapproved_manual_challenge_is_skipped(
+    runner_with_profile: _FakeRunner,
+) -> None:
+    runner = runner_with_profile
+    session = await create_search_session(
+        runner,  # type: ignore[arg-type]
+        tenant_id="ai_jobs",
+        user_id="u1",
+        source_scope=["challenge:walled"],
+    )
+    await plan_source_routes(runner, session.session_id)  # type: ignore[arg-type]
+    approved = await approve_search_session(
+        runner,  # type: ignore[arg-type]
+        session.session_id,
+        approved_source_ids=[],
+        approve_all_sensitive=False,
+    )
+    assert approved.route_plan[0].status == "skipped"
+    assert approved.route_plan[0].approved is False
+    assert approved.needs_manual_source_ids == ()
+    ran = await run_search_session(runner, session.session_id)  # type: ignore[arg-type]
+    assert ran.status == "completed"
+    runner.run_tenant.assert_not_awaited()

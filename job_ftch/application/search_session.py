@@ -24,6 +24,8 @@ from job_ftch.application.browser_capability_inventory import (
 )
 from job_ftch.domain.search_session import (
     DEFAULT_SESSION_PRIVACY_NOTES,
+    ManualChallengeInfo,
+    ManualChallengeReasonCode,
     SearchResultRef,
     SearchSession,
     SearchSessionApproval,
@@ -55,9 +57,39 @@ _SENSITIVE_GROUPS = frozenset(
     }
 )
 
+# Routes that require human-in-the-loop; never auto-executed by run_search_session.
+_MANUAL_GROUPS = frozenset({"manual_challenge"})
+
 _TERMINAL_STATUSES: frozenset[SearchSessionStatus] = frozenset(
     {"completed", "cancelled", "failed"}
 )
+
+_MANUAL_ACTION_HINTS: dict[ManualChallengeReasonCode, str] = {
+    "login_required": (
+        "Operator must complete site login in an approved headed session; "
+        "the search session will not store credentials or cookies."
+    ),
+    "challenge_required": (
+        "Operator must complete the site challenge (or wait for clearance) "
+        "outside automatic bypass; no CAPTCHA solver is claimed here."
+    ),
+    "captcha_required": (
+        "A CAPTCHA or interactive challenge was selected; provide operator approval "
+        "and handle manually — automated solve is not guaranteed."
+    ),
+    "auth_wall": (
+        "Source is behind an authentication wall; use an approved manual route "
+        "or skip the source. Credentials are never collected by this session."
+    ),
+    "manual_route_selected": (
+        "Planner selected a manual-challenge route. Approve the budget/risk, then "
+        "complete the challenge manually; automatic bypass is not performed."
+    ),
+    "operator_approval_required": (
+        "Sensitive challenge route requires explicit operator approval before any "
+        "further action; approval is consent, not automated login."
+    ),
+}
 
 # Cooperative cancel flags for in-process runs. Store-backed cancel_requested is
 # the durable signal; this set makes mid-run checks cheap without polling store.
@@ -158,6 +190,122 @@ def _risk_for_route(
     if selected and selected in inventory_by_id:
         return inventory_by_id[selected].risk
     return None
+
+
+def _reason_code_for_manual_route(
+    explanation: RoutePlanExplanation,
+    *,
+    inventory_by_id: dict[str, BrowserCapabilityEntry],
+) -> ManualChallengeReasonCode:
+    """Map route diagnostics to a stable public reason code (no secrets)."""
+    selected = explanation.selected_capability_id
+    entry = inventory_by_id.get(selected) if selected else None
+    engine = (entry.engine if entry is not None else None) or ""
+    blob = " ".join(
+        part
+        for part in (
+            explanation.selected_group or "",
+            engine,
+            entry.reason if entry is not None else "",
+            *(item.reason for item in explanation.diagnostics),
+            *explanation.notes,
+        )
+        if part
+    ).lower()
+    # Prefer specific challenge/captcha signals over generic "login" wording that
+    # may appear in advisory notes ("no automated login").
+    if "captcha" in blob or engine == "captcha_solver":
+        return "captcha_required"
+    if "auth_wall" in blob or "auth wall" in blob:
+        return "auth_wall"
+    if "challenge" in blob:
+        return "challenge_required"
+    if "login" in blob:
+        return "login_required"
+    if explanation.selected_group in _MANUAL_GROUPS:
+        return "manual_route_selected"
+    return "operator_approval_required"
+
+
+def _deadline_for_manual_route(
+    *,
+    budgets: SearchSessionBudgets,
+    explanation: RoutePlanExplanation,
+    inventory_by_id: dict[str, BrowserCapabilityEntry],
+) -> float | None:
+    if budgets.deadline_seconds is not None:
+        return float(budgets.deadline_seconds)
+    selected = explanation.selected_capability_id
+    if selected and selected in inventory_by_id:
+        timeout = inventory_by_id[selected].hard_timeout_seconds
+        if timeout is not None:
+            return float(timeout)
+    return None
+
+
+def _build_manual_challenge(
+    *,
+    source_id: str,
+    source_label: str | None,
+    explanation: RoutePlanExplanation,
+    inventory_by_id: dict[str, BrowserCapabilityEntry],
+    budgets: SearchSessionBudgets,
+    approved: bool = False,
+) -> ManualChallengeInfo:
+    reason_code = _reason_code_for_manual_route(
+        explanation,
+        inventory_by_id=inventory_by_id,
+    )
+    deadline = _deadline_for_manual_route(
+        budgets=budgets,
+        explanation=explanation,
+        inventory_by_id=inventory_by_id,
+    )
+    budget_note = None
+    if deadline is not None:
+        budget_note = f"challenge budget/deadline is {deadline:g}s; no automatic extension"
+    elif budgets.max_items is not None or budgets.max_sources is not None:
+        budget_note = "session item/source budgets apply; manual route is not auto-executed"
+    return ManualChallengeInfo(
+        source_id=source_id,
+        source_label=source_label,
+        route_id=explanation.selected_capability_id,
+        reason_code=reason_code,
+        user_action_hint=_MANUAL_ACTION_HINTS[reason_code],
+        requires_approval=True,
+        approved=approved,
+        deadline_seconds=deadline,
+        budget_note=budget_note,
+    )
+
+
+def _is_manual_route(entry: SourceRoutePlanEntry) -> bool:
+    if entry.status == "needs_manual":
+        return True
+    if entry.manual_challenge is not None:
+        return True
+    return entry.selected_group in _MANUAL_GROUPS
+
+
+def _sync_needs_manual_ids(session: SearchSession) -> SearchSession:
+    session.needs_manual_source_ids = tuple(
+        item.source_id
+        for item in session.route_plan
+        if item.status == "needs_manual" and item.enabled
+    )
+    return session
+
+
+def _runnable_source_ids(route_plan: Sequence[SourceRoutePlanEntry]) -> tuple[str, ...]:
+    """Sources eligible for automatic pipeline run (excludes needs_manual)."""
+    return tuple(
+        item.source_id
+        for item in route_plan
+        if item.enabled
+        and item.status not in {"skipped", "failed", "needs_manual"}
+        and (not item.requires_approval or item.approved)
+        and not _is_manual_route(item)
+    )
 
 
 def _resolve_source_scope(
@@ -304,18 +452,40 @@ async def plan_source_routes(
         )
         degraded = bool(source.get("degraded"))
         status: SourceSessionStatus = "degraded" if degraded else "pending"
-        if explanation.selected_group == "manual_challenge":
+        source_name = str(source.get("source_name") or "") or None
+        manual_challenge: ManualChallengeInfo | None = None
+        if explanation.selected_group in _MANUAL_GROUPS:
             status = "needs_manual"
             requires_approval = True
+            manual_challenge = _build_manual_challenge(
+                source_id=source_id,
+                source_label=source_name,
+                explanation=explanation,
+                inventory_by_id=inventory_by_id,
+                budgets=session.budgets,
+            )
         elif explanation.selected_capability_id is None:
             status = "skipped"
             requires_approval = False
+
+        if status == "needs_manual":
+            reason = (
+                f"manual challenge required ({manual_challenge.reason_code})"
+                if manual_challenge is not None
+                else "manual challenge required"
+            )
+        elif requires_approval:
+            reason = "sensitive route requires explicit approval"
+        elif explanation.selected_capability_id:
+            reason = "route selected"
+        else:
+            reason = "no available route"
 
         route_plan.append(
             SourceRoutePlanEntry(
                 source_id=source_id,
                 source_kind=explanation.source_kind or str(source.get("source_kind") or "") or None,
-                source_name=str(source.get("source_name") or "") or None,
+                source_name=source_name,
                 enabled=True,
                 status=status,
                 selected_capability_id=explanation.selected_capability_id,
@@ -325,34 +495,32 @@ async def plan_source_routes(
                     "Any",
                     _risk_for_route(explanation, inventory_by_id=inventory_by_id),
                 ),
-                reason=(
-                    "sensitive route requires explicit approval"
-                    if requires_approval
-                    else "route selected"
-                    if explanation.selected_capability_id
-                    else "no available route"
-                ),
+                reason=reason,
                 diagnostics=explanation.diagnostics,
                 route_notes=explanation.notes,
+                manual_challenge=manual_challenge,
             )
         )
 
     needs_approval = any(item.requires_approval and not item.approved for item in route_plan)
     session.route_plan = tuple(route_plan)
-    session.selected_source_ids = tuple(
-        item.source_id for item in route_plan if item.enabled and item.status != "skipped"
-    )
+    session = _sync_needs_manual_ids(session)
+    # Runnable auto-pipeline sources exclude needs_manual (HITL is not auto-bypass).
+    session.selected_source_ids = _runnable_source_ids(route_plan)
     session.planned_at = _now()
     session.status = "awaiting_approval" if needs_approval else "planned"
+    manual_count = len(session.needs_manual_source_ids)
     session.notes = (
         *(session.notes or ()),
         f"planned {len(route_plan)} source route(s)",
         "awaiting approval for sensitive routes" if needs_approval else "no sensitive approval required",
+        f"{manual_count} source(s) need manual challenge handling" if manual_count else "no manual challenge routes",
     )
     session.provenance = {
         **(session.provenance or {}),
         "route_plan_generated_at": session.planned_at.isoformat(),
         "capability_inventory_status": inventory.status,
+        "needs_manual_count": manual_count,
     }
     return await _save_session(runner, session)
 
@@ -390,18 +558,31 @@ async def approve_search_session(
             or (entry.selected_capability_id and entry.selected_capability_id in approved_caps)
         )
         if approved:
-            updated_plan.append(entry.model_copy(update={"approved": True}))
+            updates: dict[str, Any] = {"approved": True}
+            # HITL routes stay needs_manual after approval; consent != auto-bypass.
+            if _is_manual_route(entry):
+                updates["status"] = "needs_manual"
+                if entry.manual_challenge is not None:
+                    updates["manual_challenge"] = entry.manual_challenge.model_copy(
+                        update={"approved": True}
+                    )
+                updates["reason"] = (
+                    entry.reason
+                    or "manual challenge acknowledged; waiting for operator action"
+                )
+            updated_plan.append(entry.model_copy(update=updates))
         else:
             # Unapproved sensitive routes are skipped at run time.
-            updated_plan.append(
-                entry.model_copy(
-                    update={
-                        "approved": False,
-                        "status": "skipped",
-                        "reason": entry.reason or "sensitive route not approved",
-                    }
+            updates = {
+                "approved": False,
+                "status": "skipped",
+                "reason": entry.reason or "sensitive route not approved",
+            }
+            if entry.manual_challenge is not None:
+                updates["manual_challenge"] = entry.manual_challenge.model_copy(
+                    update={"approved": False}
                 )
-            )
+            updated_plan.append(entry.model_copy(update=updates))
 
     approval = SearchSessionApproval(
         approved_source_ids=tuple(sorted(approved_sources)),
@@ -413,16 +594,13 @@ async def approve_search_session(
     session.route_plan = tuple(updated_plan)
     session.approval = approval
     session.status = "approved"
-    session.selected_source_ids = tuple(
-        item.source_id
-        for item in updated_plan
-        if item.enabled
-        and item.status not in {"skipped", "failed"}
-        and (not item.requires_approval or item.approved)
-    )
+    session = _sync_needs_manual_ids(session)
+    session.selected_source_ids = _runnable_source_ids(updated_plan)
     session.notes = (
         *(session.notes or ()),
         f"approval recorded; runnable sources={len(session.selected_source_ids)}",
+        f"needs_manual sources={len(session.needs_manual_source_ids)} "
+        "(not auto-executed; human challenge handling required)",
     )
     return await _save_session(runner, session)
 
@@ -480,6 +658,18 @@ def _apply_run_outcomes(
         if entry.status == "skipped" or not entry.enabled:
             updated_plan.append(entry)
             continue
+        # Preserve HITL routes; run outcomes must not pretend they were automated.
+        if entry.status == "needs_manual" or _is_manual_route(entry):
+            updated_plan.append(
+                entry.model_copy(
+                    update={
+                        "status": "needs_manual",
+                        "reason": entry.reason
+                        or "manual challenge still requires operator action",
+                    }
+                )
+            )
+            continue
         if entry.requires_approval and not entry.approved:
             updated_plan.append(
                 entry.model_copy(
@@ -522,6 +712,7 @@ def _apply_run_outcomes(
 
     result_refs = tuple(_result_ref_from_job(job) for job in jobs)
     session.route_plan = tuple(updated_plan)
+    session = _sync_needs_manual_ids(session)
     session.result_refs = result_refs
     session.rejected_summary = {str(k): int(v) for k, v in drop_reasons.items()}
     session.degraded_source_ids = tuple(sorted(set(degraded)))
@@ -537,6 +728,7 @@ def _apply_run_outcomes(
             "failed": getattr(summary, "failed", 0),
             "rejected": getattr(summary, "rejected", 0),
             "skipped_already_active": getattr(summary, "skipped_already_active", False),
+            "needs_manual_count": len(session.needs_manual_source_ids),
         },
     }
     return session
@@ -598,9 +790,18 @@ async def run_search_session(
 
     runnable_ids = list(session.selected_source_ids)
     if not runnable_ids:
+        session = _sync_needs_manual_ids(session)
         session.status = "completed"
         session.finished_at = _now()
-        session.notes = (*(session.notes or ()), "no runnable sources after planning/approval")
+        manual_n = len(session.needs_manual_source_ids)
+        if manual_n:
+            note = (
+                f"no auto-runnable sources; {manual_n} source(s) remain needs_manual "
+                "(human login/challenge required; not bypassed automatically)"
+            )
+        else:
+            note = "no runnable sources after planning/approval"
+        session.notes = (*(session.notes or ()), note)
         session.result_refs = ()
         return await _save_session(runner, session)
 
@@ -671,10 +872,15 @@ async def run_search_session(
 
         session.status = "completed"
         session.finished_at = _now()
-        session.notes = (
-            *(session.notes or ()),
-            f"run completed with {len(session.result_refs)} result(s)",
-        )
+        session = _sync_needs_manual_ids(session)
+        manual_n = len(session.needs_manual_source_ids)
+        complete_note = f"run completed with {len(session.result_refs)} result(s)"
+        if manual_n:
+            complete_note = (
+                f"{complete_note}; {manual_n} source(s) still needs_manual "
+                "(not auto-executed)"
+            )
+        session.notes = (*(session.notes or ()), complete_note)
         return await _save_session(runner, session)
     except SearchSessionError:
         raise
@@ -741,11 +947,36 @@ async def explain_rejected_or_degraded(
         reasons = [r for r in (entry.reason, entry.error) if r]
         if entry.status == "skipped" and entry.requires_approval and not entry.approved:
             reasons.append("sensitive route was not approved")
+        if entry.status == "needs_manual":
+            reasons.append("source requires human-in-the-loop login/challenge handling")
+            if entry.manual_challenge is not None:
+                reasons.append(f"reason_code={entry.manual_challenge.reason_code}")
+                if not entry.manual_challenge.approved:
+                    reasons.append("manual challenge not yet approved by operator")
+                else:
+                    reasons.append(
+                        "manual challenge approved as consent only; automatic bypass not performed"
+                    )
         if entry.source_id in session.degraded_source_ids:
             reasons.append("source marked degraded after run")
         # Refresh route diagnostics for currency without executing browsers.
         explanation = await runner.explain_browser_route(session.tenant_id, source_id)
         public_route = explanation_to_public_dict(explanation)
+        evidence: dict[str, object] = {
+            "selected_capability_id": entry.selected_capability_id,
+            "selected_group": entry.selected_group,
+            "requires_approval": entry.requires_approval,
+            "approved": entry.approved,
+            "route": public_route,
+            "rejected_summary": dict(session.rejected_summary),
+        }
+        notes = list(entry.route_notes) + list(explanation.notes)
+        if entry.manual_challenge is not None:
+            # Public-safe HITL payload only (no tenant/user ids, cookies, tokens).
+            evidence["manual_challenge"] = entry.manual_challenge.model_dump(mode="json")
+            notes.append(entry.manual_challenge.user_action_hint)
+            if entry.manual_challenge.budget_note:
+                notes.append(entry.manual_challenge.budget_note)
         return SearchSessionExplanation(
             session_id=session_id,
             target_type="source",
@@ -753,15 +984,8 @@ async def explain_rejected_or_degraded(
             status=entry.status,
             reasons=tuple(reasons) or ("no explicit rejection reason recorded",),
             diagnostics=entry.diagnostics or explanation.diagnostics,
-            notes=entry.route_notes + explanation.notes,
-            evidence={
-                "selected_capability_id": entry.selected_capability_id,
-                "selected_group": entry.selected_group,
-                "requires_approval": entry.requires_approval,
-                "approved": entry.approved,
-                "route": public_route,
-                "rejected_summary": dict(session.rejected_summary),
-            },
+            notes=tuple(notes),
+            evidence=evidence,
         )
 
     assert job_id is not None
