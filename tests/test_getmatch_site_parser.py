@@ -163,6 +163,15 @@ def test_embedded_captcha_script_on_real_detail_is_not_challenge() -> None:
     assert classify_getmatch_payload(html, expected="detail") is GetmatchPageKind.DETAIL
 
 
+def test_listing_translation_empty_text_is_not_empty_state() -> None:
+    html = """
+    <html><body><script id="__NEXT_DATA__" type="application/json">
+    {"pageTitle":"Вакансии","seoFilters":{},"list":{"empty":"Вакансий не найдено"}}
+    </script></body></html>
+    """
+    assert classify_getmatch_payload(html, expected="listing") is GetmatchPageKind.LISTING
+
+
 @pytest.mark.asyncio
 async def test_parser_emits_items_from_listing_and_detail() -> None:
     listing = _read("site_parsers", "getmatch", "listing.html")

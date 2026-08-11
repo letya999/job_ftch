@@ -265,13 +265,13 @@ def classify_getmatch_payload(
             return GetmatchPageKind.LAYOUT_CHANGED
         return GetmatchPageKind.LAYOUT_CHANGED
 
-    if any(marker in lowered for marker in _EMPTY_MARKERS):
-        return GetmatchPageKind.EMPTY
-
     detail_shell = any(marker.casefold() in lowered for marker in _DETAIL_SHELL_MARKERS)
     listing_shell = any(marker.casefold() in lowered for marker in _LISTING_SHELL_MARKERS)
     has_title = bool(re.search(r"<h1\b", text, flags=re.I))
     has_getmatch_identity = "getmatch" in lowered or "getmatch.ru" in lowered
+
+    if _has_explicit_empty_state(text):
+        return GetmatchPageKind.EMPTY
 
     if expected == "detail":
         if detail_shell or (has_title and has_getmatch_identity):
@@ -295,6 +295,17 @@ def classify_getmatch_payload(
     if has_getmatch_identity:
         return GetmatchPageKind.UNKNOWN
     return GetmatchPageKind.LAYOUT_CHANGED
+
+
+def _has_explicit_empty_state(text: str) -> bool:
+    lowered = text.casefold()
+    if not any(marker in lowered for marker in _EMPTY_MARKERS):
+        return False
+    if re.search(r"(?:data-empty=[\"']true[\"']|class=[\"'][^\"']*empty)", text, flags=re.I):
+        return True
+    listing_shell = any(marker.casefold() in lowered for marker in _LISTING_SHELL_MARKERS)
+    detail_shell = any(marker.casefold() in lowered for marker in _DETAIL_SHELL_MARKERS)
+    return not listing_shell and not detail_shell
 
 
 def _looks_like_challenge(text: str) -> bool:
