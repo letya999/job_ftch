@@ -120,11 +120,21 @@ def test_create_server_requires_fastmcp(monkeypatch: pytest.MonkeyPatch, tmp_pat
         create_server(configs_dir=tmp_path, base_settings=_minimal_settings())
 
 
-def test_require_runner_before_startup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_require_runner_lazy_starts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setitem(sys.modules, "fastmcp", SimpleNamespace(FastMCP=_fake_mcp_module()))
-    server = create_server(configs_dir=tmp_path, base_settings=_minimal_settings())
-    with pytest.raises(RuntimeError, match="startup"):
-        server._require_runner()
+    settings = _minimal_settings()
+    for target in (
+        "job_ftch.config.get_settings",
+        "job_ftch.application.builder.get_settings",
+        "job_ftch.application.pipeline.get_settings",
+    ):
+        monkeypatch.setattr(target, lambda s=settings: s)
+
+    server = create_server(configs_dir=_tenant_configs(tmp_path), base_settings=settings)
+    runner = await server._require_runner()
+    assert runner is server.runner
+    await server.shutdown()
 
 
 @pytest.mark.asyncio
@@ -161,9 +171,10 @@ def test_run_delegates_to_fastmcp(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
         "transport": "streamable-http",
         "host": "0.0.0.0",
         "port": 9001,
+        "show_banner": False,
     }
     server.run(transport="stdio")
-    assert server.app.run_kwargs == {"transport": "stdio"}
+    assert server.app.run_kwargs == {"transport": "stdio", "show_banner": False}
 
 
 @pytest.mark.asyncio
@@ -299,7 +310,7 @@ async def test_deprecated_adapter_shim(
 
 
 @pytest.mark.asyncio
-async def test_lifespan_starts_and_stops_runner(
+async def test_lifespan_keeps_initialize_fast_and_stops_started_runner(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -316,5 +327,7 @@ async def test_lifespan_starts_and_stops_runner(
     lifespan = server.app.kwargs.get("lifespan")
     assert lifespan is not None
     async with lifespan(server.app):
+        assert server.runner is None
+        await server._require_runner()
         assert server.runner is not None
     assert server.runner is None
