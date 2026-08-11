@@ -1,0 +1,8 @@
+# User-facing pages first; remaining docs keep default filesystem order.
+nav:
+  - index.md
+  - vision.md
+  - quickstart.md
+  - roadmap.md
+  - sources
+  - ...
