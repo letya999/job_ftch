@@ -1718,13 +1718,23 @@ class TenantRunner:
             scheduler_state=scheduler_state,
         )
 
-    async def run_all(self, *, concurrency: int = 4) -> list[RunSummary]:
+    async def run_all(
+        self,
+        *,
+        concurrency: int = 4,
+        max_items: int | None = None,
+        user_id: str | None = None,
+    ) -> list[RunSummary]:
         semaphore = asyncio.Semaphore(max(concurrency, 1))
 
         async def run_one(tenant_id: str) -> RunSummary | None:
             async with semaphore:
                 try:
-                    return await self.run_tenant(tenant_id)
+                    return await self.run_tenant(
+                        tenant_id,
+                        max_items=max_items,
+                        user_id=user_id,
+                    )
                 except Exception as exc:
                     logger.error(
                         "tenant_run_failed",

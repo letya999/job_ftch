@@ -168,6 +168,55 @@ def test_load_tenants_supports_directory_and_aggregate_file(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_run_all_propagates_operator_limits_to_each_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenants = [
+        TenantConfig(tenant_id="t1", display_name="Tenant 1", sources=[]),
+        TenantConfig(tenant_id="t2", display_name="Tenant 2", sources=[]),
+    ]
+    runner = TenantRunner.from_tenants(tenants, base_settings=_isolated_base_settings())
+    calls: list[dict[str, object]] = []
+
+    async def fake_run_tenant(
+        tenant_id: str,
+        *,
+        max_items: int | None = None,
+        user_id: str | None = None,
+        source_ids: list[str] | None = None,
+    ) -> RunSummary:
+        calls.append(
+            {
+                "tenant_id": tenant_id,
+                "max_items": max_items,
+                "user_id": user_id,
+                "source_ids": source_ids,
+            }
+        )
+        return RunSummary(tenant_id=tenant_id, source_run_id=f"run-{tenant_id}")
+
+    monkeypatch.setattr(runner, "run_tenant", fake_run_tenant)
+
+    summaries = await runner.run_all(concurrency=1, max_items=3, user_id="operator-1")
+
+    assert [summary.tenant_id for summary in summaries] == ["t1", "t2"]
+    assert calls == [
+        {
+            "tenant_id": "t1",
+            "max_items": 3,
+            "user_id": "operator-1",
+            "source_ids": None,
+        },
+        {
+            "tenant_id": "t2",
+            "max_items": 3,
+            "user_id": "operator-1",
+            "source_ids": None,
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_strategy_roundtrip_memory_backend() -> None:
     from job_ftch.application.tenant_runner import TenantStore
     from job_ftch.infrastructure.stores.in_memory import InMemoryStore
