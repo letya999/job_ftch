@@ -4,16 +4,27 @@ on:
   push:
     paths:
       - "job_ftch/adapters/mcp/**"
-      - "job_ftch/**"
+      - "docker/local-mcp/**"
+      - "deploy/mcp/**"
+      - "scripts/mcp/**"
+      - "tests/adapters/test_mcp_server.py"
+      - "tests/adapters/test_mcp_unit.py"
+      - "job_ftch/cli.py"
       - "pyproject.toml"
   pull_request:
     paths:
       - "job_ftch/adapters/mcp/**"
-      - "job_ftch/**"
+      - "docker/local-mcp/**"
+      - "deploy/mcp/**"
+      - "scripts/mcp/**"
+      - "tests/adapters/test_mcp_server.py"
+      - "tests/adapters/test_mcp_unit.py"
+      - "job_ftch/cli.py"
+      - "pyproject.toml"
 
 jobs:
   build:
-    name: Lint & build image
+    name: Lint, test, build image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -21,7 +32,26 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
+      - name: Install deps (mcp test extras)
+        run: uv sync --extra mcp --extra sqlite --extra openai
+        env:
+          JOB_FTCH_LLM_BACKEND: heuristic
+          JOB_FTCH_TRACING_ENABLED: "false"
       - name: Lint adapter
-        run: uvx ruff check job_ftch/adapters/mcp
-      - name: Build image
+        run: uv run ruff check job_ftch/adapters/mcp tests/adapters/test_mcp_server.py tests/adapters/test_mcp_unit.py
+      - name: Module boundaries
+        run: uv run python scripts/check_module_boundaries.py
+      - name: MCP unit + adapter tests (coverage >= 75%)
+        run: |
+          uv run pytest tests/adapters/test_mcp_server.py tests/adapters/test_mcp_unit.py \
+            --cov=job_ftch/adapters/mcp \
+            --cov-fail-under=75 \
+            --cov-report=term-missing \
+            -q
+        env:
+          JOB_FTCH_LLM_BACKEND: heuristic
+          JOB_FTCH_TRACING_ENABLED: "false"
+      - name: Build minimal MCP image
         run: docker build -f job_ftch/adapters/mcp/Dockerfile -t job-ftch-mcp .
+      - name: Build local-mcp profile image
+        run: docker build -f docker/local-mcp/Dockerfile -t job-ftch-local-mcp .

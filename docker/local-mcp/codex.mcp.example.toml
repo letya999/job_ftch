@@ -1,0 +1,13 @@
+# Snippet for ~/.codex/config.toml (or project .codex/config.toml)
+# After: docker compose -f docker/local-mcp/docker-compose.yml up --build
+#
+# Then restart Codex CLI and run:
+#   list_tenants
+#   llm_backend_health
+#   run_pipeline with tenant_id=local_mcp
+#   search_jobs with query="python"
+
+[mcp_servers.job_ftch]
+url = "http://127.0.0.1:8000/mcp"
+# If your Codex build wants an explicit transport name, prefer streamable HTTP.
+# transport = "streamable-http"

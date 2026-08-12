@@ -51,7 +51,7 @@ from job_ftch.application.registry import (
 )
 from job_ftch.application.run_budget import AsyncCallBudget
 from job_ftch.application.source_loader import load_sources
-from job_ftch.config import Settings, get_settings
+from job_ftch.config import Settings, get_settings, resolve_outcome_lane_backend
 from job_ftch.domain import (
     JobRecord,
     MatchDecision,
@@ -249,10 +249,9 @@ def _resolve_shot_load_plans(
 class PipelineBuilder:
     """Builds pipelines programmatically for library and adapter use."""
 
-    def __init__(self) -> None:
-        from job_ftch.config import get_settings
-
-        settings = get_settings()
+    def __init__(self, settings: Settings | None = None) -> None:
+        settings = settings or get_settings()
+        self._settings = settings
         self._source_specs: list[SourceSpec] = []
         self._source_instance: Source[RawItem] | None = None
         self._auth_provider: AuthProvider | None = None
@@ -289,7 +288,7 @@ class PipelineBuilder:
         self._snapshot_fail_open = settings.snapshot_fail_open
 
     def clone(self) -> PipelineBuilder:
-        cloned = self.__class__()
+        cloned = self.__class__(settings=self._settings)
         cloned._source_specs = list(self._source_specs)
         cloned._source_instance = self._source_instance
         cloned._auth_provider = self._auth_provider
@@ -526,6 +525,7 @@ class PipelineBuilder:
             delivery_targets=self._delivery_targets,
             decision_version=self._decision_version,
             tenant_id=self._tenant_id,
+            settings=self._settings,
         )
 
     async def run_async(self, *, max_items: int | None = None) -> RunSummary:
@@ -763,9 +763,19 @@ def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = No
             "review_output_path": tenant.review_output.render_path(tenant_id),
             "review_output_jsonl": tenant.review_output.jsonl,
             "review_output_schema_version": tenant.review_output.schema_version,
+            "review_output_backend": (
+                tenant.review_output.backend
+                if tenant.review_output.backend is not None
+                else base.get("review_output_backend")
+            ),
             "rejected_output_path": tenant.rejected_output.render_path(tenant_id),
             "rejected_output_jsonl": tenant.rejected_output.jsonl,
             "rejected_output_schema_version": tenant.rejected_output.schema_version,
+            "rejected_output_backend": (
+                tenant.rejected_output.backend
+                if tenant.rejected_output.backend is not None
+                else base.get("rejected_output_backend")
+            ),
             "review_max_quality_score": tenant.review_max_quality_score,
             "posting_min_quality_score": tenant.posting_min_quality_score,
             "store_path": Path(str(tenant.store_path).format(tenant_id=tenant_id)),
@@ -822,10 +832,10 @@ def configure(path: str | Path) -> PipelineBuilder:
         run_id=run_id,
         tenant_id=settings.tenant_id or "default",
     )
-    output_sink, main_sink, review_sink, posting_sink = build_output_sinks(settings)
-    rejected_counted, rejected_sink = build_rejected_sink(settings)
+    output_sink, main_sink, review_sink, posting_sink = build_output_sinks(settings, store=store)
+    rejected_counted, rejected_sink = build_rejected_sink(settings, store=store)
 
-    builder = PipelineBuilder()
+    builder = PipelineBuilder(settings=settings)
     builder.sources(tenant.sources)
     builder.auth(auth)
     builder.store(store)
@@ -1867,20 +1877,64 @@ def build_quarantine_sink(settings: Settings) -> Sink[QuarantinedRawItem]:
     )
 
 
+def _build_outcome_lane_sink(
+    settings: Settings,
+    *,
+    lane: str,
+    lane_backend: str | None,
+    file_settings: Settings,
+    store: Store | None,
+) -> Sink[Any]:
+    """Compose file and/or store sinks for REVIEW/REJECTED (opt-in store)."""
+    from job_ftch.sinks.null_sink import NullSink as _Null
+    from job_ftch.sinks.outcome_store import StoreOutcomeSink
+
+    file_backend, write_store = resolve_outcome_lane_backend(lane_backend, settings.sink_backend)
+    targets: list[Sink[Any]] = []
+    if file_backend is not None:
+        file_cfg = file_settings.model_copy(
+            update={"sink_backend": file_backend, "output_replace_empty": True}
+        )
+        targets.append(create_sink(file_cfg))  # type: ignore[arg-type]
+    if write_store:
+        if store is None:
+            msg = f"{lane}_output_backend requires a store when backend includes 'store'"
+            raise ValueError(msg)
+        recorder = store
+        if not hasattr(recorder, "record_operational_outcome"):
+            msg = (
+                f"{lane} store sink needs record_operational_outcome "
+                f"(got {type(store).__name__})"
+            )
+            raise TypeError(msg)
+        targets.append(StoreOutcomeSink(recorder, lane=lane))  # type: ignore[arg-type]
+    if not targets:
+        return _Null()
+    if len(targets) == 1:
+        return targets[0]
+    return FanOutSink(targets)
+
+
 def build_rejected_sink(
     settings: Settings,
+    store: Store | None = None,
 ) -> tuple[CountedSink[RejectedItem], Sink[RejectedItem]]:
-    rejected_settings = settings.rejected_settings().model_copy(
-        update={"output_replace_empty": True}
+    from job_ftch.sinks.outcome_artifact import CompactRejectedSink
+
+    inner = _build_outcome_lane_sink(
+        settings,
+        lane="rejected",
+        lane_backend=settings.rejected_output_backend,
+        file_settings=settings.rejected_settings(),
+        store=store,
     )
-    counted: CountedSink[RejectedItem] = CountedSink(
-        create_sink(rejected_settings)  # type: ignore[arg-type]
-    )
+    counted: CountedSink[RejectedItem] = CountedSink(CompactRejectedSink(inner))
     return counted, FailureTolerantSink(counted, sink_name="rejected")
 
 
 def build_output_sinks(
     settings: Settings,
+    store: Store | None = None,
 ) -> tuple[
     Sink[JobRecord],
     CountedSink[JobRecord],
@@ -1889,12 +1943,16 @@ def build_output_sinks(
 ]:
     main_settings = settings.model_copy(update={"output_replace_empty": True})
     main_sink: CountedSink[JobRecord] = CountedSink(build_sink(main_settings))
-    review_settings = settings.review_settings().model_copy(update={"output_replace_empty": True})
-    from job_ftch.sinks.review_artifact import CompactReviewSink
+    from job_ftch.sinks.outcome_artifact import CompactReviewSink
 
-    review_counted: CountedSink[JobRecord] = CountedSink(
-        CompactReviewSink(create_sink(review_settings))  # type: ignore[arg-type]
+    review_inner = _build_outcome_lane_sink(
+        settings,
+        lane="review",
+        lane_backend=settings.review_output_backend,
+        file_settings=settings.review_settings(),
+        store=store,
     )
+    review_counted: CountedSink[JobRecord] = CountedSink(CompactReviewSink(review_inner))
     posting_sink: CountedSink[JobRecord] | None = None
     accept_targets: list[Sink[JobRecord]] = [main_sink]
     if not settings.dry_run and settings.posting_backend != "none":
@@ -1988,7 +2046,11 @@ async def run_pipeline_from_settings(settings: Settings) -> RunSummary:
     from job_ftch.application.tenant_store import TenantStore
 
     if not isinstance(store, TenantStore):
-        store = TenantStore(settings.tenant_id or "default", store)
+        store = TenantStore(
+            settings.tenant_id or "default",
+            store,
+            processed_item_ttl_hours=settings.processed_item_ttl_hours,
+        )
     try:
         job_group_store = cast(JobGroupStore, await create_job_group_store_with_fallback(settings))
         llm = build_llm(settings)
@@ -2009,10 +2071,12 @@ async def run_pipeline_from_settings(settings: Settings) -> RunSummary:
             run_id=run_id,
             tenant_id=settings.tenant_id or "default",
         )
-        output_sink, main_sink, review_sink, posting_sink = build_output_sinks(settings)
-        rejected_counted, rejected_sink = build_rejected_sink(settings)
+        output_sink, main_sink, review_sink, posting_sink = build_output_sinks(
+            settings, store=store
+        )
+        rejected_counted, rejected_sink = build_rejected_sink(settings, store=store)
         builder = (
-            PipelineBuilder()
+            PipelineBuilder(settings=settings)
             .with_runtime_source(build_source(settings, store=store))
             .store(store)
             .stage(sanitize_node)

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import urljoin, urlsplit
 
 from job_ftch.application.logging import configure_logging
 from job_ftch.application.profile_inputs import build_candidate_profile_from_payload
@@ -82,6 +83,93 @@ def _json_default(value: object) -> object:
     if hasattr(value, "model_dump"):
         return cast("Any", value).model_dump(mode="json")
     return str(value)
+
+
+def _tool_annotations(
+    *,
+    read_only: bool = False,
+    destructive: bool = False,
+    idempotent: bool = False,
+    open_world: bool = False,
+) -> Any:
+    """Build MCP annotations when the installed SDK exposes them."""
+    try:
+        from mcp.types import ToolAnnotations
+    except ImportError:
+        return None
+    return ToolAnnotations(
+        readOnlyHint=read_only,
+        destructiveHint=destructive,
+        idempotentHint=idempotent,
+        openWorldHint=open_world,
+    )
+
+
+def _public_endpoint(value: str | None) -> str | None:
+    if not value:
+        return None
+    parsed = urlsplit(value)
+    if not parsed.hostname:
+        return None
+    port = f":{parsed.port}" if parsed.port is not None else ""
+    return f"{parsed.scheme}://{parsed.hostname}{port}"
+
+
+async def probe_llm_backend(settings: Settings) -> dict[str, Any]:
+    """Probe an OpenAI-compatible gateway without generation or secret output."""
+    backend = settings.llm_backend
+    base_url = settings.openai_base_url
+    result: dict[str, Any] = {
+        "ok": False,
+        "llm_backend": backend,
+        "endpoint": _public_endpoint(base_url),
+        "openai_model": settings.openai_model,
+        "relevance_llm_model": settings.relevance_llm_model,
+        "reachable": False,
+        "configured_models_available": False,
+        "models_sample": [],
+        "error": None,
+    }
+    if backend != "openai":
+        result.update(ok=True, error="backend_not_openai_compatible")
+        return result
+    if not base_url:
+        result["error"] = "base_url_missing"
+        return result
+
+    root = base_url if base_url.endswith("/") else f"{base_url}/"
+    models_url = urljoin(root, "models")
+    headers: dict[str, str] = {}
+    if settings.openai_api_key is not None:
+        headers["Authorization"] = f"Bearer {settings.openai_api_key.get_secret_value()}"
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(models_url, headers=headers)
+        if response.status_code >= 400:
+            result["error"] = f"gateway_http_{response.status_code}"
+            return result
+        payload = response.json()
+        data = payload.get("data") if isinstance(payload, dict) else None
+        ids = [
+            str(item["id"])
+            for item in (data if isinstance(data, list) else [])[:20]
+            if isinstance(item, dict) and isinstance(item.get("id"), str)
+        ]
+        required = {settings.openai_model, settings.relevance_llm_model} - {None, ""}
+        result.update(
+            ok=True,
+            reachable=True,
+            models_sample=ids,
+            configured_models_available=required.issubset(ids),
+        )
+        if ids and not result["configured_models_available"]:
+            result["error"] = "configured_model_missing"
+        return result
+    except Exception as exc:  # noqa: BLE001 - public result is intentionally redacted
+        result["error"] = f"gateway_unreachable:{type(exc).__name__}"
+        return result
 
 
 def prepare_stdio_logging(level_name: str = "INFO") -> None:
@@ -766,6 +854,11 @@ class TenantMCPServer:
         async def get_bypass_capabilities() -> dict[str, Any]:
             """Read-only inventory of browser/bypass routes and availability."""
             return await self._browser_capabilities_impl()
+
+        @self.app.tool
+        async def get_llm_backend_health() -> dict[str, Any]:
+            """Probe CLIProxy/OpenAI-compatible model routing without generation."""
+            return await probe_llm_backend(self.base_settings)
 
         @self.app.tool
         async def get_bypass_routes(

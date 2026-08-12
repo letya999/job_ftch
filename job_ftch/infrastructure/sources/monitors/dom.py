@@ -516,6 +516,7 @@ async def discover(
             ) from exc
 
         browser_config = {k: v for k, v in config.items() if k in BROWSER_KEYS}
+        browser_config["_pipeline_stats"] = config.get("_pipeline_stats")
         async with open_page(browser_config, bypass_strategy=bypass_strategy) as page:
             await install_challenge_response_detector(
                 page,

@@ -2319,6 +2319,9 @@ langfuse = [
 language = [
     { name = "lingua-language-detector" },
 ]
+local-mcp = [
+    { name = "numpy" },
+]
 mcp = [
     { name = "fastmcp" },
 ]
@@ -2481,6 +2484,7 @@ requires-dist = [
     { name = "maxminddb", marker = "extra == 'parity-lab'", specifier = "==3.1.1" },
     { name = "nodriver", marker = "extra == 'all'", specifier = ">=0.50.2" },
     { name = "nodriver", marker = "extra == 'nodriver'", specifier = ">=0.50.2" },
+    { name = "numpy", marker = "extra == 'local-mcp'", specifier = ">=1.26" },
     { name = "openai", marker = "extra == 'all'", specifier = ">=1.30" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.30" },
     { name = "opentelemetry-api", specifier = ">=1.25" },
@@ -2539,7 +2543,7 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'all'", specifier = ">=12.0" },
     { name = "websockets", marker = "extra == 'realtime'", specifier = ">=12.0" },
 ]
-provides-extras = ["browser", "camoufox", "nodriver", "parity-lab", "stealth", "tls-client", "openai", "telegram", "dagster", "faststream", "api", "mcp", "bot", "fastembed", "sqlite", "postgres", "embeddings", "qdrant", "pgvector", "ollama", "feeds", "site-scrapers", "resilience", "extraction", "realtime", "resume", "language", "translation", "reranker", "bgem3", "tracing", "langfuse", "all"]
+provides-extras = ["browser", "camoufox", "nodriver", "parity-lab", "stealth", "tls-client", "openai", "telegram", "dagster", "faststream", "api", "mcp", "local-mcp", "bot", "fastembed", "sqlite", "postgres", "embeddings", "qdrant", "pgvector", "ollama", "feeds", "site-scrapers", "resilience", "extraction", "realtime", "resume", "language", "translation", "reranker", "bgem3", "tracing", "langfuse", "all"]
 
 [package.metadata.requires-dev]
 dev = [

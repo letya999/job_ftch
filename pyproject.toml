@@ -56,6 +56,7 @@ dagster = ["dagster>=1.8"]
 faststream = ["faststream>=0.5"]
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
 mcp = ["fastmcp>=2.4"]
+local_mcp = ["numpy>=1.26"]
 bot = [
     "aiogram>=3.7",
     "telethon>=1.36",

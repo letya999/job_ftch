@@ -28,6 +28,7 @@ MCP_OPERATOR_TOOLS = frozenset(
         "get_bypass_routes",
         "get_job",
         "get_job_lineage",
+        "get_llm_backend_health",
         "get_pipeline_run",
         "get_pipeline_status",
         "get_prefilter_requirements",

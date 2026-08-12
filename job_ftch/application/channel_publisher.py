@@ -5,6 +5,12 @@ own copy of this loop. The copies drifted: only the scheduler retried flood
 waits and kept a retry window, only the chat path stopped the batch on a send
 error. Delivery semantics now live here, and adapters supply nothing but a
 transport.
+
+Publish idempotency is durable in the tenant run-state ledger:
+
+- `bot_publish:sent_ids` keeps group_id/job_id for the legacy path and feedback;
+- `bot_publish:sent_urls` keeps normalized canonical_url values so regrouping a
+  vacancy does not publish it again under a fresh group_id.
 """
 
 from __future__ import annotations
@@ -16,9 +22,12 @@ from typing import TYPE_CHECKING, Protocol
 import structlog
 
 from job_ftch.application.publish_ledger import (
+    extract_publish_canonical_url,
     extract_publish_job_id,
     load_publish_ledger,
+    load_publish_url_ledger,
     persist_publish_ledger,
+    persist_publish_url_ledger,
 )
 
 if TYPE_CHECKING:
@@ -115,22 +124,30 @@ async def publish_jobs(
 
     When `store` is provided the publish ledger is consulted and updated after
     each success, so a crash mid-batch cannot re-send what already landed.
+    Both the legacy id ledger and canonical URL ledger are checked.
     """
     outcome = PublishOutcome()
     if send_limit <= 0 or not jobs:
         return outcome
 
-    ledger: list[str] = []
+    id_ledger: list[str] = []
+    url_ledger: list[str] = []
     published_ids: set[str] = set()
+    published_urls: set[str] = set()
     if store is not None:
-        ledger = await load_publish_ledger(store)
-        published_ids = set(ledger)
+        id_ledger = await load_publish_ledger(store)
+        url_ledger = await load_publish_url_ledger(store)
+        published_ids = set(id_ledger)
+        published_urls = set(url_ledger)
 
     for job in jobs:
         if outcome.sent >= send_limit:
             break
         job_id = extract_publish_job_id(job)
-        if job_id is not None and job_id in published_ids:
+        publish_url = extract_publish_canonical_url(job)
+        already_by_id = job_id is not None and job_id in published_ids
+        already_by_url = publish_url is not None and publish_url in published_urls
+        if already_by_id or already_by_url:
             outcome.skipped_already_published += 1
             continue
 
@@ -174,10 +191,15 @@ async def publish_jobs(
 
         outcome.sent += 1
         outcome.delivered.append(job)
-        if store is not None and job_id is not None:
-            published_ids.add(job_id)
-            ledger.append(job_id)
-            ledger = await persist_publish_ledger(store, ledger)
+        if store is not None:
+            if job_id is not None:
+                published_ids.add(job_id)
+                id_ledger.append(job_id)
+                id_ledger = await persist_publish_ledger(store, id_ledger)
+            if publish_url is not None:
+                published_urls.add(publish_url)
+                url_ledger.append(publish_url)
+                url_ledger = await persist_publish_url_ledger(store, url_ledger)
         if throttle_seconds > 0:
             await sleep(throttle_seconds)
 

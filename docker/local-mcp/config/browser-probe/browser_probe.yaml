@@ -1,0 +1,24 @@
+# MCP-only browser runtime probe. Kept outside the normal tenant directory so
+# production/local ingest still exposes exactly the 17 ai_jobs sources.
+tenant_id: browser_probe
+display_name: MCP browser runtime probe
+sources:
+  - type: career_site
+    url: https://example.com/jobs
+    source_name: patchright_runtime_probe
+    limit: 1
+    detail_limit: 1
+    monitor: dom
+    monitor_config:
+      render: true
+      include_self_url: true
+store_backend: sqlite
+job_group_store_backend: sqlite
+job_backend: sqlite
+search_backend: sqlite
+store_path: /data/{tenant_id}/store.db
+job_store_path: /data/{tenant_id}/jobs.db
+sink_backend: none
+output:
+  backend: none
+  path: /data/{tenant_id}/artifacts/latest.json

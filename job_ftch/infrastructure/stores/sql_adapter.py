@@ -78,6 +78,9 @@ class SQLStoreAdapter(abc.ABC):
     _SQL_SOURCE_INGEST_STATE_GET: str
     _SQL_SOURCE_INGEST_STATE_UPSERT: str
 
+    def __init__(self, *, processed_item_ttl_hours: int | None = 24) -> None:
+        self._processed_item_ttl_hours = processed_item_ttl_hours
+
     @abc.abstractmethod
     async def _execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
         """Execute a write query."""
@@ -204,10 +207,6 @@ class SQLStoreAdapter(abc.ABC):
         )
         if existing is not None:
             return existing
-        row = await self._fetchone(
-            self._SQL_OBSERVATION_MAX_VERSION,
-            (entry.tenant_id, entry.stable_id),
-        )
         import asyncio
 
         max_retries = 3
@@ -238,6 +237,13 @@ class SQLStoreAdapter(abc.ABC):
                 )
                 if attempt == max_retries - 1 or not is_unique_violation:
                     raise
+                existing = await self.get_observation(
+                    entry.stable_id,
+                    entry.content_hash,
+                    tenant_id=entry.tenant_id,
+                )
+                if existing is not None:
+                    return existing
                 await asyncio.sleep(0.01 * (attempt + 1))
         return recorded
 
@@ -251,12 +257,9 @@ class SQLStoreAdapter(abc.ABC):
         return ObservationLedgerEntry.model_validate_json(str(row[0])) if row else None
 
     async def has_processed(self, item_id: str) -> bool:
-        from job_ftch.config import get_settings
-
-        ttl_hours = get_settings().processed_item_ttl_hours
         timestamp = await self.get(_processed_timestamp_key(item_id))
         if timestamp is not None:
-            return _is_processed_timestamp_fresh(timestamp, ttl_hours)
+            return _is_processed_timestamp_fresh(timestamp, self._processed_item_ttl_hours)
         return await self.set_contains("processed", item_id)
 
     async def mark_processed(self, item_id: str) -> None:

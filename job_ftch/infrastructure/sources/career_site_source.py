@@ -524,6 +524,7 @@ class CareerSiteSource(Source["RawItem"]):
     ) -> CareerSiteSpec:
         monitor_config = dict(monitor_config_override or self.spec.monitor_config)
         monitor_config["_bypass_strategy"] = self.bypass_strategy
+        monitor_config["_pipeline_stats"] = self.stats
         if self._bypass_ctx is not None:
             monitor_config["_bypass_context"] = self._bypass_ctx
         return self.spec.model_copy(update={"monitor_config": monitor_config})

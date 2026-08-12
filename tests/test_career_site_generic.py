@@ -779,6 +779,7 @@ async def test_monitor_receives_runtime_bypass_strategy(monkeypatch):
     class _FakeMonitor:
         async def discover(self, spec, monitor_http):  # type: ignore[no-untyped-def]
             captured["bypass"] = spec.monitor_config.get("_bypass_strategy")
+            captured["stats"] = spec.monitor_config.get("_pipeline_stats")
             del monitor_http
             return {"urls": []}
 
@@ -801,6 +802,7 @@ async def test_monitor_receives_runtime_bypass_strategy(monkeypatch):
 
     assert items == []
     assert captured["bypass"] is source.bypass_strategy
+    assert captured["stats"] is source.stats
 
 
 @pytest.mark.asyncio

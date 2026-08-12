@@ -137,7 +137,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Tenant config directory (or set JOB_FTCH_CONFIGS_DIR). Also accepted as a global flag.",
     )
-    mcp_parser.add_argument("--transport", choices=("stdio", "http", "sse"), default="stdio")
+    mcp_parser.add_argument(
+        "--transport",
+        choices=("stdio", "http", "sse", "streamable-http"),
+        default="stdio",
+    )
     mcp_parser.add_argument("--host", default="127.0.0.1")
     mcp_parser.add_argument("--port", type=int, default=8000)
 

@@ -170,8 +170,8 @@ def test_mcp_adapter_registers_tool_and_resource(monkeypatch: pytest.MonkeyPatch
         assert any(issubclass(warning.category, DeprecationWarning) for warning in w)
 
     assert server.name == "job_ftch"
-    # TenantMCPServer surface: 31 operator tools (no legacy aliases), 3 resources
-    assert registered["tools"] == 31
+    # TenantMCPServer surface: 32 operator tools (no legacy aliases), 3 resources
+    assert registered["tools"] == 32
     assert registered["resources"] == 3
     uris = cast("list[str]", registered["uris"])
     assert any("jobs://" in uri for uri in uris)

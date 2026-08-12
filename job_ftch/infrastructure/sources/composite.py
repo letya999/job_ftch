@@ -38,6 +38,7 @@ class SourceFetchResult:
     rich_emitted: int = 0
     scraped: int = 0
     scrape_fallback_used: int = 0
+    browser_navigations_attempted: int = 0
     monitor_truncated: int = 0
     freshness_filtered: int = 0
     freshness_undated_passed: int = 0
@@ -98,6 +99,7 @@ def _capture_source_stats(source: object, result: SourceFetchResult) -> None:
             "rich_emitted",
             "scraped",
             "scrape_fallback_used",
+            "browser_navigations_attempted",
             "monitor_truncated",
             "freshness_filtered",
             "freshness_undated_passed",
