@@ -34,24 +34,32 @@ MCP_OPERATOR_TOOLS = frozenset(
         "get_llm_backend_health",
         "get_pipeline_run",
         "get_pipeline_status",
+        "evaluate_prefilter",
         "get_prefilter_requirements",
+        "get_prefilter_status",
         "get_search_session",
         "get_sources",
         "get_tenant_status",
         "ingest_resume",
         "list_examples",
         "list_pipeline_runs",
+        "list_prefilter_artifacts",
         "list_profiles",
         "list_search_session_results",
         "list_tenants",
         "plan_search_session",
+        "prepare_prefilter_dataset",
+        "promote_prefilter",
         "recommend_runtime_setup",
         "remove_example",
         "reset_tenant",
+        "rollback_prefilter",
         "run_pipeline",
         "run_search_session",
         "save_profile",
         "search_jobs",
+        "train_prefilter",
+        "validate_prefilter_dataset",
         "validate_runtime_setup",
     }
 )
@@ -1028,5 +1036,139 @@ async def test_mcp_scenario_examples_resume_vacancy_mapping(
     remaining = await server.app.tools["get_examples_summary"]("t_ex", "u1", None)
     assert remaining["counts"]["positive_vacancy"] == 0
     assert remaining["counts"]["negative_resume"] == 1
+
+    await server.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_mcp_scenario_prefilter_prepare_validate_promote(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scenario: prepare/validate/train dry-run/promote/rollback stay gated."""
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    (configs_dir / "tenant.json").write_text(
+        json.dumps(
+            {
+                "tenant_id": "t_pf",
+                "display_name": "Prefilter",
+                "sources": [],
+                "store_backend": "sqlite",
+                "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    _install_fake_fastmcp(monkeypatch)
+
+    from job_ftch.adapters.mcp.server import create_server
+
+    server = create_server(configs_dir=configs_dir)
+    await server.startup()
+
+    await server.app.tools["add_example"](
+        "t_pf",
+        "u1",
+        "vacancy",
+        "positive",
+        "Hiring senior LLM engineer, Python, RAG",
+        None,
+        "defer",
+    )
+    await server.app.tools["add_example"](
+        "t_pf",
+        "u1",
+        "vacancy",
+        "negative",
+        "Hiring salesperson for retail shop",
+        None,
+        "defer",
+    )
+
+    status = await server.app.tools["get_prefilter_status"]("t_pf", None)
+    assert status["dirty"] is True
+    assert status["promotion"]["automatic_after_example_change"] is False
+
+    prepared = await server.app.tools["prepare_prefilter_dataset"](
+        "t_pf",
+        None,
+        "examples",
+        None,
+        "u1",
+    )
+    assert prepared["n_rows"] == 2
+    assert prepared["n_positive"] == 1
+    assert prepared["ok"] is False
+
+    validated = await server.app.tools["validate_prefilter_dataset"](
+        prepared["path"],
+        "t_pf",
+    )
+    assert validated["ok"] is False
+    assert validated["production_ready"] is False
+
+    dry = await server.app.tools["train_prefilter"](
+        "t_pf",
+        None,
+        prepared["path"],
+        True,
+        0.30,
+    )
+    assert dry["dry_run"] is True
+    assert dry["would_write"] is False
+
+    root = tmp_path / "t_pf" / "prefilter" / "artifacts"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "art-ok.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "model_version": "tfidf-logreg-v1",
+                "vocabulary": {},
+                "idf": [],
+                "coef": [],
+                "intercept": 0.0,
+                "training": {"n_rows": 2200, "n_positive": 250},
+                "metrics": {
+                    "target_threshold": 0.3,
+                    "holdout_positive_retention": 0.95,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (root / "art-prev.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "model_version": "tfidf-logreg-v1",
+                "vocabulary": {},
+                "idf": [],
+                "coef": [],
+                "intercept": 0.0,
+                "training": {"n_rows": 2200, "n_positive": 200},
+                "metrics": {
+                    "target_threshold": 0.3,
+                    "holdout_positive_retention": 0.92,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    first = await server.app.tools["promote_prefilter"]("t_pf", "art-prev", None, True)
+    assert first["ok"] is True
+    second = await server.app.tools["promote_prefilter"]("t_pf", "art-ok", None, True)
+    assert second["ok"] is True
+    assert second["previous_artifact_id"] == "art-prev"
+    live = await server.app.tools["get_prefilter_status"]("t_pf", None)
+    assert live["using_promoted"] is True
+    assert str(live["active_model_path"]).replace("\\", "/").endswith("prefilter/current.json")
+    rolled = await server.app.tools["rollback_prefilter"]("t_pf", None)
+    assert rolled["ok"] is True
+    listed = await server.app.tools["list_prefilter_artifacts"]("t_pf", None)
+    assert listed["count"] == 2
+    assert listed["current_artifact_id"] == "art-prev"
 
     await server.shutdown()

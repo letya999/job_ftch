@@ -61,6 +61,8 @@ This branch exposes only the new operator surface (no legacy MCP tool aliases).
 - `recommend_runtime_setup(tenant_id, source_id, goal, platform)`
 - `validate_runtime_setup(goal, tenant_id, source_id)`
 - `get_prefilter_requirements(profile_type)`
+- `get_prefilter_status` / `prepare_prefilter_dataset` / `validate_prefilter_dataset`
+- `train_prefilter` / `evaluate_prefilter` / `promote_prefilter` / `rollback_prefilter` / `list_prefilter_artifacts`
 - `search_jobs(query, tenant_id, limit)`
 - `get_job(job_id, tenant_id)`
 - `get_job_lineage(job_id, tenant_id)`

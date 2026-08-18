@@ -47,6 +47,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_pipeline_reliability.py](test_pipeline_reliability.py)
 - [test_pipeline_seams.py](test_pipeline_seams.py)
 - [test_policy_writer_contract.py](test_policy_writer_contract.py)
+- [test_prefilter_artifacts.py](test_prefilter_artifacts.py)
 - [test_profile_pipeline_fixes.py](test_profile_pipeline_fixes.py)
 - [test_prompt_builder.py](test_prompt_builder.py)
 - [test_release_gates.py](test_release_gates.py)

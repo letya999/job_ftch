@@ -80,6 +80,12 @@ Legacy MCP tool names (`run_all_pipelines`, `get_status`, `list_sources`,
 | `get_bypass_capabilities()` / `get_bypass_routes(...)` | browser/bypass inventory |
 | `recommend_runtime_setup(...)` / `validate_runtime_setup(...)` | install/config readiness |
 | `get_prefilter_requirements(profile_type=null)` | prefilter dataset contract |
+| `get_prefilter_status(tenant_id, profile_id=null)` | dirty flag + current artifact |
+| `prepare_prefilter_dataset(tenant_id, profile_id=null, source="examples\|feedback\|eval_dataset\|mixed")` | build JSONL |
+| `validate_prefilter_dataset(dataset_id_or_path, tenant_id=null)` | size/label contract |
+| `train_prefilter(..., dry_run=true)` | train artifact; default does not write |
+| `evaluate_prefilter(tenant_id, artifact_id, dataset_id_or_path=null)` | holdout/dataset gate |
+| `promote_prefilter` / `rollback_prefilter` / `list_prefilter_artifacts` | gated promotion; next pipeline run uses `{store}/prefilter/current.json` |
 | `reset_tenant(tenant_id)` | dangerous admin reset |
 
 Setup/prefilter tools are read-only: they never install packages, never start

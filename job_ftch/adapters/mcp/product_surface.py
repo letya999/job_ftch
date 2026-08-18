@@ -186,6 +186,9 @@ async def add_shots(
             sync_errors.append(f"embed:{type(exc).__name__}: {exc}")
 
     await runner.save_and_activate_candidate_profile(tenant_id, managed)
+    from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
+
+    mark_prefilter_dirty(getattr(runtime, "settings", None))
 
     # Full profile mirror (same as bot document path) for scorer visibility.
     try:
@@ -271,6 +274,9 @@ async def remove_shot(
     except Exception as exc:  # noqa: BLE001
         sync_error = f"{type(exc).__name__}: {exc}"
     await runner.save_and_activate_candidate_profile(tenant_id, managed)
+    from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
+
+    mark_prefilter_dirty(getattr(runner.get_runtime(tenant_id), "settings", None))
     examples = list_examples(managed)
     return {
         "tenant_id": tenant_id,
@@ -416,6 +422,9 @@ async def add_operator_example(
         )
         managed = add_example_to_profile(managed, cleaned, kind=example_kind(polarity, shot_kind))
         await runner.save_and_activate_candidate_profile(tenant_id, managed)
+        from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
+
+        mark_prefilter_dirty(getattr(runner.get_runtime(tenant_id), "settings", None))
         examples = list_examples(managed)
         return {
             "tenant_id": tenant_id,
@@ -545,6 +554,9 @@ async def clear_operator_examples(
             managed = remove_example_from_profile(managed, ekind, 0)
             removed += 1
     await runner.save_and_activate_candidate_profile(tenant_id, managed)
+    from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
+
+    mark_prefilter_dirty(getattr(runner.get_runtime(tenant_id), "settings", None))
     remaining = list_examples(managed)
     return {
         "tenant_id": tenant_id,

@@ -1727,11 +1727,15 @@ def build_nodes(
             reason="no_profile_shots",
         )
 
+    from job_ftch.application.prefilter_artifacts import resolve_prefilter_model_path
+
     nodes.append(
         TfidfLogregRelevancePrefilterNode(
             threshold=0.35,
             mode="gate",
-            model_path="fixtures/prefilter/tfidf_logreg_v1.json",
+            model_path=resolve_prefilter_model_path(
+                settings, "fixtures/prefilter/tfidf_logreg_v1.json"
+            ),
         )
     )
     nodes.append(
@@ -1902,10 +1906,7 @@ def _build_outcome_lane_sink(
             raise ValueError(msg)
         recorder = store
         if not hasattr(recorder, "record_operational_outcome"):
-            msg = (
-                f"{lane} store sink needs record_operational_outcome "
-                f"(got {type(store).__name__})"
-            )
+            msg = f"{lane} store sink needs record_operational_outcome (got {type(store).__name__})"
             raise TypeError(msg)
         targets.append(StoreOutcomeSink(recorder, lane=lane))  # type: ignore[arg-type]
     if not targets:

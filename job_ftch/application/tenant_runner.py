@@ -978,6 +978,9 @@ class TenantRunner:
             from job_ftch.application.graph.pipeline_stage import GraphPipelineStage
 
             graph = compile_graph(load_graph(runtime.settings.pipeline_graph_path))
+            from job_ftch.application.prefilter_artifacts import apply_promoted_prefilter_to_graph
+
+            apply_promoted_prefilter_to_graph(runtime.settings, graph)
             expected_hash = runtime.settings.pipeline_graph_expected_hash
             if expected_hash is not None and graph.graph_hash != expected_hash:
                 raise RuntimeError(

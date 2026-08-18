@@ -814,6 +814,9 @@ class TenantMCPServer:
             await self._require_runner().set_active_candidate_profile(
                 tenant_id, user_id, profile_id
             )
+            from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
+
+            mark_prefilter_dirty(self._require_runner().get_runtime(tenant_id).settings)
             return saved
 
         @self.app.tool
@@ -957,6 +960,137 @@ class TenantMCPServer:
             return _prefilter_requirements_payload(profile_type)
 
         @self.app.tool
+        async def get_prefilter_status(
+            tenant_id: str,
+            profile_id: str | None = None,
+        ) -> dict[str, Any]:
+            """Return dirty flag, current artifact, and training readiness."""
+            from job_ftch.application.prefilter_artifacts import get_prefilter_status
+
+            return get_prefilter_status(
+                self._require_runner().get_runtime(tenant_id).settings,
+                tenant_id=tenant_id,
+                profile_id=profile_id,
+            )
+
+        @self.app.tool
+        async def prepare_prefilter_dataset(
+            tenant_id: str,
+            profile_id: str | None = None,
+            source: str = "examples",
+            output: str | None = None,
+            user_id: str = "mcp",
+        ) -> dict[str, Any]:
+            """Build a training JSONL from examples, feedback, eval dataset, or mixed."""
+            from job_ftch.application.prefilter_artifacts import prepare_prefilter_dataset
+
+            return await prepare_prefilter_dataset(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                profile_id=profile_id,
+                source=source,
+                output=output,
+                user_id=user_id,
+            )
+
+        @self.app.tool
+        async def validate_prefilter_dataset(
+            dataset_id_or_path: str,
+            tenant_id: str | None = None,
+        ) -> dict[str, Any]:
+            """Validate JSONL size/label contract without training."""
+            from job_ftch.application.prefilter_artifacts import validate_prefilter_dataset
+
+            settings = None
+            if tenant_id:
+                settings = self._require_runner().get_runtime(tenant_id).settings
+            return validate_prefilter_dataset(dataset_id_or_path, settings)
+
+        @self.app.tool
+        async def train_prefilter(
+            tenant_id: str,
+            profile_id: str | None = None,
+            dataset_id_or_path: str | None = None,
+            dry_run: bool = True,
+            threshold: float = 0.30,
+        ) -> dict[str, Any]:
+            """Train a TF-IDF/LogReg artifact. Default dry_run does not write."""
+            from job_ftch.application.prefilter_artifacts import train_prefilter
+
+            return train_prefilter(
+                self._require_runner().get_runtime(tenant_id).settings,
+                tenant_id=tenant_id,
+                profile_id=profile_id,
+                dataset_id_or_path=dataset_id_or_path,
+                dry_run=dry_run,
+                threshold=threshold,
+            )
+
+        @self.app.tool
+        async def evaluate_prefilter(
+            tenant_id: str,
+            artifact_id: str,
+            dataset_id_or_path: str | None = None,
+            threshold: float | None = None,
+        ) -> dict[str, Any]:
+            """Evaluate a trained artifact against stored holdout and optional dataset."""
+            from job_ftch.application.prefilter_artifacts import evaluate_prefilter
+
+            return evaluate_prefilter(
+                self._require_runner().get_runtime(tenant_id).settings,
+                tenant_id=tenant_id,
+                artifact_id=artifact_id,
+                dataset_id_or_path=dataset_id_or_path,
+                threshold=threshold,
+            )
+
+        @self.app.tool
+        async def promote_prefilter(
+            tenant_id: str,
+            artifact_id: str,
+            threshold: float | None = None,
+            require_gate_pass: bool = True,
+        ) -> dict[str, Any]:
+            """Promote an artifact to current after an eval gate."""
+            from job_ftch.application.prefilter_artifacts import promote_prefilter
+
+            return promote_prefilter(
+                self._require_runner().get_runtime(tenant_id).settings,
+                tenant_id=tenant_id,
+                artifact_id=artifact_id,
+                threshold=threshold,
+                require_gate_pass=require_gate_pass,
+            )
+
+        @self.app.tool
+        async def rollback_prefilter(
+            tenant_id: str,
+            artifact_id: str | None = None,
+        ) -> dict[str, Any]:
+            """Roll current artifact back to previous or an explicit id."""
+            from job_ftch.application.prefilter_artifacts import rollback_prefilter
+
+            return rollback_prefilter(
+                self._require_runner().get_runtime(tenant_id).settings,
+                tenant_id=tenant_id,
+                artifact_id=artifact_id,
+            )
+
+        @self.app.tool
+        async def list_prefilter_artifacts(
+            tenant_id: str,
+            profile_id: str | None = None,
+        ) -> dict[str, Any]:
+            """List trained tenant artifacts and which one is current."""
+            from job_ftch.application.prefilter_artifacts import list_prefilter_artifacts
+
+            return list_prefilter_artifacts(
+                self._require_runner().get_runtime(tenant_id).settings,
+                tenant_id=tenant_id,
+                profile_id=profile_id,
+            )
+
+        @self.app.tool
         async def ingest_resume(
             tenant_id: str,
             user_id: str,
@@ -987,6 +1121,9 @@ class TenantMCPServer:
                 )
             except Exception as exc:  # noqa: BLE001 - ingest already persisted
                 sync_error = f"{type(exc).__name__}: {exc}"
+            from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
+
+            mark_prefilter_dirty(self._require_runner().get_runtime(tenant_id).settings)
             return {
                 "user_id": record.user_id,
                 "profile_id": record.profile_id,
