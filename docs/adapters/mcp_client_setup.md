@@ -1,7 +1,7 @@
 ---
 title: "MCP client setup"
 description: "How to point local MCP clients at the job_ftch tenant server."
-updated: 2026-08-12
+updated: 2026-08-18
 ---
 # MCP client setup
 
@@ -54,6 +54,7 @@ This branch exposes only the new operator surface (no legacy MCP tool aliases).
 - `list_pipeline_runs(tenant_id, limit)`
 - `get_pipeline_run(run_id, tenant_id)`
 - `list_profiles` / `save_profile` / `activate_profile` / `ingest_resume`
+- `get_examples_summary` / `list_examples` / `add_example` / `remove_example` / `clear_examples`
 - `create_search_session` / `plan_search_session` / `approve_search_session` / `run_search_session`
 - `get_search_session` / `list_search_session_results` / `explain_search_session` / `cancel_search_session`
 - `get_bypass_capabilities()` / `get_bypass_routes(tenant_id, source_id, bypass)`

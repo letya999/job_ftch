@@ -25,9 +25,21 @@ SurfaceName = Literal["core", "ops", "admin"]
 
 ShotKind = Literal["resume", "job"]
 ShotPolarity = Literal["positive", "negative"]
+ExampleKind = Literal["resume", "vacancy"]
+ExampleLabel = Literal["positive", "negative"]
 
 _DEFAULT_USER = "mcp"
 _DEFAULT_PROFILE = "mcp_default"
+_EXAMPLE_KINDS = frozenset({"resume", "vacancy"})
+_EXAMPLE_LABELS = frozenset({"positive", "negative"})
+_EXAMPLE_CLEAR_KINDS = frozenset({"all", "resume", "vacancy"})
+_REFRESH_POLICIES = frozenset({"auto", "defer", "sync"})
+_PUBLIC_EXAMPLE_KEYS = {
+    "positive_resume": "positive_resume",
+    "negative_resume": "negative_resume",
+    "positive_job": "positive_vacancy",
+    "negative_job": "negative_vacancy",
+}
 
 
 def resolve_surface() -> SurfaceName:
@@ -268,6 +280,281 @@ async def remove_shot(
         "removed_preview": removed_text[:200],
         "counts": {k: len(v) for k, v in examples.items()},
         "shot_sync_error": sync_error,
+    }
+
+
+def example_error(code: str, message: str, **extra: object) -> dict[str, Any]:
+    payload: dict[str, Any] = {"error": code, "message": message}
+    payload.update(extra)
+    return payload
+
+
+def _shot_kind(kind: str) -> ShotKind:
+    return "job" if kind == "vacancy" else "resume"
+
+
+def _public_counts(counts: dict[str, int]) -> dict[str, int]:
+    return {_PUBLIC_EXAMPLE_KEYS.get(key, key): value for key, value in counts.items()}
+
+
+def _bucket_keys(*, kind: str, label: str | None) -> list[str]:
+    keys: list[str]
+    if kind == "resume":
+        keys = ["positive_resume", "negative_resume"]
+    elif kind == "vacancy":
+        keys = ["positive_job", "negative_job"]
+    else:
+        keys = ["positive_resume", "negative_resume", "positive_job", "negative_job"]
+    if label == "positive":
+        return [key for key in keys if key.startswith("positive_")]
+    if label == "negative":
+        return [key for key in keys if key.startswith("negative_")]
+    return keys
+
+
+def _key_to_kind_label(key: str) -> tuple[ExampleKind, ExampleLabel]:
+    label: ExampleLabel = "negative" if key.startswith("negative_") else "positive"
+    kind: ExampleKind = "vacancy" if key.endswith("job") else "resume"
+    return kind, label
+
+
+async def get_examples_summary(
+    runner: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    profile_id: str | None = None,
+) -> dict[str, Any]:
+    listed = await list_shots(runner, tenant_id=tenant_id, user_id=user_id, profile_id=profile_id)
+    counts = _public_counts(listed["counts"])
+    return {
+        "tenant_id": listed["tenant_id"],
+        "user_id": listed["user_id"],
+        "profile_id": listed["profile_id"],
+        "counts": counts,
+        "total": sum(counts.values()),
+    }
+
+
+async def list_operator_examples(
+    runner: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    profile_id: str | None = None,
+    kind: str = "all",
+    label: str | None = None,
+) -> dict[str, Any]:
+    if kind not in _EXAMPLE_CLEAR_KINDS:
+        return example_error(
+            "invalid_arguments",
+            "kind must be one of all|resume|vacancy",
+            kind=kind,
+        )
+    if label is not None and label not in _EXAMPLE_LABELS:
+        return example_error(
+            "invalid_arguments",
+            "label must be one of positive|negative",
+            label=label,
+        )
+    listed = await list_shots(runner, tenant_id=tenant_id, user_id=user_id, profile_id=profile_id)
+    wanted = set(_bucket_keys(kind=kind, label=label))
+    examples = {
+        _PUBLIC_EXAMPLE_KEYS.get(key, key): list(values)
+        for key, values in listed["examples"].items()
+        if key in wanted
+    }
+    return {
+        "tenant_id": listed["tenant_id"],
+        "user_id": listed["user_id"],
+        "profile_id": listed["profile_id"],
+        "kind": kind,
+        "label": label,
+        "examples": examples,
+        "counts": {key: len(values) for key, values in examples.items()},
+    }
+
+
+async def add_operator_example(
+    runner: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    kind: str,
+    label: str,
+    text: str,
+    profile_id: str | None = None,
+    refresh_policy: str = "auto",
+) -> dict[str, Any]:
+    if kind not in _EXAMPLE_KINDS:
+        return example_error(
+            "invalid_arguments",
+            "kind must be one of resume|vacancy",
+            kind=kind,
+        )
+    if label not in _EXAMPLE_LABELS:
+        return example_error(
+            "invalid_arguments",
+            "label must be one of positive|negative",
+            label=label,
+        )
+    if refresh_policy not in _REFRESH_POLICIES:
+        return example_error(
+            "invalid_arguments",
+            "refresh_policy must be one of auto|defer|sync",
+            refresh_policy=refresh_policy,
+        )
+    cleaned = _strip_shell_noise(text)
+    if not cleaned:
+        return example_error("invalid_arguments", "text must be non-empty")
+
+    polarity = cast("ShotPolarity", label)
+    shot_kind = _shot_kind(kind)
+    if refresh_policy == "defer":
+        managed = await ensure_managed_profile(
+            runner, tenant_id=tenant_id, user_id=user_id, profile_id=profile_id
+        )
+        managed = add_example_to_profile(managed, cleaned, kind=example_kind(polarity, shot_kind))
+        await runner.save_and_activate_candidate_profile(tenant_id, managed)
+        examples = list_examples(managed)
+        return {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "profile_id": managed.profile_id,
+            "kind": kind,
+            "label": label,
+            "added": 1,
+            "counts": _public_counts({key: len(values) for key, values in examples.items()}),
+            "refresh_policy": refresh_policy,
+            "refresh_deferred": True,
+            "prefilter_dirty": True,
+            "shot_sync_errors": [],
+            "ontology_errors": [],
+        }
+
+    result = await add_shots(
+        runner,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        polarity=polarity,
+        kind=shot_kind,
+        text=cleaned,
+        profile_id=profile_id,
+    )
+    return {
+        "tenant_id": result["tenant_id"],
+        "user_id": result["user_id"],
+        "profile_id": result["profile_id"],
+        "kind": kind,
+        "label": label,
+        "added": result["added"],
+        "counts": _public_counts(result["counts"]),
+        "refresh_policy": refresh_policy,
+        "refresh_deferred": False,
+        "prefilter_dirty": True,
+        "shot_sync_errors": result["shot_sync_errors"],
+        "ontology_errors": result["ontology_errors"],
+        "ontology_store": result["ontology_store"],
+        "embedding_provider": result["embedding_provider"],
+    }
+
+
+async def remove_operator_example(
+    runner: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    kind: str,
+    label: str,
+    index: int,
+    profile_id: str | None = None,
+) -> dict[str, Any]:
+    if kind not in _EXAMPLE_KINDS:
+        return example_error(
+            "invalid_arguments",
+            "kind must be one of resume|vacancy",
+            kind=kind,
+        )
+    if label not in _EXAMPLE_LABELS:
+        return example_error(
+            "invalid_arguments",
+            "label must be one of positive|negative",
+            label=label,
+        )
+    try:
+        result = await remove_shot(
+            runner,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            polarity=cast("ShotPolarity", label),
+            kind=_shot_kind(kind),
+            index=index,
+            profile_id=profile_id,
+        )
+    except ValueError as exc:
+        return example_error("invalid_arguments", str(exc), kind=kind, label=label, index=index)
+    return {
+        "tenant_id": result["tenant_id"],
+        "user_id": result["user_id"],
+        "profile_id": result["profile_id"],
+        "kind": kind,
+        "label": label,
+        "removed_index": result["removed_index"],
+        "removed_preview": result["removed_preview"],
+        "counts": _public_counts(result["counts"]),
+        "prefilter_dirty": True,
+        "shot_sync_error": result["shot_sync_error"],
+    }
+
+
+async def clear_operator_examples(
+    runner: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    kind: str = "all",
+    profile_id: str | None = None,
+) -> dict[str, Any]:
+    if kind not in _EXAMPLE_CLEAR_KINDS:
+        return example_error(
+            "invalid_arguments",
+            "kind must be one of all|resume|vacancy",
+            kind=kind,
+        )
+    managed = await ensure_managed_profile(
+        runner, tenant_id=tenant_id, user_id=user_id, profile_id=profile_id
+    )
+    examples = list_examples(managed)
+    removed = 0
+    sync_errors: list[str] = []
+    for key in _bucket_keys(kind=kind, label=None):
+        example_kind_name, label = _key_to_kind_label(key)
+        role = shot_role(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            kind=_shot_kind(example_kind_name),
+            polarity=label,
+        )
+        texts = list(examples.get(key, []))
+        ekind = example_kind(label, _shot_kind(example_kind_name))
+        for text in texts:
+            try:
+                await remove_shot_async(text=text, role=role)
+            except Exception as exc:  # noqa: BLE001 - profile still cleared
+                sync_errors.append(f"{type(exc).__name__}: {exc}")
+            managed = remove_example_from_profile(managed, ekind, 0)
+            removed += 1
+    await runner.save_and_activate_candidate_profile(tenant_id, managed)
+    remaining = list_examples(managed)
+    return {
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "profile_id": managed.profile_id,
+        "kind": kind,
+        "removed": removed,
+        "counts": _public_counts({key: len(values) for key, values in remaining.items()}),
+        "prefilter_dirty": True,
+        "shot_sync_errors": sync_errors,
     }
 
 

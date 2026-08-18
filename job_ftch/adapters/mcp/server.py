@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import urljoin, urlsplit
 
+from job_ftch.adapters.mcp import product_surface as mcp_examples
 from job_ftch.application.logging import configure_logging
 from job_ftch.application.profile_inputs import build_candidate_profile_from_payload
 from job_ftch.application.source_inputs import build_source_spec_from_input
@@ -975,12 +976,115 @@ class TenantMCPServer:
             summary = resume.summary if resume is not None else None
             if summary is None and record.profile.search_profiles:
                 summary = record.profile.search_profiles[0].name
+            sync_error: str | None = None
+            try:
+                from job_ftch.application.shot_sync import sync_profile_to_shot_store
+
+                await sync_profile_to_shot_store(
+                    profile=record,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+            except Exception as exc:  # noqa: BLE001 - ingest already persisted
+                sync_error = f"{type(exc).__name__}: {exc}"
             return {
                 "user_id": record.user_id,
                 "profile_id": record.profile_id,
                 "updated_at": record.updated_at.isoformat(),
                 "summary": summary,
+                "prefilter_dirty": True,
+                "shot_sync_error": sync_error,
             }
+
+        @self.app.tool
+        async def get_examples_summary(
+            tenant_id: str,
+            user_id: str,
+            profile_id: str | None = None,
+        ) -> dict[str, Any]:
+            """Return example counts for a user profile (resume/vacancy × polarity)."""
+            return await mcp_examples.get_examples_summary(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                profile_id=profile_id,
+            )
+
+        @self.app.tool
+        async def list_examples(
+            tenant_id: str,
+            user_id: str,
+            profile_id: str | None = None,
+            kind: str = "all",
+            label: str | None = None,
+        ) -> dict[str, Any]:
+            """List resume/vacancy examples, optionally filtered by kind and label."""
+            return await mcp_examples.list_operator_examples(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                profile_id=profile_id,
+                kind=kind,
+                label=label,
+            )
+
+        @self.app.tool
+        async def add_example(
+            tenant_id: str,
+            user_id: str,
+            kind: str,
+            label: str,
+            text: str,
+            profile_id: str | None = None,
+            refresh_policy: str = "auto",
+        ) -> dict[str, Any]:
+            """Add a positive/negative resume or vacancy example and refresh learning."""
+            return await mcp_examples.add_operator_example(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                kind=kind,
+                label=label,
+                text=text,
+                profile_id=profile_id,
+                refresh_policy=refresh_policy,
+            )
+
+        @self.app.tool
+        async def remove_example(
+            tenant_id: str,
+            user_id: str,
+            kind: str,
+            label: str,
+            index: int,
+            profile_id: str | None = None,
+        ) -> dict[str, Any]:
+            """Remove one example by kind, label, and index."""
+            return await mcp_examples.remove_operator_example(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                kind=kind,
+                label=label,
+                index=index,
+                profile_id=profile_id,
+            )
+
+        @self.app.tool
+        async def clear_examples(
+            tenant_id: str,
+            user_id: str,
+            kind: str = "all",
+            profile_id: str | None = None,
+        ) -> dict[str, Any]:
+            """Clear resume, vacancy, or all examples for a profile."""
+            return await mcp_examples.clear_operator_examples(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                kind=kind,
+                profile_id=profile_id,
+            )
 
         @self.app.tool
         async def create_search_session(

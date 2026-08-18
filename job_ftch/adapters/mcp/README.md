@@ -1,7 +1,7 @@
 # MCP server adapter
 
 A FastMCP server that exposes operator-facing `job_ftch` tools
-(`get_sources`, `run_pipeline`, `get_bypass_capabilities`, …) and `jobs://`
+(`get_sources`, `run_pipeline`, `add_example`, `get_bypass_capabilities`, …) and `jobs://`
 resources to MCP clients (Claude Code, Cursor, Claude Desktop). This branch
 uses the new operator surface only; legacy MCP tool aliases are not registered.
 See `docs/adapters/mcp_adapter.md`.

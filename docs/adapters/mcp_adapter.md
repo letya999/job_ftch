@@ -1,7 +1,7 @@
 ---
 title: "MCP adapter"
 description: "FastMCP tenant server exposing pipeline tools and job resources."
-updated: 2026-08-12
+updated: 2026-08-18
 ---
 # MCP adapter
 
@@ -69,6 +69,11 @@ Legacy MCP tool names (`run_all_pipelines`, `get_status`, `list_sources`,
 | `get_pipeline_run(run_id, tenant_id=null)` | single run |
 | `list_profiles(tenant_id, user_id)` / `save_profile(...)` / `activate_profile(...)` | candidate profiles |
 | `ingest_resume(tenant_id, user_id, resume_text, profile_id=null, activate=true)` | resume ingestion |
+| `get_examples_summary(tenant_id, user_id, profile_id=null)` | example counts |
+| `list_examples(tenant_id, user_id, profile_id=null, kind="all\|resume\|vacancy", label=null)` | list resume/vacancy examples |
+| `add_example(tenant_id, user_id, kind, label, text, profile_id=null, refresh_policy="auto")` | add example + learning refresh |
+| `remove_example(tenant_id, user_id, kind, label, index, profile_id=null)` | remove one example |
+| `clear_examples(tenant_id, user_id, kind="all\|resume\|vacancy", profile_id=null)` | clear examples |
 | `create_search_session(...)` / `plan_search_session` / `approve_search_session` / `run_search_session` | search session workflow |
 | `get_search_session(session_id)` / `list_search_session_results` / `explain_search_session` / `cancel_search_session` | search session status/results |
 | `search_jobs` / `get_job` / `get_job_lineage` | job lookup |

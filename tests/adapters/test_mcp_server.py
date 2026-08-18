@@ -22,9 +22,12 @@ MCP_OPERATOR_TOOLS = frozenset(
         "cancel_search_session",
         "clear_run_data",
         "create_search_session",
+        "add_example",
+        "clear_examples",
         "disable_source",
         "explain_search_session",
         "get_bypass_capabilities",
+        "get_examples_summary",
         "get_bypass_routes",
         "get_job",
         "get_job_lineage",
@@ -36,12 +39,14 @@ MCP_OPERATOR_TOOLS = frozenset(
         "get_sources",
         "get_tenant_status",
         "ingest_resume",
+        "list_examples",
         "list_pipeline_runs",
         "list_profiles",
         "list_search_session_results",
         "list_tenants",
         "plan_search_session",
         "recommend_runtime_setup",
+        "remove_example",
         "reset_tenant",
         "run_pipeline",
         "run_search_session",
@@ -953,3 +958,75 @@ async def test_mcp_scenario_live_stdio_tool_list_operator_only(tmp_path: Path) -
         assert MCP_LEGACY_TOOLS.isdisjoint(tool_names)
         for legacy in sorted(MCP_LEGACY_TOOLS):
             assert legacy not in tool_names
+
+
+@pytest.mark.asyncio
+async def test_mcp_scenario_examples_resume_vacancy_mapping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scenario: operator example tools map resume/vacancy × polarity."""
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    (configs_dir / "tenant.json").write_text(
+        json.dumps({"tenant_id": "t_ex", "display_name": "Examples", "sources": []}),
+        encoding="utf-8",
+    )
+    _install_fake_fastmcp(monkeypatch)
+
+    from job_ftch.adapters.mcp.server import create_server
+
+    server = create_server(configs_dir=configs_dir)
+    await server.startup()
+
+    added = await server.app.tools["add_example"](
+        "t_ex",
+        "u1",
+        "vacancy",
+        "positive",
+        "Hiring senior LLM engineer, Python, RAG",
+        None,
+        "defer",
+    )
+    assert added["kind"] == "vacancy"
+    assert added["label"] == "positive"
+    assert added["prefilter_dirty"] is True
+    assert added["counts"]["positive_vacancy"] == 1
+    assert "positive_job" not in added["counts"]
+
+    added_resume = await server.app.tools["add_example"](
+        "t_ex",
+        "u1",
+        "resume",
+        "negative",
+        "Staff accountant with 1C only",
+        None,
+        "defer",
+    )
+    assert added_resume["counts"]["negative_resume"] == 1
+
+    listed = await server.app.tools["list_examples"]("t_ex", "u1", None, "all", None)
+    assert listed["examples"]["positive_vacancy"] == ["Hiring senior LLM engineer, Python, RAG"]
+    assert listed["examples"]["negative_resume"] == ["Staff accountant with 1C only"]
+
+    summary = await server.app.tools["get_examples_summary"]("t_ex", "u1", None)
+    assert summary["total"] == 2
+
+    bad = await server.app.tools["add_example"](
+        "t_ex",
+        "u1",
+        "job",
+        "positive",
+        "legacy kind should fail",
+        None,
+        "auto",
+    )
+    assert bad["error"] == "invalid_arguments"
+
+    cleared = await server.app.tools["clear_examples"]("t_ex", "u1", "vacancy", None)
+    assert cleared["removed"] == 1
+    remaining = await server.app.tools["get_examples_summary"]("t_ex", "u1", None)
+    assert remaining["counts"]["positive_vacancy"] == 0
+    assert remaining["counts"]["negative_resume"] == 1
+
+    await server.shutdown()
