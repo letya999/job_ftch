@@ -1,7 +1,7 @@
 ---
 title: "Application Model Map"
 description: "Полный индекс `job_ftch/application/*`: composition roots, ports, runtime orchestration, registries и helper modules."
-updated: 2026-07-28
+updated: 2026-08-19
 ---
 # Application Model Map
 
@@ -52,7 +52,7 @@ updated: 2026-07-28
 | `prompt_builder` | runtime prompt construction |
 | `ontology_compiler` | compile labeled shots в ontology/projection |
 | `ontology_corpus` | corpus helpers для ontology compilation |
-| `ontology_enrichment` | ontology enrichment helpers |
+| `ontology_enrichment` | ontology shot enrichment and full-profile compile/projection |
 | `ontology_graph_builder` | graph projection/building из compiled ontology |
 | `ontology_snapshot` | runtime ontology snapshot assembly |
 | `shot_sync` | синхронизация profile shots with runtime stores |

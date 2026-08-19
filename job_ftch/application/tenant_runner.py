@@ -505,14 +505,22 @@ def _pin_parser(spec: SourceSpec, parser_override: str) -> SourceSpec:
     elif spec_type == "browser":
         updates["parser"] = name
     elif spec_type == "career_site":
-        from job_ftch.application.registry import all_monitor_names, all_scraper_names
+        from job_ftch.application.registry import (
+            all_monitor_names,
+            all_scraper_names,
+            all_site_parser_names,
+        )
 
+        if name in all_site_parser_names():
+            updates["site_parser"] = name
         if name in all_monitor_names():
             updates["monitor"] = name
         if name in all_scraper_names():
             updates["scraper"] = name
         if not updates:
-            raise ValueError(f"parser {name!r} is not a registered monitor or scraper")
+            raise ValueError(
+                f"parser {name!r} is not a registered monitor, scraper, or site parser"
+            )
     else:
         raise ValueError(f"parser pin is not supported for source type {spec_type}")
     copier = getattr(spec, "model_copy", None)
@@ -1981,7 +1989,12 @@ class TenantRunner:
     def _session_call(self, payload: Any) -> dict[str, Any]:
         if isinstance(payload, dict):
             return payload
-        return {"status": "error", "error": "invalid_session_payload", "ok": False, "executed": False}
+        return {
+            "status": "error",
+            "error": "invalid_session_payload",
+            "ok": False,
+            "executed": False,
+        }
 
     async def open_operator_browser_session(
         self,
@@ -2023,9 +2036,7 @@ class TenantRunner:
         session_id: str,
         artifact_type: str,
     ) -> dict[str, Any]:
-        return self._session_call(
-            await self._session_service().capture(session_id, artifact_type)
-        )
+        return self._session_call(await self._session_service().capture(session_id, artifact_type))
 
     async def close_operator_browser_session(self, session_id: str) -> dict[str, Any]:
         return self._session_call(await self._session_service().close(session_id))

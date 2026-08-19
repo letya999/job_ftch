@@ -658,8 +658,155 @@ async def probe_challenge(
     )
 
 
+_SAFE_FINGERPRINT_KEYS = frozenset({"render", "challenge", "board_gone", "spa", "jsonld"})
+
+
+async def probe_fingerprint(
+    *,
+    url: str,
+    engine: str = "auto",
+    headed: bool = False,
+    max_items: int = 5,
+    bypass_config: dict[str, Any] | None = None,
+    settings: Settings | None = None,
+    deadline_seconds: float = LISTING_PROBE_DEADLINE_SECONDS,
+) -> dict[str, Any]:
+    """HTTP site-class probe plus an optional same-page UA snapshot. No cookies."""
+    del max_items, settings
+    notes = [
+        "fingerprint probe uses HTTP site classification",
+        "does not persist cookies, profiles, or challenge tokens",
+    ]
+    target = url.strip()
+    resolved_engine = resolve_probe_engine(engine)
+    try:
+        await check_ssrf(target)
+    except Exception as exc:  # noqa: BLE001 - operator probe must not crash MCP
+        error = "ssrf_blocked" if isinstance(exc, httpx.LocalProtocolError) else type(exc).__name__
+        return _result(
+            status="error",
+            error=error,
+            notes=[*notes, str(exc)[:240]],
+            engine=resolved_engine,
+            requested_url=target,
+        )
+    from job_ftch.infrastructure.sources.site_fingerprinter import fingerprint as http_fingerprint
+
+    try:
+        profile = await http_fingerprint(target)
+    except Exception as exc:  # noqa: BLE001
+        return _result(
+            status="error",
+            executed=True,
+            error=type(exc).__name__,
+            notes=[*notes, str(exc)[:240]],
+            engine=resolved_engine,
+            requested_url=target,
+        )
+    detected = {
+        key: value
+        for key, value in dict(profile.detected_config or {}).items()
+        if key in _SAFE_FINGERPRINT_KEYS
+    }
+    payload = {
+        "site_class": str(profile.site_class),
+        "recommended_monitors": list(profile.recommended_monitors or [])[:8],
+        "canonical_url": profile.canonical_url,
+        "detected": detected,
+    }
+    user_agent = None
+    if headed:
+        notes.append("headed fingerprint still does not keep a session")
+
+        async def _handler(
+            page: Any,
+            challenge_sink: Any,
+            requested: str,
+            engine_name: str,
+            probe_notes: list[str],
+        ) -> dict[str, Any]:
+            del challenge_sink, requested, engine_name
+            ua = None
+            evaluate = getattr(page, "evaluate", None)
+            if callable(evaluate):
+                try:
+                    raw = evaluate("() => navigator.userAgent")
+                    if hasattr(raw, "__await__"):
+                        raw = await raw
+                    ua = str(raw or "")[:180] or None
+                except Exception:
+                    ua = None
+            return _result(
+                status="ok",
+                ok=True,
+                executed=True,
+                notes=probe_notes,
+                engine=resolved_engine,
+                requested_url=target,
+                final_url=str(getattr(page, "url", "") or target),
+                page_title=await _page_title(page),
+                fingerprint=payload,
+                user_agent=ua,
+            )
+
+        try:
+            live = await _run_live_probe(
+                url=target,
+                engine=engine,
+                headed=True,
+                bypass_config=bypass_config,
+                deadline_seconds=min(deadline_seconds, 20.0),
+                notes=notes,
+                handler=_handler,
+            )
+            if live.get("executed"):
+                live.setdefault("fingerprint", payload)
+                return live
+        except Exception:
+            pass
+    challenge = bool(detected.get("challenge"))
+    return _result(
+        status="challenge" if challenge else "ok",
+        ok=not challenge,
+        executed=True,
+        error="challenge_detected" if challenge else None,
+        notes=notes,
+        engine=resolved_engine,
+        requested_url=target,
+        fingerprint=payload,
+        user_agent=user_agent,
+    )
+
+
+async def probe_custom_safe(
+    *,
+    url: str,
+    engine: str = "auto",
+    headed: bool = False,
+    max_items: int = 5,
+    bypass_config: dict[str, Any] | None = None,
+    settings: Settings | None = None,
+    deadline_seconds: float = LISTING_PROBE_DEADLINE_SECONDS,
+) -> dict[str, Any]:
+    """One page, no clicks/forms/cookies: title, challenge, bounded link preview."""
+    payload = await probe_listing(
+        url=url,
+        engine=engine,
+        headed=headed,
+        max_items=min(int(max_items), 3),
+        bypass_config=bypass_config,
+        settings=settings,
+        deadline_seconds=deadline_seconds,
+    )
+    notes = list(payload.get("notes") or [])
+    notes.append("custom_safe: no clicks, no forms, no cookie values")
+    payload["notes"] = notes
+    payload["probe"] = "custom_safe"
+    return payload
+
+
 class LiveBrowserSessionProbe:
-    """Application-port adapter over listing/detail/challenge probes."""
+    """Application-port adapter over listing/detail/challenge/fingerprint/custom_safe probes."""
 
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
@@ -748,6 +895,24 @@ class LiveBrowserSessionProbe:
                 max_items=max_items,
                 bypass_config=bypass_config,
                 solve=solve,
+            )
+        if kind == "fingerprint":
+            return await probe_fingerprint(
+                url=url,
+                engine=engine,
+                headed=headed,
+                max_items=max_items,
+                bypass_config=bypass_config,
+                settings=self._settings,
+            )
+        if kind == "custom_safe":
+            return await probe_custom_safe(
+                url=url,
+                engine=engine,
+                headed=headed,
+                max_items=max_items,
+                bypass_config=bypass_config,
+                settings=self._settings,
             )
         return await self.probe_listing(
             url=url,

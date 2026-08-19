@@ -135,3 +135,89 @@ async def test_mcp_add_shots_fills_ontology_with_heuristic(tmp_path: Any) -> Non
     anti = await ontology.list_anti_patterns()
     neg_skills = await ontology.list_negative_skills()
     assert anti or neg_skills or await ontology.list_negative_keywords()
+
+
+@pytest.mark.asyncio
+async def test_mcp_add_shots_compiles_recipe_scale_profile(tmp_path: Any) -> None:
+    settings = Settings(
+        llm_backend="heuristic",
+        store_backend="sqlite",
+        store_path=tmp_path / "store.db",
+        tracing_enabled=False,
+        openobserve_enabled=False,
+        job_backend="sqlite",
+        search_backend="sqlite",
+        job_group_store_backend="sqlite",
+        bgem3_enabled=False,
+        embedding_enabled=False,
+    )
+    tenant_store = TenantStore("local_mcp", create_store(settings))
+    ontology = create_ontology_store(settings)
+    runner = _FakeRunner(_FakeRuntime(tenant_store, ontology, HeuristicLLMProvider()))
+    empty = ManagedCandidateProfile(
+        user_id="mcp",
+        profile_id="mcp_default",
+        profile=CandidateProfile(
+            identity=CandidateIdentity(candidate_id="mcp", display_name="mcp"),
+            search_profiles=(SearchProfile(),),
+        ),
+    )
+    await runner.save_and_activate_candidate_profile("local_mcp", empty)
+
+    positives = [
+        f"Senior LLM Engineer / Python, PyTorch, RAG, Docker, Kubernetes #{idx}"
+        for idx in range(10)
+    ]
+    for text in positives:
+        result = await add_shots(
+            runner,
+            tenant_id="local_mcp",
+            polarity="positive",
+            kind="resume",
+            text=text,
+            profile_id="mcp_default",
+        )
+        assert result["ontology_errors"] == []
+    jobs = [f"Hiring ML Engineer: Python, FastAPI, LLM, RAG, SQL #{idx}" for idx in range(10)]
+    batched = await add_shots(
+        runner,
+        tenant_id="local_mcp",
+        polarity="positive",
+        kind="job",
+        texts=jobs,
+        profile_id="mcp_default",
+    )
+    assert batched["added"] == 10
+    assert batched["ontology_errors"] == []
+    assert int(batched["pos_added"]) > 0
+
+    negatives = [f"Sales manager / accountant / recruiter only #{idx}" for idx in range(10)]
+    await add_shots(
+        runner,
+        tenant_id="local_mcp",
+        polarity="negative",
+        kind="job",
+        texts=negatives,
+        profile_id="mcp_default",
+    )
+    resume_neg = [f"Java Spring enterprise accountant #{idx}" for idx in range(10)]
+    last = await add_shots(
+        runner,
+        tenant_id="local_mcp",
+        polarity="negative",
+        kind="resume",
+        texts=resume_neg,
+        profile_id="mcp_default",
+    )
+    assert last["ontology_errors"] == []
+    keywords = await ontology.list_positive_keywords()
+    skills = await ontology.list_skills()
+    assert keywords or skills
+    terms = []
+    for item in keywords:
+        if isinstance(item, dict):
+            terms.append(str(item.get("term") or ""))
+        else:
+            terms.append(str(item))
+    blob = " ".join(terms + list(skills)).lower()
+    assert "python" in blob or "llm" in blob or "rag" in blob or "pytorch" in blob

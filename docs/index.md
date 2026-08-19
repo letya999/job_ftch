@@ -21,7 +21,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 
 ## Files On This Level
 
-- [Архитектура job_ftch](architecture.md) - Полное описание текущей архитектуры: слои, порты, pipeline, graph runtime, ingest stack, bypass и адаптеры. (Updated: 2026-08-03)
+- [Архитектура job_ftch](architecture.md) - Полное описание текущей архитектуры: слои, порты, pipeline, graph runtime, ingest stack, bypass и адаптеры. (Updated: 2026-08-19)
 - [Деплой Telegram bot production stack](deploy.md) - Production-shape деплой job_ftch: shared runtime image, Telegram bot compose, Postgres и Qdrant. (Updated: 2026-07-28)
 - [Примеры](examples.md) - Минимальные исполняемые примеры: tenant на fixture, validate, run и eval gate. (Updated: 2026-07-28)
 - [Быстрый старт](quickstart.md) - Быстрый локальный запуск job_ftch на fixture tenant без внешних сервисов. (Updated: 2026-07-28)

@@ -311,9 +311,16 @@ async def test_run_browser_probe_detail_uses_runner_port() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_browser_probe_fingerprint_is_not_implemented() -> None:
+async def test_run_browser_probe_fingerprint_uses_runner_port() -> None:
     runner = _FakeRunner()
-    runner.probe_browser_listing = AsyncMock()
+    runner.probe_browser_listing = AsyncMock(
+        return_value={
+            "ok": True,
+            "status": "ok",
+            "executed": True,
+            "fingerprint": {"site_class": "SSR", "recommended_monitors": ["dom"]},
+        }
+    )
     payload = await run_browser_probe(
         runner,
         tenant_id="t1",
@@ -322,9 +329,35 @@ async def test_run_browser_probe_fingerprint_is_not_implemented() -> None:
         probe="fingerprint",
         engine="auto",
     )
-    assert payload["status"] == "not_implemented"
-    assert payload["executed"] is False
-    runner.probe_browser_listing.assert_not_called()
+    assert payload["status"] != "not_implemented"
+    assert payload["executed"] is True
+    assert payload["fingerprint"]["site_class"] == "SSR"
+    assert runner.probe_browser_listing.await_args.kwargs["probe"] == "fingerprint"
+    runner.run_tenant.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_browser_probe_custom_safe_uses_runner_port() -> None:
+    runner = _FakeRunner()
+    runner.probe_browser_listing = AsyncMock(
+        return_value={
+            "ok": True,
+            "status": "ok",
+            "executed": True,
+            "probe": "custom_safe",
+            "notes": ["custom_safe: no clicks, no forms, no cookie values"],
+        }
+    )
+    payload = await run_browser_probe(
+        runner,
+        tenant_id="t1",
+        url="https://example.com/jobs",
+        probe="custom_safe",
+        engine="auto",
+    )
+    assert payload["status"] != "not_implemented"
+    assert payload["executed"] is True
+    assert runner.probe_browser_listing.await_args.kwargs["probe"] == "custom_safe"
     runner.run_tenant.assert_not_called()
 
 
@@ -363,6 +396,51 @@ async def test_run_source_pins_career_site_parser(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.asyncio
+async def test_run_source_pins_site_parser_on_mismatched_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations.all_site_parser_names",
+        lambda: {"getmatch"},
+    )
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations.all_monitor_names",
+        lambda: set(),
+    )
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations.all_scraper_names",
+        lambda: set(),
+    )
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations.site_parser_domain_pattern",
+        lambda name: r"getmatch\.ru" if name == "getmatch" else None,
+    )
+    runner = _FakeRunner()
+    runner.sources.append(
+        {
+            "source_id": "career_site:other",
+            "source_kind": "career_site",
+            "source_name": "other",
+            "enabled": True,
+            "status": "pending",
+            "degraded": False,
+            "requirements": {"browser_required": False},
+            "spec": {"type": "career_site", "url": "https://example.com/jobs", "monitor": "auto"},
+        }
+    )
+    payload = await run_source(
+        runner,
+        tenant_id="t1",
+        source_id="career_site:other",
+        parser="getmatch",
+    )
+    assert payload["executed"] is True
+    assert payload["requested_parser"] == "getmatch"
+    assert payload["parser_host_mismatch"] is True
+    assert any("parser_host_mismatch" in note for note in payload["notes"])
+    assert runner.run_tenant.await_args.kwargs["parser_override"] == "getmatch"
+
+
 async def test_run_source_rejects_parser_pin_on_fixture() -> None:
     runner = _FakeRunner()
     payload = await run_source(

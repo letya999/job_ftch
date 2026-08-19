@@ -266,6 +266,7 @@ profiles:
     )
     pipeline_runs = await server.app.tools["list_pipeline_runs"]("ai_jobs", 10)
     search_results = await server.app.tools["search_jobs"]("senior", "ai_jobs", 10)
+    assert all("title" in item for item in search_results)
     lineage_payload = await server.app.tools["get_job_lineage"](latest_jobs[0]["job_id"], "ai_jobs")
     pipeline_run = await server.app.tools["get_pipeline_run"](
         run_summary["source_run_id"], "ai_jobs"
@@ -1300,11 +1301,32 @@ async def test_mcp_scenario_source_probe_pin_and_listing(
     assert detail["error"] == "listing_url_required"
     _assert_no_secret_values(detail)
 
+    async def _fake_fingerprint_probe(**kwargs: object) -> dict[str, object]:
+        del kwargs
+        return {
+            "ok": True,
+            "status": "ok",
+            "executed": True,
+            "engine": "patchright_browser",
+            "fingerprint": {
+                "site_class": "SSR",
+                "recommended_monitors": ["dom"],
+                "detected": {"render": False, "challenge": False},
+            },
+            "notes": ["fingerprint probe uses HTTP site classification"],
+        }
+
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.browser_probe.probe_fingerprint",
+        _fake_fingerprint_probe,
+    )
     fingerprint = await server.app.tools["run_browser_probe"](
         "t_src", source_id, "https://example.com/jobs", "fingerprint", "auto", None, False, 1
     )
-    assert fingerprint["status"] == "not_implemented"
-    assert fingerprint["executed"] is False
+    assert fingerprint["status"] != "not_implemented"
+    assert fingerprint["executed"] is True
+    assert fingerprint["fingerprint"]["site_class"] == "SSR"
+    assert "secret" not in str(fingerprint.get("fingerprint"))
     _assert_no_secret_values(fingerprint)
 
     session = await server.app.tools["open_browser_session"](

@@ -168,6 +168,67 @@ async def test_probe_listing_challenge_without_cards(
 
 
 @pytest.mark.asyncio
+async def test_probe_fingerprint_returns_http_class(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Profile:
+        site_class = "SSR"
+        recommended_monitors = ["dom"]
+        detected_config = {"render": False, "challenge": False, "unsafe_key": "drop-me"}
+        canonical_url = None
+
+    async def fake_http(url: str, client: object = None) -> _Profile:
+        del url, client
+        return _Profile()
+
+    async def fake_ssrf(url: str) -> None:
+        del url
+
+    async def fail_live(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        raise AssertionError("headless fingerprint must not open a live page")
+
+    monkeypatch.setattr(probe_mod, "check_ssrf", fake_ssrf)
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.site_fingerprinter.fingerprint",
+        fake_http,
+    )
+    monkeypatch.setattr(probe_mod, "_run_live_probe", fail_live)
+
+    payload = await probe_mod.probe_fingerprint(url="https://example.com/jobs", engine="auto")
+    assert payload["status"] != "not_implemented"
+    assert payload["executed"] is True
+    assert payload["fingerprint"]["site_class"] == "SSR"
+    assert "drop-me" not in str(payload["fingerprint"])
+    assert "unsafe_key" not in str(payload["fingerprint"])
+
+
+@pytest.mark.asyncio
+async def test_probe_custom_safe_uses_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = _FakePage()
+
+    @asynccontextmanager
+    async def fake_open_page(config: dict[str, Any], *, bypass_strategy: Any = None):
+        del config, bypass_strategy
+        yield page
+
+    async def fake_navigate(opened: Any, url: str, config: dict[str, Any]) -> None:
+        del opened, url, config
+
+    async def fake_ssrf(url: str) -> None:
+        del url
+
+    monkeypatch.setattr(probe_mod, "open_page", fake_open_page)
+    monkeypatch.setattr(probe_mod, "navigate", fake_navigate)
+    monkeypatch.setattr(probe_mod, "check_ssrf", fake_ssrf)
+    monkeypatch.setattr(probe_mod, "resolve_bypass", lambda name, config=None: object())
+
+    payload = await probe_mod.probe_custom_safe(url="https://example.com/jobs/list", engine="auto")
+    assert payload["status"] != "not_implemented"
+    assert payload["executed"] is True
+    assert payload["probe"] == "custom_safe"
+    assert any("custom_safe" in note for note in payload["notes"])
+
+
+@pytest.mark.asyncio
 async def test_probe_detail_returns_text_preview(monkeypatch: pytest.MonkeyPatch) -> None:
     class _DetailPage(_FakePage):
         async def evaluate(self, script: str, arg: object = None) -> object:

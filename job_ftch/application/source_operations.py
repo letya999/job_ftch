@@ -17,6 +17,7 @@ from job_ftch.application.registry import (
     all_scraper_names,
     all_site_parser_names,
     list_bypass_capabilities,
+    site_parser_domain_pattern,
 )
 from job_ftch.domain.runtime_source import source_spec_identifier
 from job_ftch.domain.source_spec import SourceSpec
@@ -37,7 +38,7 @@ _BROWSER_ENGINES = frozenset(
     }
 )
 _MISSING_BROWSER_PROBE = "browser_session_probe"
-_LIVE_PROBES = frozenset({"listing", "detail", "challenge"})
+_LIVE_PROBES = frozenset({"listing", "detail", "challenge", "fingerprint", "custom_safe"})
 _SESSION_PROFILES = frozenset({"ephemeral", "persistent", "domain"})
 _SWEEP_MAX_ROUTES = 6
 _ADAPTIVE_BYPASS = frozenset({"auto", "adaptive"})
@@ -257,9 +258,10 @@ def _parser_pin_error(source: dict[str, Any], requested: str) -> str | None:
         try:
             monitors = all_monitor_names()
             scrapers = all_scraper_names()
+            site_parsers = all_site_parser_names()
         except Exception:
-            monitors, scrapers = frozenset(), frozenset()
-        if requested in monitors or requested in scrapers:
+            monitors, scrapers, site_parsers = frozenset(), frozenset(), frozenset()
+        if requested in monitors or requested in scrapers or requested in site_parsers:
             return None
         return "parser_unavailable"
     if kind == "declarative_html":
@@ -273,6 +275,23 @@ def _parser_pin_error(source: dict[str, Any], requested: str) -> str | None:
     if kind == "browser":
         return None
     return "parser_pin_unsupported_source"
+
+
+def _parser_host_mismatch(source: dict[str, Any], requested: str) -> str | None:
+    import re
+
+    spec_raw = source.get("spec")
+    spec: dict[str, Any] = spec_raw if isinstance(spec_raw, dict) else {}
+    url = str(spec.get("url") or "")
+    pattern = site_parser_domain_pattern(requested)
+    if not pattern or not url:
+        return None
+    try:
+        if re.search(pattern, url, re.IGNORECASE):
+            return None
+    except re.error:
+        return None
+    return f"parser_host_mismatch: {requested} is URL-bound; pinned onto {url} for this call only"
 
 
 def _parse_diagnosis(
@@ -648,6 +667,7 @@ async def run_source(
                     requested_parser=requested_parser,
                 )
             parser_pin = requested_parser
+        mismatch = _parser_host_mismatch(source, parser_pin) if parser_pin else None
         attempt = await _attempt_bypass(
             runner,
             tenant_id=tenant_id,
@@ -667,6 +687,7 @@ async def run_source(
             notes=_notes(
                 f"pinned bypass {pin} for this call only",
                 "does not keep the pin on the tenant source",
+                mismatch or "",
             ),
             source=snapshot,
             route=route,
@@ -702,6 +723,7 @@ async def run_source(
                 requested_parser=requested_parser,
             )
         parser_pin = requested_parser
+    mismatch = _parser_host_mismatch(source, parser_pin) if parser_pin else None
     executed = await _execute_source_run(
         runner,
         tenant_id=tenant_id,
@@ -716,6 +738,8 @@ async def run_source(
         if parser_pin
         else ["no parser pin: source keeps its configured monitor/scraper"]
     )
+    if mismatch:
+        parser_notes.append(mismatch)
     return _envelope(
         tenant_id=tenant_id,
         source_id=source_id,
@@ -733,6 +757,7 @@ async def run_source(
         selected_route=selected,
         requested_bypass=requested_bypass,
         requested_parser=requested_parser,
+        parser_host_mismatch=bool(mismatch),
         parse=executed.get("parse"),
         run=executed.get("run"),
         browser_required=_is_browser_route(route, source),
@@ -1177,6 +1202,8 @@ async def run_browser_probe(
         solve=executed.get("solve"),
         item_count=executed.get("item_count"),
         items=executed.get("items") or [],
+        fingerprint=executed.get("fingerprint"),
+        user_agent=executed.get("user_agent"),
         source=None if source is None else _source_snapshot(source),
         route=route,
         selected_route=None if route is None else _selected_route(route),

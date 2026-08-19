@@ -1,7 +1,7 @@
 ---
 title: "MCP operator surface redesign plan"
 description: "Plan for turning the MCP adapter from thin TenantRunner wrappers into a Telegram-aligned operator API for sources, examples, bypass, browser sessions, pipeline, jobs, feedback, and prefilter training."
-updated: 2026-08-12
+updated: 2026-08-19
 ---
 # MCP operator surface redesign plan
 
@@ -196,8 +196,9 @@ runtime cannot be controlled through Patchright, the tool should still expose a
 consistent session/probe contract around the underlying capability.
 
 Listing/detail/challenge probes and ephemeral sessions are implemented
-(ADR-081/083). `persistent`/`domain` profiles, `fingerprint`/`custom_safe`,
-and `trace` artifacts stay `not_implemented` / `unsupported`.
+(ADR-081/083). Persistent/domain profiles, `fingerprint`/`custom_safe`,
+`trace`, pollable headed captcha, and mismatched-host parser pin are
+ADR-084.
 
 ### Examples / resumes / vacancies
 
@@ -431,6 +432,16 @@ Implemented on this branch (ADR-083):
 - Ephemeral `open_browser_session` / continue / capture / close (TTL 180s).
 - `run_source(parser=X)` pins a registered monitor/scraper for one call.
 
+### Slice 8 — persistent/domain, fingerprint/custom_safe, trace, parser host override
+
+Implemented on this branch (ADR-084):
+
+- `run_browser_probe(probe="fingerprint"|"custom_safe")` returns a bounded payload.
+- Operator sessions accept `profile=persistent|domain` under `browser_profile_root/operator/<key>`.
+- `capture_browser_artifact(trace)` writes a zip or navigation JSONL; no cookie values.
+- `wait_challenge` / `extend` keep headed captcha pollable without hanging MCP.
+- Explicit `run_source(parser=<site parser>)` may pin a URL-bound parser onto another host.
+
 ## Testing plan
 
 For each slice:
@@ -470,12 +481,13 @@ ai-repo-safety prepush --target .
 
 ## Expected deliverable for the current branch
 
-Slices 1–7 are implemented on this branch. Remaining out of scope:
+Slices 1–7 plus ADR-084 (persistent/domain, fingerprint/custom_safe, trace,
+pollable headed captcha, explicit mismatched-host parser pin) are implemented
+on this branch. Remaining out of scope:
 
-- persistent/domain browser profiles;
-- `fingerprint` / `custom_safe` probes and `trace` artifacts;
-- headed captcha that waits on a human indefinitely;
-- pinning a URL-bound site parser onto a career site that is not that host.
+- new captcha vendors;
+- returning cookie **values** or secret profile paths;
+- making mismatched-host parser pin the silent default ingest path.
 
 Where a target tool cannot be implemented yet, keep a structured
 `not_implemented` response only if the tool is necessary for discoverability,

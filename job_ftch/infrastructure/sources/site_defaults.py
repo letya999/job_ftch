@@ -56,9 +56,9 @@ def apply_runtime_defaults(spec: CareerSiteSpec) -> CareerSiteSpec:
     with the richer YAML source configs used in normal operation.
     """
 
-    from job_ftch.application.registry import resolve_site_parser
+    from job_ftch.application.registry import resolve_site_parser_for_spec
 
-    parser = resolve_site_parser(spec.url)
+    parser = resolve_site_parser_for_spec(spec)
     if parser is None:
         return spec
 

@@ -31,7 +31,7 @@ def expand_career_site_specs(
     target_roles: Sequence[str],
 ) -> list[SourceSpec]:
     """Return ``specs`` with searchable career sites expanded by ``target_roles``."""
-    from job_ftch.application.registry import resolve_site_parser
+    from job_ftch.application.registry import resolve_site_parser_for_spec
     from job_ftch.domain.source_spec import CareerSiteSpec
 
     roles = [role for role in (target_roles or ()) if isinstance(role, str) and role.strip()]
@@ -46,7 +46,7 @@ def expand_career_site_specs(
         if _url_has_search_query(spec.url):
             expanded.append(spec)
             continue
-        parser = resolve_site_parser(spec.url)
+        parser = resolve_site_parser_for_spec(spec)
         if parser is None or not getattr(parser, "supports_search", False):
             # Tier-1: no dedicated search parser. Hand the keywords to the source
             # so it can detect a search form at runtime (career_site_source only

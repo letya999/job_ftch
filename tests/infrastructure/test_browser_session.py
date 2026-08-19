@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -62,35 +63,93 @@ async def test_session_open_capture_close(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(session_mod, "resolve_bypass", lambda name, config=None: object())
 
     service = session_mod.OperatorBrowserSessionService()
-    opened = await service.open(
-        tenant_id="t1",
-        url="https://example.com/jobs",
-        engine="auto",
-        headed=False,
-    )
-    assert opened["ok"] is True
-    assert opened["session_id"]
-    session_id = str(opened["session_id"])
-    captured = await service.capture(session_id, "text")
-    assert "Open roles" in str(captured.get("text") or "")
-    cookies = await service.capture(session_id, "cookies_summary")
-    assert cookies["cookies_summary"]["names"] == ["sessionid"]
-    assert "secret" not in str(cookies)
-    closed = await service.close(session_id)
-    assert closed["status"] == "closed"
+    try:
+        opened = await service.open(
+            tenant_id="t1",
+            url="https://example.com/jobs",
+            engine="auto",
+            headed=False,
+        )
+        assert opened["ok"] is True
+        assert opened["session_id"]
+        session_id = str(opened["session_id"])
+        captured = await service.capture(session_id, "text")
+        assert "Open roles" in str(captured.get("text") or "")
+        cookies = await service.capture(session_id, "cookies_summary")
+        assert cookies["cookies_summary"]["names"] == ["sessionid"]
+        assert "secret" not in str(cookies)
+        closed = await service.close(session_id)
+        assert closed["status"] == "closed"
+    finally:
+        await service.close_all()
 
 
 @pytest.mark.asyncio
-async def test_persistent_profile_is_unsupported() -> None:
-    service = session_mod.OperatorBrowserSessionService()
-    payload = await service.open(
-        tenant_id="t1",
-        url="https://example.com/jobs",
-        engine="auto",
-        profile="persistent",
+async def test_persistent_profile_opens_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    @asynccontextmanager
+    async def fake_open_page(config: dict[str, Any], *, bypass_strategy: Any = None):
+        del bypass_strategy
+        assert config.get("persistent_context") is True
+        assert config.get("_profile_dir")
+        yield _FakePage()
+
+    async def fake_navigate(opened: Any, url: str, config: dict[str, Any]) -> None:
+        del opened, url, config
+
+    async def fake_ssrf(url: str) -> None:
+        del url
+
+    monkeypatch.setattr(session_mod, "open_page", fake_open_page)
+    monkeypatch.setattr(session_mod, "navigate", fake_navigate)
+    monkeypatch.setattr(session_mod, "check_ssrf", fake_ssrf)
+    monkeypatch.setattr(session_mod, "resolve_bypass", lambda name, config=None: object())
+    monkeypatch.setattr(
+        "job_ftch.config.get_settings",
+        lambda: SimpleNamespace(browser_profile_root=tmp_path),
     )
-    assert payload["status"] == "unsupported"
-    assert payload["error"] == "persistent_profile_unsupported"
+
+    service = session_mod.OperatorBrowserSessionService()
+    try:
+        payload = await service.open(
+            tenant_id="t1",
+            url="https://example.com/jobs",
+            engine="auto",
+            headed=False,
+            profile="persistent",
+        )
+        assert payload["status"] != "not_implemented"
+        assert payload["ok"] is True
+        assert payload["profile"] == "persistent"
+        assert payload.get("profile_key")
+        assert str(tmp_path) not in str(payload)
+        assert "secret" not in str(payload)
+        session_id = str(payload["session_id"])
+        traced = await service.capture(session_id, "trace")
+        assert traced["status"] != "not_implemented"
+        assert traced.get("path")
+        assert "secret" not in str(traced)
+        extended = await service.continue_session(session_id, "extend")
+        assert extended["status"] != "unsupported"
+        waited = await service.continue_session(session_id, "wait_challenge")
+        assert waited["status"] != "not_implemented"
+        await service.close(session_id)
+
+        domain = await service.open(
+            tenant_id="t1",
+            url="https://example.com/jobs",
+            engine="auto",
+            headed=False,
+            profile="domain",
+        )
+        assert domain["ok"] is True
+        assert domain["profile"] == "domain"
+        assert domain.get("profile_key")
+        assert str(tmp_path) not in str(domain)
+        await service.close(str(domain["session_id"]))
+    finally:
+        await service.close_all()
 
 
 @pytest.mark.asyncio
@@ -112,8 +171,11 @@ async def test_unknown_instruction_is_unsupported(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(session_mod, "resolve_bypass", lambda name, config=None: object())
 
     service = session_mod.OperatorBrowserSessionService()
-    opened = await service.open(tenant_id="t1", url="https://example.com/jobs", engine="auto")
-    session_id = str(opened["session_id"])
-    payload = await service.continue_session(session_id, "click all the things")
-    assert payload["status"] == "unsupported"
-    await service.close(session_id)
+    try:
+        opened = await service.open(tenant_id="t1", url="https://example.com/jobs", engine="auto")
+        session_id = str(opened["session_id"])
+        payload = await service.continue_session(session_id, "click all the things")
+        assert payload["status"] == "unsupported"
+        await service.close(session_id)
+    finally:
+        await service.close_all()

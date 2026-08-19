@@ -805,6 +805,7 @@ class TenantMCPServer:
             link: str,
             source_type: str | None = None,
             limit: int = 100,
+            source_name: str | None = None,
         ) -> dict[str, Any]:
             runner = self._require_runner()
             spec = await build_source_spec_from_input(
@@ -812,6 +813,7 @@ class TenantMCPServer:
                 auth_provider=runner.get_runtime(tenant_id).auth_provider,
                 source_type=source_type,
                 limit=limit,
+                source_name=source_name,
             )
             return await runner.add_source_spec(
                 tenant_id,
@@ -1007,7 +1009,7 @@ class TenantMCPServer:
             max_items: int = 5,
             solve: str = "none",
         ) -> dict[str, Any]:
-            """Live listing/detail/challenge probe. fingerprint/custom_safe stay not_implemented."""
+            """Live listing/detail/challenge/fingerprint/custom_safe probe."""
             from job_ftch.application.source_operations import (
                 run_browser_probe as run_browser_probe_op,
             )
@@ -1037,7 +1039,7 @@ class TenantMCPServer:
             profile: str = "ephemeral",
             manual_challenge: bool = False,
         ) -> dict[str, Any]:
-            """Open one ephemeral operator browser session. persistent/domain stay unsupported."""
+            """Open an ephemeral, persistent, or domain operator browser session."""
             from job_ftch.application.source_operations import (
                 open_browser_session as open_browser_session_op,
             )
@@ -1069,7 +1071,7 @@ class TenantMCPServer:
             session_id: str,
             instruction: str | None = None,
         ) -> dict[str, Any]:
-            """wait|reload|wait_challenge|solve|navigate <url> on an open session."""
+            """wait|reload|wait_challenge|extend|solve|navigate <url> on an open session."""
             from job_ftch.application.source_operations import (
                 continue_browser_session as continue_browser_session_op,
             )
@@ -1086,7 +1088,7 @@ class TenantMCPServer:
             session_id: str,
             artifact_type: str = "text",
         ) -> dict[str, Any]:
-            """Capture text, truncated html, cookie names, or a screenshot path."""
+            """Capture text, truncated html, cookie names, screenshot, or trace."""
             from job_ftch.application.source_operations import (
                 capture_browser_artifact as capture_browser_artifact_op,
             )
@@ -1574,7 +1576,9 @@ class TenantMCPServer:
             groups = await self._require_runner().search_jobs(
                 query, tenant_id=tenant_id, user_id=user_id, limit=limit
             )
-            return [group.model_dump(mode="json") for group in groups]
+            from job_ftch.adapters.mcp.product_surface import public_job_group
+
+            return [public_job_group(group) for group in groups]
 
         @self.app.tool
         async def get_job(job_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:

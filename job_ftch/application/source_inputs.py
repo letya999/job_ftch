@@ -124,6 +124,68 @@ async def _detect_telegram_source_type(
     return "telegram_group"
 
 
+def _recipe_source_name(value: str) -> str | None:
+    """Map a recipe/public fixture locator to its canonical source_name."""
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "fixtures" / "sources" / "ai_jobs.json"
+    if not path.is_file():
+        return None
+    try:
+        import json
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    needle = value.strip().rstrip("/")
+    for item in payload.get("sources") or []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("source_name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        locators = [
+            str(item.get("url") or "").strip().rstrip("/"),
+            str(item.get("entity") or "").strip().lstrip("@"),
+            str(item.get("feed_url") or "").strip().rstrip("/"),
+        ]
+        if needle in locators or needle.lstrip("@") in locators:
+            return name.strip()
+        if needle.endswith("/" + locators[1]) and locators[1]:
+            return name.strip()
+        if (
+            needle.startswith("https://t.me/")
+            and locators[1]
+            and needle.rsplit("/", 1)[-1] == locators[1]
+        ):
+            return name.strip()
+        if (
+            needle.startswith("http://t.me/")
+            and locators[1]
+            and needle.rsplit("/", 1)[-1] == locators[1]
+        ):
+            return name.strip()
+    return None
+
+
+def _with_source_name(spec: SourceSpec, source_name: str | None, *locators: str) -> SourceSpec:
+    explicit = (source_name or "").strip() or None
+    chosen = explicit
+    if chosen is None:
+        for locator in locators:
+            if locator:
+                chosen = _recipe_source_name(locator)
+                if chosen:
+                    break
+    if chosen is None:
+        chosen = getattr(spec, "source_name", None) or source_spec_name(spec)
+    copier = getattr(spec, "model_copy", None)
+    if not callable(copier):
+        return spec
+    copied = copier(update={"source_name": chosen})
+    return copied if isinstance(copied, type(spec)) else spec
+
+
 async def build_source_spec_from_input(
     value: str,
     *,
@@ -134,6 +196,7 @@ async def build_source_spec_from_input(
     telegram_client_factory: Callable[[str | None, AuthProvider], AbstractAsyncContextManager[Any]]
     | None = None,
     runtime_defaults_fn: Callable[[CareerSiteSpec], CareerSiteSpec] | None = None,
+    source_name: str | None = None,
 ) -> SourceSpec:
     stripped, source_type = _split_inline_source_type(value.strip(), source_type)
     if not stripped:
@@ -162,19 +225,19 @@ async def build_source_spec_from_input(
                 limit=limit,
                 auth_source_id=auth_source_id,
             )
-            return group_spec.model_copy(update={"source_name": source_spec_name(group_spec)})
+            return _with_source_name(group_spec, source_name, value, stripped, entity)
         channel_spec = TelegramChannelSpec(
             type="telegram_channel",
             entity=entity,
             limit=limit,
             auth_source_id=auth_source_id,
         )
-        return channel_spec.model_copy(update={"source_name": source_spec_name(channel_spec)})
+        return _with_source_name(channel_spec, source_name, value, stripped, entity)
 
     parsed = urlsplit(stripped)
     if normalized_type in {"rss", "rss_feed"} and parsed.scheme in {"http", "https"}:
         rss_spec = RSSFeedSourceSpec.model_validate({"type": "rss_feed", "feed_url": stripped})
-        return rss_spec.model_copy(update={"source_name": source_spec_name(rss_spec)})
+        return _with_source_name(rss_spec, source_name, value, stripped)
 
     if normalized_type in {"auto", "career_site", "site", "url"} and parsed.scheme in {
         "http",
@@ -188,7 +251,7 @@ async def build_source_spec_from_input(
         )
         if runtime_defaults_fn is not None:
             site_spec = runtime_defaults_fn(site_spec)
-        return site_spec.model_copy(update={"source_name": source_spec_name(site_spec)})
+        return _with_source_name(site_spec, source_name, value, stripped)
 
     msg = f"Unsupported source input: {value}"
     raise ValueError(msg)

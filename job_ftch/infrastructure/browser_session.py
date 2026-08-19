@@ -1,12 +1,14 @@
-"""In-process ephemeral operator browser sessions.
+"""In-process operator browser sessions.
 
-Holds at most a few open_page contexts with a hard TTL. Does not persist
-profiles, return cookie values, or import browser clients into adapters.
+Holds at most a few open_page contexts with a hard TTL. Persistent/domain
+profiles live under browser_profile_root/operator/<key>. Does not return
+cookie values, filesystem paths, or import browser clients into adapters.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import time
 import uuid
@@ -34,6 +36,7 @@ from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
 log = structlog.get_logger()
 
 SESSION_TTL_SECONDS = 180.0
+HEADED_SESSION_TTL_SECONDS = 900.0
 OPEN_DEADLINE_SECONDS = 45.0
 COMMAND_DEADLINE_SECONDS = 30.0
 MAX_SESSIONS = 2
@@ -107,6 +110,10 @@ class _LiveSession:
         headed: bool,
         bypass_config: dict[str, Any] | None,
         manual_challenge: bool,
+        profile: str = "ephemeral",
+        profile_dir: str | None = None,
+        profile_key: str | None = None,
+        ttl_seconds: float = SESSION_TTL_SECONDS,
     ) -> None:
         self.id = uuid.uuid4().hex
         self.tenant_id = tenant_id
@@ -115,8 +122,12 @@ class _LiveSession:
         self.headed = headed
         self.bypass_config = bypass_config
         self.manual_challenge = manual_challenge
+        self.profile = profile
+        self.profile_dir = profile_dir
+        self.profile_key = profile_key
         self.created_at = time.monotonic()
-        self.expires_at = self.created_at + SESSION_TTL_SECONDS
+        self.expires_at = self.created_at + ttl_seconds
+        self.nav_trace: list[dict[str, Any]] = []
         self.commands: asyncio.Queue[_Command] = asyncio.Queue()
         self.ready = asyncio.Event()
         self.stop = asyncio.Event()
@@ -140,7 +151,8 @@ class _LiveSession:
             tenant_id=self.tenant_id,
             engine=self.engine,
             headed=self.headed,
-            profile="ephemeral",
+            profile=self.profile,
+            profile_key=self.profile_key,
             requested_url=self.requested_url,
             ttl_seconds=round(self.remaining(), 1),
             **{
@@ -163,13 +175,22 @@ class _LiveSession:
             "ok": not bool(challenge),
             "error": "challenge_detected" if challenge else None,
             "notes": [
-                "ephemeral operator session; expires automatically",
-                "does not persist cookies or a browser profile",
+                f"{self.profile} operator session; poll wait_challenge/extend to keep a headed captcha open",
+                "does not return cookie values or profile filesystem paths",
             ],
             "final_url": final_url,
             "page_title": await _page_title(page) if page is not None else None,
             "challenge": challenge,
         }
+        self.nav_trace.append(
+            {
+                "ts": round(time.monotonic() - self.created_at, 2),
+                "url": final_url,
+                "title": self.snapshot.get("page_title"),
+                "challenge": challenge,
+            }
+        )
+        self.nav_trace = self.nav_trace[-40:]
 
     async def _exec(self, command: _Command) -> dict[str, Any]:
         page = self.page
@@ -178,6 +199,10 @@ class _LiveSession:
         kind = command.kind
         if kind == "wait":
             await asyncio.sleep(1.0)
+        elif kind == "extend":
+            self.expires_at = time.monotonic() + (
+                HEADED_SESSION_TTL_SECONDS if self.headed else SESSION_TTL_SECONDS
+            )
         elif kind == "reload":
             reload_fn = getattr(page, "reload", None)
             if callable(reload_fn):
@@ -187,12 +212,18 @@ class _LiveSession:
             else:
                 await navigate(page, str(getattr(page, "url", "") or self.requested_url), {})
         elif kind == "wait_challenge":
-            deadline = time.monotonic() + min(20.0, self.remaining())
+            self.expires_at = max(
+                self.expires_at,
+                time.monotonic()
+                + (HEADED_SESSION_TTL_SECONDS if self.headed else SESSION_TTL_SECONDS),
+            )
+            poll_budget = 20.0 if self.headed else 2.0
+            deadline = time.monotonic() + min(poll_budget, self.remaining())
             while time.monotonic() < deadline:
                 await self._refresh()
                 if not self.snapshot.get("challenge"):
                     break
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(1.0 if self.headed else 0.2)
         elif kind == "solve":
             from job_ftch.infrastructure.browser_probe import _make_solver
 
@@ -249,14 +280,42 @@ class _LiveSession:
                 session_id=self.id,
             )
         if kind == "trace":
-            return _session_result(
-                status="not_implemented",
-                error="trace_not_implemented",
-                session_id=self.id,
-                artifact_type=kind,
-            )
+            extra: dict[str, Any] = {"artifact_type": kind}
+            context = getattr(page, "context", None)
+            tracing = getattr(context, "tracing", None) if context is not None else None
+            stop = getattr(tracing, "stop", None) if tracing is not None else None
+            path: str | None = None
+            if callable(stop):
+                try:
+                    with tempfile.NamedTemporaryFile(
+                        prefix="job_ftch_trace_", suffix=".zip", delete=False
+                    ) as handle:
+                        zip_path = handle.name
+                    result = stop(path=zip_path)
+                    if hasattr(result, "__await__"):
+                        await result
+                    path = zip_path
+                except Exception:
+                    path = None
+            if path is None:
+                with tempfile.NamedTemporaryFile(
+                    prefix="job_ftch_trace_",
+                    suffix=".jsonl",
+                    delete=False,
+                    mode="w",
+                    encoding="utf-8",
+                ) as handle:
+                    for row in self.nav_trace:
+                        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    path = handle.name
+            extra["path"] = path
+            extra["trace"] = {
+                "events": list(self.nav_trace),
+                "kind": "playwright_zip" if path.endswith(".zip") else "navigation_jsonl",
+            }
+            return self.public(extra=extra)
         await self._refresh()
-        extra: dict[str, Any] = {"artifact_type": kind}
+        extra = {"artifact_type": kind}
         if kind == "text":
             extra["text"] = await _page_text(page)
         elif kind == "html":
@@ -284,7 +343,7 @@ class _LiveSession:
         return self.public(extra=extra)
 
     async def run(self) -> None:
-        notes = ["ephemeral operator session"]
+        notes = [f"{self.profile} operator session"]
         try:
             strategy = resolve_bypass(self.engine, self.bypass_config)
         except ValueError:
@@ -298,14 +357,17 @@ class _LiveSession:
             self.ready.set()
             return
         self.challenge_sink = _attach_challenge_sink(strategy)
+        persistent = self.profile in {"persistent", "domain"}
         config: dict[str, Any] = {
             "url": self.requested_url,
             "headless": not self.headed,
             "timeout": NAV_TIMEOUT_MS,
             "wait": "domcontentloaded",
-            "persistent_context": False,
+            "persistent_context": persistent,
             "_bypass_strategy": self.challenge_sink,
         }
+        if persistent and self.profile_dir:
+            config["_profile_dir"] = self.profile_dir
         try:
             await check_ssrf(self.requested_url)
             async with open_page(config, bypass_strategy=strategy) as page:
@@ -416,13 +478,10 @@ class OperatorBrowserSessionService:
         normalized_profile = (profile or "ephemeral").strip().lower() or "ephemeral"
         if normalized_profile not in PROFILES:
             return _session_result(status="unsupported", error="unsupported_profile")
-        if normalized_profile != "ephemeral":
-            return _session_result(
-                status="unsupported",
-                error="persistent_profile_unsupported",
-                notes=["only ephemeral operator sessions are implemented"],
-                profile=normalized_profile,
-            )
+        profile_dir, profile_key = _profile_location(
+            tenant_id=tenant_id, url=url, profile=normalized_profile
+        )
+        ttl = HEADED_SESSION_TTL_SECONDS if (headed or manual_challenge) else SESSION_TTL_SECONDS
         async with self._lock:
             self._reap_locked()
             if len(self._sessions) >= MAX_SESSIONS:
@@ -438,6 +497,10 @@ class OperatorBrowserSessionService:
             headed=headed or manual_challenge,
             bypass_config=bypass_config,
             manual_challenge=manual_challenge,
+            profile=normalized_profile,
+            profile_dir=profile_dir,
+            profile_key=profile_key,
+            ttl_seconds=ttl,
         )
         session.task = asyncio.create_task(session.run())
         try:
@@ -474,7 +537,7 @@ class OperatorBrowserSessionService:
                 status="unsupported",
                 error="unsupported_instruction",
                 session_id=session_id,
-                notes=["use wait|reload|wait_challenge|solve|navigate <url>"],
+                notes=["use wait|reload|wait_challenge|extend|solve|navigate <url>"],
             )
         return await self._ask(session, kind, payload)
 
@@ -537,6 +600,20 @@ class OperatorBrowserSessionService:
             )
 
 
+def _profile_location(*, tenant_id: str, url: str, profile: str) -> tuple[str | None, str | None]:
+    if profile not in {"persistent", "domain"}:
+        return None, None
+    from job_ftch.config import get_settings
+
+    root = get_settings().browser_profile_root
+    host = urlparse(url).netloc.split(":")[0].lower() or "site"
+    slug = "".join(ch if ch.isalnum() else "_" for ch in host).strip("_") or "site"
+    key = f"{tenant_id}" if profile == "persistent" else f"{tenant_id}_{slug}"
+    path = root / "operator" / key
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path), key
+
+
 def _parse_instruction(instruction: str | None) -> tuple[str, dict[str, Any]]:
     text = (instruction or "wait").strip()
     lowered = text.lower()
@@ -546,6 +623,8 @@ def _parse_instruction(instruction: str | None) -> tuple[str, dict[str, Any]]:
         return "reload", {}
     if lowered in {"wait_challenge", "wait-challenge"}:
         return "wait_challenge", {}
+    if lowered in {"extend", "keep_alive", "keep-alive"}:
+        return "extend", {}
     if lowered in {"solve", "solve:browser_wait", "solve:auto"}:
         return "solve", {"solve": "browser_wait"}
     if lowered.startswith("solve:"):

@@ -47,3 +47,6 @@ either hung on HTTP `:8765` or bounced as `not_implemented`.
   captcha under existing gates, keep a short session, and pin a parser.
 - (-) Sessions are process-local and expire. They are not a headed daemon.
 - (-) Site parsers remain URL-bound; career-site pin is monitor/scraper.
+- Follow-up: [084](084-operator-persistent-fingerprint-parser-override.md) implements
+  persistent/domain profiles, fingerprint/custom_safe, trace, pollable captcha, and
+  an explicit mismatched-host site-parser pin.

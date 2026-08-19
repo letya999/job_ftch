@@ -148,22 +148,10 @@ async def add_shots(
     ontology_errors: list[str] = []
     runtime = runner.get_runtime(tenant_id)
 
-    from job_ftch.application.ontology_enrichment import (
-        add_example_to_profile_with_enrichment,
-    )
+    from job_ftch.application.ontology_enrichment import compile_profile_ontology
 
     for item in items:
-        try:
-            managed = await add_example_to_profile_with_enrichment(
-                managed,
-                item,
-                kind=ekind,
-                llm=getattr(runtime, "llm_provider", None),
-                ontology_store=getattr(runtime, "ontology_store", None),
-            )
-        except Exception as exc:  # noqa: BLE001 - still persist example text
-            ontology_errors.append(f"{type(exc).__name__}: {exc}")
-            managed = add_example_to_profile(managed, item, kind=ekind)
+        managed = add_example_to_profile(managed, item, kind=ekind)
         try:
             await remove_shot_async(text=item, role=role)
             await add_shot_async(
@@ -186,6 +174,17 @@ async def add_shots(
             sync_errors.append(f"embed:{type(exc).__name__}: {exc}")
 
     await runner.save_and_activate_candidate_profile(tenant_id, managed)
+    pos_added = 0
+    try:
+        compiled = await compile_profile_ontology(
+            managed,
+            llm=getattr(runtime, "llm_provider", None),
+            ontology_store=getattr(runtime, "ontology_store", None),
+        )
+        pos_added = int(compiled.get("pos_added") or 0)
+        ontology_errors.extend(str(item) for item in compiled.get("ontology_errors") or [])
+    except Exception as exc:  # noqa: BLE001
+        ontology_errors.append(f"{type(exc).__name__}: {exc}")
     from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
 
     mark_prefilter_dirty(getattr(runtime, "settings", None))
@@ -213,6 +212,7 @@ async def add_shots(
         "counts": {k: len(v) for k, v in examples.items()},
         "shot_sync_errors": sync_errors,
         "ontology_errors": ontology_errors,
+        "pos_added": pos_added,
         "ontology_store": runtime.ontology_store is not None,
         "embedding_provider": embedding_provider is not None,
     }
@@ -463,9 +463,33 @@ async def add_operator_example(
         "prefilter_dirty": True,
         "shot_sync_errors": result["shot_sync_errors"],
         "ontology_errors": result["ontology_errors"],
+        "pos_added": result.get("pos_added", 0),
         "ontology_store": result["ontology_store"],
         "embedding_provider": result["embedding_provider"],
     }
+
+
+def public_job_group(group: Any) -> dict[str, Any]:
+    """Operator-readable JobGroup dump with a top-level title."""
+    payload = group.model_dump(mode="json") if hasattr(group, "model_dump") else dict(group)
+    job = getattr(group, "canonical_job", None)
+    title = None
+    company = None
+    if job is not None:
+        title = (
+            getattr(job, "title", None)
+            or getattr(job, "title_normalized", None)
+            or getattr(job, "title_raw", None)
+        )
+        company = getattr(job, "company", None) or getattr(job, "company_canonical", None)
+    nested = payload.get("canonical_job") if isinstance(payload.get("canonical_job"), dict) else {}
+    if not title:
+        title = nested.get("title") or nested.get("title_normalized") or nested.get("title_raw")
+    if not company:
+        company = nested.get("company") or nested.get("company_canonical")
+    payload["title"] = title or ""
+    payload["company"] = company
+    return payload
 
 
 async def remove_operator_example(

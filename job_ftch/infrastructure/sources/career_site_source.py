@@ -791,9 +791,9 @@ class CareerSiteSource(Source["RawItem"]):
     async def _try_site_parser(
         self, original_http: Any
     ) -> AsyncIterator[RawItem | QuarantinedRawItem]:
-        from job_ftch.application.registry import resolve_site_parser
+        from job_ftch.application.registry import resolve_site_parser_for_spec
 
-        site_parser = resolve_site_parser(self.spec.url)
+        site_parser = resolve_site_parser_for_spec(self.spec)
         if site_parser is not None and getattr(site_parser, "has_custom_parse", True):
             parser_spec = self._runtime_monitor_spec()
             parser_monitor_config = dict(self.spec.monitor_config)
@@ -1600,14 +1600,16 @@ class CareerSiteSource(Source["RawItem"]):
         keywords = self.spec.monitor_config.get("_search_keywords")
         if not keywords:
             return
-        from job_ftch.application.registry import resolve_site_parser
+        from job_ftch.application.registry import resolve_site_parser_for_spec
         from job_ftch.infrastructure.sources.http_retry import fetch_with_retry
         from job_ftch.infrastructure.sources.site_parsers.generic_search import (
             discover_working_search_url,
         )
         from job_ftch.infrastructure.sources.site_parsers.helpers import url_has_search_query
 
-        if resolve_site_parser(self.spec.url) is not None or url_has_search_query(self.spec.url):
+        if resolve_site_parser_for_spec(self.spec) is not None or url_has_search_query(
+            self.spec.url
+        ):
             return
 
         try:

@@ -13,6 +13,7 @@ from job_ftch.adapters.mcp.product_surface import (
     filter_job_groups,
     get_examples_summary,
     list_operator_examples,
+    public_job_group,
     remove_operator_example,
     resolve_surface,
     shot_role,
@@ -72,6 +73,27 @@ def test_filter_job_groups_by_company_and_score() -> None:
     out2 = filter_job_groups(groups, limit=10, location="moscow")
     assert len(out2) == 1
     assert out2[0]["canonical_job"]["company"] == "Yandex"
+
+
+def test_public_job_group_exposes_title() -> None:
+    job = SimpleNamespace(
+        title="Senior LLM Engineer",
+        title_normalized="senior llm engineer",
+        title_raw="Senior LLM Engineer",
+        company="Aston",
+        company_canonical=None,
+    )
+    group = SimpleNamespace(
+        canonical_job=job,
+        model_dump=lambda mode="json": {
+            "group_id": "abc",
+            "canonical_job": {"title": "Senior LLM Engineer", "company": "Aston"},
+        },
+    )
+    payload = public_job_group(group)
+    assert payload["title"] == "Senior LLM Engineer"
+    assert payload["company"] == "Aston"
+    assert payload["group_id"] == "abc"
 
 
 class _MemoryRunner:
