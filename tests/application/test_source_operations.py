@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from job_ftch.application.source_operations import (
+    close_browser_session,
+    open_browser_session,
     probe_bypass_route,
     probe_source,
     run_browser_probe,
@@ -280,7 +282,36 @@ async def test_run_browser_probe_listing_uses_runner_port() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_browser_probe_detail_is_not_implemented() -> None:
+async def test_run_browser_probe_detail_uses_runner_port() -> None:
+    runner = _FakeRunner()
+    runner.probe_browser_listing = AsyncMock(
+        return_value={
+            "ok": True,
+            "status": "ok",
+            "executed": True,
+            "engine": "patchright_browser",
+            "page_title": "Engineer",
+            "heading": "Engineer",
+            "text_preview": "We are hiring",
+            "items": [],
+        }
+    )
+    payload = await run_browser_probe(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        url="https://example.com/jobs/1",
+        probe="detail",
+        engine="auto",
+    )
+    assert payload["ok"] is True
+    assert payload["heading"] == "Engineer"
+    assert runner.probe_browser_listing.await_args.kwargs["probe"] == "detail"
+    runner.run_tenant.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_browser_probe_fingerprint_is_not_implemented() -> None:
     runner = _FakeRunner()
     runner.probe_browser_listing = AsyncMock()
     payload = await run_browser_probe(
@@ -288,14 +319,108 @@ async def test_run_browser_probe_detail_is_not_implemented() -> None:
         tenant_id="t1",
         source_id="debug:fixture",
         url="https://example.com/jobs",
-        probe="detail",
+        probe="fingerprint",
         engine="auto",
     )
     assert payload["status"] == "not_implemented"
     assert payload["executed"] is False
-    assert payload["missing_service"] == "browser_session_probe"
     runner.probe_browser_listing.assert_not_called()
     runner.run_tenant.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_source_pins_career_site_parser(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations.all_monitor_names",
+        lambda: {"sitemap"},
+    )
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations.all_scraper_names",
+        lambda: set(),
+    )
+    runner = _FakeRunner()
+    runner.sources.append(
+        {
+            "source_id": "career_site:jobs",
+            "source_kind": "career_site",
+            "source_name": "jobs",
+            "enabled": True,
+            "status": "pending",
+            "degraded": False,
+            "requirements": {"browser_required": False},
+            "spec": {"type": "career_site", "url": "https://example.com/jobs", "monitor": "auto"},
+        }
+    )
+    payload = await run_source(
+        runner,
+        tenant_id="t1",
+        source_id="career_site:jobs",
+        parser="sitemap",
+    )
+    assert payload["executed"] is True
+    assert payload["requested_parser"] == "sitemap"
+    assert runner.run_tenant.await_args.kwargs["parser_override"] == "sitemap"
+
+
+@pytest.mark.asyncio
+async def test_run_source_rejects_parser_pin_on_fixture() -> None:
+    runner = _FakeRunner()
+    payload = await run_source(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        parser="generic",
+    )
+    assert payload["status"] == "unsupported"
+    assert payload["error"] == "parser_pin_unsupported_source"
+    runner.run_tenant.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_open_browser_session_requires_url() -> None:
+    runner = _FakeRunner()
+    runner.open_operator_browser_session = AsyncMock()
+    payload = await open_browser_session(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        engine="auto",
+    )
+    assert payload["status"] == "unsupported"
+    assert payload["error"] == "listing_url_required"
+    runner.open_operator_browser_session.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_open_browser_session_uses_runner_port() -> None:
+    runner = _FakeRunner()
+    runner.open_operator_browser_session = AsyncMock(
+        return_value={
+            "ok": True,
+            "status": "ok",
+            "executed": True,
+            "session_id": "sess-1",
+            "engine": "patchright_browser",
+            "final_url": "https://example.com/jobs",
+            "ttl_seconds": 180,
+        }
+    )
+    payload = await open_browser_session(
+        runner,
+        tenant_id="t1",
+        url="https://example.com/jobs",
+        engine="auto",
+        headed=False,
+    )
+    assert payload["ok"] is True
+    assert payload["session_id"] == "sess-1"
+    runner.open_operator_browser_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_close_browser_session_missing_port() -> None:
+    payload = await close_browser_session(_FakeRunner(), session_id="missing")
+    assert payload["status"] == "not_implemented"
 
 
 @pytest.mark.asyncio

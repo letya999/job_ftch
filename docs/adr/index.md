@@ -91,6 +91,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [080 — Opt-in operational outcomes store (REVIEW / REJECTED)](080-opt-in-operational-outcomes-store.md) - **Status**: ACCEPTED (Updated: 2026-08-08)
 - [081 — Operator browser listing probe](081-operator-browser-listing-probe.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
 - [082 — Operator bypass pin and sweep](082-operator-bypass-pin-and-sweep.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
+- [083 — Operator sessions, challenge probes, captcha wait, parser pin](083-operator-sessions-challenge-parser-pin.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

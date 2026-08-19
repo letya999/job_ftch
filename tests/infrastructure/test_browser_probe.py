@@ -165,3 +165,77 @@ async def test_probe_listing_challenge_without_cards(
     assert payload["error"] == "challenge_detected"
     assert payload["challenge"] == "blocked_fingerprint"
     assert payload["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_probe_detail_returns_text_preview(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _DetailPage(_FakePage):
+        async def evaluate(self, script: str, arg: object = None) -> object:
+            del arg
+            if "innerText" in script:
+                return "We are hiring an engineer"
+            if "h1" in script:
+                return "Engineer"
+            return [{"url": "https://example.com/jobs/1", "title": "Engineer"}]
+
+    @asynccontextmanager
+    async def fake_open_page(config: dict[str, Any], *, bypass_strategy: Any = None):
+        del config, bypass_strategy
+        yield _DetailPage()
+
+    async def fake_navigate(opened: Any, url: str, config: dict[str, Any]) -> None:
+        del opened, url, config
+
+    async def fake_ssrf(url: str) -> None:
+        del url
+
+    monkeypatch.setattr(probe_mod, "open_page", fake_open_page)
+    monkeypatch.setattr(probe_mod, "navigate", fake_navigate)
+    monkeypatch.setattr(probe_mod, "check_ssrf", fake_ssrf)
+    monkeypatch.setattr(probe_mod, "resolve_bypass", lambda name, config=None: object())
+
+    payload = await probe_mod.probe_detail(url="https://example.com/jobs/1", engine="auto")
+    assert payload["ok"] is True
+    assert payload["heading"] == "Engineer"
+    assert "hiring" in payload["text_preview"]
+
+
+@pytest.mark.asyncio
+async def test_probe_challenge_without_solve(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _ChallengePage(_FakePage):
+        html = "<html><body>Cloudflare challenge</body></html>"
+
+        async def evaluate(self, script: str, arg: object = None) -> object:
+            del script, arg
+            return []
+
+        async def content(self) -> str:
+            return self.html
+
+    class _Bypass:
+        observed_challenge_type = "cloudflare_challenge"
+
+        def set_observed_challenge_type(self, challenge_type: str | None) -> None:
+            if challenge_type:
+                self.observed_challenge_type = str(challenge_type)
+
+    @asynccontextmanager
+    async def fake_open_page(config: dict[str, Any], *, bypass_strategy: Any = None):
+        del config, bypass_strategy
+        yield _ChallengePage()
+
+    async def fake_navigate(opened: Any, url: str, config: dict[str, Any]) -> None:
+        del opened, url, config
+
+    async def fake_ssrf(url: str) -> None:
+        del url
+
+    monkeypatch.setattr(probe_mod, "open_page", fake_open_page)
+    monkeypatch.setattr(probe_mod, "navigate", fake_navigate)
+    monkeypatch.setattr(probe_mod, "check_ssrf", fake_ssrf)
+    monkeypatch.setattr(probe_mod, "resolve_bypass", lambda name, config=None: _Bypass())
+
+    payload = await probe_mod.probe_challenge(url="https://example.com/jobs", engine="auto")
+    assert payload["status"] == "challenge"
+    assert payload["challenge"] == "cloudflare_challenge"
+    assert payload["captcha"] is None

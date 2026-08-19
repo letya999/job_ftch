@@ -724,6 +724,16 @@ def all_monitor_names() -> frozenset[str]:
     return frozenset(e.name for e in _MONITOR_REGISTRY)
 
 
+def all_scraper_names() -> frozenset[str]:
+    load_extensions()
+    return frozenset(_SCRAPER_REGISTRY)
+
+
+def all_site_parser_names() -> frozenset[str]:
+    load_extensions()
+    return frozenset(entry.name for entry in _site_parser_factories)
+
+
 def rich_monitor_names() -> frozenset[str]:
     load_extensions()
     return frozenset(e.name for e in _MONITOR_REGISTRY if e.rich)

@@ -82,7 +82,8 @@ Legacy MCP tool names (`run_all_pipelines`, `get_status`, `list_sources`,
 | `run_source(tenant_id, source_id, max_items=null, parser=null, bypass=null)` | omit `bypass` for the adaptive ladder; pass a registered name to pin one mechanic |
 | `run_source_escalation(tenant_id, source_id, strategy="recommended\|all")` | recommended = adaptive ingest; `all` walks `fallback_order`; `max_tier` truncates |
 | `probe_bypass_route(tenant_id, source_id, bypass, max_items=3)` | run one named bypass; browser routes use listing probe |
-| `run_browser_probe(...)` | `listing` opens one ephemeral page via `TenantRunner.probe_browser_listing`; other probes stay `not_implemented` |
+| `run_browser_probe(...)` | `listing`/`detail`/`challenge` open one ephemeral page; `solve=browser_wait\|provider` is captcha-gated; fingerprint stays `not_implemented` |
+| `open_browser_session(...)` / `get_browser_session` / `continue_browser_session` / `capture_browser_artifact` / `close_browser_session` | ephemeral operator session, TTL 180s; persistent/domain stay `unsupported` |
 | `recommend_runtime_setup(...)` / `validate_runtime_setup(...)` | install/config readiness |
 | `get_prefilter_requirements(profile_type=null)` | prefilter dataset contract |
 | `get_prefilter_status(tenant_id, profile_id=null)` | dirty flag + current artifact |
@@ -100,11 +101,13 @@ Source/bypass Slice 4 tools reuse `TenantRunner.run_tenant(..., source_ids=...)`
 for ingest. Slice 5 adds a bounded listing probe: `run_browser_probe(probe="listing")`
 opens one ephemeral page through `open_page`/`navigate` and returns title plus
 same-host link previews. It does not ingest, persist cookies, or keep a session.
-`detail`/`challenge`/session tools still return `not_implemented`. Slice 6
-lets MCP pin one bypass or walk `fallback_order` (ADR-082). Each attempt
-returns `parse` (`stage` + `reason`: challenge, empty fetch, zero_reason,
-listing cards). Missing extras return `unavailable`. MCP does not import
-Playwright/Patchright/nodriver clients.
+`fingerprint`/`custom_safe` still return `not_implemented`. Slice 6 lets MCP
+pin one bypass or walk `fallback_order` (ADR-082). Slice 7 (ADR-083) adds
+detail/challenge probes, ephemeral sessions, captcha wait/solve under
+`captcha_authorized_domains`, and a one-call parser pin (`monitor`/`scraper`
+on career sites). Each attempt returns `parse` (`stage` + `reason`). Missing
+extras return `unavailable`. Sessions never return cookie values or tokens.
+MCP does not import Playwright/Patchright/nodriver clients.
 
 ## Config directory
 

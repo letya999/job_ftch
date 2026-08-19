@@ -496,9 +496,35 @@ TenantStore = _tenant_store.TenantStore
 _summary_from_payload = _tenant_store._summary_from_payload
 
 
+def _pin_parser(spec: SourceSpec, parser_override: str) -> SourceSpec:
+    name = parser_override.strip()
+    spec_type = getattr(spec, "type", None)
+    updates: dict[str, Any] = {}
+    if spec_type == "declarative_html":
+        updates["parser_kind"] = name
+    elif spec_type == "browser":
+        updates["parser"] = name
+    elif spec_type == "career_site":
+        from job_ftch.application.registry import all_monitor_names, all_scraper_names
+
+        if name in all_monitor_names():
+            updates["monitor"] = name
+        if name in all_scraper_names():
+            updates["scraper"] = name
+        if not updates:
+            raise ValueError(f"parser {name!r} is not a registered monitor or scraper")
+    else:
+        raise ValueError(f"parser pin is not supported for source type {spec_type}")
+    copier = getattr(spec, "model_copy", None)
+    if not callable(copier):
+        return spec
+    return spec.model_copy(update=updates)
+
+
 class TenantRunner:
     def __init__(self, runtimes: dict[str, TenantRuntime]) -> None:
         self._runtimes = runtimes
+        self._operator_sessions: Any = None
 
     @classmethod
     def from_tenants(
@@ -1265,6 +1291,7 @@ class TenantRunner:
         user_id: str | None = None,
         source_ids: Sequence[str] | None = None,
         bypass_override: str | None = None,
+        parser_override: str | None = None,
         ignore_schedule_gates: bool = False,
     ) -> RunSummary:
         """Run acquisition and policy under one correlated trace/run id."""
@@ -1285,6 +1312,7 @@ class TenantRunner:
                             user_id=user_id,
                             source_ids=source_ids,
                             bypass_override=bypass_override,
+                            parser_override=parser_override,
                             ignore_schedule_gates=ignore_schedule_gates,
                             lock_already_held=True,
                         )
@@ -1323,6 +1351,7 @@ class TenantRunner:
         user_id: str | None = None,
         source_ids: Sequence[str] | None = None,
         bypass_override: str | None = None,
+        parser_override: str | None = None,
         ignore_schedule_gates: bool = False,
         lock_already_held: bool = False,
     ) -> RunSummary:
@@ -1373,14 +1402,20 @@ class TenantRunner:
             seen_specs.add(sid)
             unique_specs.append(spec)
 
-        if bypass_override:
+        if bypass_override or parser_override:
             pinned_specs: list[SourceSpec] = []
             for spec in unique_specs:
-                copier = getattr(spec, "model_copy", None)
-                if callable(copier):
-                    pinned_specs.append(spec.model_copy(update={"bypass": bypass_override}))
-                else:
-                    pinned_specs.append(spec)
+                current = spec
+                if bypass_override:
+                    copier = getattr(current, "model_copy", None)
+                    current = (
+                        current.model_copy(update={"bypass": bypass_override})
+                        if callable(copier)
+                        else current
+                    )
+                if parser_override:
+                    current = _pin_parser(current, parser_override)
+                pinned_specs.append(current)
             unique_specs = pinned_specs
 
         assessment_service = create_source_assessment_service()
@@ -1918,18 +1953,82 @@ class TenantRunner:
         headed: bool = False,
         max_items: int = 5,
         bypass_config: dict[str, Any] | None = None,
+        probe: str = "listing",
+        solve: str = "none",
     ) -> dict[str, Any]:
-        """Open one ephemeral listing page. Does not ingest or keep a session."""
+        """Open one ephemeral page. Does not ingest or keep a session."""
         from job_ftch.infrastructure.browser_probe import LiveBrowserSessionProbe
 
-        probe = LiveBrowserSessionProbe(self._settings_for_inventory(tenant_id))
-        return await probe.probe_listing(
+        probe_kind = (probe or "listing").strip().lower()
+        live = LiveBrowserSessionProbe(self._settings_for_inventory(tenant_id))
+        return await live.probe(
             url=url,
             engine=engine,
+            probe=probe_kind,
             headed=headed,
             max_items=max_items,
             bypass_config=bypass_config,
+            solve=solve,
         )
+
+    def _session_service(self) -> Any:
+        if self._operator_sessions is None:
+            from job_ftch.infrastructure.browser_session import OperatorBrowserSessionService
+
+            self._operator_sessions = OperatorBrowserSessionService()
+        return self._operator_sessions
+
+    def _session_call(self, payload: Any) -> dict[str, Any]:
+        if isinstance(payload, dict):
+            return payload
+        return {"status": "error", "error": "invalid_session_payload", "ok": False, "executed": False}
+
+    async def open_operator_browser_session(
+        self,
+        tenant_id: str,
+        *,
+        url: str,
+        engine: str = "auto",
+        headed: bool = False,
+        bypass_config: dict[str, Any] | None = None,
+        manual_challenge: bool = False,
+        profile: str = "ephemeral",
+    ) -> dict[str, Any]:
+        return self._session_call(
+            await self._session_service().open(
+                tenant_id=tenant_id,
+                url=url,
+                engine=engine,
+                headed=headed,
+                bypass_config=bypass_config,
+                manual_challenge=manual_challenge,
+                profile=profile,
+            )
+        )
+
+    async def get_operator_browser_session(self, session_id: str) -> dict[str, Any]:
+        return self._session_call(await self._session_service().get(session_id))
+
+    async def continue_operator_browser_session(
+        self,
+        session_id: str,
+        instruction: str | None = None,
+    ) -> dict[str, Any]:
+        return self._session_call(
+            await self._session_service().continue_session(session_id, instruction)
+        )
+
+    async def capture_operator_browser_artifact(
+        self,
+        session_id: str,
+        artifact_type: str,
+    ) -> dict[str, Any]:
+        return self._session_call(
+            await self._session_service().capture(session_id, artifact_type)
+        )
+
+    async def close_operator_browser_session(self, session_id: str) -> dict[str, Any]:
+        return self._session_call(await self._session_service().close(session_id))
 
     async def create_search_session(
         self,
@@ -2474,6 +2573,12 @@ class TenantRunner:
             }
 
     async def close(self) -> None:
+        sessions = self._operator_sessions
+        if sessions is not None:
+            closer = getattr(sessions, "close_all", None)
+            if callable(closer):
+                await closer()
+            self._operator_sessions = None
         closed: set[int] = set()
         try:
             for runtime in self._runtimes.values():

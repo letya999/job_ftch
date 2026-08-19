@@ -195,9 +195,9 @@ This block must support both Patchright-style and non-browser runtimes. If a
 runtime cannot be controlled through Patchright, the tool should still expose a
 consistent session/probe contract around the underlying capability.
 
-Listing probe is implemented (ADR-081). Live session operations
-(`open_browser_session` / continue / close) may still return `not_implemented`
-until a session service exists. Route diagnostics stay available either way.
+Listing/detail/challenge probes and ephemeral sessions are implemented
+(ADR-081/083). `persistent`/`domain` profiles, `fingerprint`/`custom_safe`,
+and `trace` artifacts stay `not_implemented` / `unsupported`.
 
 ### Examples / resumes / vacancies
 
@@ -421,6 +421,16 @@ Implemented on this branch (ADR-082):
 - Responses include `parse.stage` / `parse.reason` so an operator can see
   challenge vs empty listing vs fetch vs parser/zero-yield.
 
+### Slice 7 — sessions, detail/challenge, captcha wait, parser pin
+
+Implemented on this branch (ADR-083):
+
+- `run_browser_probe(probe="detail"|"challenge")` opens one ephemeral page.
+- `solve=browser_wait|auto|provider` uses `CaptchaSolverBypass`; provider
+  stays gated by `captcha_authorized_domains`.
+- Ephemeral `open_browser_session` / continue / capture / close (TTL 180s).
+- `run_source(parser=X)` pins a registered monitor/scraper for one call.
+
 ## Testing plan
 
 For each slice:
@@ -460,13 +470,12 @@ ai-repo-safety prepush --target .
 
 ## Expected deliverable for the current branch
 
-Slices 1–6 are implemented on this branch. Remaining out of scope until a
-dedicated service exists:
+Slices 1–7 are implemented on this branch. Remaining out of scope:
 
-- live browser sessions (`open` / `continue` / `close`);
-- `detail` / `challenge` / `fingerprint` / `custom_safe` probes;
-- interactive captcha / headed manual challenge;
-- parser pin to a different parser than the source currently uses.
+- persistent/domain browser profiles;
+- `fingerprint` / `custom_safe` probes and `trace` artifacts;
+- headed captcha that waits on a human indefinitely;
+- pinning a URL-bound site parser onto a career site that is not that host.
 
 Where a target tool cannot be implemented yet, keep a structured
 `not_implemented` response only if the tool is necessary for discoverability,

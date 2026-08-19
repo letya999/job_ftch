@@ -69,7 +69,8 @@ Source of truth: `job_ftch/application/contracts.py`.
 - `ManagedShotBackend`;
 - `OntologyStore`;
 - `SourceAssessmentAdapter`;
-- `BrowserSessionProbe` (operator listing probe; ADR-081).
+- `BrowserSessionProbe` (operator listing/detail/challenge probe; ADR-081/083);
+- `OperatorBrowserSessionPort` (ephemeral operator sessions; ADR-083).
 
 ## 4. Семья payload-типов
 

@@ -1,8 +1,8 @@
 """Source-scoped probe/run helpers for operator adapters.
 
-MCP calls these instead of importing browser clients. Listing probes go through
-TenantRunner.probe_browser_listing. Interactive sessions are not implemented.
-Ingest reuses TenantRunner source_ids runs.
+MCP calls these instead of importing browser clients. Listing/detail/challenge
+probes and ephemeral sessions go through TenantRunner. Ingest reuses
+TenantRunner source_ids runs.
 """
 
 from __future__ import annotations
@@ -12,7 +12,12 @@ from typing import Any
 from pydantic import TypeAdapter
 
 from job_ftch.application.browser_capability_inventory import explanation_to_public_dict
-from job_ftch.application.registry import list_bypass_capabilities
+from job_ftch.application.registry import (
+    all_monitor_names,
+    all_scraper_names,
+    all_site_parser_names,
+    list_bypass_capabilities,
+)
 from job_ftch.domain.runtime_source import source_spec_identifier
 from job_ftch.domain.source_spec import SourceSpec
 
@@ -32,6 +37,8 @@ _BROWSER_ENGINES = frozenset(
     }
 )
 _MISSING_BROWSER_PROBE = "browser_session_probe"
+_LIVE_PROBES = frozenset({"listing", "detail", "challenge"})
+_SESSION_PROFILES = frozenset({"ephemeral", "persistent", "domain"})
 _SWEEP_MAX_ROUTES = 6
 _ADAPTIVE_BYPASS = frozenset({"auto", "adaptive"})
 _ENGINE_ALIASES = {
@@ -242,6 +249,32 @@ def _registered_bypass_names() -> set[str]:
         return set()
 
 
+def _parser_pin_error(source: dict[str, Any], requested: str) -> str | None:
+    spec_raw = source.get("spec")
+    spec: dict[str, Any] = spec_raw if isinstance(spec_raw, dict) else {}
+    kind = str(spec.get("type") or source.get("source_kind") or "")
+    if kind == "career_site":
+        try:
+            monitors = all_monitor_names()
+            scrapers = all_scraper_names()
+        except Exception:
+            monitors, scrapers = frozenset(), frozenset()
+        if requested in monitors or requested in scrapers:
+            return None
+        return "parser_unavailable"
+    if kind == "declarative_html":
+        try:
+            names = all_site_parser_names()
+        except Exception:
+            names = frozenset()
+        if names and requested not in names and requested != "auto":
+            return "parser_unavailable"
+        return None
+    if kind == "browser":
+        return None
+    return "parser_pin_unsupported_source"
+
+
 def _parse_diagnosis(
     *,
     run: dict[str, Any] | None = None,
@@ -346,6 +379,7 @@ async def _execute_source_run(
     requested_source_id: str,
     max_items: int | None,
     bypass_override: str | None = None,
+    parser_override: str | None = None,
     ignore_schedule_gates: bool = False,
 ) -> dict[str, Any]:
     try:
@@ -354,6 +388,7 @@ async def _execute_source_run(
             max_items=max_items,
             source_ids=[_run_source_id(source, requested_source_id)],
             bypass_override=bypass_override,
+            parser_override=parser_override,
             ignore_schedule_gates=ignore_schedule_gates,
         )
     except ValueError as exc:
@@ -396,6 +431,7 @@ async def _attempt_bypass(
     source_id: str,
     bypass: str,
     max_items: int,
+    parser_override: str | None = None,
 ) -> dict[str, Any]:
     listing_url = _listing_url(source, None)
     browser = bypass in _BROWSER_ENGINES
@@ -432,6 +468,7 @@ async def _attempt_bypass(
         requested_source_id=source_id,
         max_items=max_items,
         bypass_override=bypass,
+        parser_override=parser_override,
         ignore_schedule_gates=True,
     )
     run = executed.get("run") if isinstance(executed.get("run"), dict) else {}
@@ -594,6 +631,23 @@ async def run_source(
                 requested_bypass=requested_bypass,
                 requested_parser=requested_parser,
             )
+        parser_pin = None
+        if requested_parser and requested_parser not in {"auto"}:
+            parser_error = _parser_pin_error(source, requested_parser)
+            if parser_error:
+                return _envelope(
+                    tenant_id=tenant_id,
+                    source_id=source_id,
+                    status="unavailable" if parser_error == "parser_unavailable" else "unsupported",
+                    error=parser_error,
+                    notes=_notes(f"cannot pin parser {requested_parser!r} for this source"),
+                    source=snapshot,
+                    route=route,
+                    selected_route=selected,
+                    requested_bypass=requested_bypass,
+                    requested_parser=requested_parser,
+                )
+            parser_pin = requested_parser
         attempt = await _attempt_bypass(
             runner,
             tenant_id=tenant_id,
@@ -601,6 +655,7 @@ async def run_source(
             source_id=source_id,
             bypass=pin,
             max_items=int(max_items) if max_items is not None else 5,
+            parser_override=parser_pin,
         )
         return _envelope(
             tenant_id=tenant_id,
@@ -627,17 +682,18 @@ async def run_source(
             browser_required=pin in _BROWSER_ENGINES,
             max_items=max_items,
         )
+    parser_pin = None
     if requested_parser and requested_parser not in {"auto"}:
-        current_parser = snapshot.get("current_parser")
-        if current_parser and requested_parser != current_parser:
+        parser_error = _parser_pin_error(source, requested_parser)
+        if parser_error:
             return _envelope(
                 tenant_id=tenant_id,
                 source_id=source_id,
-                status="unsupported",
-                error="parser_override_unsupported",
+                status="unavailable" if parser_error == "parser_unavailable" else "unsupported",
+                error=parser_error,
                 notes=_notes(
-                    "run_source cannot pin a different parser for one call",
-                    f"current parser is {current_parser}",
+                    f"cannot pin parser {requested_parser!r} for this source",
+                    "career_site pin accepts a registered monitor or scraper name",
                 ),
                 source=snapshot,
                 route=route,
@@ -645,13 +701,20 @@ async def run_source(
                 requested_bypass=requested_bypass,
                 requested_parser=requested_parser,
             )
+        parser_pin = requested_parser
     executed = await _execute_source_run(
         runner,
         tenant_id=tenant_id,
         source=source,
         requested_source_id=source_id,
         max_items=max_items,
+        parser_override=parser_pin,
         ignore_schedule_gates=True,
+    )
+    parser_notes = (
+        [f"pinned parser {parser_pin} for this call only"]
+        if parser_pin
+        else ["no parser pin: source keeps its configured monitor/scraper"]
     )
     return _envelope(
         tenant_id=tenant_id,
@@ -663,6 +726,7 @@ async def run_source(
         notes=_notes(
             "run_source is a source-scoped TenantRunner ingest",
             "no bypass pin: source uses the standard adaptive ladder",
+            *parser_notes,
         ),
         source=snapshot,
         route=route,
@@ -959,6 +1023,7 @@ async def run_browser_probe(
     bypass: str | None = None,
     headed: bool = False,
     max_items: int = 5,
+    solve: str = "none",
 ) -> dict[str, Any]:
     normalized_probe = (probe or "listing").strip().lower()
     normalized_engine = (engine or "auto").strip().lower()
@@ -1020,7 +1085,7 @@ async def run_browser_probe(
                 route=route,
                 selected_route=_selected_route(route),
             )
-    if normalized_probe != "listing":
+    if normalized_probe not in _LIVE_PROBES:
         return _envelope(
             tenant_id=tenant_id,
             source_id=source_id,
@@ -1029,7 +1094,7 @@ async def run_browser_probe(
             missing_service=_MISSING_BROWSER_PROBE,
             notes=_notes(
                 f"probe={normalized_probe} is not implemented yet",
-                "listing probe is the live path; other probes stay diagnostic-only",
+                "listing/detail/challenge are the live paths",
             ),
             probe=normalized_probe,
             engine=normalized_engine,
@@ -1046,7 +1111,7 @@ async def run_browser_probe(
             status="unsupported",
             error="listing_url_required",
             notes=_notes(
-                "listing probe needs an http(s) url argument or a source spec url",
+                f"{normalized_probe} probe needs an http(s) url argument or a source spec url",
                 "local_fixture / telegram sources have no listing page",
             ),
             probe=normalized_probe,
@@ -1083,6 +1148,8 @@ async def run_browser_probe(
         headed=headed,
         max_items=int(max_items),
         bypass_config=bypass_config if isinstance(bypass_config, dict) else None,
+        probe=normalized_probe,
+        solve=(solve or "none").strip().lower() or "none",
     )
     if not isinstance(executed, dict):
         executed = {"status": "error", "error": "invalid_probe_payload", "executed": False}
@@ -1095,7 +1162,7 @@ async def run_browser_probe(
         error=executed.get("error"),
         notes=_notes(
             *list(executed.get("notes") or []),
-            "listing probe does not run TenantRunner ingest",
+            f"{normalized_probe} probe does not run TenantRunner ingest",
         ),
         probe=normalized_probe,
         engine=executed.get("engine") or resolved_engine,
@@ -1103,10 +1170,251 @@ async def run_browser_probe(
         requested_url=listing_url,
         final_url=executed.get("final_url"),
         page_title=executed.get("page_title"),
+        heading=executed.get("heading"),
+        text_preview=executed.get("text_preview"),
         challenge=executed.get("challenge"),
+        captcha=executed.get("captcha"),
+        solve=executed.get("solve"),
         item_count=executed.get("item_count"),
         items=executed.get("items") or [],
         source=None if source is None else _source_snapshot(source),
         route=route,
         selected_route=None if route is None else _selected_route(route),
+    )
+
+
+def _session_url(source: dict[str, Any] | None, url: str | None) -> str | None:
+    return _listing_url(source, url)
+
+
+async def open_browser_session(
+    runner: Any,
+    *,
+    tenant_id: str,
+    source_id: str | None = None,
+    url: str | None = None,
+    engine: str = "auto",
+    headed: bool = True,
+    bypass: str | None = None,
+    profile: str = "ephemeral",
+    manual_challenge: bool = False,
+) -> dict[str, Any]:
+    normalized_engine = (engine or "auto").strip().lower()
+    normalized_profile = (profile or "ephemeral").strip().lower() or "ephemeral"
+    if normalized_engine not in BROWSER_ENGINES:
+        return _envelope(
+            tenant_id=tenant_id,
+            source_id=source_id,
+            status="unsupported",
+            error="unsupported_engine",
+            engine=engine,
+            profile=normalized_profile,
+        )
+    if normalized_profile not in _SESSION_PROFILES:
+        return _envelope(
+            tenant_id=tenant_id,
+            source_id=source_id,
+            status="unsupported",
+            error="unsupported_profile",
+            engine=normalized_engine,
+            profile=profile,
+        )
+    source = None
+    route = None
+    if source_id:
+        source = await _find_source(runner, tenant_id, source_id)
+        if source is None:
+            return _envelope(
+                tenant_id=tenant_id,
+                source_id=source_id,
+                status="source_not_found",
+                error="source_not_found",
+                engine=normalized_engine,
+                profile=normalized_profile,
+            )
+        route = await _route_payload(runner, tenant_id, source_id, bypass=bypass)
+    target = _session_url(source, url)
+    if target is None:
+        return _envelope(
+            tenant_id=tenant_id,
+            source_id=source_id,
+            status="unsupported",
+            error="listing_url_required",
+            notes=_notes("open_browser_session needs an http(s) url or a source spec url"),
+            engine=normalized_engine,
+            profile=normalized_profile,
+            source=None if source is None else _source_snapshot(source),
+            route=route,
+        )
+    open_fn = getattr(runner, "open_operator_browser_session", None)
+    if not callable(open_fn):
+        return _envelope(
+            tenant_id=tenant_id,
+            source_id=source_id,
+            status="not_implemented",
+            error="live_browser_session_not_implemented",
+            missing_service="operator_browser_session",
+            engine=normalized_engine,
+            profile=normalized_profile,
+        )
+    spec_raw = (source or {}).get("spec")
+    spec: dict[str, Any] = spec_raw if isinstance(spec_raw, dict) else {}
+    executed = await open_fn(
+        tenant_id,
+        url=target,
+        engine=_resolve_listing_engine(normalized_engine),
+        headed=headed or manual_challenge,
+        bypass_config=spec.get("bypass_config")
+        if isinstance(spec.get("bypass_config"), dict)
+        else None,
+        manual_challenge=manual_challenge,
+        profile=normalized_profile,
+    )
+    if not isinstance(executed, dict):
+        executed = {"status": "error", "error": "invalid_session_payload"}
+    return _envelope(
+        tenant_id=tenant_id,
+        source_id=source_id,
+        status=str(executed.get("status") or "error"),
+        ok=bool(executed.get("ok")),
+        executed=bool(executed.get("executed")),
+        error=executed.get("error"),
+        notes=_notes(*list(executed.get("notes") or [])),
+        extra={
+            k: v
+            for k, v in executed.items()
+            if k not in {"ok", "status", "executed", "error", "notes"}
+        },
+        source=None if source is None else _source_snapshot(source),
+        route=route,
+        engine=executed.get("engine") or _resolve_listing_engine(normalized_engine),
+        profile=normalized_profile,
+        requested_url=target,
+        browser_required=True,
+    )
+
+
+async def get_browser_session(runner: Any, *, session_id: str) -> dict[str, Any]:
+    get_fn = getattr(runner, "get_operator_browser_session", None)
+    if not callable(get_fn):
+        return _envelope(
+            tenant_id=None,
+            source_id=None,
+            status="not_implemented",
+            error="live_browser_session_not_implemented",
+            missing_service="operator_browser_session",
+        )
+    executed = await get_fn(session_id)
+    if not isinstance(executed, dict):
+        executed = {"status": "error", "error": "invalid_session_payload"}
+    return _envelope(
+        tenant_id=executed.get("tenant_id"),
+        source_id=None,
+        status=str(executed.get("status") or "error"),
+        ok=bool(executed.get("ok")),
+        executed=bool(executed.get("executed")),
+        error=executed.get("error"),
+        notes=_notes(*list(executed.get("notes") or [])),
+        extra={
+            k: v
+            for k, v in executed.items()
+            if k not in {"ok", "status", "executed", "error", "notes"}
+        },
+    )
+
+
+async def continue_browser_session(
+    runner: Any,
+    *,
+    session_id: str,
+    instruction: str | None = None,
+) -> dict[str, Any]:
+    cont_fn = getattr(runner, "continue_operator_browser_session", None)
+    if not callable(cont_fn):
+        return _envelope(
+            tenant_id=None,
+            source_id=None,
+            status="not_implemented",
+            error="live_browser_session_not_implemented",
+            missing_service="operator_browser_session",
+        )
+    executed = await cont_fn(session_id, instruction)
+    if not isinstance(executed, dict):
+        executed = {"status": "error", "error": "invalid_session_payload"}
+    return _envelope(
+        tenant_id=executed.get("tenant_id"),
+        source_id=None,
+        status=str(executed.get("status") or "error"),
+        ok=bool(executed.get("ok")),
+        executed=bool(executed.get("executed")),
+        error=executed.get("error"),
+        notes=_notes(*list(executed.get("notes") or [])),
+        extra={
+            k: v
+            for k, v in executed.items()
+            if k not in {"ok", "status", "executed", "error", "notes"}
+        },
+    )
+
+
+async def capture_browser_artifact(
+    runner: Any,
+    *,
+    session_id: str,
+    artifact_type: str = "text",
+) -> dict[str, Any]:
+    cap_fn = getattr(runner, "capture_operator_browser_artifact", None)
+    if not callable(cap_fn):
+        return _envelope(
+            tenant_id=None,
+            source_id=None,
+            status="not_implemented",
+            error="live_browser_session_not_implemented",
+            missing_service="operator_browser_session",
+        )
+    executed = await cap_fn(session_id, artifact_type)
+    if not isinstance(executed, dict):
+        executed = {"status": "error", "error": "invalid_session_payload"}
+    return _envelope(
+        tenant_id=executed.get("tenant_id"),
+        source_id=None,
+        status=str(executed.get("status") or "error"),
+        ok=bool(executed.get("ok")),
+        executed=bool(executed.get("executed")),
+        error=executed.get("error"),
+        notes=_notes(*list(executed.get("notes") or [])),
+        extra={
+            k: v
+            for k, v in executed.items()
+            if k not in {"ok", "status", "executed", "error", "notes"}
+        },
+    )
+
+
+async def close_browser_session(runner: Any, *, session_id: str) -> dict[str, Any]:
+    close_fn = getattr(runner, "close_operator_browser_session", None)
+    if not callable(close_fn):
+        return _envelope(
+            tenant_id=None,
+            source_id=None,
+            status="not_implemented",
+            error="live_browser_session_not_implemented",
+            missing_service="operator_browser_session",
+        )
+    executed = await close_fn(session_id)
+    if not isinstance(executed, dict):
+        executed = {"status": "error", "error": "invalid_session_payload"}
+    return _envelope(
+        tenant_id=executed.get("tenant_id"),
+        source_id=None,
+        status=str(executed.get("status") or "error"),
+        ok=bool(executed.get("ok")),
+        executed=bool(executed.get("executed")),
+        error=executed.get("error"),
+        notes=_notes(*list(executed.get("notes") or [])),
+        extra={
+            k: v
+            for k, v in executed.items()
+            if k not in {"ok", "status", "executed", "error", "notes"}
+        },
     )

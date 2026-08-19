@@ -41,6 +41,11 @@ MCP_OPERATOR_TOOLS = frozenset(
         "get_sources",
         "get_tenant_status",
         "ingest_resume",
+        "open_browser_session",
+        "get_browser_session",
+        "continue_browser_session",
+        "capture_browser_artifact",
+        "close_browser_session",
         "list_examples",
         "list_pipeline_runs",
         "list_prefilter_artifacts",
@@ -1289,11 +1294,30 @@ async def test_mcp_scenario_source_probe_pin_and_listing(
     _assert_no_secret_values(live)
 
     detail = await server.app.tools["run_browser_probe"](
-        "t_src", source_id, "https://example.com/jobs", "detail", "auto", None, False, 1
+        "t_src", source_id, None, "detail", "auto", None, False, 1
     )
-    assert detail["status"] == "not_implemented"
-    assert detail["executed"] is False
-    assert detail["missing_service"] == "browser_session_probe"
+    assert detail["status"] == "unsupported"
+    assert detail["error"] == "listing_url_required"
     _assert_no_secret_values(detail)
+
+    fingerprint = await server.app.tools["run_browser_probe"](
+        "t_src", source_id, "https://example.com/jobs", "fingerprint", "auto", None, False, 1
+    )
+    assert fingerprint["status"] == "not_implemented"
+    assert fingerprint["executed"] is False
+    _assert_no_secret_values(fingerprint)
+
+    session = await server.app.tools["open_browser_session"](
+        "t_src", source_id, None, "auto", False, None, "ephemeral", False
+    )
+    assert session["status"] == "unsupported"
+    assert session["error"] == "listing_url_required"
+    _assert_no_secret_values(session)
+
+    pinned_parser = await server.app.tools["run_source"]("t_src", source_id, 1, "generic", None)
+    assert pinned_parser["status"] == "unsupported"
+    assert pinned_parser["error"] == "parser_pin_unsupported_source"
+    assert pinned_parser["requested_parser"] == "generic"
+    _assert_no_secret_values(pinned_parser)
 
     await server.shutdown()

@@ -101,7 +101,7 @@ updated: 2026-07-28
 | `builder` | `_ShotLoadPlan`, `PipelineBuilder` |
 | `channel_publisher` | `TransientSendError`, `FatalTargetError`, `CardSender`, `PublishOutcome` |
 | `concurrency` | `ConcurrencyPlan` |
-| `contracts` | `Source`, `Stage`, `PipelineNode`, `SanitizingNode`, `ProcessingNode`, `TypeChangingNode`, `FanOutStage`, `Sink`, `DeliveryTarget`, `FlushableSink`, `Store`, `StoreConnector`, `AuthProvider`, `BgeMThreeProviderPort`, `LLMProvider`, `CrossEncoderProvider`, `ShotStoreClearError`, `ManagedShotBackend`, `OntologyStore`, `ClassificationResult`, `PluginMetadata`, `ClassifierProvider`, `JobGroupStore`, `JobPersistenceBackend`, `SearchBackend`, `EmbeddingProvider`, `VectorBackend`, `IngestMode`, `ProxyManager`, `BypassStrategy`, `BrowserSessionBypass`, `BrowserSessionProbe`, `BoardMonitor`, `JobScraper`, `Normalizer`, `LanguageDetectorPort`, `TranslatorPort`, `CrossEncoderPort` |
+| `contracts` | `Source`, `Stage`, `PipelineNode`, `SanitizingNode`, `ProcessingNode`, `TypeChangingNode`, `FanOutStage`, `Sink`, `DeliveryTarget`, `FlushableSink`, `Store`, `StoreConnector`, `AuthProvider`, `BgeMThreeProviderPort`, `LLMProvider`, `CrossEncoderProvider`, `ShotStoreClearError`, `ManagedShotBackend`, `OntologyStore`, `ClassificationResult`, `PluginMetadata`, `ClassifierProvider`, `JobGroupStore`, `JobPersistenceBackend`, `SearchBackend`, `EmbeddingProvider`, `VectorBackend`, `IngestMode`, `ProxyManager`, `BypassStrategy`, `BrowserSessionBypass`, `BrowserSessionProbe`, `OperatorBrowserSessionPort`, `BoardMonitor`, `JobScraper`, `Normalizer`, `LanguageDetectorPort`, `TranslatorPort`, `CrossEncoderPort` |
 | `delivery` | `SinkDeliveryTarget` |
 | `drops` | `RawItemDropped` |
 | `enrichment` | `PostAcceptEnrichmentQueue` |

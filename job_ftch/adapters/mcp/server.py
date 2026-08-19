@@ -938,7 +938,7 @@ class TenantMCPServer:
             parser: str | None = None,
             bypass: str | None = None,
         ) -> dict[str, Any]:
-            """Run one source. omit bypass for adaptive ladder; pass bypass to pin one mechanic."""
+            """Run one source. omit bypass/parser for defaults; pass a name to pin one mechanic."""
             from job_ftch.application.source_operations import run_source as run_source_op
 
             payload = await run_source_op(
@@ -1005,8 +1005,9 @@ class TenantMCPServer:
             bypass: str | None = None,
             headed: bool = False,
             max_items: int = 5,
+            solve: str = "none",
         ) -> dict[str, Any]:
-            """Live listing probe via application port; other probes stay not_implemented."""
+            """Live listing/detail/challenge probe. fingerprint/custom_safe stay not_implemented."""
             from job_ftch.application.source_operations import (
                 run_browser_probe as run_browser_probe_op,
             )
@@ -1021,8 +1022,89 @@ class TenantMCPServer:
                 bypass=bypass,
                 headed=headed,
                 max_items=max_items,
+                solve=solve,
             )
             return await self._with_setup_if_needed(payload, goal="browser")
+
+        @self.app.tool
+        async def open_browser_session(
+            tenant_id: str,
+            source_id: str | None = None,
+            url: str | None = None,
+            engine: str = "auto",
+            headed: bool = True,
+            bypass: str | None = None,
+            profile: str = "ephemeral",
+            manual_challenge: bool = False,
+        ) -> dict[str, Any]:
+            """Open one ephemeral operator browser session. persistent/domain stay unsupported."""
+            from job_ftch.application.source_operations import (
+                open_browser_session as open_browser_session_op,
+            )
+
+            payload = await open_browser_session_op(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                source_id=source_id,
+                url=url,
+                engine=engine,
+                headed=headed,
+                bypass=bypass,
+                profile=profile,
+                manual_challenge=manual_challenge,
+            )
+            return await self._with_setup_if_needed(payload, goal="browser")
+
+        @self.app.tool
+        async def get_browser_session(session_id: str) -> dict[str, Any]:
+            """Return a public snapshot of an operator browser session."""
+            from job_ftch.application.source_operations import (
+                get_browser_session as get_browser_session_op,
+            )
+
+            return await get_browser_session_op(self._require_runner(), session_id=session_id)
+
+        @self.app.tool
+        async def continue_browser_session(
+            session_id: str,
+            instruction: str | None = None,
+        ) -> dict[str, Any]:
+            """wait|reload|wait_challenge|solve|navigate <url> on an open session."""
+            from job_ftch.application.source_operations import (
+                continue_browser_session as continue_browser_session_op,
+            )
+
+            payload = await continue_browser_session_op(
+                self._require_runner(),
+                session_id=session_id,
+                instruction=instruction,
+            )
+            return await self._with_setup_if_needed(payload, goal="captcha")
+
+        @self.app.tool
+        async def capture_browser_artifact(
+            session_id: str,
+            artifact_type: str = "text",
+        ) -> dict[str, Any]:
+            """Capture text, truncated html, cookie names, or a screenshot path."""
+            from job_ftch.application.source_operations import (
+                capture_browser_artifact as capture_browser_artifact_op,
+            )
+
+            return await capture_browser_artifact_op(
+                self._require_runner(),
+                session_id=session_id,
+                artifact_type=artifact_type,
+            )
+
+        @self.app.tool
+        async def close_browser_session(session_id: str) -> dict[str, Any]:
+            """Close an operator browser session and release the runtime."""
+            from job_ftch.application.source_operations import (
+                close_browser_session as close_browser_session_op,
+            )
+
+            return await close_browser_session_op(self._require_runner(), session_id=session_id)
 
         @self.app.tool
         async def recommend_runtime_setup(

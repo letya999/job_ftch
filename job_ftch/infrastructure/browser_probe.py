@@ -239,27 +239,114 @@ async def _page_title(page: Any) -> str | None:
     return text[:200] or None
 
 
-async def probe_listing(
+DETAIL_TEXT_CAP = 2_000
+
+
+async def _page_text(page: Any, *, limit: int = DETAIL_TEXT_CAP) -> str:
+    evaluate = getattr(page, "evaluate", None)
+    if callable(evaluate):
+        try:
+            raw = await evaluate(
+                "(limit) => String(document.body && document.body.innerText || '').slice(0, limit)",
+                limit,
+            )
+            return str(raw or "")[:limit]
+        except Exception:
+            pass
+    content_fn = getattr(page, "content", None)
+    if not callable(content_fn):
+        return ""
+    try:
+        html = content_fn()
+        if hasattr(html, "__await__"):
+            html = await html
+    except Exception:
+        return ""
+    return str(html or "")[:limit]
+
+
+async def _page_heading(page: Any) -> str | None:
+    evaluate = getattr(page, "evaluate", None)
+    if not callable(evaluate):
+        return None
+    try:
+        raw = await evaluate(
+            "() => String(document.querySelector('h1')?.textContent || '').replace(/\\s+/g, ' ').trim()"
+        )
+    except Exception:
+        return None
+    text = str(raw or "").strip()
+    return text[:200] or None
+
+
+async def _page_html(page: Any) -> str:
+    content_fn = getattr(page, "content", None)
+    if not callable(content_fn):
+        return ""
+    try:
+        html = content_fn()
+        if hasattr(html, "__await__"):
+            html = await html
+    except Exception:
+        return ""
+    return str(html or "")
+
+
+def _classify_html(html: str) -> str | None:
+    from job_ftch.infrastructure.bypass.challenge_classifier import classify_challenge
+
+    detection = classify_challenge(surface="operator_probe", body=html)
+    if detection.challenge_type:
+        return str(detection.challenge_type)
+    if detection.detected:
+        return str(detection.kind.value)
+    return None
+
+
+def _public_solve(result: Any) -> dict[str, Any]:
+    failure = getattr(result, "failure_reason", None)
+    kind = getattr(result, "result_kind", None)
+    return {
+        "solved": bool(getattr(result, "solved", False)),
+        "method": getattr(result, "method", None),
+        "error": getattr(result, "error", None),
+        "failure_reason": getattr(failure, "value", failure),
+        "challenge_type": getattr(result, "challenge_type", None),
+        "result_kind": getattr(kind, "value", kind),
+        "elapsed_seconds": getattr(result, "elapsed_seconds", None),
+    }
+
+
+def _make_solver(solve: str, bypass_config: dict[str, Any] | None) -> Any | None:
+    normalized = (solve or "none").strip().lower()
+    if normalized in {"", "none"}:
+        return None
+    from job_ftch.infrastructure.bypass.captcha_solver import (
+        CaptchaSolverBypass,
+        _create_captcha_solver,
+    )
+
+    if normalized in {"browser_wait", "auto"}:
+        return CaptchaSolverBypass(provider="browser_wait", api_key="", wait_seconds=8.0)
+    if normalized == "provider":
+        return _create_captcha_solver(bypass_config)
+    return None
+
+
+async def _run_live_probe(
     *,
     url: str,
-    engine: str = "auto",
-    headed: bool = False,
-    max_items: int = 5,
-    bypass_config: dict[str, Any] | None = None,
-    settings: Settings | None = None,
-    deadline_seconds: float = LISTING_PROBE_DEADLINE_SECONDS,
+    engine: str,
+    headed: bool,
+    bypass_config: dict[str, Any] | None,
+    deadline_seconds: float,
+    notes: list[str],
+    handler: Any,
 ) -> dict[str, Any]:
-    """Open one listing URL and return bounded public link previews."""
-    del settings
     target = url.strip()
     resolved_engine = resolve_probe_engine(engine)
-    limit = max(1, min(int(max_items), LISTING_MAX_ITEMS_CAP))
-    notes = [
-        "listing probe opens one ephemeral headless page",
-        "does not ingest, persist cookies, or keep a browser session",
-    ]
     if headed:
-        notes.append("headed=true is operator-visible and still uses an ephemeral profile")
+        notes = [*notes, "headed=true is operator-visible and still uses an ephemeral profile"]
     try:
         strategy = resolve_bypass(resolved_engine, bypass_config)
     except ValueError:
@@ -289,38 +376,14 @@ async def probe_listing(
         await check_ssrf(target)
         async with open_page(config, bypass_strategy=strategy) as page:
             await navigate(page, target, config)
-            await _wait_for_cards(page)
-            await asyncio.sleep(0)
-            final_url = str(getattr(page, "url", "") or target)
-            items = await _extract_items(page, page_url=final_url, max_items=limit)
-            challenge = _observed_challenge(challenge_sink)
-            result_notes = list(notes)
-            if challenge:
-                result_notes.append(f"challenge observed: {challenge}")
-                result_notes.append("retry with a stronger engine or run_source adaptive ingest")
-            if not items:
-                result_notes.append(
-                    "no vacancy-like URLs (need /jobs|/vacancies/<id>); nav chrome is ignored"
-                )
-            if challenge and not items:
-                status, ok, error = "challenge", False, "challenge_detected"
-            elif not items:
-                status, ok, error = "empty", True, None
-            else:
-                status, ok, error = "ok", True, None
+            payload = await handler(page, challenge_sink, target, resolved_engine, notes)
+            if isinstance(payload, dict):
+                return payload
             return _result(
-                status=status,
-                ok=ok,
-                executed=True,
-                error=error,
-                notes=result_notes,
+                status="error",
+                error="invalid_probe_payload",
                 engine=resolved_engine,
                 requested_url=target,
-                final_url=final_url,
-                page_title=await _page_title(page),
-                challenge=challenge,
-                item_count=len(items),
-                items=items,
             )
 
     try:
@@ -373,8 +436,230 @@ async def probe_listing(
         )
 
 
+async def probe_listing(
+    *,
+    url: str,
+    engine: str = "auto",
+    headed: bool = False,
+    max_items: int = 5,
+    bypass_config: dict[str, Any] | None = None,
+    settings: Settings | None = None,
+    deadline_seconds: float = LISTING_PROBE_DEADLINE_SECONDS,
+) -> dict[str, Any]:
+    """Open one listing URL and return bounded public link previews."""
+    del settings
+    limit = max(1, min(int(max_items), LISTING_MAX_ITEMS_CAP))
+    notes = [
+        "listing probe opens one ephemeral headless page",
+        "does not ingest, persist cookies, or keep a browser session",
+    ]
+
+    async def _handler(
+        page: Any,
+        challenge_sink: Any,
+        target: str,
+        resolved_engine: str,
+        probe_notes: list[str],
+    ) -> dict[str, Any]:
+        await _wait_for_cards(page)
+        await asyncio.sleep(0)
+        final_url = str(getattr(page, "url", "") or target)
+        items = await _extract_items(page, page_url=final_url, max_items=limit)
+        challenge = _observed_challenge(challenge_sink) or _classify_html(await _page_html(page))
+        result_notes = list(probe_notes)
+        if challenge:
+            result_notes.append(f"challenge observed: {challenge}")
+            result_notes.append("retry with a stronger engine or run_source adaptive ingest")
+        if not items:
+            result_notes.append(
+                "no vacancy-like URLs (need /jobs|/vacancies/<id>); nav chrome is ignored"
+            )
+        if challenge and not items:
+            status, ok, error = "challenge", False, "challenge_detected"
+        elif not items:
+            status, ok, error = "empty", True, None
+        else:
+            status, ok, error = "ok", True, None
+        return _result(
+            status=status,
+            ok=ok,
+            executed=True,
+            error=error,
+            notes=result_notes,
+            engine=resolved_engine,
+            requested_url=target,
+            final_url=final_url,
+            page_title=await _page_title(page),
+            challenge=challenge,
+            item_count=len(items),
+            items=items,
+        )
+
+    return await _run_live_probe(
+        url=url,
+        engine=engine,
+        headed=headed,
+        bypass_config=bypass_config,
+        deadline_seconds=deadline_seconds,
+        notes=notes,
+        handler=_handler,
+    )
+
+
+async def probe_detail(
+    *,
+    url: str,
+    engine: str = "auto",
+    headed: bool = False,
+    max_items: int = 5,
+    bypass_config: dict[str, Any] | None = None,
+    settings: Settings | None = None,
+    deadline_seconds: float = LISTING_PROBE_DEADLINE_SECONDS,
+) -> dict[str, Any]:
+    """Open one detail URL and return a bounded public text preview."""
+    del settings
+    limit = max(1, min(int(max_items), LISTING_MAX_ITEMS_CAP))
+    notes = [
+        "detail probe opens one ephemeral page",
+        "returns title/heading/text preview; does not ingest",
+    ]
+
+    async def _handler(
+        page: Any,
+        challenge_sink: Any,
+        target: str,
+        resolved_engine: str,
+        probe_notes: list[str],
+    ) -> dict[str, Any]:
+        await asyncio.sleep(LISTING_SETTLE_SECONDS)
+        final_url = str(getattr(page, "url", "") or target)
+        heading = await _page_heading(page)
+        text_preview = await _page_text(page)
+        items = await _extract_items(page, page_url=final_url, max_items=limit)
+        challenge = _observed_challenge(challenge_sink) or _classify_html(await _page_html(page))
+        result_notes = list(probe_notes)
+        if challenge:
+            result_notes.append(f"challenge observed: {challenge}")
+        if challenge and not text_preview and not heading:
+            status, ok, error = "challenge", False, "challenge_detected"
+        elif not heading and not text_preview:
+            status, ok, error = "empty", True, None
+        else:
+            status, ok, error = "ok", True, None
+        return _result(
+            status=status,
+            ok=ok,
+            executed=True,
+            error=error,
+            notes=result_notes,
+            engine=resolved_engine,
+            requested_url=target,
+            final_url=final_url,
+            page_title=await _page_title(page),
+            heading=heading,
+            text_preview=text_preview,
+            challenge=challenge,
+            item_count=len(items),
+            items=items,
+        )
+
+    return await _run_live_probe(
+        url=url,
+        engine=engine,
+        headed=headed,
+        bypass_config=bypass_config,
+        deadline_seconds=deadline_seconds,
+        notes=notes,
+        handler=_handler,
+    )
+
+
+async def probe_challenge(
+    *,
+    url: str,
+    engine: str = "auto",
+    headed: bool = False,
+    max_items: int = 5,
+    bypass_config: dict[str, Any] | None = None,
+    settings: Settings | None = None,
+    deadline_seconds: float = LISTING_PROBE_DEADLINE_SECONDS,
+    solve: str = "none",
+) -> dict[str, Any]:
+    """Detect a challenge page; optionally wait/solve under captcha gates."""
+    del settings, max_items
+    normalized_solve = (solve or "none").strip().lower() or "none"
+    notes = [
+        "challenge probe opens one ephemeral page",
+        "does not return cookies, tokens, or provider secrets",
+    ]
+    if normalized_solve not in {"none", "browser_wait", "auto", "provider"}:
+        return _result(
+            status="unsupported",
+            error="unsupported_solve",
+            notes=[*notes, "solve must be none|browser_wait|auto|provider"],
+            engine=resolve_probe_engine(engine),
+            requested_url=url.strip(),
+            solve=normalized_solve,
+        )
+    solver = _make_solver(normalized_solve, bypass_config)
+
+    async def _handler(
+        page: Any,
+        challenge_sink: Any,
+        target: str,
+        resolved_engine: str,
+        probe_notes: list[str],
+    ) -> dict[str, Any]:
+        await asyncio.sleep(LISTING_SETTLE_SECONDS)
+        final_url = str(getattr(page, "url", "") or target)
+        html = await _page_html(page)
+        challenge = _observed_challenge(challenge_sink) or _classify_html(html)
+        solve_payload: dict[str, Any] | None = None
+        result_notes = list(probe_notes)
+        if solver is not None:
+            result = await solver.solve(page, challenge_type=challenge or "unknown", url=final_url)
+            solve_payload = _public_solve(result)
+            html = await _page_html(page)
+            challenge = _observed_challenge(challenge_sink) or _classify_html(html) or challenge
+            if result.solved:
+                result_notes.append(f"challenge solve via {result.method}")
+            elif result.error:
+                result_notes.append(str(result.error)[:200])
+        if challenge and not (solve_payload and solve_payload.get("solved")):
+            status, ok, error = "challenge", False, "challenge_detected"
+        elif solve_payload and solve_payload.get("solved"):
+            status, ok, error = "ok", True, None
+        else:
+            status, ok, error = "ok", True, None
+            result_notes.append("no challenge detected")
+        return _result(
+            status=status,
+            ok=ok,
+            executed=True,
+            error=error,
+            notes=result_notes,
+            engine=resolved_engine,
+            requested_url=target,
+            final_url=final_url,
+            page_title=await _page_title(page),
+            challenge=challenge,
+            solve=normalized_solve,
+            captcha=solve_payload,
+        )
+
+    return await _run_live_probe(
+        url=url,
+        engine=engine,
+        headed=headed,
+        bypass_config=bypass_config,
+        deadline_seconds=deadline_seconds,
+        notes=notes,
+        handler=_handler,
+    )
+
+
 class LiveBrowserSessionProbe:
-    """Application-port adapter over ``probe_listing``."""
+    """Application-port adapter over listing/detail/challenge probes."""
 
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
@@ -395,4 +680,79 @@ class LiveBrowserSessionProbe:
             max_items=max_items,
             bypass_config=bypass_config,
             settings=self._settings,
+        )
+
+    async def probe_detail(
+        self,
+        *,
+        url: str,
+        engine: str,
+        headed: bool = False,
+        max_items: int = 5,
+        bypass_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return await probe_detail(
+            url=url,
+            engine=engine,
+            headed=headed,
+            max_items=max_items,
+            bypass_config=bypass_config,
+            settings=self._settings,
+        )
+
+    async def probe_challenge(
+        self,
+        *,
+        url: str,
+        engine: str,
+        headed: bool = False,
+        max_items: int = 5,
+        bypass_config: dict[str, Any] | None = None,
+        solve: str = "none",
+    ) -> dict[str, Any]:
+        return await probe_challenge(
+            url=url,
+            engine=engine,
+            headed=headed,
+            max_items=max_items,
+            bypass_config=bypass_config,
+            settings=self._settings,
+            solve=solve,
+        )
+
+    async def probe(
+        self,
+        *,
+        url: str,
+        engine: str,
+        probe: str = "listing",
+        headed: bool = False,
+        max_items: int = 5,
+        bypass_config: dict[str, Any] | None = None,
+        solve: str = "none",
+    ) -> dict[str, Any]:
+        kind = (probe or "listing").strip().lower()
+        if kind == "detail":
+            return await self.probe_detail(
+                url=url,
+                engine=engine,
+                headed=headed,
+                max_items=max_items,
+                bypass_config=bypass_config,
+            )
+        if kind == "challenge":
+            return await self.probe_challenge(
+                url=url,
+                engine=engine,
+                headed=headed,
+                max_items=max_items,
+                bypass_config=bypass_config,
+                solve=solve,
+            )
+        return await self.probe_listing(
+            url=url,
+            engine=engine,
+            headed=headed,
+            max_items=max_items,
+            bypass_config=bypass_config,
         )
