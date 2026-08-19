@@ -725,11 +725,24 @@ class TenantMCPServer:
         *,
         goal: str = "protected_sites",
     ) -> dict[str, Any]:
-        needs_setup = payload.get("status") in {
-            "not_implemented",
-            "unsupported",
-            "unavailable",
-        } or bool(payload.get("browser_required"))
+        attempts = payload.get("attempts")
+        attempt_needs_setup = isinstance(attempts, list) and any(
+            isinstance(item, dict)
+            and item.get("status") in {"unavailable", "not_implemented", "error"}
+            for item in attempts
+        )
+        needs_setup = (
+            payload.get("status")
+            in {
+                "not_implemented",
+                "unsupported",
+                "unavailable",
+                "degraded",
+                "error",
+            }
+            or bool(payload.get("browser_required"))
+            or attempt_needs_setup
+        )
         if not needs_setup or payload.get("setup") is not None:
             return payload
         inventory = None
@@ -925,7 +938,7 @@ class TenantMCPServer:
             parser: str | None = None,
             bypass: str | None = None,
         ) -> dict[str, Any]:
-            """Run ingest for one source through TenantRunner. No browser client imports."""
+            """Run one source. omit bypass for adaptive ladder; pass bypass to pin one mechanic."""
             from job_ftch.application.source_operations import run_source as run_source_op
 
             payload = await run_source_op(
@@ -946,7 +959,7 @@ class TenantMCPServer:
             max_tier: str | None = None,
             max_items: int = 5,
         ) -> dict[str, Any]:
-            """Run adaptive source escalation, or explain why a sweep is unavailable."""
+            """recommended = adaptive ladder; all = bounded per-route sweep with parse diagnosis."""
             from job_ftch.application.source_operations import (
                 run_source_escalation as run_source_escalation_op,
             )
@@ -959,7 +972,7 @@ class TenantMCPServer:
                 max_tier=max_tier,
                 max_items=max_items,
             )
-            return await self._with_setup_if_needed(payload)
+            return await self._with_setup_if_needed(payload, goal="bypass")
 
         @self.app.tool
         async def probe_bypass_route(
@@ -968,7 +981,7 @@ class TenantMCPServer:
             bypass: str,
             max_items: int = 3,
         ) -> dict[str, Any]:
-            """Diagnose a bypass route; execute only the current non-browser selection."""
+            """Run one named bypass (listing probe for browsers, pinned ingest otherwise)."""
             from job_ftch.application.source_operations import (
                 probe_bypass_route as probe_bypass_route_op,
             )
@@ -993,7 +1006,7 @@ class TenantMCPServer:
             headed: bool = False,
             max_items: int = 5,
         ) -> dict[str, Any]:
-            """Structured not_implemented for live browser probes, plus route diagnostics."""
+            """Live listing probe via application port; other probes stay not_implemented."""
             from job_ftch.application.source_operations import (
                 run_browser_probe as run_browser_probe_op,
             )

@@ -126,7 +126,11 @@ async def test_probe_source_full_runs_tenant() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_source_rejects_foreign_bypass_pin() -> None:
+async def test_run_source_pins_foreign_bypass(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations._registered_bypass_names",
+        lambda: {"cloak", "noop", "curl_stealth"},
+    )
     runner = _FakeRunner()
     payload = await run_source(
         runner,
@@ -134,13 +138,20 @@ async def test_run_source_rejects_foreign_bypass_pin() -> None:
         source_id="debug:fixture",
         bypass="cloak",
     )
-    assert payload["status"] == "unsupported"
-    assert payload["executed"] is False
-    runner.run_tenant.assert_not_called()
+    assert payload["executed"] is True
+    assert payload["parse"]["stage"] in {"ingest", "fetch", "parse", "pipeline"}
+    runner.run_tenant.assert_awaited_once()
+    kwargs = runner.run_tenant.await_args.kwargs
+    assert kwargs["bypass_override"] == "cloak"
+    assert kwargs["ignore_schedule_gates"] is True
 
 
 @pytest.mark.asyncio
-async def test_run_source_escalation_all_is_not_implemented() -> None:
+async def test_run_source_escalation_all_sweeps_ladder(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations._registered_bypass_names",
+        lambda: {"cloak", "noop", "curl_stealth"},
+    )
     runner = _FakeRunner()
     payload = await run_source_escalation(
         runner,
@@ -148,9 +159,33 @@ async def test_run_source_escalation_all_is_not_implemented() -> None:
         source_id="debug:fixture",
         strategy="all",
     )
-    assert payload["status"] == "not_implemented"
-    assert payload["missing_service"] == "independent_bypass_sweep"
-    runner.run_tenant.assert_not_called()
+    assert payload["status"] in {"ok", "degraded"}
+    assert payload["escalation_ladder"] == ["noop", "curl_stealth", "cloak"]
+    assert isinstance(payload["attempts"], list)
+    assert len(payload["attempts"]) == len(payload["escalation_ladder"])
+    assert all("parse" in item and "stage" in item["parse"] for item in payload["attempts"])
+    assert runner.run_tenant.await_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_run_source_escalation_all_stops_at_max_tier(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations._registered_bypass_names",
+        lambda: {"cloak", "noop", "curl_stealth"},
+    )
+    runner = _FakeRunner()
+    payload = await run_source_escalation(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        strategy="all",
+        max_tier="noop",
+    )
+    assert payload["escalation_ladder"] == ["noop"]
+    assert len(payload["attempts"]) == 1
+    assert payload["attempts"][0]["bypass"] == "noop"
+    assert payload["attempts"][0]["parse"]["stage"]
+    assert runner.run_tenant.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -168,7 +203,13 @@ async def test_probe_bypass_route_executes_selected_http_engine() -> None:
 
 
 @pytest.mark.asyncio
-async def test_probe_bypass_route_does_not_start_browser_engine() -> None:
+async def test_probe_bypass_route_pins_browser_engine_without_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations._registered_bypass_names",
+        lambda: {"cloak", "noop", "curl_stealth"},
+    )
     runner = _FakeRunner()
     payload = await probe_bypass_route(
         runner,
@@ -177,13 +218,14 @@ async def test_probe_bypass_route_does_not_start_browser_engine() -> None:
         bypass="cloak",
         max_items=2,
     )
-    assert payload["status"] == "not_implemented"
-    assert payload["missing_service"] == "browser_session_probe"
-    runner.run_tenant.assert_not_called()
+    assert payload["executed"] is True
+    assert payload["parse"] is not None
+    runner.run_tenant.assert_awaited_once()
+    assert runner.run_tenant.await_args.kwargs["bypass_override"] == "cloak"
 
 
 @pytest.mark.asyncio
-async def test_run_browser_probe_never_executes() -> None:
+async def test_run_browser_probe_requires_listing_url() -> None:
     runner = _FakeRunner()
     payload = await run_browser_probe(
         runner,
@@ -192,10 +234,67 @@ async def test_run_browser_probe_never_executes() -> None:
         probe="listing",
         engine="auto",
     )
+    assert payload["status"] == "unsupported"
+    assert payload["executed"] is False
+    assert payload["error"] == "listing_url_required"
+    assert payload["route"]["selected_capability_id"] == "engine:noop"
+    runner.run_tenant.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_browser_probe_listing_uses_runner_port() -> None:
+    runner = _FakeRunner()
+    runner.probe_browser_listing = AsyncMock(
+        return_value={
+            "ok": True,
+            "status": "ok",
+            "executed": True,
+            "engine": "patchright_browser",
+            "final_url": "https://example.com/jobs",
+            "page_title": "Jobs",
+            "item_count": 1,
+            "items": [{"url": "https://example.com/jobs/1", "title": "Engineer"}],
+            "notes": ["listing probe opens one ephemeral headless page"],
+        }
+    )
+    payload = await run_browser_probe(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        url="https://example.com/jobs",
+        probe="listing",
+        engine="auto",
+        max_items=3,
+    )
+    assert payload["ok"] is True
+    assert payload["executed"] is True
+    assert payload["status"] == "ok"
+    assert payload["engine"] == "patchright_browser"
+    assert payload["items"][0]["url"] == "https://example.com/jobs/1"
+    runner.probe_browser_listing.assert_awaited_once()
+    kwargs = runner.probe_browser_listing.await_args.kwargs
+    assert kwargs["url"] == "https://example.com/jobs"
+    assert kwargs["engine"] == "patchright_browser"
+    assert kwargs["max_items"] == 3
+    runner.run_tenant.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_browser_probe_detail_is_not_implemented() -> None:
+    runner = _FakeRunner()
+    runner.probe_browser_listing = AsyncMock()
+    payload = await run_browser_probe(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        url="https://example.com/jobs",
+        probe="detail",
+        engine="auto",
+    )
     assert payload["status"] == "not_implemented"
     assert payload["executed"] is False
     assert payload["missing_service"] == "browser_session_probe"
-    assert payload["route"]["selected_capability_id"] == "engine:noop"
+    runner.probe_browser_listing.assert_not_called()
     runner.run_tenant.assert_not_called()
 
 

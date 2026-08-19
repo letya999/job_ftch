@@ -1264,6 +1264,8 @@ class TenantRunner:
         max_items: int | None = None,
         user_id: str | None = None,
         source_ids: Sequence[str] | None = None,
+        bypass_override: str | None = None,
+        ignore_schedule_gates: bool = False,
     ) -> RunSummary:
         """Run acquisition and policy under one correlated trace/run id."""
         run_id = uuid.uuid4().hex
@@ -1282,6 +1284,8 @@ class TenantRunner:
                             max_items=max_items,
                             user_id=user_id,
                             source_ids=source_ids,
+                            bypass_override=bypass_override,
+                            ignore_schedule_gates=ignore_schedule_gates,
                             lock_already_held=True,
                         )
                 except TenantRunAlreadyActiveError:
@@ -1318,6 +1322,8 @@ class TenantRunner:
         max_items: int | None = None,
         user_id: str | None = None,
         source_ids: Sequence[str] | None = None,
+        bypass_override: str | None = None,
+        ignore_schedule_gates: bool = False,
         lock_already_held: bool = False,
     ) -> RunSummary:
         runtime = self.get_runtime(tenant_id)
@@ -1367,6 +1373,16 @@ class TenantRunner:
             seen_specs.add(sid)
             unique_specs.append(spec)
 
+        if bypass_override:
+            pinned_specs: list[SourceSpec] = []
+            for spec in unique_specs:
+                copier = getattr(spec, "model_copy", None)
+                if callable(copier):
+                    pinned_specs.append(spec.model_copy(update={"bypass": bypass_override}))
+                else:
+                    pinned_specs.append(spec)
+            unique_specs = pinned_specs
+
         assessment_service = create_source_assessment_service()
         runnable_specs: list[SourceSpec] = []
         planned_source_ids: list[str] = []
@@ -1375,7 +1391,7 @@ class TenantRunner:
             health = health_map.get(sid)
 
             # Task 3: Rate Limit
-            if health and health.last_run_at:
+            if (not ignore_schedule_gates) and health and health.last_run_at:
                 try:
                     last_run = datetime.fromisoformat(health.last_run_at)
                     if last_run.tzinfo is None:
@@ -1392,7 +1408,7 @@ class TenantRunner:
                     pass
 
             # Task 5: Auto-pause with Half-open
-            if health and health.paused:
+            if (not ignore_schedule_gates) and health and health.paused:
                 health.skipped_runs += 1
                 if health.skipped_runs >= runtime.settings.source_health_probe_every_n_runs:
                     logger.info("source_probe", source_id=sid, skipped_runs=health.skipped_runs)
@@ -1891,6 +1907,28 @@ class TenantRunner:
             source=source_payload,
             source_id=source_id,
             requested_bypass=bypass,
+        )
+
+    async def probe_browser_listing(
+        self,
+        tenant_id: str | None,
+        *,
+        url: str,
+        engine: str = "auto",
+        headed: bool = False,
+        max_items: int = 5,
+        bypass_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Open one ephemeral listing page. Does not ingest or keep a session."""
+        from job_ftch.infrastructure.browser_probe import LiveBrowserSessionProbe
+
+        probe = LiveBrowserSessionProbe(self._settings_for_inventory(tenant_id))
+        return await probe.probe_listing(
+            url=url,
+            engine=engine,
+            headed=headed,
+            max_items=max_items,
+            bypass_config=bypass_config,
         )
 
     async def create_search_session(

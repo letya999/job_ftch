@@ -612,6 +612,20 @@ class BrowserSessionBypass(BypassStrategy, Protocol):
 
 
 @runtime_checkable
+class BrowserSessionProbe(Protocol):
+    async def probe_listing(
+        self,
+        *,
+        url: str,
+        engine: str,
+        headed: bool = False,
+        max_items: int = 5,
+        bypass_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Open one ephemeral listing page and return bounded public previews."""
+
+
+@runtime_checkable
 class BoardMonitor(Protocol):
     """Discovers what jobs exist on a board."""
 

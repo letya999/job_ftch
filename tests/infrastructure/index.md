@@ -20,6 +20,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [__init__.py](__init__.py)
 - [test_bgem3_card.py](test_bgem3_card.py)
 - [test_bgem3_provider.py](test_bgem3_provider.py)
+- [test_browser_probe.py](test_browser_probe.py)
 - [test_ctranslate2_translator.py](test_ctranslate2_translator.py)
 - [test_document_parser.py](test_document_parser.py)
 - [test_extruct_fallback.py](test_extruct_fallback.py)

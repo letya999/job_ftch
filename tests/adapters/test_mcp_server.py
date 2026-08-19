@@ -1180,11 +1180,11 @@ async def test_mcp_scenario_prefilter_prepare_validate_promote(
 
 
 @pytest.mark.asyncio
-async def test_mcp_scenario_source_probe_and_browser_not_implemented(
+async def test_mcp_scenario_source_probe_pin_and_listing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Scenario: cheap/full source probe, escalation, bypass diagnose, no live browser."""
+    """Scenario: cheap/full probe, bypass pin, bounded sweep, listing-url required."""
     fixture_path = tmp_path / "fixture.json"
     _write_fixture(fixture_path)
     configs_dir = tmp_path / "configs"
@@ -1245,9 +1245,9 @@ async def test_mcp_scenario_source_probe_and_browser_not_implemented(
     source_id = str(listed_after["sources"][0]["source_id"])
 
     pinned = await server.app.tools["run_source"]("t_src", source_id, 1, None, "cloak")
-    assert pinned["status"] == "unsupported"
-    assert pinned["executed"] is False
-    assert pinned["missing_service"] == "forced_bypass_override"
+    assert pinned["status"] in {"ok", "empty", "degraded", "error", "unavailable"}
+    assert pinned["requested_bypass"] == "cloak"
+    assert "parse" in pinned or pinned["status"] == "unavailable"
     assert "setup" in pinned
 
     recommended = await server.app.tools["run_source_escalation"](
@@ -1256,11 +1256,15 @@ async def test_mcp_scenario_source_probe_and_browser_not_implemented(
     assert recommended["status"] in {"ok", "empty", "degraded", "error"}
     assert isinstance(recommended["escalation_ladder"], list)
 
-    swept = await server.app.tools["run_source_escalation"]("t_src", source_id, "all", None, 2)
-    assert swept["status"] == "not_implemented"
-    assert swept["executed"] is False
-    assert swept["missing_service"] == "independent_bypass_sweep"
+    swept = await server.app.tools["run_source_escalation"]("t_src", source_id, "all", "noop", 2)
+    assert swept["status"] in {"ok", "degraded", "unavailable"}
+    assert swept["strategy"] == "all"
+    assert isinstance(swept.get("attempts"), list)
+    assert swept["escalation_ladder"][0] == "noop"
+    assert swept["attempts"]
+    assert all("parse" in item and "stage" in item["parse"] for item in swept["attempts"])
     assert "setup" in swept
+    assert "commands" in swept["setup"]
 
     selected_engine = str(cheap["selected_route"]["engine"])
     bypass_ok = await server.app.tools["probe_bypass_route"]("t_src", source_id, selected_engine, 2)
@@ -1268,20 +1272,28 @@ async def test_mcp_scenario_source_probe_and_browser_not_implemented(
     assert bypass_ok["requested_bypass"] == selected_engine
 
     browser_bypass = await server.app.tools["probe_bypass_route"]("t_src", source_id, "cloak", 2)
-    assert browser_bypass["status"] in {"not_implemented", "unavailable"}
-    assert browser_bypass["executed"] is False
+    assert browser_bypass["status"] in {"ok", "empty", "degraded", "error", "unavailable"}
+    assert "parse" in browser_bypass or browser_bypass["status"] == "unavailable"
     assert "setup" in browser_bypass
     _assert_no_secret_values(browser_bypass)
 
     live = await server.app.tools["run_browser_probe"](
         "t_src", source_id, None, "listing", "auto", None, False, 5
     )
-    assert live["status"] == "not_implemented"
+    assert live["status"] == "unsupported"
     assert live["executed"] is False
-    assert live["missing_service"] == "browser_session_probe"
+    assert live["error"] == "listing_url_required"
     assert live["route"] is not None
     assert "setup" in live
     assert "commands" in live["setup"]
     _assert_no_secret_values(live)
+
+    detail = await server.app.tools["run_browser_probe"](
+        "t_src", source_id, "https://example.com/jobs", "detail", "auto", None, False, 1
+    )
+    assert detail["status"] == "not_implemented"
+    assert detail["executed"] is False
+    assert detail["missing_service"] == "browser_session_probe"
+    _assert_no_secret_values(detail)
 
     await server.shutdown()
