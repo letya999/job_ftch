@@ -49,13 +49,18 @@ MCP_OPERATOR_TOOLS = frozenset(
         "list_tenants",
         "plan_search_session",
         "prepare_prefilter_dataset",
+        "probe_bypass_route",
+        "probe_source",
         "promote_prefilter",
         "recommend_runtime_setup",
         "remove_example",
         "reset_tenant",
         "rollback_prefilter",
+        "run_browser_probe",
         "run_pipeline",
         "run_search_session",
+        "run_source",
+        "run_source_escalation",
         "save_profile",
         "search_jobs",
         "train_prefilter",
@@ -1170,5 +1175,113 @@ async def test_mcp_scenario_prefilter_prepare_validate_promote(
     listed = await server.app.tools["list_prefilter_artifacts"]("t_pf", None)
     assert listed["count"] == 2
     assert listed["current_artifact_id"] == "art-prev"
+
+    await server.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_mcp_scenario_source_probe_and_browser_not_implemented(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scenario: cheap/full source probe, escalation, bypass diagnose, no live browser."""
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    (configs_dir / "tenant.json").write_text(
+        json.dumps(
+            {
+                "tenant_id": "t_src",
+                "display_name": "Source ops",
+                "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+                "store_backend": "sqlite",
+                "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+                "job_group_store_backend": "sqlite",
+                "job_backend": "sqlite",
+                "search_backend": "sqlite",
+                "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+            }
+        ),
+        encoding="utf-8",
+    )
+    _install_fake_fastmcp(monkeypatch)
+
+    from job_ftch.adapters.mcp.server import create_server
+    from job_ftch.application import tenant_runner as tenant_runner_module
+
+    monkeypatch.setattr(
+        tenant_runner_module,
+        "build_llm",
+        lambda settings: _AcceptingHeuristicLLMProvider(),
+    )
+
+    server = create_server(configs_dir=configs_dir)
+    await server.startup()
+
+    listed = await server.app.tools["get_sources"]("t_src", True, True)
+    assert listed["count"] >= 1
+    source_id = str(listed["sources"][0]["source_id"])
+
+    cheap = await server.app.tools["probe_source"]("t_src", source_id, "cheap", 5)
+    assert cheap["ok"] is True
+    assert cheap["executed"] is False
+    assert cheap["status"] == "ok"
+    assert cheap["source"]["source_id"] == source_id
+    assert "route" in cheap
+    assert cheap["selected_route"]["engine"] is not None
+    _assert_no_secret_values(cheap)
+
+    missing = await server.app.tools["probe_source"]("t_src", "debug:missing", "cheap", 5)
+    assert missing["status"] == "source_not_found"
+    assert missing["executed"] is False
+
+    full = await server.app.tools["probe_source"]("t_src", source_id, "full", 2)
+    assert full["executed"] is True
+    assert full["run"]["tenant_id"] == "t_src"
+    assert int(full["run"]["fetched"] or 0) >= 1
+
+    listed_after = await server.app.tools["get_sources"]("t_src", True, True)
+    source_id = str(listed_after["sources"][0]["source_id"])
+
+    pinned = await server.app.tools["run_source"]("t_src", source_id, 1, None, "cloak")
+    assert pinned["status"] == "unsupported"
+    assert pinned["executed"] is False
+    assert pinned["missing_service"] == "forced_bypass_override"
+    assert "setup" in pinned
+
+    recommended = await server.app.tools["run_source_escalation"](
+        "t_src", source_id, "recommended", None, 2
+    )
+    assert recommended["status"] in {"ok", "empty", "degraded", "error"}
+    assert isinstance(recommended["escalation_ladder"], list)
+
+    swept = await server.app.tools["run_source_escalation"]("t_src", source_id, "all", None, 2)
+    assert swept["status"] == "not_implemented"
+    assert swept["executed"] is False
+    assert swept["missing_service"] == "independent_bypass_sweep"
+    assert "setup" in swept
+
+    selected_engine = str(cheap["selected_route"]["engine"])
+    bypass_ok = await server.app.tools["probe_bypass_route"]("t_src", source_id, selected_engine, 2)
+    assert bypass_ok["executed"] is True
+    assert bypass_ok["requested_bypass"] == selected_engine
+
+    browser_bypass = await server.app.tools["probe_bypass_route"]("t_src", source_id, "cloak", 2)
+    assert browser_bypass["status"] in {"not_implemented", "unavailable"}
+    assert browser_bypass["executed"] is False
+    assert "setup" in browser_bypass
+    _assert_no_secret_values(browser_bypass)
+
+    live = await server.app.tools["run_browser_probe"](
+        "t_src", source_id, None, "listing", "auto", None, False, 5
+    )
+    assert live["status"] == "not_implemented"
+    assert live["executed"] is False
+    assert live["missing_service"] == "browser_session_probe"
+    assert live["route"] is not None
+    assert "setup" in live
+    assert "commands" in live["setup"]
+    _assert_no_secret_values(live)
 
     await server.shutdown()

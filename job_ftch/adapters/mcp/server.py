@@ -719,6 +719,31 @@ class TenantMCPServer:
         )
         return explanation_to_public_dict(explanation)
 
+    async def _with_setup_if_needed(
+        self,
+        payload: dict[str, Any],
+        *,
+        goal: str = "protected_sites",
+    ) -> dict[str, Any]:
+        needs_setup = payload.get("status") in {
+            "not_implemented",
+            "unsupported",
+            "unavailable",
+        } or bool(payload.get("browser_required"))
+        if not needs_setup or payload.get("setup") is not None:
+            return payload
+        inventory = None
+        if goal in {"browser", "bypass", "career_sites", "protected_sites", "captcha", "full"}:
+            inventory = await self._browser_capabilities_impl()
+        source_context = payload.get("source") if isinstance(payload.get("source"), dict) else None
+        payload["setup"] = _recommend_runtime_setup(
+            goal=goal,
+            platform=None,
+            inventory=inventory,
+            source_context=source_context,
+        )
+        return payload
+
     def _register_surface(self) -> None:
         @self.app.tool
         async def run_pipeline(
@@ -872,6 +897,119 @@ class TenantMCPServer:
         ) -> dict[str, Any]:
             """Explain why a browser/bypass route is selected or unavailable."""
             return await self._browser_routes_impl(tenant_id, source_id, bypass)
+
+        @self.app.tool
+        async def probe_source(
+            tenant_id: str,
+            source_id: str,
+            mode: str = "cheap",
+            max_items: int = 5,
+        ) -> dict[str, Any]:
+            """Diagnose a source (cheap) or run a bounded source-scoped ingest (full)."""
+            from job_ftch.application.source_operations import probe_source as probe_source_op
+
+            payload = await probe_source_op(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                source_id=source_id,
+                mode=mode,
+                max_items=max_items,
+            )
+            return await self._with_setup_if_needed(payload)
+
+        @self.app.tool
+        async def run_source(
+            tenant_id: str,
+            source_id: str,
+            max_items: int | None = None,
+            parser: str | None = None,
+            bypass: str | None = None,
+        ) -> dict[str, Any]:
+            """Run ingest for one source through TenantRunner. No browser client imports."""
+            from job_ftch.application.source_operations import run_source as run_source_op
+
+            payload = await run_source_op(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                source_id=source_id,
+                max_items=max_items,
+                parser=parser,
+                bypass=bypass,
+            )
+            return await self._with_setup_if_needed(payload)
+
+        @self.app.tool
+        async def run_source_escalation(
+            tenant_id: str,
+            source_id: str,
+            strategy: str = "recommended",
+            max_tier: str | None = None,
+            max_items: int = 5,
+        ) -> dict[str, Any]:
+            """Run adaptive source escalation, or explain why a sweep is unavailable."""
+            from job_ftch.application.source_operations import (
+                run_source_escalation as run_source_escalation_op,
+            )
+
+            payload = await run_source_escalation_op(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                source_id=source_id,
+                strategy=strategy,
+                max_tier=max_tier,
+                max_items=max_items,
+            )
+            return await self._with_setup_if_needed(payload)
+
+        @self.app.tool
+        async def probe_bypass_route(
+            tenant_id: str,
+            source_id: str,
+            bypass: str,
+            max_items: int = 3,
+        ) -> dict[str, Any]:
+            """Diagnose a bypass route; execute only the current non-browser selection."""
+            from job_ftch.application.source_operations import (
+                probe_bypass_route as probe_bypass_route_op,
+            )
+
+            payload = await probe_bypass_route_op(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                source_id=source_id,
+                bypass=bypass,
+                max_items=max_items,
+            )
+            return await self._with_setup_if_needed(payload, goal="bypass")
+
+        @self.app.tool
+        async def run_browser_probe(
+            tenant_id: str,
+            source_id: str | None = None,
+            url: str | None = None,
+            probe: str = "listing",
+            engine: str = "auto",
+            bypass: str | None = None,
+            headed: bool = False,
+            max_items: int = 5,
+        ) -> dict[str, Any]:
+            """Structured not_implemented for live browser probes, plus route diagnostics."""
+            from job_ftch.application.source_operations import (
+                run_browser_probe as run_browser_probe_op,
+            )
+
+            payload = await run_browser_probe_op(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                source_id=source_id,
+                url=url,
+                probe=probe,
+                engine=engine,
+                bypass=bypass,
+                headed=headed,
+                max_items=max_items,
+            )
+            return await self._with_setup_if_needed(payload, goal="browser")
 
         @self.app.tool
         async def recommend_runtime_setup(

@@ -1,7 +1,7 @@
 ---
 title: "MCP adapter"
 description: "FastMCP tenant server exposing pipeline tools and job resources."
-updated: 2026-08-18
+updated: 2026-08-19
 ---
 # MCP adapter
 
@@ -78,6 +78,11 @@ Legacy MCP tool names (`run_all_pipelines`, `get_status`, `list_sources`,
 | `get_search_session(session_id)` / `list_search_session_results` / `explain_search_session` / `cancel_search_session` | search session status/results |
 | `search_jobs` / `get_job` / `get_job_lineage` | job lookup |
 | `get_bypass_capabilities()` / `get_bypass_routes(...)` | browser/bypass inventory |
+| `probe_source(tenant_id, source_id, mode="cheap\|full", max_items=5)` | cheap diagnostics or bounded source-scoped ingest |
+| `run_source(tenant_id, source_id, max_items=null, parser=null, bypass=null)` | one-source TenantRunner ingest; parser/bypass pins only if they match current route |
+| `run_source_escalation(tenant_id, source_id, strategy="recommended\|all")` | recommended = adaptive ingest; `all` / `max_tier` return `not_implemented` |
+| `probe_bypass_route(tenant_id, source_id, bypass, max_items=3)` | diagnose a bypass; execute only the current non-browser selection |
+| `run_browser_probe(...)` | structured `not_implemented` for live browser sessions, plus route diagnostics |
 | `recommend_runtime_setup(...)` / `validate_runtime_setup(...)` | install/config readiness |
 | `get_prefilter_requirements(profile_type=null)` | prefilter dataset contract |
 | `get_prefilter_status(tenant_id, profile_id=null)` | dirty flag + current artifact |
@@ -90,6 +95,12 @@ Legacy MCP tool names (`run_all_pipelines`, `get_status`, `list_sources`,
 
 Setup/prefilter tools are read-only: they never install packages, never start
 live browser sessions, and never return secret values.
+
+Source/bypass Slice 4 tools reuse `TenantRunner.run_tenant(..., source_ids=...)`
+for ingest. Dedicated live browser session/probe services do not exist yet, so
+`run_browser_probe` and forced bypass/engine sweeps return structured
+`not_implemented` with setup recommendations instead of pretending success.
+MCP does not import Playwright/Patchright/nodriver clients.
 
 ## Config directory
 
