@@ -21,8 +21,10 @@ import structlog
 
 from job_ftch.application.registry import resolve_bypass
 from job_ftch.infrastructure.browser_probe import (
+    _absorb_blocked_navigation,
     _attach_challenge_sink,
     _classify_html,
+    _no_challenge_captcha,
     _observed_challenge,
     _page_html,
     _page_text,
@@ -31,7 +33,11 @@ from job_ftch.infrastructure.browser_probe import (
     resolve_probe_engine,
 )
 from job_ftch.infrastructure.network.ssrf_guard import check_ssrf
-from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
+from job_ftch.infrastructure.sources.browser_utils import (
+    is_blocked_navigation_error,
+    navigate,
+    open_page,
+)
 
 log = structlog.get_logger()
 
@@ -39,7 +45,11 @@ SESSION_TTL_SECONDS = 180.0
 HEADED_SESSION_TTL_SECONDS = 900.0
 OPEN_DEADLINE_SECONDS = 45.0
 COMMAND_DEADLINE_SECONDS = 30.0
+SOLVE_DEADLINE_SLACK_SECONDS = 15.0
+SOLVE_DEADLINE_CAP_SECONDS = 180.0
 MAX_SESSIONS = 2
+_CF_SOLVE_CHALLENGES = frozenset({"cloudflare_challenge", "turnstile"})
+_PUBLIC_SECRET_KEYS = frozenset({"proxy", "proxy_url", "_proxy_url"})
 HTML_CAP = 8_000
 NAV_TIMEOUT_MS = 20_000
 ARTIFACT_TYPES = frozenset({"text", "html", "cookies_summary", "screenshot", "trace"})
@@ -136,6 +146,8 @@ class _LiveSession:
         self.challenge_sink: Any = None
         self.open_error: dict[str, Any] | None = None
         self.snapshot: dict[str, Any] = {}
+        self.page_lock = asyncio.Lock()
+        self._borrowed = False
 
     def remaining(self) -> float:
         return max(0.0, self.expires_at - time.monotonic())
@@ -163,6 +175,8 @@ class _LiveSession:
         )
         if extra:
             payload.update(extra)
+        for key in _PUBLIC_SECRET_KEYS:
+            payload.pop(key, None)
         return payload
 
     async def _refresh(self) -> None:
@@ -193,6 +207,10 @@ class _LiveSession:
         self.nav_trace = self.nav_trace[-40:]
 
     async def _exec(self, command: _Command) -> dict[str, Any]:
+        async with self.page_lock:
+            return await self._exec_locked(command)
+
+    async def _exec_locked(self, command: _Command) -> dict[str, Any]:
         page = self.page
         if page is None:
             return _session_result(status="error", error="session_page_gone", session_id=self.id)
@@ -227,9 +245,29 @@ class _LiveSession:
         elif kind == "solve":
             from job_ftch.infrastructure.browser_probe import _make_solver
 
-            solver = _make_solver(
-                str(command.payload.get("solve") or "browser_wait"), self.bypass_config
-            )
+            await self._refresh()
+            challenge = str(self.snapshot.get("challenge") or "").strip()
+            solve_mode = str(command.payload.get("solve") or "browser_wait")
+            solve_deadline = _command_deadline_seconds("solve")
+            self.expires_at = max(self.expires_at, time.monotonic() + solve_deadline)
+            if solve_mode == "provider" and not challenge:
+                return self.public(
+                    extra={
+                        "captcha": _no_challenge_captcha(),
+                        "instruction": "solve",
+                        "error": "no_challenge",
+                    }
+                )
+            solver_config = dict(self.bypass_config or {})
+            if (
+                solve_mode == "provider"
+                and challenge in _CF_SOLVE_CHALLENGES
+                and not str(solver_config.get("proxy_url") or "").strip()
+            ):
+                attached = _operator_captcha_proxy_url()
+                if attached:
+                    solver_config["proxy_url"] = attached
+            solver = _make_solver(solve_mode, solver_config)
             if solver is None:
                 return _session_result(
                     status="unsupported",
@@ -238,7 +276,7 @@ class _LiveSession:
                 )
             result = await solver.solve(
                 page,
-                challenge_type=str(self.snapshot.get("challenge") or "unknown"),
+                challenge_type=challenge or "unknown",
                 url=str(getattr(page, "url", "") or self.requested_url),
             )
             await self._refresh()
@@ -371,7 +409,14 @@ class _LiveSession:
         try:
             await check_ssrf(self.requested_url)
             async with open_page(config, bypass_strategy=strategy) as page:
-                await navigate(page, self.requested_url, config)
+                try:
+                    await navigate(page, self.requested_url, config)
+                except RuntimeError as exc:
+                    # Blocked 403/401/429/503 still has a live page; classify and keep the session.
+                    if not is_blocked_navigation_error(exc):
+                        raise
+                    with _suppress():
+                        await _absorb_blocked_navigation(page, self.challenge_sink, exc)
                 self.page = page
                 await self._refresh()
                 if self.manual_challenge:
@@ -519,6 +564,46 @@ class OperatorBrowserSessionService:
             self._sessions[session.id] = session
         return session.public()
 
+    async def borrow(self, session_id: str, tenant_id: str) -> _LiveSession | dict[str, Any]:
+        """Lock the live page for same-tab ingest. Caller must release()."""
+        session = await self._find(session_id)
+        if isinstance(session, dict):
+            return session
+        if session.tenant_id != tenant_id:
+            return _session_result(
+                status="unavailable",
+                error="session_wrong_tenant",
+                session_id=session_id,
+                tenant_id=tenant_id,
+            )
+        await session.page_lock.acquire()
+        if session.stop.is_set() or session.remaining() <= 0:
+            session.page_lock.release()
+            return _session_result(
+                status="unavailable",
+                error="session_expired",
+                session_id=session_id,
+            )
+        if session.page is None:
+            session.page_lock.release()
+            return _session_result(
+                status="unavailable",
+                error="session_page_gone",
+                session_id=session_id,
+            )
+        ttl = HEADED_SESSION_TTL_SECONDS if session.headed else SESSION_TTL_SECONDS
+        session.expires_at = time.monotonic() + ttl
+        session._borrowed = True
+        return session
+
+    async def release(self, session_id: str) -> None:
+        session = self._sessions.get(session_id)
+        if session is None or not session._borrowed:
+            return
+        session._borrowed = False
+        if session.page_lock.locked():
+            session.page_lock.release()
+
     async def get(self, session_id: str) -> dict[str, Any]:
         session = await self._find(session_id)
         if isinstance(session, dict):
@@ -591,13 +676,55 @@ class OperatorBrowserSessionService:
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
         await session.commands.put(_Command(kind=kind, payload=payload, future=future))
         try:
-            return await asyncio.wait_for(future, timeout=COMMAND_DEADLINE_SECONDS)
+            return await asyncio.wait_for(future, timeout=_command_deadline_seconds(kind))
         except TimeoutError:
             return _session_result(
                 status="timeout",
                 error="session_command_deadline",
                 session_id=session.id,
             )
+
+
+def _solver_timeout_budget_seconds() -> float:
+    from job_ftch.config import get_settings
+
+    return float(get_settings().captcha_solver_timeout_budget_seconds)
+
+
+def _command_deadline_seconds(kind: str) -> float:
+    if kind != "solve":
+        return COMMAND_DEADLINE_SECONDS
+    return min(
+        SOLVE_DEADLINE_CAP_SECONDS,
+        max(
+            COMMAND_DEADLINE_SECONDS,
+            _solver_timeout_budget_seconds() + SOLVE_DEADLINE_SLACK_SECONDS,
+        ),
+    )
+
+
+def _operator_captcha_proxy_url() -> str | None:
+    """Residential/gateway proxy for CF/turnstile. Never log or return this publicly."""
+    try:
+        from job_ftch.infrastructure.bypass.proxy_bypass import _load_residential_proxies
+
+        urls = [str(item).strip() for item in _load_residential_proxies() if str(item).strip()]
+        if urls:
+            return urls[0]
+    except Exception:
+        pass
+    from job_ftch.config import get_settings
+
+    settings = get_settings()
+    gateway = str(getattr(settings, "proxy_gateway", "") or "").strip()
+    if not gateway:
+        return None
+    user = str(getattr(settings, "proxy_user", "") or "").strip()
+    password = str(getattr(settings, "proxy_pass", "") or "").strip()
+    if user and password and "://" in gateway:
+        scheme, rest = gateway.split("://", 1)
+        gateway = f"{scheme}://{user}:{password}@{rest}"
+    return gateway
 
 
 def _profile_location(*, tenant_id: str, url: str, profile: str) -> tuple[str | None, str | None]:
