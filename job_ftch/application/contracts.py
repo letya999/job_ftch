@@ -451,6 +451,9 @@ class OntologyStore(Protocol):
     async def upsert_compiled_ontology(self, ontology: CompiledOntology) -> None:
         """Persist the profile-level compiled ontology source of truth."""
 
+    async def reset_live_projection(self) -> None:
+        """Drop live role/skill/anti/keyword/occurrence rows before a profile rebuild."""
+
 
 @dataclass(frozen=True)
 class ClassificationResult:

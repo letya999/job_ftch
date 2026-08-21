@@ -382,7 +382,8 @@ class Settings(BaseSettings):
     llm_ontology_max_per_shot: int = Field(default=1, ge=0)
     ontology_compiler_prompt_path: str = "config/prompts/ontology_compiler_v2.yaml"
     ontology_compiler_mode: str = "llm_v2_apply"
-    ontology_compiler_model: str = "gpt-4.1-nano"
+    ontology_compiler_model: str = "gpt-4.1-mini"
+    ontology_compiler_timeout_seconds: float = Field(default=120.0, gt=0.0, le=300.0)
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int | None = None

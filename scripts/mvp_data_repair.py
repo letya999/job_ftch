@@ -24,6 +24,7 @@ from job_ftch.application.ontology_compiler import (
     materialize_compiled_ontology,
     sanitize_compiled_ontology,
 )
+from job_ftch.application.ontology_enrichment import ontology_compiler_runtime_settings
 from job_ftch.application.ontology_graph_builder import build_ontology_graph_from_compiled
 from job_ftch.application.registry import create_llm, create_ontology_store, create_store
 from job_ftch.application.shot_sync import sync_profile_to_shot_store
@@ -265,13 +266,7 @@ async def rebuild_ontology(*, apply: bool, staging_artifact: Path | None = None)
     """Extract all active-profile shots, then atomically replace live ontology."""
     tenant, profile, _user_id = await _profile()
     base_settings = get_settings()
-    settings = base_settings.model_copy(
-        update={
-            "llm_backend": "openai",
-            "openai_model": base_settings.ontology_compiler_model,
-            "openai_timeout_seconds": 120.0,
-        }
-    )
+    settings = ontology_compiler_runtime_settings(base_settings)
     search = profile.profile.search_profiles[0]
     shots = (
         *(("positive_resume", text) for text in search.positive_example_texts),

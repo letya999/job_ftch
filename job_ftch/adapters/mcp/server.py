@@ -1406,11 +1406,12 @@ class TenantMCPServer:
             user_id: str,
             kind: str,
             label: str,
-            text: str,
+            text: str = "",
+            texts: list[str] | None = None,
             profile_id: str | None = None,
             refresh_policy: str = "auto",
         ) -> dict[str, Any]:
-            """Add a positive/negative resume or vacancy example and refresh learning."""
+            """Add one or many positive/negative resume or vacancy examples and compile once."""
             return await mcp_examples.add_operator_example(
                 self._require_runner(),
                 tenant_id=tenant_id,
@@ -1418,6 +1419,7 @@ class TenantMCPServer:
                 kind=kind,
                 label=label,
                 text=text,
+                texts=texts,
                 profile_id=profile_id,
                 refresh_policy=refresh_policy,
             )

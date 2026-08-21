@@ -7,14 +7,16 @@ projection for the existing runtime tables.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+import structlog
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from job_ftch.domain import (
     CompiledOntology,
@@ -24,9 +26,12 @@ from job_ftch.domain import (
     OntologyTermStat,
 )
 
+log = structlog.get_logger()
+_MAX_CONSECUTIVE_CLASSIFY_FAILURES = 2
+_CANDIDATE_EXTRACT_CONCURRENCY = 4
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
 
 ShotKind = Literal["positive_resume", "negative_resume", "positive_job", "negative_job"]
 
@@ -80,6 +85,368 @@ class OntologyCandidateChunk(BaseModel):
     warnings: tuple[str, ...] = ()
 
 
+_ENTITY_TYPE_ALIASES = {
+    "skill": "skill",
+    "skills": "skill",
+    "tool": "skill",
+    "tools": "skill",
+    "technology": "skill",
+    "tech": "skill",
+    "role": "role",
+    "roles": "role",
+    "job": "role",
+    "title": "role",
+    "position": "role",
+    "keyword": "keyword",
+    "keywords": "keyword",
+    "term": "keyword",
+    "anti_pattern": "anti_pattern",
+    "antipattern": "anti_pattern",
+    "anti": "anti_pattern",
+    "seniority": "seniority",
+    "level": "seniority",
+}
+_POLARITY_ALIASES = {
+    "positive": "positive",
+    "pos": "positive",
+    "plus": "positive",
+    "good": "positive",
+    "negative": "negative",
+    "neg": "negative",
+    "minus": "negative",
+    "bad": "negative",
+    "neutral": "neutral",
+    "none": "neutral",
+    "contextual": "contextual",
+    "mixed": "contextual",
+    "depends": "contextual",
+}
+_SCOPE_ALIASES = {
+    "target": "target",
+    "main": "target",
+    "primary": "target",
+    "core": "target",
+    "supporting": "supporting",
+    "support": "supporting",
+    "secondary": "supporting",
+    "background": "background",
+    "anti": "anti",
+    "reject": "anti",
+    "contextual": "contextual",
+    "current": "current",
+    "now": "current",
+    "past": "past",
+    "old": "past",
+    "previous": "past",
+    "desired": "desired",
+    "want": "desired",
+    "unknown": "unknown",
+}
+_SOURCE_SECTION_ALIASES = {
+    "title": "title",
+    "headline": "title",
+    "desired_role": "desired_role",
+    "desired": "desired_role",
+    "current_role": "current_role",
+    "current": "current_role",
+    "past_role": "past_role",
+    "past": "past_role",
+    "previous": "past_role",
+    "responsibilities": "responsibilities",
+    "requirements": "requirements",
+    "must": "requirements",
+    "must_have": "requirements",
+    "required": "requirements",
+    "nice_to_have": "nice_to_have",
+    "nice": "nice_to_have",
+    "optional": "nice_to_have",
+    "skills": "skills",
+    "experience": "skills",
+    "project": "project",
+    "projects": "project",
+    "summary": "summary",
+    "description": "summary",
+    "anti_reason": "anti_reason",
+    "rejection": "anti_reason",
+    "unknown": "unknown",
+}
+_PREDICATE_ALIASES = {
+    "requires": "requires",
+    "require": "requires",
+    "needs": "requires",
+    "need": "requires",
+    "requires_skill": "requires",
+    "supports": "supports",
+    "support": "supports",
+    "supports_role": "supports",
+    "excludes": "excludes",
+    "exclude": "excludes",
+    "excludes_skill": "excludes",
+    "excludes_role": "excludes",
+    "aliases": "aliases",
+    "alias": "aliases",
+    "aka": "aliases",
+    "contrasts_with": "contrasts_with",
+    "contrast": "contrasts_with",
+    "specializes": "specializes",
+    "specialize": "specializes",
+    "broader_than": "broader_than",
+    "broader": "broader_than",
+    "cooccurs_with": "cooccurs_with",
+    "cooccurs": "cooccurs_with",
+}
+_ALLOWED_SEMANTIC_ROLES = {
+    "target_role",
+    "anti_role",
+    "current_role",
+    "past_role",
+    "target_skill",
+    "supporting_skill",
+    "background_skill",
+    "anti_skill",
+    "positive_keyword",
+    "negative_keyword",
+    "anti_pattern",
+    "seniority",
+    "context",
+}
+
+
+def _alias_token(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip().casefold().replace("-", "_").replace(" ", "_")
+
+
+def _coerce_choice(value: object, aliases: dict[str, str], default: str) -> str:
+    token = _alias_token(value)
+    if not token:
+        return default
+    return aliases.get(token, default)
+
+
+def _coerce_semantic_role(value: object, entity_type: str, polarity: str) -> str:
+    token = _alias_token(value)
+    if token in _ALLOWED_SEMANTIC_ROLES:
+        return token
+    negative = polarity == "negative"
+    if token in {"skill", "tool", "technology", "tech", "target"}:
+        return "anti_skill" if negative else "target_skill"
+    if token in {"supporting", "support"}:
+        return "supporting_skill"
+    if token in {"background"}:
+        return "background_skill"
+    if token in {"role", "job", "title", "position"}:
+        return "anti_role" if negative else "target_role"
+    if token in {"keyword", "term"}:
+        return "negative_keyword" if negative else "positive_keyword"
+    if token in {"anti", "reject", "pattern"}:
+        return "anti_pattern"
+    if entity_type == "role":
+        return "anti_role" if negative else "target_role"
+    if entity_type == "keyword":
+        return "negative_keyword" if negative else "positive_keyword"
+    if entity_type == "anti_pattern":
+        return "anti_pattern"
+    if entity_type == "seniority":
+        return "seniority"
+    return "anti_skill" if negative else "target_skill"
+
+
+def _unit_interval(value: object, default: float = 0.5) -> float:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(1.0, number))
+
+
+def _str_tuple(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        text = value.strip()
+        return (text,) if text else ()
+    if isinstance(value, (list, tuple, set)):
+        return tuple(text for item in value if (text := str(item).strip()))
+    return ()
+
+
+def _nonneg_int(value: object, default: int = 0) -> int:
+    try:
+        number = int(float(value))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return max(0, number)
+
+
+def _as_item_list(value: object) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return []
+
+
+class LLMCompiledTerm(BaseModel):
+    """Instructor-facing term DTO. Domain `CompiledOntologyTerm` stays strict."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    canonical: str = ""
+    aliases: list[str] = Field(default_factory=list)
+    entity_type: str = "skill"
+    semantic_role: str = "target_skill"
+    polarity: str = "positive"
+    scope: str = "target"
+    source_section: str = "unknown"
+    evidence_shot_ids: list[str] = Field(default_factory=list)
+    support_count: int = Field(default=0, ge=0)
+    contrast_count: int = Field(default=0, ge=0)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    accepted: bool = False
+    reject_reason: str = ""
+    rationale: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        entity_type = _coerce_choice(payload.get("entity_type"), _ENTITY_TYPE_ALIASES, "skill")
+        polarity = _coerce_choice(payload.get("polarity"), _POLARITY_ALIASES, "positive")
+        payload["entity_type"] = entity_type
+        payload["polarity"] = polarity
+        payload["semantic_role"] = _coerce_semantic_role(
+            payload.get("semantic_role"), entity_type, polarity
+        )
+        payload["scope"] = _coerce_choice(
+            payload.get("scope"),
+            _SCOPE_ALIASES,
+            "anti" if polarity == "negative" else "target",
+        )
+        payload["source_section"] = _coerce_choice(
+            payload.get("source_section"), _SOURCE_SECTION_ALIASES, "unknown"
+        )
+        payload["canonical"] = str(payload.get("canonical") or "").strip()
+        payload["aliases"] = list(_str_tuple(payload.get("aliases")))
+        payload["evidence_shot_ids"] = list(_str_tuple(payload.get("evidence_shot_ids")))
+        payload["support_count"] = _nonneg_int(payload.get("support_count", 0))
+        payload["contrast_count"] = _nonneg_int(payload.get("contrast_count", 0))
+        payload["confidence"] = _unit_interval(payload.get("confidence", 0.5))
+        payload["weight"] = _unit_interval(payload.get("weight", 0.5))
+        return payload
+
+    def to_domain(self) -> CompiledOntologyTerm | None:
+        try:
+            return CompiledOntologyTerm.model_validate(self.model_dump())
+        except Exception:  # noqa: BLE001 - drop one bad LLM term, keep the chunk
+            return None
+
+
+class LLMCompiledRelation(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    subject: str = ""
+    predicate: str = "requires"
+    object: str = ""
+    polarity: str = "contextual"
+    evidence_shot_ids: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    rationale: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        payload["predicate"] = _coerce_choice(
+            payload.get("predicate"), _PREDICATE_ALIASES, "requires"
+        )
+        payload["polarity"] = _coerce_choice(
+            payload.get("polarity"), _POLARITY_ALIASES, "contextual"
+        )
+        payload["subject"] = str(payload.get("subject") or "").strip()
+        payload["object"] = str(payload.get("object") or "").strip()
+        payload["evidence_shot_ids"] = list(_str_tuple(payload.get("evidence_shot_ids")))
+        payload["confidence"] = _unit_interval(payload.get("confidence", 0.5))
+        payload["weight"] = _unit_interval(payload.get("weight", 0.5))
+        return payload
+
+    def to_domain(self) -> CompiledOntologyRelation | None:
+        try:
+            return CompiledOntologyRelation.model_validate(self.model_dump())
+        except Exception:  # noqa: BLE001 - drop one bad LLM relation
+            return None
+
+
+class LLMOntologyCandidateChunk(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    terms: list[LLMCompiledTerm] = Field(default_factory=list, max_length=96)
+    relations: list[LLMCompiledRelation] = Field(default_factory=list, max_length=96)
+    warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        payload["terms"] = _as_item_list(payload.get("terms"))
+        payload["relations"] = _as_item_list(payload.get("relations"))
+        payload["warnings"] = list(_str_tuple(payload.get("warnings")))
+        return payload
+
+    def to_domain(self) -> OntologyCandidateChunk:
+        terms = tuple(term for item in self.terms if (term := item.to_domain()) is not None)
+        relations = tuple(
+            relation for item in self.relations if (relation := item.to_domain()) is not None
+        )
+        return OntologyCandidateChunk(
+            terms=terms, relations=relations, warnings=tuple(self.warnings)
+        )
+
+
+class LLMCompiledOntology(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    summary: str = ""
+    terms: list[LLMCompiledTerm] = Field(default_factory=list)
+    relations: list[LLMCompiledRelation] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        payload["summary"] = str(payload.get("summary") or "").strip()
+        payload["terms"] = _as_item_list(payload.get("terms"))
+        payload["relations"] = _as_item_list(payload.get("relations"))
+        payload["warnings"] = list(_str_tuple(payload.get("warnings")))
+        return payload
+
+    def to_domain(self) -> CompiledOntology:
+        terms = tuple(term for item in self.terms if (term := item.to_domain()) is not None)
+        relations = tuple(
+            relation for item in self.relations if (relation := item.to_domain()) is not None
+        )
+        return CompiledOntology(
+            summary=self.summary,
+            terms=terms,
+            relations=relations,
+            warnings=tuple(self.warnings),
+        )
+
+
 @dataclass(frozen=True)
 class OntologyCompilationResult:
     ontology: CompiledOntology
@@ -131,6 +498,175 @@ def _chunks(
 
 def _format_prompt(template: str, **values: str) -> str:
     return template.format(**values)
+
+
+def _compile_timeout_seconds(explicit: float | None) -> float:
+    if explicit is not None:
+        return explicit
+    try:
+        from job_ftch.config import get_settings
+
+        return float(get_settings().ontology_compiler_timeout_seconds)
+    except Exception:  # noqa: BLE001 - compiler must still run without settings
+        return 120.0
+
+
+def _normalize_classify_result(raw: Any, schema: type[Any]) -> Any | None:
+    if raw is None:
+        return None
+    if schema is LLMOntologyCandidateChunk:
+        if isinstance(raw, OntologyCandidateChunk):
+            return raw
+        converter = getattr(raw, "to_domain", None)
+        if callable(converter):
+            converted = converter()
+            if isinstance(converted, OntologyCandidateChunk):
+                return converted
+        payload = raw.model_dump() if isinstance(raw, BaseModel) else raw
+        return LLMOntologyCandidateChunk.model_validate(payload).to_domain()
+    if schema is LLMCompiledOntology:
+        if isinstance(raw, CompiledOntology):
+            return raw
+        converter = getattr(raw, "to_domain", None)
+        if callable(converter):
+            converted = converter()
+            if isinstance(converted, CompiledOntology):
+                return converted
+        payload = raw.model_dump() if isinstance(raw, BaseModel) else raw
+        return LLMCompiledOntology.model_validate(payload).to_domain()
+    return raw
+
+
+_COMPILE_PASS_MAX_TOKENS = 12000
+
+
+async def _extract_candidate_chunk(
+    *,
+    chunk: Sequence[LabeledOntologyShot],
+    classify: Any,
+    prompts: OntologyCompilerPrompts,
+    compile_timeout: float | None,
+) -> tuple[OntologyCandidateChunk | None, tuple[str, ...]]:
+    prompt_parts: list[str] = []
+    user_prompt = _format_prompt(
+        prompts.candidate_user_template,
+        shots_json=_json([shot.model_dump(mode="json") for shot in chunk]),
+    )
+    prompt = f"{prompts.candidate_system}\n\n{user_prompt}"
+    candidate = await _classify_schema(
+        classify,
+        prompt,
+        LLMOntologyCandidateChunk,
+        prompt_parts,
+        timeout_seconds=compile_timeout,
+    )
+    if candidate is None:
+        return None, tuple(prompt_parts)
+    candidate = _reattach_chunk_evidence(candidate, chunk)
+    if any(shot.kind.startswith("negative") for shot in chunk) and not _has_negative_candidate(
+        candidate
+    ):
+        rescue_terms = list(candidate.terms)
+        rescue_relations = list(candidate.relations)
+        for shot in chunk:
+            if not shot.kind.startswith("negative"):
+                continue
+            rescue_user_prompt = _format_prompt(
+                prompts.candidate_user_template,
+                shots_json=_json([shot.model_dump(mode="json")]),
+            )
+            rescue_prompt = (
+                f"{prompts.candidate_system}\n\n"
+                "This is a negative-shot rescue pass. Return only reusable rejection "
+                "signals from this shot: negative_keyword, anti_pattern, anti_role, "
+                "or anti_skill. Do not return positive target terms.\n\n"
+                f"{rescue_user_prompt}"
+            )
+            rescued = await _classify_schema(
+                classify,
+                rescue_prompt,
+                LLMOntologyCandidateChunk,
+                prompt_parts,
+                timeout_seconds=compile_timeout,
+            )
+            if rescued is not None:
+                rescued = _reattach_chunk_evidence(rescued, (shot,))
+                rescue_terms.extend(rescued.terms)
+                rescue_relations.extend(rescued.relations)
+        candidate = OntologyCandidateChunk(
+            terms=tuple(rescue_terms[:24]),
+            relations=tuple(rescue_relations[:24]),
+            warnings=candidate.warnings,
+        )
+    return candidate, tuple(prompt_parts)
+
+
+async def _classify_schema(
+    classify: Any,
+    prompt: str,
+    schema: type[Any],
+    prompt_parts: list[str],
+    *,
+    timeout_seconds: float | None = None,
+    max_tokens: int | None = None,
+) -> Any | None:
+    prompt_parts.append(prompt)
+    try:
+        kwargs: dict[str, Any] = {}
+        if timeout_seconds is not None:
+            kwargs["timeout_seconds"] = timeout_seconds
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        try:
+            raw = await classify(prompt, schema, **kwargs) if kwargs else await classify(prompt, schema)
+        except TypeError:
+            raw = await classify(prompt, schema)
+        return _normalize_classify_result(raw, schema)
+    except Exception as exc:  # noqa: BLE001 - one bad LLM chunk must not abort compile
+        log.warning(
+            "ontology_compiler_classify_failed",
+            schema=getattr(schema, "__name__", str(schema)),
+            error=type(exc).__name__,
+            detail=str(exc)[:500],
+        )
+        return None
+
+
+def _reattach_chunk_evidence(
+    chunk: OntologyCandidateChunk,
+    shots: Sequence[LabeledOntologyShot],
+) -> OntologyCandidateChunk:
+    known = {shot.shot_id: shot for shot in shots}
+
+    def _ids_for(term: CompiledOntologyTerm) -> tuple[str, ...]:
+        matched = tuple(shot_id for shot_id in term.evidence_shot_ids if shot_id in known)
+        if matched:
+            return matched
+        needle = normalize_compiled_term(term.canonical)
+        if needle:
+            from_text = tuple(shot.shot_id for shot in shots if needle in shot.text.casefold())
+            if from_text:
+                return from_text[:4]
+        if term.polarity == "negative":
+            return tuple(shot.shot_id for shot in shots if shot.kind.startswith("negative"))[:4]
+        return tuple(shot.shot_id for shot in shots if shot.kind.startswith("positive"))[:4]
+
+    terms = tuple(
+        term.model_copy(update={"evidence_shot_ids": _ids_for(term), "accepted": False})
+        for term in chunk.terms
+    )
+    relations = tuple(
+        relation.model_copy(
+            update={
+                "evidence_shot_ids": tuple(
+                    shot_id for shot_id in relation.evidence_shot_ids if shot_id in known
+                )
+                or tuple(shot.shot_id for shot in shots)[:4]
+            }
+        )
+        for relation in chunk.relations
+    )
+    return chunk.model_copy(update={"terms": terms, "relations": relations})
 
 
 def _dedupe_terms(terms: Sequence[CompiledOntologyTerm]) -> tuple[CompiledOntologyTerm, ...]:
@@ -304,11 +840,112 @@ def _candidate_chunks_for_compile(
     return tuple(compact)
 
 
+_POSITIVE_SKILL_PREDICATES = {"requires", "supports"}
+
+
+def _iter_positive_skill_relations(
+    ontology: CompiledOntology,
+    candidate_chunks: Sequence[OntologyCandidateChunk],
+) -> tuple[CompiledOntologyRelation, ...]:
+    seen: set[tuple[str, str, str]] = set()
+    ordered: list[CompiledOntologyRelation] = []
+    for relation in (
+        *ontology.relations,
+        *(item for chunk in candidate_chunks for item in chunk.relations),
+    ):
+        if relation.polarity != "positive" or relation.predicate not in _POSITIVE_SKILL_PREDICATES:
+            continue
+        subject = normalize_compiled_term(relation.subject)
+        obj = normalize_compiled_term(relation.object)
+        if not subject or not obj:
+            continue
+        key = (subject, relation.predicate, obj)
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(relation.model_copy(update={"subject": subject, "object": obj}))
+    return tuple(ordered)
+
+
+def _remap_negative_skill_overlaps(
+    ontology: CompiledOntology,
+    positive_objects: set[str],
+) -> CompiledOntology:
+    if not positive_objects:
+        return ontology
+    existing_insufficient = {
+        normalize_compiled_term(term.canonical)
+        for term in ontology.terms
+        if term.entity_type == "anti_pattern" or term.canonical.startswith("insufficient ")
+    }
+    remapped: list[CompiledOntologyTerm] = []
+    changed = False
+    for term in ontology.terms:
+        canonical = normalize_compiled_term(term.canonical)
+        if (
+            term.polarity == "negative"
+            and term.entity_type == "skill"
+            and canonical in positive_objects
+            and not canonical.startswith("insufficient ")
+        ):
+            changed = True
+            insufficient = f"insufficient {canonical}"
+            if normalize_compiled_term(insufficient) in existing_insufficient:
+                continue
+            remapped.append(
+                term.model_copy(
+                    update={
+                        "canonical": insufficient,
+                        "entity_type": "anti_pattern",
+                        "semantic_role": "anti_pattern",
+                        "scope": "anti",
+                        "accepted": bool(term.evidence_shot_ids),
+                    }
+                )
+            )
+            existing_insufficient.add(normalize_compiled_term(insufficient))
+            continue
+        remapped.append(term)
+    if not changed:
+        return ontology
+    return ontology.model_copy(update={"terms": tuple(remapped)})
+
+
+def _relation_evidence_ids(
+    evidence_ids: Sequence[str],
+    *,
+    canonical: str,
+    shots: Sequence[LabeledOntologyShot],
+) -> tuple[str, ...]:
+    shot_kind = {shot.shot_id: shot.kind for shot in shots}
+    known = tuple(shot_id for shot_id in evidence_ids if shot_id in shot_kind)
+    if known:
+        return known
+    from_text = tuple(
+        shot.shot_id
+        for shot in shots
+        if canonical in shot.text.casefold() and shot.kind.startswith("positive")
+    )[:4]
+    if from_text:
+        return from_text
+    fallback = tuple(shot.shot_id for shot in shots if shot.kind.startswith("positive"))[:4]
+    return fallback or tuple(evidence_ids)
+
+
 def _restore_projection_from_candidates(
     ontology: CompiledOntology,
     candidate_chunks: Sequence[OntologyCandidateChunk],
     shots: Sequence[LabeledOntologyShot],
 ) -> CompiledOntology:
+    skill_relations = _iter_positive_skill_relations(ontology, candidate_chunks)
+    positive_relation_objects = {
+        normalize_compiled_term(relation.object) for relation in skill_relations
+    }
+    ontology = _remap_negative_skill_overlaps(
+        ontology,
+        positive_relation_objects
+        | {normalize_compiled_term(relation.subject) for relation in skill_relations},
+    )
     shot_kind = {shot.shot_id: shot.kind for shot in shots}
     existing = {
         (term.entity_type, normalize_compiled_term(term.canonical)) for term in ontology.terms
@@ -320,6 +957,10 @@ def _restore_projection_from_candidates(
     ]
     by_key: dict[tuple[str, str], CompiledOntologyTerm] = {}
     candidate_by_canonical: dict[str, CompiledOntologyTerm] = {}
+    for term in ontology.terms:
+        canonical = normalize_compiled_term(term.canonical)
+        if canonical:
+            candidate_by_canonical.setdefault(canonical, term)
     positive_skill_evidence_by_canonical: dict[str, tuple[str, ...]] = {}
     positive_skill_support_by_canonical: dict[str, int] = {}
     positive_skill_terms_by_shot: dict[str, set[str]] = {}
@@ -330,9 +971,23 @@ def _restore_projection_from_candidates(
         if term.polarity == "positive"
         if (canonical := normalize_compiled_term(term.canonical))
     }
+    positive_candidate_keys.update(
+        {("skill", canonical) for canonical in positive_relation_objects if canonical}
+    )
     relation_terms_by_key: dict[str, tuple[str, ...]] = {}
     relation_confidence: dict[str, float] = {}
     relation_weight: dict[str, float] = {}
+    for relation in skill_relations:
+        canonical = normalize_compiled_term(relation.object)
+        if not canonical:
+            continue
+        relation_terms_by_key[canonical] = tuple(
+            dict.fromkeys((*relation_terms_by_key.get(canonical, ()), *relation.evidence_shot_ids))
+        )
+        relation_confidence[canonical] = max(
+            relation_confidence.get(canonical, 0.0), relation.confidence
+        )
+        relation_weight[canonical] = max(relation_weight.get(canonical, 0.0), relation.weight)
     for chunk in candidate_chunks:
         for term in chunk.terms:
             canonical = normalize_compiled_term(term.canonical)
@@ -363,27 +1018,6 @@ def _restore_projection_from_candidates(
                 for shot_id in term.evidence_shot_ids:
                     if shot_kind.get(shot_id, "").startswith("positive"):
                         positive_skill_terms_by_shot.setdefault(shot_id, set()).add(canonical)
-        for relation in chunk.relations:
-            if relation.polarity != "positive" or relation.predicate not in {
-                "requires",
-                "supports",
-            }:
-                continue
-            for value in (relation.subject, relation.object):
-                canonical = normalize_compiled_term(value)
-                if not canonical:
-                    continue
-                relation_terms_by_key[canonical] = tuple(
-                    dict.fromkeys(
-                        (*relation_terms_by_key.get(canonical, ()), *relation.evidence_shot_ids)
-                    )
-                )
-                relation_confidence[canonical] = max(
-                    relation_confidence.get(canonical, 0.0), relation.confidence
-                )
-                relation_weight[canonical] = max(
-                    relation_weight.get(canonical, 0.0), relation.weight
-                )
     for chunk in candidate_chunks:
         for term in chunk.terms:
             canonical = normalize_compiled_term(term.canonical)
@@ -545,30 +1179,28 @@ def _restore_projection_from_candidates(
                     accepted_positive_roles.append(canonical)
     role_tokens = {_term_tokens(role) for role in accepted_positive_roles}
     for canonical, evidence_ids in relation_terms_by_key.items():
-        if (candidate := candidate_by_canonical.get(canonical)) is not None:
-            evidence_kinds = {shot_kind.get(shot_id, "") for shot_id in candidate.evidence_shot_ids}
-            has_negative_evidence = any(kind.startswith("negative") for kind in evidence_kinds)
-            if has_negative_evidence or candidate.semantic_role in {
-                "anti_role",
-                "anti_skill",
-                "negative_keyword",
-                "anti_pattern",
-                "past_role",
-                "target_role",
-            }:
-                continue
-        relation_evidence_kinds = {shot_kind.get(shot_id, "") for shot_id in evidence_ids}
-        if not any(kind.startswith("positive") for kind in relation_evidence_kinds):
+        candidate = candidate_by_canonical.get(canonical)
+        if candidate is not None and (
+            candidate.entity_type == "role"
+            or candidate.semantic_role in {"target_role", "anti_role", "past_role"}
+        ):
+            continue
+        known_kinds = {shot_kind[shot_id] for shot_id in evidence_ids if shot_id in shot_kind}
+        if known_kinds and not any(kind.startswith("positive") for kind in known_kinds):
             continue
         if _term_tokens(canonical) in role_tokens:
             continue
         key = ("skill", canonical)
         if key in existing or key in by_key:
             continue
-        confidence = max(relation_confidence.get(canonical, 0.0), 0.65)
-        weight = max(relation_weight.get(canonical, 0.0), 0.6)
-        if confidence < 0.7 or weight < 0.6:
+        bound_evidence = _relation_evidence_ids(evidence_ids, canonical=canonical, shots=shots)
+        if not bound_evidence:
             continue
+        confidence = max(relation_confidence.get(canonical, 0.0), 0.5)
+        weight = max(relation_weight.get(canonical, 0.0), 0.5)
+        source_section = "requirements"
+        if candidate is not None and candidate.source_section != "unknown":
+            source_section = candidate.source_section
         by_key[key] = CompiledOntologyTerm(
             canonical=canonical,
             aliases=(),
@@ -576,9 +1208,9 @@ def _restore_projection_from_candidates(
             semantic_role="supporting_skill",
             polarity="positive",
             scope="supporting",
-            source_section=(candidate.source_section if candidate is not None else "unknown"),
-            evidence_shot_ids=evidence_ids,
-            support_count=max(1, len(evidence_ids)),
+            source_section=source_section,  # type: ignore[arg-type]
+            evidence_shot_ids=bound_evidence,
+            support_count=max(1, len(bound_evidence)),
             contrast_count=0,
             confidence=confidence,
             weight=weight,
@@ -688,6 +1320,7 @@ async def compile_ontology_from_shots(
     shots: Sequence[tuple[str, str]],
     llm: object,
     prompt_path: str | Path,
+    compile_timeout_seconds: float | None = None,
 ) -> OntologyCompilationResult:
     classify = getattr(llm, "classify", None)
     if not callable(classify):
@@ -695,77 +1328,61 @@ async def compile_ontology_from_shots(
 
     prompts = load_ontology_compiler_prompts(prompt_path)
     labeled = make_labeled_ontology_shots(shots)
+    compile_timeout = _compile_timeout_seconds(compile_timeout_seconds)
     prompt_parts: list[str] = []
     candidate_chunks: list[OntologyCandidateChunk] = []
-    for chunk in _chunks(labeled, prompts.chunk_size):
-        user_prompt = _format_prompt(
-            prompts.candidate_user_template,
-            shots_json=_json([shot.model_dump(mode="json") for shot in chunk]),
-        )
-        prompt = f"{prompts.candidate_system}\n\n{user_prompt}"
-        prompt_parts.append(prompt)
-        candidate = await classify(prompt, OntologyCandidateChunk)
-        if candidate is None:
-            raise RuntimeError("ontology candidate extraction returned no result")
-        candidate = candidate.model_copy(
-            update={
-                "terms": tuple(
-                    term.model_copy(update={"accepted": False}) for term in candidate.terms
-                )
-            }
-        )
-        if any(shot.kind.startswith("negative") for shot in chunk) and not _has_negative_candidate(
-            candidate
-        ):
-            rescue_terms = list(candidate.terms)
-            rescue_relations = list(candidate.relations)
-            for shot in chunk:
-                if not shot.kind.startswith("negative"):
-                    continue
-                rescue_user_prompt = _format_prompt(
-                    prompts.candidate_user_template,
-                    shots_json=_json([shot.model_dump(mode="json")]),
-                )
-                rescue_prompt = (
-                    f"{prompts.candidate_system}\n\n"
-                    "This is a negative-shot rescue pass. Return only reusable rejection "
-                    "signals from this shot: negative_keyword, anti_pattern, anti_role, "
-                    "or anti_skill. Do not return positive target terms.\n\n"
-                    f"{rescue_user_prompt}"
-                )
-                prompt_parts.append(rescue_prompt)
-                rescued = await classify(rescue_prompt, OntologyCandidateChunk)
-                if rescued is not None:
-                    rescue_terms.extend(
-                        term.model_copy(update={"accepted": False}) for term in rescued.terms
-                    )
-                    rescue_relations.extend(rescued.relations)
-            candidate = OntologyCandidateChunk(
-                terms=tuple(rescue_terms[:24]),
-                relations=tuple(rescue_relations[:24]),
-                warnings=candidate.warnings,
+    consecutive_failures = 0
+    candidate_inputs = list(_chunks(labeled, prompts.chunk_size))
+    semaphore = asyncio.Semaphore(_CANDIDATE_EXTRACT_CONCURRENCY)
+
+    async def _bound_extract(
+        chunk: Sequence[LabeledOntologyShot],
+    ) -> tuple[OntologyCandidateChunk | None, tuple[str, ...]]:
+        async with semaphore:
+            return await _extract_candidate_chunk(
+                chunk=chunk,
+                classify=classify,
+                prompts=prompts,
+                compile_timeout=compile_timeout,
             )
+
+    extracted = await asyncio.gather(*(_bound_extract(chunk) for chunk in candidate_inputs))
+    for candidate, parts in extracted:
+        prompt_parts.extend(parts)
+        if candidate is None:
+            consecutive_failures += 1
+            continue
+        consecutive_failures = 0
         candidate_chunks.append(candidate)
-    if len(labeled) > 1:
+    if len(labeled) > 1 and not any(
+        chunk.terms or chunk.relations for chunk in candidate_chunks
+    ):
+        consecutive_failures = 0
         for chunk in _chunks(labeled, prompts.coverage_chunk_size):
             user_prompt = _format_prompt(
                 prompts.coverage_user_template,
                 shots_json=_json([shot.model_dump(mode="json") for shot in chunk]),
             )
             prompt = f"{prompts.coverage_system}\n\n{user_prompt}"
-            prompt_parts.append(prompt)
-            coverage = await classify(prompt, OntologyCandidateChunk)
-            if coverage is not None and (coverage.terms or coverage.relations):
-                candidate_chunks.append(
-                    coverage.model_copy(
-                        update={
-                            "terms": tuple(
-                                term.model_copy(update={"accepted": False})
-                                for term in coverage.terms
-                            )
-                        }
-                    )
-                )
+            coverage = await _classify_schema(
+                classify,
+                prompt,
+                LLMOntologyCandidateChunk,
+                prompt_parts,
+                timeout_seconds=compile_timeout,
+            )
+            if coverage is None:
+                consecutive_failures += 1
+                if consecutive_failures >= _MAX_CONSECUTIVE_CLASSIFY_FAILURES:
+                    break
+                continue
+            consecutive_failures = 0
+            coverage = _reattach_chunk_evidence(coverage, chunk)
+            if coverage.terms or coverage.relations:
+                candidate_chunks.append(coverage)
+
+    if not any(chunk.terms or chunk.relations for chunk in candidate_chunks):
+        raise RuntimeError("ontology candidate extraction returned no result")
 
     compile_prompt = f"{prompts.compile_system}\n\n" + _format_prompt(
         prompts.compile_user_template,
@@ -776,21 +1393,20 @@ async def compile_ontology_from_shots(
             ]
         ),
     )
-    prompt_parts.append(compile_prompt)
     compile_failed = False
-    try:
-        ontology = await classify(compile_prompt, CompiledOntology)
-    except Exception as exc:
-        compile_failed = True
-        ontology = CompiledOntology(
-            summary="Candidate-only ontology projection after compile pass failed.",
-            warnings=(f"compile_failed:{type(exc).__name__}",),
-        )
+    ontology = await _classify_schema(
+        classify,
+        compile_prompt,
+        LLMCompiledOntology,
+        prompt_parts,
+        timeout_seconds=compile_timeout,
+        max_tokens=_COMPILE_PASS_MAX_TOKENS,
+    )
     if ontology is None:
         compile_failed = True
         ontology = CompiledOntology(
-            summary="Candidate-only ontology projection after empty compile pass.",
-            warnings=("compile_empty",),
+            summary="Candidate-only ontology projection after compile pass failed.",
+            warnings=("compile_failed",),
         )
     ontology = sanitize_compiled_ontology(ontology)
 
@@ -799,13 +1415,16 @@ async def compile_ontology_from_shots(
             prompts.critique_user_template,
             ontology_json=_json(ontology),
         )
-        prompt_parts.append(critique_prompt)
-        critiqued = await classify(critique_prompt, CompiledOntology)
+        critiqued = await _classify_schema(
+            classify,
+            critique_prompt,
+            LLMCompiledOntology,
+            prompt_parts,
+            timeout_seconds=compile_timeout,
+            max_tokens=_COMPILE_PASS_MAX_TOKENS,
+        )
         if critiqued is not None:
             ontology = sanitize_compiled_ontology(critiqued)
-
-    if len(labeled) > 1 and any(chunk.terms for chunk in candidate_chunks):
-        ontology = ontology.model_copy(update={"terms": ()})
 
     if _has_negative_shots(labeled) and not _has_accepted_negative_projection(ontology):
         ontology = sanitize_compiled_ontology(
@@ -815,12 +1434,18 @@ async def compile_ontology_from_shots(
         _restore_projection_from_candidates(ontology, candidate_chunks, labeled)
     )
     if _has_negative_shots(labeled) and not _has_accepted_negative_projection(ontology):
-        msg = "compiled ontology has negative shots but no accepted negative projection"
-        raise RuntimeError(msg)
+        ontology = ontology.model_copy(
+            update={"warnings": (*ontology.warnings, "missing_negative_projection")}
+        )
 
     materialized, term_stats = materialize_compiled_ontology(ontology)
     prompt_hash = hashlib.sha256("\n\n---\n\n".join(prompt_parts).encode("utf-8")).hexdigest()
-    model = str(getattr(llm, "model_id", None) or getattr(llm, "model", "unknown"))
+    model = str(
+        getattr(llm, "model_id", None)
+        or getattr(llm, "model", None)
+        or getattr(llm, "_model", None)
+        or "unknown"
+    )
     return OntologyCompilationResult(
         ontology=ontology,
         materialized=materialized,

@@ -224,6 +224,30 @@ async def test_classify_uses_instructor_client(
 
 
 @pytest.mark.anyio
+async def test_classify_forwards_compile_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic import BaseModel
+
+    class _S(BaseModel):
+        label: str
+
+    provider, instructor_client, raw_client = _build_provider(monkeypatch)
+    instructor_client.create_with_completion = AsyncMock(
+        return_value=(
+            _S(label="ok"),
+            MagicMock(usage=MagicMock(prompt_tokens=1, completion_tokens=1)),
+        )
+    )
+    out = await provider.classify("prompt", _S, timeout_seconds=120.0)
+    assert out.label == "ok"
+    kwargs = instructor_client.create_with_completion.await_args.kwargs
+    assert kwargs["timeout"] == 120.0
+    assert kwargs["max_retries"] == 0
+    raw_client.chat.completions.create.assert_not_called()
+
+
+@pytest.mark.anyio
 async def test_structured_create_retries_transient_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -124,9 +124,8 @@ async def add_shots(
 ) -> dict[str, Any]:
     """Add one or many positive/negative resume/job shots (bot parity).
 
-    Same side-effects as Telegram bot handlers:
-    profile persist, ontology enrichment (LLM or heuristic), optional
-    embeddings, and shot-store mirror for scorers.
+    Persists examples first, then compiles ontology once from the full
+    profile (Telegram rebuild), not once per shot.
     """
     items: list[str] = []
     if text and text.strip():
@@ -149,7 +148,16 @@ async def add_shots(
     runtime = runner.get_runtime(tenant_id)
 
     from job_ftch.application.ontology_enrichment import compile_profile_ontology
+    from job_ftch.application.resume_extraction import add_example_to_profile
 
+    ontology_store = getattr(runtime, "ontology_store", None)
+    llm = getattr(runtime, "llm_provider", None)
+    compile_model = str(
+        getattr(llm, "model_id", None)
+        or getattr(llm, "model", None)
+        or getattr(llm, "_model", None)
+        or ""
+    )
     for item in items:
         managed = add_example_to_profile(managed, item, kind=ekind)
         try:
@@ -175,16 +183,26 @@ async def add_shots(
 
     await runner.save_and_activate_candidate_profile(tenant_id, managed)
     pos_added = 0
-    try:
-        compiled = await compile_profile_ontology(
-            managed,
-            llm=getattr(runtime, "llm_provider", None),
-            ontology_store=getattr(runtime, "ontology_store", None),
-        )
-        pos_added = int(compiled.get("pos_added") or 0)
-        ontology_errors.extend(str(item) for item in compiled.get("ontology_errors") or [])
-    except Exception as exc:  # noqa: BLE001
-        ontology_errors.append(f"{type(exc).__name__}: {exc}")
+    if ontology_store is not None:
+        try:
+            compiled = await compile_profile_ontology(
+                managed, llm=llm, ontology_store=ontology_store
+            )
+            compile_model = str(compiled.get("model") or compile_model)
+            ontology_errors.extend(str(err) for err in compiled.get("ontology_errors") or [])
+            pos_added = int(compiled.get("pos_added") or 0)
+            if pos_added == 0:
+                skills = await ontology_store.list_skills()
+                roles = await ontology_store.list_roles()
+                pos_added = len(skills) + len(roles)
+        except Exception as exc:  # noqa: BLE001
+            ontology_errors.append(f"{type(exc).__name__}: {exc}")
+            try:
+                skills = await ontology_store.list_skills()
+                roles = await ontology_store.list_roles()
+                pos_added = len(skills) + len(roles)
+            except Exception as list_exc:  # noqa: BLE001
+                ontology_errors.append(f"{type(list_exc).__name__}: {list_exc}")
     from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
 
     mark_prefilter_dirty(getattr(runtime, "settings", None))
@@ -213,6 +231,7 @@ async def add_shots(
         "shot_sync_errors": sync_errors,
         "ontology_errors": ontology_errors,
         "pos_added": pos_added,
+        "model": compile_model,
         "ontology_store": runtime.ontology_store is not None,
         "embedding_provider": embedding_provider is not None,
     }
@@ -388,7 +407,8 @@ async def add_operator_example(
     user_id: str,
     kind: str,
     label: str,
-    text: str,
+    text: str = "",
+    texts: list[str] | None = None,
     profile_id: str | None = None,
     refresh_policy: str = "auto",
 ) -> dict[str, Any]:
@@ -410,9 +430,14 @@ async def add_operator_example(
             "refresh_policy must be one of auto|defer|sync",
             refresh_policy=refresh_policy,
         )
-    cleaned = _strip_shell_noise(text)
-    if not cleaned:
-        return example_error("invalid_arguments", "text must be non-empty")
+    items: list[str] = []
+    if text and text.strip():
+        items.append(_strip_shell_noise(text))
+    if texts:
+        items.extend(_strip_shell_noise(item) for item in texts if item and item.strip())
+    items = [item for item in items if item]
+    if not items:
+        return example_error("invalid_arguments", "text or texts[] must be non-empty")
 
     polarity = cast("ShotPolarity", label)
     shot_kind = _shot_kind(kind)
@@ -420,7 +445,8 @@ async def add_operator_example(
         managed = await ensure_managed_profile(
             runner, tenant_id=tenant_id, user_id=user_id, profile_id=profile_id
         )
-        managed = add_example_to_profile(managed, cleaned, kind=example_kind(polarity, shot_kind))
+        for cleaned in items:
+            managed = add_example_to_profile(managed, cleaned, kind=example_kind(polarity, shot_kind))
         await runner.save_and_activate_candidate_profile(tenant_id, managed)
         from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
 
@@ -432,7 +458,7 @@ async def add_operator_example(
             "profile_id": managed.profile_id,
             "kind": kind,
             "label": label,
-            "added": 1,
+            "added": len(items),
             "counts": _public_counts({key: len(values) for key, values in examples.items()}),
             "refresh_policy": refresh_policy,
             "refresh_deferred": True,
@@ -447,7 +473,7 @@ async def add_operator_example(
         user_id=user_id,
         polarity=polarity,
         kind=shot_kind,
-        text=cleaned,
+        texts=items,
         profile_id=profile_id,
     )
     return {
