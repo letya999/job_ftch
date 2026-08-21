@@ -179,19 +179,20 @@ async def test_probe_fingerprint_returns_http_class(monkeypatch: pytest.MonkeyPa
         del url, client
         return _Profile()
 
-    async def fake_ssrf(url: str) -> None:
-        del url
-
     async def fail_live(*args: object, **kwargs: object) -> dict[str, object]:
         del args, kwargs
         raise AssertionError("headless fingerprint must not open a live page")
 
-    monkeypatch.setattr(probe_mod, "check_ssrf", fake_ssrf)
+    def boom_dns(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("example.com must not be DNS-resolved")
+
     monkeypatch.setattr(
         "job_ftch.infrastructure.sources.site_fingerprinter.fingerprint",
         fake_http,
     )
     monkeypatch.setattr(probe_mod, "_run_live_probe", fail_live)
+    monkeypatch.setattr("job_ftch.infrastructure.network.ssrf_guard.socket.getaddrinfo", boom_dns)
 
     payload = await probe_mod.probe_fingerprint(url="https://example.com/jobs", engine="auto")
     assert payload["status"] != "not_implemented"
