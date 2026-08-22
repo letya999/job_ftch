@@ -48,9 +48,10 @@ def expand_career_site_specs(
             continue
         parser = resolve_site_parser_for_spec(spec)
         if parser is None or not getattr(parser, "supports_search", False):
-            # Tier-1: no dedicated search parser. Hand the keywords to the source
-            # so it can detect a search form at runtime (career_site_source only
-            # acts on this for sites without any site parser at all).
+            # Tier-1: parser has no authoritative search URLs. Attach keywords
+            # so CareerSiteSource can rewrite the listing via a discovered GET
+            # form. Presence of a SiteParser is not a skip — only
+            # ``supports_search`` is.
             expanded.append(_attach_search_keywords(spec, roles))
             continue
         try:

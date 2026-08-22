@@ -715,6 +715,132 @@ async def test_render_true_always_triggers_browser_even_when_http_succeeds(monke
 
 
 @pytest.mark.asyncio
+async def test_scrape_with_fallback_drops_503_error_html(monkeypatch) -> None:
+    url = "https://example.com/job/503"
+    spec = CareerSiteSpec(type="career_site", url=url, source_name="example", scraper="dom")
+    client = FakeHttpClient(
+        {
+            url: FakeResponse(
+                "<html><head><title>503 Service Temporarily Unavailable</title></head>"
+                "<body><h1>503 Service Temporarily Unavailable</h1></body></html>",
+                status_code=503,
+            ),
+        }
+    )
+    source = CareerSiteSource(spec=spec, http_client=client, auth=MagicMock())
+
+    async def no_browser(_url: str) -> str | None:
+        raise AssertionError("503 HTML must not fall through to a vacancy scrape")
+
+    monkeypatch.setattr(source, "_fetch_detail_html_with_browser", no_browser)
+    payload = await source._scrape_with_fallback(url, ["dom"])
+    assert payload is None
+
+
+@pytest.mark.asyncio
+async def test_scrape_with_fallback_still_scrapes_200_job_html() -> None:
+    url = "https://example.com/job/200"
+    spec = CareerSiteSpec(type="career_site", url=url, source_name="example", scraper="dom")
+    client = FakeHttpClient(
+        {
+            url: FakeResponse(
+                "<html><head><title>ML Engineer | Example</title></head>"
+                "<body><h1>ML Engineer</h1><p>Train ranking models</p></body></html>",
+                status_code=200,
+            ),
+        }
+    )
+    source = CareerSiteSource(spec=spec, http_client=client, auth=MagicMock())
+    payload = await source._scrape_with_fallback(url, ["dom"])
+    assert payload is not None
+    assert payload.title == "ML Engineer"
+
+
+@pytest.mark.asyncio
+async def test_maybe_apply_generic_search_does_not_skip_parser_without_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = CareerSiteSpec(
+        url="https://www.superjob.ru/vacancy/search/",
+        source_name="superjob_ru",
+        monitor_config={"_search_keywords": ["ML Engineer"]},
+    )
+    source = CareerSiteSource(spec=spec, http_client=FakeHttpClient({}), auth=MagicMock())
+    probed: list[str] = []
+
+    class _NoSearchParser:
+        supports_search = False
+
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser_for_spec",
+        lambda _spec: _NoSearchParser(),
+    )
+
+    async def _bypass(_http: object) -> object:
+        return object()
+
+    async def _discover(_fetch, url, keywords, log=None):  # type: ignore[no-untyped-def]
+        del _fetch, keywords, log
+        probed.append(url)
+        return None
+
+    monkeypatch.setattr(source, "_apply_bypass_http", _bypass)
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.site_parsers.generic_search.discover_working_search_url",
+        _discover,
+    )
+    await source._maybe_apply_generic_search(object())
+    assert probed == ["https://www.superjob.ru/vacancy/search/"]
+
+
+@pytest.mark.asyncio
+async def test_maybe_apply_generic_search_skips_parser_with_supports_search(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = CareerSiteSpec(
+        url="https://hh.ru/search/vacancy",
+        source_name="hh",
+        monitor_config={"_search_keywords": ["ML Engineer"]},
+    )
+    source = CareerSiteSource(spec=spec, http_client=FakeHttpClient({}), auth=MagicMock())
+
+    class _SearchParser:
+        supports_search = True
+
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser_for_spec",
+        lambda _spec: _SearchParser(),
+    )
+
+    async def _discover(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("supports_search parsers must skip generic form detection")
+
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.site_parsers.generic_search.discover_working_search_url",
+        _discover,
+    )
+    await source._maybe_apply_generic_search(object())
+
+
+@pytest.mark.asyncio
+async def test_dom_heuristic_skips_opisanie_section_heading() -> None:
+    html = (
+        "<html><head><title>ML Engineer | T-Bank</title>"
+        '<meta property="og:title" content="ML Engineer"></head>'
+        "<body><h1>Описание</h1><h2>ML Engineer</h2><p>Train ranking models</p></body></html>"
+    )
+    detected = dom_scraper_can_handle([html])
+    assert detected is not None
+    payload = await dom_scrape(
+        "https://www.tbank.ru/career/vacancies/it/ml-engineer/",
+        {**detected, "prefetched_html": html},
+        _NoFetchClient(),
+    )
+    assert payload is not None
+    assert payload.title == "ML Engineer"
+
+
+@pytest.mark.asyncio
 async def test_cached_noop_strategy_keeps_adaptive_bypass_enabled(monkeypatch):
     spec = CareerSiteSpec(
         type="career_site",

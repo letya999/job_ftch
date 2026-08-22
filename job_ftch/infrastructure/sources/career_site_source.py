@@ -298,6 +298,28 @@ def _declares_editorial_article(html: str | None) -> bool:
     return bool(html and _ARTICLE_OPEN_GRAPH_RE.search(html))
 
 
+_HTTP_ERROR_TITLE_RE = re.compile(
+    r"(?:^|\b)(?:50[0234]|404)(?:\b|$)|"
+    r"service temporarily unavailable|"
+    r"bad gateway|"
+    r"not found|"
+    r"internal server error|"
+    r"gateway timeout|"
+    r"access denied",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_http_error_title(title: str | None) -> bool:
+    if not title:
+        return False
+    return bool(_HTTP_ERROR_TITLE_RE.search(" ".join(title.split())))
+
+
+def _http_status_should_not_scrape(status_code: int | None) -> bool:
+    return isinstance(status_code, int) and status_code >= 400
+
+
 # Matches a URL that points at a SPECIFIC job posting: a job/vacancy marker
 # segment followed by an id-bearing segment (contains a digit, e.g. a numeric id
 # or a "84179-senior-engineer" slug). Listing/search entry points such as
@@ -1547,6 +1569,11 @@ class CareerSiteSource(Source["RawItem"]):
                     max_browser_launches=get_settings().bypass_max_listing_browser_launches,
                 )
 
+            # Rewrite listing URL before the site parser so parsers without
+            # ``supports_search`` still see a keyword-filtered URL. Parsers
+            # that advertise ``supports_search`` skip this rewrite themselves.
+            await self._maybe_apply_generic_search(original_http)
+
             site_parser_emitted = False
             async for item in self._try_site_parser(original_http):
                 site_parser_emitted = True
@@ -1554,8 +1581,6 @@ class CareerSiteSource(Source["RawItem"]):
 
             if site_parser_emitted or self._parser_failure_is_terminal:
                 return
-
-            await self._maybe_apply_generic_search(original_http)
 
             monitor_config = dict(self.spec.monitor_config)
             monitors_to_try, monitor_config = await self._resolve_monitors(
@@ -1591,11 +1616,11 @@ class CareerSiteSource(Source["RawItem"]):
     async def _maybe_apply_generic_search(self, original_http: Any) -> None:
         """Tier-1: rewrite spec.url to a keyword-filtered search URL if possible.
 
-        Only runs for sites with no dedicated site parser (Tier-2 parsers build
-        their own search URLs) and no explicit query already in the URL. Detects
-        a GET search form on the listing page and adopts it only if it verifiably
-        narrows the result set. Never fails the run — on any error the original
-        URL is kept.
+        Skip only when the URL already has a known search query, or the resolved
+        parser advertises ``supports_search`` (it builds its own URLs). Presence
+        of a SiteParser alone is not a skip. Detects a GET search form on the
+        listing page and adopts it only if it verifiably narrows the result set.
+        Never fails the run — on any error the original URL is kept.
         """
         keywords = self.spec.monitor_config.get("_search_keywords")
         if not keywords:
@@ -1607,9 +1632,10 @@ class CareerSiteSource(Source["RawItem"]):
         )
         from job_ftch.infrastructure.sources.site_parsers.helpers import url_has_search_query
 
-        if resolve_site_parser_for_spec(self.spec) is not None or url_has_search_query(
-            self.spec.url
-        ):
+        if url_has_search_query(self.spec.url):
+            return
+        parser = resolve_site_parser_for_spec(self.spec)
+        if parser is not None and getattr(parser, "supports_search", False):
             return
 
         try:
@@ -2175,6 +2201,13 @@ class CareerSiteSource(Source["RawItem"]):
                         logger.warning("access_denied_no_browser_fallback", kind=_kind, url=url)
                         self._record_detail_protection_failure()
                         return None
+                elif _http_status_should_not_scrape(getattr(response, "status_code", None)):
+                    logger.warning(
+                        "http_error_on_detail_page",
+                        url=url,
+                        status_code=getattr(response, "status_code", None),
+                    )
+                    return None
 
             if self._should_render_detail():
                 browser_html = await self._fetch_detail_html_with_browser(url)
@@ -2209,9 +2242,23 @@ class CareerSiteSource(Source["RawItem"]):
                         log_event="scraper_failed_after_browser_retry",
                     )
                     if browser_result is not None:
+                        if _looks_like_http_error_title(browser_result.title):
+                            logger.warning(
+                                "http_error_page_scraped_as_vacancy",
+                                url=url,
+                                title=browser_result.title,
+                            )
+                            return None
                         return browser_result
 
             if result is not None:
+                if _looks_like_http_error_title(result.title):
+                    logger.warning(
+                        "http_error_page_scraped_as_vacancy",
+                        url=url,
+                        title=result.title,
+                    )
+                    return None
                 return result
 
         if protected_failure:

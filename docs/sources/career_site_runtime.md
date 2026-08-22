@@ -1,7 +1,7 @@
 ---
 title: "Career-site runtime flow"
 description: "Фактический control-flow CareerSiteSource.fetch(): strategy init, site parser, generic search, monitor chain, discover/enrich, freshness, zero-yield taxonomy и teardown."
-updated: 2026-07-30
+updated: 2026-08-22
 ---
 # Career-site runtime flow
 
@@ -16,8 +16,9 @@ updated: 2026-07-30
 ```text
 _init_strategy            -> domain, cached strategy, bypass, BypassContext
 start_operation(listing)  -> per-source browser-launch budget
+_maybe_apply_generic_search -> keyword-search URL rewrite (skip only if URL already
+                              has a query or parser.supports_search)
 _try_site_parser          -> site-specific fast path (может завершить fetch)
-_maybe_apply_generic_search -> keyword-search URL rewrite (если нет parser)
 _resolve_monitors         -> auto-detect или explicit monitor chain
 _run_monitor_chain        -> discover -> enrich (основной объём вакансий)
 finally                   -> end_operation, close bypass, close http, intel.save
@@ -68,10 +69,14 @@ bypass используются как стартовая точка: `bypass_st
 
 ## Generic keyword-search rewrite
 
-Если dedicated site parser отсутствует и в URL ещё нет явного запроса,
-`_maybe_apply_generic_search` пытается переписать `spec.url` на search-URL,
-собранный из `target_roles`. Подробнее — [search_query_ingest.md](search_query_ingest.md).
-На любой ошибке исходный URL сохраняется (never-fail).
+`_maybe_apply_generic_search` пытается переписать `spec.url` на search-URL из
+`target_roles` **до** site parser. Skip только если в URL уже есть известный
+query-параметр или resolved parser имеет `supports_search=True`. Наличие
+SiteParser само по себе не skip: SuperJob / Yandex / T-Bank / Kolesa / Avito
+без `build_search_urls` должны увидеть переписанный URL. Подробнее —
+[search_query_ingest.md](search_query_ingest.md). На любой ошибке исходный URL
+сохраняется (never-fail). После успешного parser generic search повторно не
+вызывается.
 
 ## Monitor resolution и chain
 

@@ -6,8 +6,9 @@ structured fields from the HTML.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import structlog
 
@@ -50,6 +51,37 @@ def _normalize_title(text: str) -> str:
     return cleaned
 
 
+_GENERIC_SECTION_HEADINGS = frozenset(
+    {
+        "описание",
+        "обязанности",
+        "требования",
+        "description",
+        "responsibilities",
+        "requirements",
+    }
+)
+_OG_TITLE_RE = re.compile(
+    r'<meta[^>]+(?:property|name)=["\']og:title["\'][^>]*content=["\']([^"\']+)["\']'
+    r"|<meta[^>]+content=[\"']([^\"']+)[\"'][^>]*(?:property|name)=[\"']og:title[\"']",
+    re.IGNORECASE,
+)
+
+
+def _is_generic_section_heading(text: str | None) -> bool:
+    if not text:
+        return True
+    return " ".join(text.split()).casefold() in _GENERIC_SECTION_HEADINGS
+
+
+def _title_from_url_slug(url: str) -> str | None:
+    slug = unquote(urlparse(url).path.rstrip("/").rsplit("/", 1)[-1])
+    if not slug or slug.isdigit():
+        return None
+    cleaned = " ".join(slug.replace("-", " ").replace("_", " ").split())
+    return cleaned or None
+
+
 def _heuristic_steps(elements: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
     """Generate heuristic extraction steps from flattened elements."""
     if not elements:
@@ -60,11 +92,13 @@ def _heuristic_steps(elements: list[dict[str, Any]]) -> list[dict[str, Any]] | N
     # so using it as the description anchor can stop immediately on menu copy
     # (for example a "Back" item) before the actual posting body.  A number
     # of CMS job pages use h2 rather than h1 for their posting title.
+    # Skip generic section headings such as «Описание» — T-Bank uses that as
+    # the first h1/h2, with the real job title later or in og:title.
     anchor_idx = None
     anchor_tag = None
     for heading_tag in ("h1", "h2"):
         for i, el in enumerate(elements):
-            if el["tag"] == heading_tag:
+            if el["tag"] == heading_tag and not _is_generic_section_heading(el.get("text")):
                 anchor_idx = i
                 anchor_tag = heading_tag
                 break
@@ -73,7 +107,7 @@ def _heuristic_steps(elements: list[dict[str, Any]]) -> list[dict[str, Any]] | N
 
     if anchor_idx is None:
         for i, el in enumerate(elements):
-            if el["tag"] == "title":
+            if el["tag"] == "title" and not _is_generic_section_heading(el.get("text")):
                 anchor_idx = i
                 anchor_tag = "title"
                 break
@@ -234,7 +268,24 @@ async def scrape(
     elements = flatten(html)
     start = _fragment_start(url, elements)
     raw, _ = walk_steps(elements, steps, start=start)
-    return _map_to_payload(raw)
+    payload = _map_to_payload(raw)
+    if payload.title and not _is_generic_section_heading(payload.title):
+        return payload
+    og_match = _OG_TITLE_RE.search(html)
+    og_title = None
+    if og_match:
+        og_title = (og_match.group(1) or og_match.group(2) or "").strip() or None
+    for candidate in (
+        og_title,
+        next((el["text"] for el in elements if el["tag"] == "title"), None),
+    ):
+        if candidate and not _is_generic_section_heading(candidate):
+            payload.title = _normalize_title(candidate)
+            return payload
+    slug = _title_from_url_slug(url)
+    if slug and not _is_generic_section_heading(slug):
+        payload.title = _normalize_title(slug)
+    return payload
 
 
 register_scraper("dom", scrape, can_handle=can_handle)

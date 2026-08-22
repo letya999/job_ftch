@@ -250,12 +250,42 @@ def _metadata_text(item: RawItem, keys: tuple[str, ...]) -> str | None:
     return None
 
 
+_GENERIC_SECTION_HEADINGS = frozenset(
+    {
+        "описание",
+        "обязанности",
+        "требования",
+        "description",
+        "responsibilities",
+        "requirements",
+    }
+)
+_METADATA_TITLE_PREFIXES = ("published time:",)
+
+
+def _collapsed_casefold(text: str) -> str:
+    return " ".join(text.split()).casefold()
+
+
+def _is_unusable_title(text: str | None) -> bool:
+    if not text or not text.strip():
+        return True
+    collapsed = _collapsed_casefold(text)
+    if collapsed in _GENERIC_SECTION_HEADINGS:
+        return True
+    return any(collapsed.startswith(prefix) for prefix in _METADATA_TITLE_PREFIXES)
+
+
 def _fallback_title(item: RawItem) -> str | None:
     titled = _metadata_text(item, _TITLE_METADATA_KEYS)
-    if titled is not None:
+    if titled is not None and not _is_unusable_title(titled):
         return titled
-    first_line = next((line.strip(" -") for line in item.text.splitlines() if line.strip()), "")
-    return first_line or None
+    for line in item.text.splitlines():
+        candidate = line.strip(" -")
+        if not candidate or _is_unusable_title(candidate):
+            continue
+        return candidate
+    return None
 
 
 def _fallback_company(item: RawItem) -> str | None:
@@ -462,9 +492,12 @@ class ExtractionNode:
             self._call_count += 1
         extracted, degraded = await self._extract_fields(item)
         extracted_title = extracted.title
-        if extracted_title is not None and self._looks_like_target_roles(extracted_title):
-            # Guard against the LLM echoing the candidate's target-roles list into
-            # the title despite the prompt instruction. Fall back to the posting.
+        if extracted_title is not None and (
+            self._looks_like_target_roles(extracted_title) or _is_unusable_title(extracted_title)
+        ):
+            # Guard against the LLM echoing the candidate's target-roles list,
+            # a section heading like «Описание», or a Telegram "Published time:"
+            # prefix into the title. Fall back to the posting.
             extracted_title = None
         title = extracted_title or _fallback_title(item)
         company = extracted.company or _fallback_company(item)

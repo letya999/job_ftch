@@ -9,6 +9,7 @@ from job_ftch.application.site_parser_manifest import (
 )
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.site_defaults import apply_runtime_defaults
+from job_ftch.infrastructure.sources.site_parsers.avito import AvitoCareerParser
 from job_ftch.infrastructure.sources.site_parsers.yandex import YandexJobsParser
 
 
@@ -28,6 +29,13 @@ def test_site_parser_manifest_rejects_malformed_entry(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="Invalid site parser manifest"):
         load_site_parser_manifest(manifest_path)
+
+
+def test_resolve_site_parser_matches_career_avito_and_avito_ru() -> None:
+    career = registry.resolve_site_parser("https://career.avito.com/vacancies/")
+    classic = registry.resolve_site_parser("https://www.avito.ru/moskva/vakansii")
+    assert isinstance(career, AvitoCareerParser)
+    assert isinstance(classic, AvitoCareerParser)
 
 
 def test_resolve_site_parser_prefers_more_specific_pattern() -> None:

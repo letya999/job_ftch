@@ -18,7 +18,11 @@ from job_ftch.domain import (
 )
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
-from job_ftch.infrastructure.sources.site_parsers.helpers import safe_fetch
+from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    normalize_search_keywords,
+    safe_fetch,
+    with_query_params,
+)
 
 if TYPE_CHECKING:
     from job_ftch.domain.source_spec import CareerSiteSpec
@@ -28,6 +32,21 @@ class SberParser:
     domain_pattern = r"(?:www\.)?rabota\.sber\.ru(?:/|$)"
     has_custom_parse = True
     supports_discover = False
+    supports_search = True
+    search_mode = "combined"
+
+    def build_search_urls(
+        self,
+        base_url: str,
+        keywords: Any,
+        *,
+        limit: int | None = None,
+    ) -> list[str]:
+        del limit
+        terms = normalize_search_keywords(keywords)
+        if not terms:
+            return []
+        return [with_query_params(base_url, {"query": " OR ".join(terms)})]
 
     _API_URL = "https://rabota.sber.ru/public/app-candidate-public-api-gateway/api/v1/publications"
 
