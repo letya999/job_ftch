@@ -1,7 +1,7 @@
 ---
 title: "MCP adapter"
 description: "FastMCP tenant server exposing pipeline tools and job resources."
-updated: 2026-08-19
+updated: 2026-08-21
 ---
 # MCP adapter
 
@@ -10,12 +10,9 @@ updated: 2026-08-19
 ## Source of truth
 
 - Server: `job_ftch/adapters/mcp/server.py`
-- Deprecated shim: `job_ftch/adapters/mcp/adapter.py`
+- Factory: `create_server()` / `TenantMCPServer`
 - CLI entry point: `uv run job_ftch mcp-server`
 - Dockerfile: `job_ftch/adapters/mcp/Dockerfile`
-
-Use `create_server()` from `job_ftch.adapters.mcp.server` for new code.
-`create_mcp_server()` remains only as a deprecated compatibility shim.
 
 ## Local HTTP
 
@@ -47,67 +44,70 @@ For `stdio`:
 `run_pipeline` itself is fast once the process is warm; cold MCP process startup
 loads tenant runtime/ontology and can take ~20s before the first tool response.
 
-## Operator tools (new surface only)
+## Operator tools
 
-This branch intentionally exposes only the Telegram-aligned operator surface.
-Legacy MCP tool names (`run_all_pipelines`, `get_status`, `list_sources`,
-`list_source_health`, `list_runs`, `get_run`, `list_browser_capabilities`,
-`explain_browser_route`, `plan_source_routes`, `get_search_session_status`,
-`list_search_results`) are not registered.
+`JOB_FTCH_MCP_SURFACE=all|mass|personal` (default `all`) selects the catalog.
+`all` is 18 tools, `mass` is 14, `personal` is 12. Shared tools exist on every
+surface. Application services stay; only MCP registration shrinks. Tests keep a
+forbidden-name list so extra names are not registered.
+
+### Shared (`all`, `mass`, `personal`)
 
 | Tool | Role |
 |---|---|
 | `list_tenants()` | tenant catalog |
-| `get_tenant_status(tenant_id)` | status + source degradation + latest run |
-| `get_sources(tenant_id, include_health=true, include_diagnostics=true)` | sources with health/diagnostics |
-| `add_source(tenant_id, link, source_type=null, limit=100)` | add runtime source |
-| `disable_source(tenant_id, source_id)` | disable source |
-| `run_pipeline(tenant_id=null, user_id=null, scope="tenant\|all", source_ids=null, max_items=null)` | run one or all tenants |
-| `clear_run_data(tenant_id, clear_output_artifacts=true)` | `/run`-like clean of run state and output files without deleting profiles |
-| `get_pipeline_status(tenant_id)` | latest pipeline status |
-| `list_pipeline_runs(tenant_id=null, limit=20)` | run history |
-| `get_pipeline_run(run_id, tenant_id=null)` | single run |
-| `list_profiles(tenant_id, user_id)` / `save_profile(...)` / `activate_profile(...)` | candidate profiles |
-| `ingest_resume(tenant_id, user_id, resume_text, profile_id=null, activate=true)` | resume ingestion |
-| `get_examples_summary(tenant_id, user_id, profile_id=null)` | example counts |
-| `list_examples(tenant_id, user_id, profile_id=null, kind="all\|resume\|vacancy", label=null)` | list resume/vacancy examples |
-| `add_example(tenant_id, user_id, kind, label, text, profile_id=null, refresh_policy="auto")` | add example + learning refresh |
-| `remove_example(tenant_id, user_id, kind, label, index, profile_id=null)` | remove one example |
-| `clear_examples(tenant_id, user_id, kind="all\|resume\|vacancy", profile_id=null)` | clear examples |
-| `create_search_session(...)` / `plan_search_session` / `approve_search_session` / `run_search_session` | search session workflow |
-| `get_search_session(session_id)` / `list_search_session_results` / `explain_search_session` / `cancel_search_session` | search session status/results |
-| `search_jobs` / `get_job` / `get_job_lineage` | job lookup |
-| `get_bypass_capabilities()` / `get_bypass_routes(...)` | browser/bypass inventory |
-| `probe_source(tenant_id, source_id, mode="cheap\|full", max_items=5)` | cheap diagnostics or bounded source-scoped ingest |
-| `run_source(tenant_id, source_id, max_items=null, parser=null, bypass=null)` | omit `bypass` for the adaptive ladder; pass a registered name to pin one mechanic |
-| `run_source_escalation(tenant_id, source_id, strategy="recommended\|all")` | recommended = adaptive ingest; `all` walks `fallback_order`; `max_tier` truncates |
-| `probe_bypass_route(tenant_id, source_id, bypass, max_items=3)` | run one named bypass; browser routes use listing probe |
-| `run_browser_probe(...)` | `listing`/`detail`/`challenge`/`fingerprint`/`custom_safe` open one bounded page; `solve=browser_wait\|provider` is captcha-gated |
-| `open_browser_session(...)` / `get_browser_session` / `continue_browser_session` / `capture_browser_artifact` / `close_browser_session` | ephemeral/persistent/domain session; `wait_challenge`/`extend` keep headed captcha pollable; `trace` is an artifact |
-| `recommend_runtime_setup(...)` / `validate_runtime_setup(...)` | install/config readiness |
-| `get_prefilter_requirements(profile_type=null)` | prefilter dataset contract |
-| `get_prefilter_status(tenant_id, profile_id=null)` | dirty flag + current artifact |
-| `prepare_prefilter_dataset(tenant_id, profile_id=null, source="examples\|feedback\|eval_dataset\|mixed")` | build JSONL |
-| `validate_prefilter_dataset(dataset_id_or_path, tenant_id=null)` | size/label contract |
+| `get_status(tenant_id, run_id=null)` | tenant snapshot + latest/recent runs + source degradation; one run when `run_id` is set |
+| `get_runtime()` | live engines / LLM / CLIProxy / residential proxy / captcha readiness (no secrets) |
+| `doctor()` | written diagnosis of extras, browsers, proxies, captcha, CLIProxy; `get_runtime` is the structured subset |
+| `get_sources(tenant_id)` | sources with health, assessment, and recommended_route |
+| `update_source(tenant_id, action=add\|update\|remove, ...)` | add / patch enabled+limit / remove (config/base delete → `unsupported`) |
+| `get_jobs(tenant_id, query=null, job_id=null, limit=20, include_lineage=false)` | latest, search, or one job |
+| `update_shot(..., action=list\|add\|remove\|clear\|compile)` | shots. `list`/`clear` default to all kinds; `add`/`remove` require `kind`+`label` |
+
+### Mass only
+
+| Tool | Role |
+|---|---|
+| `run_pipeline(tenant_id=null, source_ids=null, max_items=null, clear_first=false, user_id=null, scope="tenant\|all")` | run one or all tenants; `clear_first` wipes run state and output files |
+| `get_prefilter_status(tenant_id, profile_id=null)` | dirty flag, current/previous artifacts, dataset contract |
+| `prepare_prefilter_dataset(...)` | build JSONL from examples/feedback/eval/mixed |
 | `train_prefilter(..., dry_run=true)` | train artifact; default does not write |
-| `evaluate_prefilter(tenant_id, artifact_id, dataset_id_or_path=null)` | holdout/dataset gate |
-| `promote_prefilter` / `rollback_prefilter` / `list_prefilter_artifacts` | gated promotion; next pipeline run uses `{store}/prefilter/current.json` |
-| `reset_tenant(tenant_id)` | dangerous admin reset |
+| `evaluate_prefilter(...)` | holdout/dataset gate |
+| `promote_prefilter(..., rollback=false)` | gated promotion; `rollback=true` restores previous |
 
-Setup/prefilter tools are read-only: they never install packages, never start
-live browser sessions, and never return secret values.
+### Personal only
 
-Source/bypass Slice 4 tools reuse `TenantRunner.run_tenant(..., source_ids=...)`
-for ingest. Slice 5 adds a bounded listing probe: `run_browser_probe(probe="listing")`
-opens one ephemeral page through `open_page`/`navigate` and returns title plus
-same-host link previews. It does not ingest, persist cookies, or keep a session.
-`fingerprint`/`custom_safe` are bounded probes (ADR-084). Slice 6 lets MCP
-pin one bypass or walk `fallback_order` (ADR-082). Slice 7 (ADR-083) adds
-detail/challenge probes, ephemeral sessions, captcha wait/solve under
-`captcha_authorized_domains`, and a one-call parser pin (`monitor`/`scraper`/site parser
-on career sites; mismatched host is an explicit override). Each attempt returns `parse` (`stage` + `reason`). Missing
-extras return `unavailable`. Sessions never return cookie values or tokens.
-MCP does not import Playwright/Patchright/nodriver clients.
+| Tool | Role |
+|---|---|
+| `set_resume(tenant_id, user_id, resume_text, profile_id=null, activate=true)` | ingest resume + shot sync / prefilter dirty |
+| `probe_page(..., what=listing\|detail\|challenge\|fingerprint)` | live page probe; **not** ingest |
+| `browser_session(action=open\|status\|wait\|solve\|goto\|capture\|close, ...)` | operator browser session; no cookie values |
+| `run_source(..., escalation=adaptive\|all, session_id=null)` | adaptive ingest, pin, or `fallback_order` sweep. `session_id` reuses the open operator page (same tab, not a second browser) |
+
+Search sessions, vacancy feedback, standalone setup/bypass inventory tools, and
+`jobs://` resources are not registered. Use `get_jobs` / `get_status` /
+`get_runtime` / `doctor` instead. `config://{tenant_id}` remains.
+
+`get_runtime` probes `/models` on the OpenAI-compatible gateway, a cheap hop
+through the first configured residential proxy, and captcha key presence. It
+never returns proxy URLs, users, passwords, API keys, or cookie values.
+Heuristic LLM is ok without a gateway. `doctor` reuses the same probes and
+adds extras, public bypass inventory, proxy flags (http list / gateway /
+residential hop), and a multi-line `report`. `ok` is false when the OpenAI
+backend fails `/models` or every browser engine is missing.
+
+Source ingest still reuses `TenantRunner.run_tenant(..., source_ids=...)`.
+`probe_page` is a bounded live probe (not ingest). Pin one bypass with
+`run_source(bypass=...)` or walk `fallback_order` with `escalation=all`.
+`run_source(session_id=...)` ingests through the already-open operator
+session page (same Python page object, not a second Chromium and not cookie
+copy). The session stays open after ingest; close it with
+`browser_session(action=close)`. `escalation=all` walks the full registered
+ladder (`noop` → `cloak`); the attached session engine reuses that tab, other
+tiers do not. `engine=playwright` / `stealth_browser` launches vanilla
+Playwright when Patchright is not required. Each ingest attempt returns
+`parse` (`stage` + `reason`). Missing extras return `unavailable`. MCP does
+not import Playwright/Patchright/nodriver clients.
 
 ## Config directory
 

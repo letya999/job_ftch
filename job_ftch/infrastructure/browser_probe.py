@@ -8,16 +8,22 @@ from __future__ import annotations
 
 import asyncio
 import re
+from contextlib import suppress
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
 import structlog
 
-from job_ftch.application.registry import resolve_bypass
+from job_ftch.application.registry import resolve_bypass, resolve_site_parser
 from job_ftch.config import Settings, get_settings
 from job_ftch.infrastructure.network.ssrf_guard import check_ssrf
-from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
+from job_ftch.infrastructure.sources.browser_utils import (
+    blocked_navigation_status,
+    is_blocked_navigation_error,
+    navigate,
+    open_page,
+)
 
 log = structlog.get_logger()
 
@@ -34,9 +40,10 @@ _HREF_ATTR = re.compile(r"""href\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 
 ENGINE_ALIASES: dict[str, str] = {
     "auto": "patchright_browser",
+    "playwright": "stealth_browser",
+    "stealth_browser": "stealth_browser",
     "patchright": "patchright_browser",
     "patchright_browser": "patchright_browser",
-    "stealth_browser": "stealth_browser",
     "nodriver": "nodriver",
     "camoufox": "camoufox",
     "cloak": "cloak",
@@ -139,6 +146,64 @@ def _public_items(raw: object, *, origin: str, max_items: int) -> list[dict[str,
     return items
 
 
+# Same bar as DOM ingest `has_strong_detail` (score_job_url >= 8). Weak nav
+# chrome such as /kk/common/mobsvyaz-altel scores 1 and must not become a card.
+_PROBE_STRONG_DETAIL_SCORE = 8
+
+
+def _strong_detail_urls(urls: list[str], *, board_url: str, max_items: int) -> list[str]:
+    from job_ftch.infrastructure.sources.url_scoring import score_job_url
+
+    strong: list[str] = []
+    seen: set[str] = set()
+    for url in urls:
+        canonical = str(url or "").split("#")[0].strip()
+        if not canonical.startswith("http") or canonical in seen:
+            continue
+        if score_job_url(canonical, board_url=board_url) < _PROBE_STRONG_DETAIL_SCORE:
+            continue
+        seen.add(canonical)
+        strong.append(canonical)
+        if len(strong) >= max_items:
+            break
+    return strong
+
+
+def _items_from_urls(urls: list[str], *, max_items: int) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for url in urls:
+        canonical = str(url or "").split("#")[0].strip()
+        if not canonical.startswith("http") or canonical in seen:
+            continue
+        seen.add(canonical)
+        items.append({"url": canonical, "title": ""})
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def _url_filter_from_parser(url: str) -> Any:
+    try:
+        parser = resolve_site_parser(url)
+    except Exception:
+        return None
+    if parser is None:
+        return None
+    getter = getattr(parser, "runtime_defaults", None)
+    if not callable(getter):
+        return None
+    try:
+        defaults = getter(url)
+    except Exception:
+        return None
+    if defaults is None:
+        return None
+    if isinstance(defaults, dict):
+        return defaults.get("url_filter")
+    return getattr(defaults, "url_filter", None)
+
+
 def _items_from_html(html: str, *, page_url: str, max_items: int) -> list[dict[str, str]]:
     origin = _origin(page_url)
     items: list[dict[str, str]] = []
@@ -223,6 +288,44 @@ async def _extract_items(page: Any, *, page_url: str, max_items: int) -> list[di
     except Exception:
         return []
     return _items_from_html(str(html or ""), page_url=page_url, max_items=max_items)
+
+
+async def _dom_listing_fallback(
+    page: Any,
+    *,
+    html: str,
+    page_url: str,
+    max_items: int,
+    url_filter: Any = None,
+) -> tuple[list[dict[str, str]], str | None]:
+    """Reuse ingest DOM listing brain on the already-open page. No second navigate."""
+    from job_ftch.infrastructure.sources.monitors.dom import (
+        extract_static_job_links,
+        visible_job_links_on_page,
+    )
+
+    resolved_filter = url_filter or _url_filter_from_parser(page_url)
+    static_urls = _strong_detail_urls(
+        extract_static_job_links(
+            html, page_url, url_filter=resolved_filter, limit=max_items
+        ),
+        board_url=page_url,
+        max_items=max_items,
+    )
+    items = _items_from_urls(static_urls, max_items=max_items)
+    if items:
+        return items, "dom_static"
+    rendered_urls = _strong_detail_urls(
+        await visible_job_links_on_page(
+            page, page_url, url_filter=resolved_filter, limit=max_items
+        ),
+        board_url=page_url,
+        max_items=max_items,
+    )
+    items = _items_from_urls(rendered_urls, max_items=max_items)
+    if items:
+        return items, "dom_rendered"
+    return [], None
 
 
 async def _page_title(page: Any) -> str | None:
@@ -317,6 +420,48 @@ def _public_solve(result: Any) -> dict[str, Any]:
     }
 
 
+def _no_challenge_captcha() -> dict[str, Any]:
+    """Public skip payload: paid solver was not constructed or called."""
+    return {
+        "solved": False,
+        "method": None,
+        "error": "no_challenge",
+        "failure_reason": None,
+        "challenge_type": None,
+        "result_kind": None,
+        "elapsed_seconds": None,
+    }
+
+
+async def _absorb_blocked_navigation(
+    page: Any,
+    challenge_sink: Any,
+    exc: BaseException,
+) -> None:
+    """Classify a blocked navigate() onto the live page while it is still open."""
+    if _observed_challenge(challenge_sink):
+        return
+    html = await _page_html(page)
+    from job_ftch.infrastructure.bypass.challenge_classifier import classify_challenge
+
+    detection = classify_challenge(
+        surface="operator_probe",
+        status_code=blocked_navigation_status(exc),
+        body=html,
+    )
+    if detection.challenge_type:
+        label = str(detection.challenge_type)
+    elif detection.detected:
+        label = "unknown"
+    else:
+        label = _classify_html(html)
+    if not label:
+        return
+    setter = getattr(challenge_sink, "set_observed_challenge_type", None)
+    if callable(setter):
+        setter(label)
+
+
 def _make_solver(solve: str, bypass_config: dict[str, Any] | None) -> Any | None:
     normalized = (solve or "none").strip().lower()
     if normalized in {"", "none"}:
@@ -375,7 +520,13 @@ async def _run_live_probe(
     async def _run() -> dict[str, Any]:
         await check_ssrf(target)
         async with open_page(config, bypass_strategy=strategy) as page:
-            await navigate(page, target, config)
+            try:
+                await navigate(page, target, config)
+            except RuntimeError as exc:
+                if not is_blocked_navigation_error(exc):
+                    raise
+                with suppress(Exception):
+                    await _absorb_blocked_navigation(page, challenge_sink, exc)
             payload = await handler(page, challenge_sink, target, resolved_engine, notes)
             if isinstance(payload, dict):
                 return payload
@@ -443,6 +594,7 @@ async def probe_listing(
     headed: bool = False,
     max_items: int = 5,
     bypass_config: dict[str, Any] | None = None,
+    url_filter: Any = None,
     settings: Settings | None = None,
     deadline_seconds: float = LISTING_PROBE_DEADLINE_SECONDS,
 ) -> dict[str, Any]:
@@ -465,16 +617,30 @@ async def probe_listing(
         await asyncio.sleep(0)
         final_url = str(getattr(page, "url", "") or target)
         items = await _extract_items(page, page_url=final_url, max_items=limit)
-        challenge = _observed_challenge(challenge_sink) or _classify_html(await _page_html(page))
+        extract_kind = "generic" if items else None
+        html = await _page_html(page)
+        challenge = _observed_challenge(challenge_sink) or _classify_html(html)
         result_notes = list(probe_notes)
         if challenge:
+            items = []
+            extract_kind = None
             result_notes.append(f"challenge observed: {challenge}")
             result_notes.append("retry with a stronger engine or run_source adaptive ingest")
-        if not items:
-            result_notes.append(
-                "no vacancy-like URLs (need /jobs|/vacancies/<id>); nav chrome is ignored"
+        elif not items:
+            items, extract_kind = await _dom_listing_fallback(
+                page,
+                html=html,
+                page_url=final_url,
+                max_items=limit,
+                url_filter=url_filter,
             )
-        if challenge and not items:
+        if extract_kind:
+            result_notes.append(f"listing_extract={extract_kind}")
+        if not items and not challenge:
+            result_notes.append(
+                "no vacancy-like URLs after generic and DOM listing extract; nav chrome is ignored"
+            )
+        if challenge:
             status, ok, error = "challenge", False, "challenge_detected"
         elif not items:
             status, ok, error = "empty", True, None
@@ -601,7 +767,6 @@ async def probe_challenge(
             requested_url=url.strip(),
             solve=normalized_solve,
         )
-    solver = _make_solver(normalized_solve, bypass_config)
 
     async def _handler(
         page: Any,
@@ -616,17 +781,28 @@ async def probe_challenge(
         challenge = _observed_challenge(challenge_sink) or _classify_html(html)
         solve_payload: dict[str, Any] | None = None
         result_notes = list(probe_notes)
-        if solver is not None:
-            result = await solver.solve(page, challenge_type=challenge or "unknown", url=final_url)
-            solve_payload = _public_solve(result)
-            html = await _page_html(page)
-            challenge = _observed_challenge(challenge_sink) or _classify_html(html) or challenge
-            if result.solved:
-                result_notes.append(f"challenge solve via {result.method}")
-            elif result.error:
-                result_notes.append(str(result.error)[:200])
+        if normalized_solve == "provider" and not challenge:
+            solve_payload = _no_challenge_captcha()
+            result_notes.append("no_challenge: paid solver not invoked")
+        elif normalized_solve != "none":
+            solver = _make_solver(normalized_solve, bypass_config)
+            if solver is not None:
+                result = await solver.solve(
+                    page, challenge_type=challenge or "unknown", url=final_url
+                )
+                solve_payload = _public_solve(result)
+                html = await _page_html(page)
+                challenge = (
+                    _observed_challenge(challenge_sink) or _classify_html(html) or challenge
+                )
+                if result.solved:
+                    result_notes.append(f"challenge solve via {result.method}")
+                elif result.error:
+                    result_notes.append(str(result.error)[:200])
         if challenge and not (solve_payload and solve_payload.get("solved")):
             status, ok, error = "challenge", False, "challenge_detected"
+        elif solve_payload and solve_payload.get("error") == "no_challenge":
+            status, ok, error = "ok", True, "no_challenge"
         elif solve_payload and solve_payload.get("solved"):
             status, ok, error = "ok", True, None
         else:
@@ -785,6 +961,7 @@ async def probe_custom_safe(
     headed: bool = False,
     max_items: int = 5,
     bypass_config: dict[str, Any] | None = None,
+    url_filter: Any = None,
     settings: Settings | None = None,
     deadline_seconds: float = LISTING_PROBE_DEADLINE_SECONDS,
 ) -> dict[str, Any]:
@@ -795,6 +972,7 @@ async def probe_custom_safe(
         headed=headed,
         max_items=min(int(max_items), 3),
         bypass_config=bypass_config,
+        url_filter=url_filter,
         settings=settings,
         deadline_seconds=deadline_seconds,
     )
@@ -819,6 +997,7 @@ class LiveBrowserSessionProbe:
         headed: bool = False,
         max_items: int = 5,
         bypass_config: dict[str, Any] | None = None,
+        url_filter: Any = None,
     ) -> dict[str, Any]:
         return await probe_listing(
             url=url,
@@ -826,6 +1005,7 @@ class LiveBrowserSessionProbe:
             headed=headed,
             max_items=max_items,
             bypass_config=bypass_config,
+            url_filter=url_filter,
             settings=self._settings,
         )
 
@@ -877,6 +1057,7 @@ class LiveBrowserSessionProbe:
         max_items: int = 5,
         bypass_config: dict[str, Any] | None = None,
         solve: str = "none",
+        url_filter: Any = None,
     ) -> dict[str, Any]:
         kind = (probe or "listing").strip().lower()
         if kind == "detail":
@@ -913,6 +1094,7 @@ class LiveBrowserSessionProbe:
                 max_items=max_items,
                 bypass_config=bypass_config,
                 settings=self._settings,
+                url_filter=url_filter,
             )
         return await self.probe_listing(
             url=url,
@@ -920,4 +1102,5 @@ class LiveBrowserSessionProbe:
             headed=headed,
             max_items=max_items,
             bypass_config=bypass_config,
+            url_filter=url_filter,
         )

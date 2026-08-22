@@ -36,6 +36,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_logging.py](test_logging.py)
 - [test_logging_sanitization.py](test_logging_sanitization.py)
 - [test_merge_derived_ontology.py](test_merge_derived_ontology.py)
+- [test_ontology_compiler.py](test_ontology_compiler.py)
 - [test_ontology_graph_builder.py](test_ontology_graph_builder.py)
 - [test_ontology_snapshot_diff.py](test_ontology_snapshot_diff.py)
 - [test_operational_outcomes.py](test_operational_outcomes.py)

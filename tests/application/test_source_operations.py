@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from job_ftch.application.registry import all_site_parser_names
 from job_ftch.application.source_operations import (
+    _parse_diagnosis,
     close_browser_session,
     open_browser_session,
     probe_bypass_route,
@@ -16,6 +18,7 @@ from job_ftch.application.source_operations import (
     run_source,
     run_source_escalation,
 )
+from job_ftch.application.tenant_runner import OperatorSessionAttachError
 from job_ftch.domain.browser_capability_inventory import (
     RouteCapabilityDiagnostic,
     RoutePlanExplanation,
@@ -278,6 +281,7 @@ async def test_run_browser_probe_listing_uses_runner_port() -> None:
     assert kwargs["url"] == "https://example.com/jobs"
     assert kwargs["engine"] == "patchright_browser"
     assert kwargs["max_items"] == 3
+    assert "url_filter" in kwargs
     runner.run_tenant.assert_not_called()
 
 
@@ -507,3 +511,257 @@ async def test_disabled_source_is_not_run() -> None:
     payload = await run_source(runner, tenant_id="t1", source_id="career_site:off")
     assert payload["status"] == "source_disabled"
     runner.run_tenant.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_source_passes_operator_session_id() -> None:
+    runner = _FakeRunner()
+    payload = await run_source(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        session_id="sess-live",
+    )
+    assert payload["error"] != "session_not_attached_to_ingest"
+    assert payload["session_id"] == "sess-live"
+    assert payload["session_attached"] is True
+    runner.run_tenant.assert_awaited_once()
+    assert runner.run_tenant.await_args.kwargs["operator_session_id"] == "sess-live"
+
+
+@pytest.mark.asyncio
+async def test_run_source_unknown_session_id() -> None:
+    runner = _FakeRunner()
+
+    async def _missing(*_args: Any, **kwargs: Any) -> Any:
+        raise OperatorSessionAttachError(
+            {
+                "status": "source_not_found",
+                "error": "session_not_found",
+                "session_id": kwargs.get("operator_session_id"),
+            }
+        )
+
+    runner.run_tenant = _missing
+    payload = await run_source(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        session_id="missing",
+    )
+    assert payload["error"] == "session_not_found"
+    assert payload["executed"] is False
+    assert payload["session_attached"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_source_session_skips_listing_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations._registered_bypass_names",
+        lambda: {"cloak", "noop"},
+    )
+    runner = _FakeRunner()
+    runner.probe_browser_listing = AsyncMock(
+        return_value={"ok": True, "status": "ok", "executed": True}
+    )
+    runner.sources[0]["spec"] = {
+        "bypass": None,
+        "parser": "generic",
+        "url": "https://example.com/jobs",
+    }
+    payload = await run_source(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        bypass="cloak",
+        session_id="sess-live",
+        max_items=2,
+    )
+    runner.probe_browser_listing.assert_not_called()
+    runner.run_tenant.assert_awaited_once()
+    assert runner.run_tenant.await_args.kwargs["operator_session_id"] == "sess-live"
+    assert payload["session_attached"] is True
+
+
+def test_parse_diagnosis_confirmed_empty() -> None:
+    result = _parse_diagnosis(
+        run={
+            "fetched": 0,
+            "extracted": 0,
+            "failed": 0,
+            "source_outcomes": [
+                {"zero_reason": "confirmed_empty", "yielded": 0, "status": "ok"}
+            ],
+            "source_failures": [],
+        }
+    )
+    assert result["stage"] == "parse"
+    assert result["reason"] == "confirmed_empty"
+    assert result["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_run_source_escalation_uses_default_ladder_when_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations._registered_bypass_names",
+        lambda: {"noop", "curl_stealth", "tls_client", "stealth_browser", "patchright_browser"},
+    )
+    runner = _FakeRunner()
+    runner.default_escalation_ladder = lambda: [
+        "noop",
+        "curl_stealth",
+        "tls_client",
+        "stealth_browser",
+        "patchright_browser",
+        "nodriver",
+        "camoufox",
+        "cloak",
+    ]
+
+    async def _empty_route(
+        tenant_id: str | None = None,
+        source_id: str | None = None,
+        *,
+        bypass: str | None = None,
+    ) -> RoutePlanExplanation:
+        del tenant_id, bypass
+        return RoutePlanExplanation(
+            generated_at=datetime.now(UTC),
+            source_id=source_id,
+            source_kind="local_fixture",
+            requested_bypass=None,
+            selected_capability_id="engine:noop",
+            selected_group="direct_http",
+            fallback_order=(),
+            diagnostics=(),
+            notes=("empty",),
+        )
+
+    runner.explain_browser_route = _empty_route
+    payload = await run_source_escalation(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        strategy="all",
+        max_tier="tls_client",
+        max_items=1,
+    )
+    assert payload["error"] != "empty_escalation_ladder"
+    assert payload["escalation_ladder"] == ["noop", "curl_stealth", "tls_client"]
+    assert len(payload["attempts"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_run_source_escalation_session_reuses_matching_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations._registered_bypass_names",
+        lambda: {"noop", "patchright_browser"},
+    )
+    runner = _FakeRunner()
+    runner.probe_browser_listing = AsyncMock(
+        return_value={"ok": True, "status": "ok", "executed": True, "items": [{"url": "x"}]}
+    )
+
+    async def _session(_session_id: str) -> dict[str, str]:
+        return {"engine": "patchright", "session_id": _session_id}
+
+    runner.get_operator_browser_session = _session
+    runner.sources[0]["spec"] = {
+        "type": "local_fixture",
+        "url": "https://example.com/jobs",
+    }
+
+    async def _route(
+        tenant_id: str | None = None,
+        source_id: str | None = None,
+        *,
+        bypass: str | None = None,
+    ) -> RoutePlanExplanation:
+        del tenant_id, bypass
+        return RoutePlanExplanation(
+            generated_at=datetime.now(UTC),
+            source_id=source_id,
+            source_kind="local_fixture",
+            requested_bypass=None,
+            selected_capability_id="engine:noop",
+            selected_group="direct_http",
+            fallback_order=("noop", "patchright_browser"),
+            diagnostics=(),
+            notes=("test",),
+        )
+
+    runner.explain_browser_route = _route
+    payload = await run_source_escalation(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        strategy="all",
+        session_id="sess-live",
+        max_items=2,
+    )
+    assert payload["error"] != "invalid_arguments"
+    assert payload["escalation_ladder"] == ["noop", "patchright_browser"]
+    calls = runner.run_tenant.await_args_list
+    session_flags = [call.kwargs.get("operator_session_id") for call in calls]
+    assert "sess-live" in session_flags
+    assert any(flag is None for flag in session_flags)
+    runner.probe_browser_listing.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_source_pins_site_parser_with_session_id() -> None:
+    names = all_site_parser_names()
+    if not names:
+        pytest.skip("no site parsers registered")
+    parser_name = sorted(names)[0]
+    runner = _FakeRunner()
+    runner.sources.append(
+        {
+            "source_id": "career_site:jobs",
+            "source_kind": "career_site",
+            "source_name": "jobs",
+            "enabled": True,
+            "status": "pending",
+            "degraded": False,
+            "requirements": {"browser_required": True},
+            "spec": {
+                "type": "career_site",
+                "url": "https://example.com/jobs",
+                "monitor": "auto",
+            },
+        }
+    )
+    payload = await run_source(
+        runner,
+        tenant_id="t1",
+        source_id="career_site:jobs",
+        parser=parser_name,
+        session_id="sess-live",
+    )
+    assert payload["executed"] is True
+    assert payload["requested_parser"] == parser_name
+    assert runner.run_tenant.await_args.kwargs["parser_override"] == parser_name
+    assert runner.run_tenant.await_args.kwargs["operator_session_id"] == "sess-live"
+    assert payload["session_attached"] is True
+
+
+@pytest.mark.asyncio
+async def test_probe_page_accepts_playwright_engine_alias() -> None:
+    runner = _FakeRunner()
+    payload = await run_browser_probe(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        probe="listing",
+        engine="playwright",
+    )
+    assert payload["error"] != "unsupported_engine"
+    assert payload["engine"] in {"playwright", "stealth_browser"} or payload["status"] in {
+        "unsupported",
+        "ok",
+        "unavailable",
+    }

@@ -19,13 +19,25 @@ from job_ftch.application.registry import (
     list_bypass_capabilities,
     site_parser_domain_pattern,
 )
+from job_ftch.application.tenant_runner import OperatorSessionAttachError
 from job_ftch.domain.runtime_source import source_spec_identifier
 from job_ftch.domain.source_spec import SourceSpec
 
 PROBE_MODES = frozenset({"cheap", "full"})
 ESCALATION_STRATEGIES = frozenset({"recommended", "all"})
 BROWSER_PROBES = frozenset({"listing", "detail", "challenge", "fingerprint", "custom_safe"})
-BROWSER_ENGINES = frozenset({"auto", "patchright", "nodriver", "camoufox", "cloak"})
+BROWSER_ENGINES = frozenset(
+    {
+        "auto",
+        "playwright",
+        "stealth_browser",
+        "patchright",
+        "patchright_browser",
+        "nodriver",
+        "camoufox",
+        "cloak",
+    }
+)
 _BROWSER_GROUPS = frozenset({"browser", "persistent_session", "manual_challenge"})
 _BROWSER_ENGINES = frozenset(
     {
@@ -40,13 +52,14 @@ _BROWSER_ENGINES = frozenset(
 _MISSING_BROWSER_PROBE = "browser_session_probe"
 _LIVE_PROBES = frozenset({"listing", "detail", "challenge", "fingerprint", "custom_safe"})
 _SESSION_PROFILES = frozenset({"ephemeral", "persistent", "domain"})
-_SWEEP_MAX_ROUTES = 6
+_SWEEP_MAX_ROUTES = 8
 _ADAPTIVE_BYPASS = frozenset({"auto", "adaptive"})
 _ENGINE_ALIASES = {
     "auto": "patchright_browser",
+    "playwright": "stealth_browser",
+    "stealth_browser": "stealth_browser",
     "patchright": "patchright_browser",
     "patchright_browser": "patchright_browser",
-    "stealth_browser": "stealth_browser",
     "nodriver": "nodriver",
     "camoufox": "camoufox",
     "cloak": "cloak",
@@ -400,6 +413,7 @@ async def _execute_source_run(
     bypass_override: str | None = None,
     parser_override: str | None = None,
     ignore_schedule_gates: bool = False,
+    operator_session_id: str | None = None,
 ) -> dict[str, Any]:
     try:
         summary = await runner.run_tenant(
@@ -409,7 +423,19 @@ async def _execute_source_run(
             bypass_override=bypass_override,
             parser_override=parser_override,
             ignore_schedule_gates=ignore_schedule_gates,
+            operator_session_id=operator_session_id,
         )
+    except OperatorSessionAttachError as exc:
+        payload = dict(exc.payload)
+        return {
+            "ok": False,
+            "status": str(payload.get("status") or "unavailable"),
+            "executed": False,
+            "error": str(payload.get("error") or "session_attach_failed"),
+            "run": None,
+            "session_id": operator_session_id,
+            "session_attached": False,
+        }
     except ValueError as exc:
         return {
             "ok": False,
@@ -420,7 +446,7 @@ async def _execute_source_run(
         }
     payload = _summary_payload(summary)
     status, ok = _run_status(payload)
-    return {
+    result: dict[str, Any] = {
         "ok": ok,
         "status": status,
         "executed": True,
@@ -428,6 +454,10 @@ async def _execute_source_run(
         "run": payload,
         "parse": _parse_diagnosis(run=payload),
     }
+    if operator_session_id:
+        result["session_id"] = operator_session_id
+        result["session_attached"] = True
+    return result
 
 
 def _ladder_from_route(route: dict[str, Any], *, max_tier: str | None = None) -> list[str]:
@@ -442,6 +472,49 @@ def _ladder_from_route(route: dict[str, Any], *, max_tier: str | None = None) ->
     return names[:_SWEEP_MAX_ROUTES]
 
 
+def _same_resolved_engine(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    return _ENGINE_ALIASES.get(left.lower(), left) == _ENGINE_ALIASES.get(right.lower(), right)
+
+
+def _default_escalation_ladder(runner: Any, *, max_tier: str | None = None) -> list[str]:
+    getter = getattr(runner, "default_escalation_ladder", None)
+    if not callable(getter):
+        return []
+    raw = getter()
+    if not isinstance(raw, list | tuple):
+        return []
+    return _ladder_from_route({"fallback_order": list(raw)}, max_tier=max_tier)
+
+
+def _escalation_ladder(
+    runner: Any,
+    route: dict[str, Any],
+    *,
+    max_tier: str | None = None,
+) -> list[str]:
+    ladder = _ladder_from_route(route, max_tier=max_tier)
+    if ladder:
+        return ladder
+    return _default_escalation_ladder(runner, max_tier=max_tier)
+
+
+async def _session_engine_name(runner: Any, session_id: str | None) -> str | None:
+    if not session_id:
+        return None
+    getter = getattr(runner, "get_operator_browser_session", None)
+    if not callable(getter):
+        return None
+    snap = await getter(session_id)
+    if not isinstance(snap, dict):
+        return None
+    raw = snap.get("engine")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return _ENGINE_ALIASES.get(raw.strip().lower(), raw.strip())
+
+
 async def _attempt_bypass(
     runner: Any,
     *,
@@ -451,11 +524,12 @@ async def _attempt_bypass(
     bypass: str,
     max_items: int,
     parser_override: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     listing_url = _listing_url(source, None)
     browser = bypass in _BROWSER_ENGINES
     probe_fn = getattr(runner, "probe_browser_listing", None)
-    if browser and listing_url and callable(probe_fn):
+    if browser and listing_url and callable(probe_fn) and not session_id:
         listing = await probe_fn(
             tenant_id,
             url=listing_url,
@@ -489,6 +563,7 @@ async def _attempt_bypass(
         bypass_override=bypass,
         parser_override=parser_override,
         ignore_schedule_gates=True,
+        operator_session_id=session_id,
     )
     run = executed.get("run") if isinstance(executed.get("run"), dict) else {}
     parse = executed.get("parse") or _parse_diagnosis(run=run)
@@ -505,6 +580,7 @@ async def _attempt_bypass(
         "page_title": None,
         "parse": parse,
         "run": run,
+        **_session_fields(executed, session_id),
     }
 
 
@@ -595,6 +671,16 @@ async def probe_source(
     )
 
 
+def _session_fields(executed: dict[str, Any], session_id: str | None) -> dict[str, Any]:
+    if not session_id:
+        return {}
+    attached = bool(executed.get("session_attached"))
+    return {
+        "session_id": executed.get("session_id") or session_id,
+        "session_attached": attached,
+    }
+
+
 async def run_source(
     runner: Any,
     *,
@@ -603,6 +689,7 @@ async def run_source(
     max_items: int | None = None,
     parser: str | None = None,
     bypass: str | None = None,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     if max_items is not None and int(max_items) <= 0:
         return _envelope(
@@ -676,6 +763,7 @@ async def run_source(
             bypass=pin,
             max_items=int(max_items) if max_items is not None else 5,
             parser_override=parser_pin,
+            session_id=session_id,
         )
         return _envelope(
             tenant_id=tenant_id,
@@ -702,6 +790,7 @@ async def run_source(
             items=attempt.get("items") or [],
             browser_required=pin in _BROWSER_ENGINES,
             max_items=max_items,
+            **_session_fields(attempt, session_id),
         )
     parser_pin = None
     if requested_parser and requested_parser not in {"auto"}:
@@ -732,6 +821,7 @@ async def run_source(
         max_items=max_items,
         parser_override=parser_pin,
         ignore_schedule_gates=True,
+        operator_session_id=session_id,
     )
     parser_notes = (
         [f"pinned parser {parser_pin} for this call only"]
@@ -762,6 +852,7 @@ async def run_source(
         run=executed.get("run"),
         browser_required=_is_browser_route(route, source),
         max_items=max_items,
+        **_session_fields(executed, session_id),
     )
 
 
@@ -773,6 +864,7 @@ async def run_source_escalation(
     strategy: str = "recommended",
     max_tier: str | None = None,
     max_items: int = 5,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     normalized = (strategy or "recommended").strip().lower()
     if normalized not in ESCALATION_STRATEGIES:
@@ -814,7 +906,7 @@ async def run_source_escalation(
                 max_tier=max_tier,
             )
         route = await _route_payload(runner, tenant_id, source_id)
-        ladder = _ladder_from_route(route, max_tier=max_tier)
+        ladder = _escalation_ladder(runner, route, max_tier=max_tier)
         if not ladder:
             return _envelope(
                 tenant_id=tenant_id,
@@ -830,7 +922,10 @@ async def run_source_escalation(
                 escalation_ladder=[],
                 attempts=[],
                 browser_required=_is_browser_route(route, source),
+                session_id=session_id,
+                session_attached=False,
             )
+        session_engine = await _session_engine_name(runner, session_id)
         registered = _registered_bypass_names()
         attempts: list[dict[str, Any]] = []
         for name in ladder:
@@ -852,6 +947,7 @@ async def run_source_escalation(
                     }
                 )
                 continue
+            attach = session_id if _same_resolved_engine(name, session_engine) else None
             attempts.append(
                 await _attempt_bypass(
                     runner,
@@ -860,10 +956,12 @@ async def run_source_escalation(
                     source_id=source_id,
                     bypass=name,
                     max_items=int(max_items),
+                    session_id=attach,
                 )
             )
         worked = [item for item in attempts if item.get("ok") and item.get("parse", {}).get("ok")]
         status = "ok" if worked else "degraded"
+        attached_used = any(bool(item.get("session_attached")) for item in attempts)
         return _envelope(
             tenant_id=tenant_id,
             source_id=source_id,
@@ -874,6 +972,7 @@ async def run_source_escalation(
             notes=_notes(
                 "strategy=all walks fallback_order with a bounded per-route probe",
                 "browser routes use listing probe; others pin ingest for this call",
+                "session engine reuses the open operator tab; other tiers do not",
             ),
             strategy=normalized,
             max_tier=max_tier,
@@ -881,6 +980,8 @@ async def run_source_escalation(
             route=route,
             selected_route=_selected_route(route),
             escalation_ladder=ladder,
+            session_id=session_id,
+            session_attached=attached_used,
             attempts=attempts,
             working_bypass=[item.get("bypass") for item in worked],
             browser_required=any(name in _BROWSER_ENGINES for name in ladder),
@@ -890,6 +991,7 @@ async def run_source_escalation(
         tenant_id=tenant_id,
         source_id=source_id,
         max_items=int(max_items),
+        session_id=session_id,
     )
     result["strategy"] = normalized
     result["escalation_ladder"] = list((result.get("route") or {}).get("fallback_order") or [])
@@ -1166,6 +1268,7 @@ async def run_browser_probe(
     spec_raw = (source or {}).get("spec")
     spec: dict[str, Any] = spec_raw if isinstance(spec_raw, dict) else {}
     bypass_config = spec.get("bypass_config")
+    url_filter = spec.get("url_filter")
     executed = await probe_fn(
         tenant_id,
         url=listing_url,
@@ -1175,6 +1278,7 @@ async def run_browser_probe(
         bypass_config=bypass_config if isinstance(bypass_config, dict) else None,
         probe=normalized_probe,
         solve=(solve or "none").strip().lower() or "none",
+        url_filter=url_filter,
     )
     if not isinstance(executed, dict):
         executed = {"status": "error", "error": "invalid_probe_payload", "executed": False}

@@ -24,8 +24,8 @@ The redesigned surface should be smaller, more operator-oriented, and safer.
 
 ## Non-goals
 
-- Do not reintroduce removed MCP legacy aliases without an explicit migration
-  request. Current implementation slice is intentionally operator-only.
+- Do not register extra names for the same behavior. Current implementation
+  slice is operator-only.
 - Do not bypass legal/config gates, approval gates, captcha authorization, or
   secret handling.
 - Do not read or expose `.env*`, tokens, browser profiles, cookies, proxy
@@ -73,8 +73,8 @@ degradation summary and latest run metadata.
 get_sources(tenant_id, include_health=true, include_diagnostics=true)
 add_source(tenant_id, link, source_type=null, limit=100, added_by=null)
 disable_source(tenant_id, source_id)
-update_source(tenant_id, source_id, patch)
-remove_source(tenant_id, source_id)
+update_source(tenant_id, source_id, patch)  # implemented: enabled + limit only
+remove_source(tenant_id, source_id)  # implemented: runtime delete; config/base → disable_source
 ```
 
 `get_sources` replaces the current split between `list_sources` and
@@ -95,7 +95,7 @@ run_pipeline(tenant_id=null, user_id=null, scope="tenant|all", source_ids=null, 
 get_pipeline_status(tenant_id)
 list_pipeline_runs(tenant_id=null, limit=20)
 get_pipeline_run(run_id, tenant_id=null)
-cancel_pipeline_run(run_id)
+cancel_pipeline_run(run_id)  # implemented as discoverable-unsupported (no cancel token)
 ```
 
 `run_pipeline(scope="all")` replaces a separate `run_all_pipelines` top-level
@@ -441,6 +441,32 @@ Implemented on this branch (ADR-084):
 - `capture_browser_artifact(trace)` writes a zip or navigation JSONL; no cookie values.
 - `wait_challenge` / `extend` keep headed captcha pollable without hanging MCP.
 - Explicit `run_source(parser=<site parser>)` may pin a URL-bound parser onto another host.
+
+### Slice 9 — remaining Telegram-parity operator tools
+
+Implemented on this branch:
+
+- Feedback: `list_feedback`, `add_vacancy_feedback`, `set_feedback_audience`,
+  `clear_feedback`, `promote_feedback_to_example` (explicit; skip if threshold
+  unmet and no `job_id`). Telegram promote-to-manual-copy is unchanged.
+- Jobs: `get_latest_jobs` (tool; resource `jobs://{tenant_id}/latest` kept).
+- Ontology: `compile_examples_ontology` with `dry_run` that does not persist.
+- Bypass/failure: `recommend_bypass_route` (inventory only), `explain_source_failure`
+  (read-only diagnostics, no new probe).
+- Sources: `remove_source` for runtime records; config/base returns `unsupported`
+  and tells the operator to `disable_source`. `update_source` patches `enabled`
+  and/or `limit` on runtime sources; config/base may only change `enabled`
+  (limit is unsupported; YAML is not rewritten).
+- Pipeline: `cancel_pipeline_run` returns `status=unsupported`,
+  `error=pipeline_is_in_process_await`.
+- Artifacts: `get_source_artifacts` wraps stored snapshot hashes for `summary`;
+  html/screenshot/trace/raw stay structured `unavailable` (no filesystem crawler).
+
+Out of scope on this branch:
+
+- extra MCP resources (`sources://`, `examples://`, `prefilter://`, `browser://`);
+- `refresh_examples` / `get_examples_refresh_status` (write-path already compiles);
+- extra names for existing tools.
 
 ## Testing plan
 

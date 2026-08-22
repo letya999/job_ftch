@@ -57,6 +57,7 @@ captcha_provider_routes:
     - manual_required
   cloudflare_challenge:
     - browser_wait
+    - capsolver
     - manual_required
   turnstile:
     - observe

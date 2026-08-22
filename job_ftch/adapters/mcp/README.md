@@ -1,9 +1,10 @@
 # MCP server adapter
 
-A FastMCP server that exposes operator-facing `job_ftch` tools
-(`get_sources`, `run_pipeline`, `add_example`, `get_bypass_capabilities`, …) and `jobs://`
-resources to MCP clients (Claude Code, Cursor, Claude Desktop). This branch
-uses the new operator surface only; legacy MCP tool aliases are not registered.
+A FastMCP server that exposes an 18-tool operator catalog
+(`list_tenants`, `get_status`, `get_runtime`, `doctor`, `get_sources`, `update_source`,
+`get_jobs`, `update_shot`, plus mass/personal extras) and `config://{tenant_id}`
+to MCP clients (Claude Code, Cursor, Claude Desktop).
+Gate with `JOB_FTCH_MCP_SURFACE=all|mass|personal` (default `all`).
 See `docs/adapters/mcp_adapter.md`.
 
 ## Run locally
@@ -30,5 +31,4 @@ docker run -p 8000:8000 --env-file .env -v "$PWD/config:/app/config" job-ftch-mc
 ## Entry point
 
 The server factory is published under the `job_ftch.mcp_servers` entry-point group
-(`adapters.mcp.server:create_server`). `adapters/mcp/adapter.py` keeps a thin
-deprecated `create_mcp_server()` shim for newer callers.
+(`adapters.mcp.server:create_server`).

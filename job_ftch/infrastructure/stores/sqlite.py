@@ -269,6 +269,9 @@ class SQLiteStore(SQLStoreAdapter):
             "outbox": await _count(
                 "SELECT COUNT(*) FROM jf_outbox WHERE tenant_id = ?", (tenant_id,)
             ),
+            "source_assessments": await _count(
+                "SELECT COUNT(*) FROM jf_source_assessments WHERE tenant_id = ?", (tenant_id,)
+            ),
         }
         await conn.execute("DELETE FROM jf_kv WHERE " + kv_where, kv_patterns)  # nosec B608
         await conn.execute("DELETE FROM jf_set WHERE " + set_where, set_patterns)  # nosec B608
@@ -277,6 +280,7 @@ class SQLiteStore(SQLStoreAdapter):
         await conn.execute("DELETE FROM jf_source_ingest_state WHERE tenant_id = ?", (tenant_id,))
         await conn.execute("DELETE FROM jf_dedup_claims WHERE claim_key LIKE ?", (f"{prefix}%",))
         await conn.execute("DELETE FROM jf_outbox WHERE tenant_id = ?", (tenant_id,))
+        await conn.execute("DELETE FROM jf_source_assessments WHERE tenant_id = ?", (tenant_id,))
         await conn.commit()
         return counts
 

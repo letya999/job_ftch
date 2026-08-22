@@ -559,6 +559,7 @@ async def compile_profile_ontology(
     *,
     llm: object | None,
     ontology_store: OntologyStore | None,
+    persist: bool = True,
 ) -> dict[str, object]:
     """Compile/project ontology from every labeled shot on the profile.
 
@@ -567,10 +568,14 @@ async def compile_profile_ontology(
     then heuristically fills any empty positive projection.
     """
     if ontology_store is None:
-        return {"pos_added": 0, "ontology_errors": ["ontology_store_missing"]}
+        return {
+            "pos_added": 0,
+            "ontology_errors": ["ontology_store_missing"],
+            "persisted": False,
+        }
     shots = _shots_from_profile(managed)
     if not shots:
-        return {"pos_added": 0, "ontology_errors": []}
+        return {"pos_added": 0, "ontology_errors": [], "persisted": False}
 
     errors: list[str] = []
     ontology = None
@@ -617,7 +622,19 @@ async def compile_profile_ontology(
             materialized = heuristic
 
     if materialized is None:
-        return {"pos_added": 0, "ontology_errors": errors or ["empty_projection"]}
+        return {
+            "pos_added": 0,
+            "ontology_errors": errors or ["empty_projection"],
+            "persisted": False,
+        }
+
+    if not persist:
+        return {
+            "pos_added": _materialized_positive_count(materialized),
+            "ontology_errors": errors,
+            "model": model,
+            "persisted": False,
+        }
 
     reset = getattr(ontology_store, "reset_live_projection", None)
     if callable(reset):
@@ -625,7 +642,7 @@ async def compile_profile_ontology(
             await reset()
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{type(exc).__name__}: {exc}")
-            return {"pos_added": 0, "ontology_errors": errors}
+            return {"pos_added": 0, "ontology_errors": errors, "persisted": False}
 
     has_negative_shots = any(kind.startswith("negative") for kind, _text in shots)
     has_anti = bool(
@@ -661,12 +678,13 @@ async def compile_profile_ontology(
         )
     except Exception as exc:  # noqa: BLE001
         errors.append(f"{type(exc).__name__}: {exc}")
-        return {"pos_added": 0, "ontology_errors": errors}
+        return {"pos_added": 0, "ontology_errors": errors, "persisted": False}
 
     return {
         "pos_added": _materialized_positive_count(materialized),
         "ontology_errors": errors,
         "model": model,
+        "persisted": True,
     }
 
 

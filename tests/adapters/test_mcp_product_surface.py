@@ -17,16 +17,23 @@ from job_ftch.adapters.mcp.product_surface import (
     remove_operator_example,
     resolve_surface,
     shot_role,
+    update_operator_shot,
 )
 
 
-def test_resolve_surface_defaults_core(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_surface_defaults_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("JOB_FTCH_MCP_SURFACE", raising=False)
-    assert resolve_surface() == "core"
+    assert resolve_surface() == "all"
+    monkeypatch.setenv("JOB_FTCH_MCP_SURFACE", "mass")
+    assert resolve_surface() == "mass"
+    monkeypatch.setenv("JOB_FTCH_MCP_SURFACE", "personal")
+    assert resolve_surface() == "personal"
+    monkeypatch.setenv("JOB_FTCH_MCP_SURFACE", "core")
+    assert resolve_surface() == "all"
     monkeypatch.setenv("JOB_FTCH_MCP_SURFACE", "admin")
-    assert resolve_surface() == "admin"
+    assert resolve_surface() == "all"
     monkeypatch.setenv("JOB_FTCH_MCP_SURFACE", "nope")
-    assert resolve_surface() == "core"
+    assert resolve_surface() == "all"
 
 
 def test_example_kind_and_role() -> None:
@@ -206,3 +213,46 @@ async def test_operator_examples_reject_invalid_kind() -> None:
     assert result["error"] == "invalid_arguments"
     listed = await list_operator_examples(runner, tenant_id="t1", user_id="u1", kind="shots")
     assert listed["error"] == "invalid_arguments"
+
+
+@pytest.mark.asyncio
+async def test_update_operator_shot_rejects_unknown_action() -> None:
+    runner = _MemoryRunner()
+    result = await update_operator_shot(
+        runner,
+        tenant_id="t1",
+        user_id="u1",
+        action="sync",
+    )
+    assert result["error"] == "invalid_arguments"
+
+
+@pytest.mark.asyncio
+async def test_update_operator_shot_list_defaults_and_requires_kind_label() -> None:
+    runner = _MemoryRunner()
+    missing = await update_operator_shot(
+        runner,
+        tenant_id="t1",
+        user_id="u1",
+        action="add",
+        text="needs kind and label",
+    )
+    assert missing["error"] == "invalid_arguments"
+    added = await update_operator_shot(
+        runner,
+        tenant_id="t1",
+        user_id="u1",
+        action="add",
+        kind="vacancy",
+        label="positive",
+        text="Hiring senior LLM engineer",
+        refresh_policy="defer",
+    )
+    assert added["added"] == 1
+    listed = await update_operator_shot(
+        runner,
+        tenant_id="t1",
+        user_id="u1",
+        action="list",
+    )
+    assert listed["examples"]["positive_vacancy"] == ["Hiring senior LLM engineer"]

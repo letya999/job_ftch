@@ -624,6 +624,7 @@ class BrowserSessionProbe(Protocol):
         headed: bool = False,
         max_items: int = 5,
         bypass_config: dict[str, Any] | None = None,
+        url_filter: Any = None,
     ) -> dict[str, Any]:
         """Open one ephemeral listing page and return bounded public previews."""
 

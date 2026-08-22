@@ -347,6 +347,22 @@ async def test_sqlite_clear_run_artifacts_removes_processed_dedup_and_ledgers():
         delivery_payload={"job_id": "other"},
     )
     await store.enqueue_outbox(other_outbox)
+    assessment = SourceAssessmentResult(
+        source_id="career_site:careers",
+        source_type="career_site",
+        capabilities=SourceCapabilities(has_publication_time=True),
+        freshness=FreshnessAssessment(
+            confidence=AssessmentConfidence.HIGH,
+            can_detect_freshness_without_snapshot=True,
+            can_filter_since_yesterday=True,
+            item_level_dates=True,
+            requires_full_snapshot=False,
+            rationale="sqlite-clear",
+        ),
+    )
+    await tenant.save_source_assessment("ai_jobs", assessment)
+    other_assessment = assessment.model_copy(update={"source_id": "career_site:other"})
+    await store.save_source_assessment("other_tenant", other_assessment)
 
     counts = await tenant.clear_run_artifacts()
 
@@ -354,6 +370,9 @@ async def test_sqlite_clear_run_artifacts_removes_processed_dedup_and_ledgers():
     assert counts["kv"] >= 1
     assert counts["source_ingest_states"] == 1
     assert counts["outbox"] == 1
+    assert counts["source_assessments"] == 1
+    assert await tenant.get_source_assessment("ai_jobs", assessment.source_id) is None
+    assert await store.get_source_assessment("other_tenant", other_assessment.source_id) == other_assessment
     assert await tenant.has_processed(raw.stable_id) is False
     assert await tenant.has_dedup_key(dedup.key) is False
     assert await tenant.get_observation(raw.stable_id, observation.content_hash) is None

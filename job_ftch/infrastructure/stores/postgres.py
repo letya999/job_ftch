@@ -308,6 +308,13 @@ class PostgreSQLStore(SQLStoreAdapter):
                     )
                     or 0
                 ),
+                "source_assessments": int(
+                    await conn.fetchval(
+                        "SELECT COUNT(*) FROM jf_source_assessments WHERE tenant_id = $1",
+                        tenant_id,
+                    )
+                    or 0
+                ),
             }
             await conn.execute("DELETE FROM jf_kv WHERE key LIKE ANY($1::text[])", kv_patterns)
             await conn.execute("DELETE FROM jf_set WHERE key LIKE ANY($1::text[])", set_patterns)
@@ -316,6 +323,9 @@ class PostgreSQLStore(SQLStoreAdapter):
             await conn.execute("DELETE FROM jf_source_ingest_state WHERE tenant_id = $1", tenant_id)
             await conn.execute("DELETE FROM jf_dedup_claims WHERE claim_key LIKE $1", f"{prefix}%")
             await conn.execute("DELETE FROM jf_outbox WHERE tenant_id = $1", tenant_id)
+            await conn.execute(
+                "DELETE FROM jf_source_assessments WHERE tenant_id = $1", tenant_id
+            )
             return counts
 
     async def ping(self) -> bool:

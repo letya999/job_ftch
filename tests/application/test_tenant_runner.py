@@ -839,6 +839,94 @@ async def test_tenant_runner_persists_runtime_sources_and_disables_them(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_tenant_runner_remove_runtime_source_keeps_config_sources(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "ai_jobs",
+            "display_name": "AI Jobs",
+            "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+            "store_backend": "sqlite",
+            "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            "job_group_store_backend": "sqlite",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+        }
+    )
+    runtime_spec = CareerSiteSpec(
+        type="career_site",
+        url="https://example.com/jobs",
+        source_name="example_com_jobs",
+    )
+    source_id = source_spec_identifier(runtime_spec)
+    runner = TenantRunner.from_tenants([tenant], base_settings=_isolated_base_settings())
+    try:
+        await runner.add_source_spec("ai_jobs", runtime_spec, added_via="test")
+        removed = await runner.remove_source("ai_jobs", source_id)
+        listed = await runner.list_sources("ai_jobs")
+        config_id = next(item["source_id"] for item in listed if item.get("origin") == "config")
+        config_block = await runner.remove_source("ai_jobs", config_id)
+        assert removed["status"] == "removed"
+        assert all(item["source_id"] != source_id for item in listed)
+        assert config_block["status"] == "unsupported"
+        assert config_block["error"] == "config_source_not_deletable"
+        assert any(item["source_id"] == config_id for item in listed)
+    finally:
+        await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_tenant_runner_update_source_runtime_and_config_rules(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "ai_jobs",
+            "display_name": "AI Jobs",
+            "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+            "store_backend": "sqlite",
+            "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            "job_group_store_backend": "sqlite",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+        }
+    )
+    runtime_spec = CareerSiteSpec(
+        type="career_site",
+        url="https://example.com/jobs",
+        source_name="example_com_jobs",
+        limit=20,
+    )
+    source_id = source_spec_identifier(runtime_spec)
+    runner = TenantRunner.from_tenants([tenant], base_settings=_isolated_base_settings())
+    try:
+        await runner.add_source_spec("ai_jobs", runtime_spec, added_via="test")
+        patched = await runner.update_source(
+            "ai_jobs",
+            source_id,
+            {"enabled": False, "limit": 7},
+        )
+        assert patched.get("enabled") is False
+        assert patched["spec"]["limit"] == 7
+        unknown = await runner.update_source("ai_jobs", source_id, {"parser": "generic"})
+        assert unknown["error"] == "invalid_arguments"
+        listed = await runner.list_sources("ai_jobs")
+        config_id = next(item["source_id"] for item in listed if item.get("origin") == "config")
+        config_limit = await runner.update_source("ai_jobs", config_id, {"limit": 2})
+        assert config_limit["status"] == "unsupported"
+        assert config_limit["error"] == "config_limit_not_updatable"
+        config_disabled = await runner.update_source("ai_jobs", config_id, {"enabled": False})
+        assert config_disabled.get("enabled") is False
+        with pytest.raises(KeyError):
+            await runner.update_source("ai_jobs", "missing-source", {"enabled": True})
+    finally:
+        await runner.close()
+
+
+@pytest.mark.asyncio
 async def test_tenant_runner_list_sources_deduplicates_runtime_copy_of_config_source(
     tmp_path: Path,
 ) -> None:

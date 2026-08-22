@@ -5,21 +5,20 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
-from datetime import UTC, datetime
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import urljoin, urlsplit
 
+from job_ftch.adapters.mcp import operator_surface as mcp_ops
 from job_ftch.adapters.mcp import product_surface as mcp_examples
 from job_ftch.application.logging import configure_logging
-from job_ftch.application.profile_inputs import build_candidate_profile_from_payload
 from job_ftch.application.source_inputs import build_source_spec_from_input
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.config import Settings, get_settings
-from job_ftch.domain import ManagedCandidateProfile
 
 _PIPELINE_SCOPES = frozenset({"tenant", "all"})
 _RUNTIME_GOALS = frozenset(
@@ -35,6 +34,29 @@ _RUNTIME_GOALS = frozenset(
         "bypass",
     }
 )
+_SOURCE_ACTIONS = frozenset({"add", "update", "remove"})
+_SESSION_ACTIONS = frozenset({"open", "status", "wait", "solve", "goto", "capture", "close"})
+_PAGE_WHAT = frozenset({"listing", "detail", "challenge", "fingerprint"})
+_ESCALATION_MODES = frozenset({"adaptive", "all"})
+_SOLVE_MODES = frozenset({"none", "browser_wait", "provider"})
+_CAPTCHA_PROVIDER_ENV: dict[str, str] = {
+    "capsolver": "CAPSOLVER_API_KEY",
+    "capmonster": "CAPMONSTER_API_KEY",
+    "nextcaptcha": "NEXTCAPTCHA_API_KEY",
+    "2captcha": "TWOCAPTCHA_API_KEY",
+    "anticaptcha": "ANTICAPTCHA_API_KEY",
+    "nopecha": "NOPECHA_API_KEY",
+}
+_RUNTIME_ENGINES: tuple[tuple[str, str, str, str], ...] = (
+    ("stealth_browser", "playwright_stealth", "stealth", "stealth_browser"),
+    ("playwright", "playwright", "stealth", "stealth_browser"),
+    ("patchright", "patchright", "browser", "patchright_browser"),
+    ("nodriver", "nodriver", "nodriver", "nodriver"),
+    ("camoufox", "camoufox", "browser", "camoufox"),
+    ("cloak", "cloakbrowser", "browser", "cloak"),
+)
+_RESIDENTIAL_PROBE_URL = "https://example.com"
+_RESIDENTIAL_PROBE_TIMEOUT = 3.0
 _HEALTH_KEYS = frozenset(
     {
         "status",
@@ -557,6 +579,252 @@ def _source_degradation_summary(sources: list[dict[str, Any]]) -> dict[str, Any]
     }
 
 
+def _job_id_from_payload(item: dict[str, Any] | None) -> str | None:
+    if not isinstance(item, dict):
+        return None
+    job_id = item.get("job_id")
+    if isinstance(job_id, str) and job_id:
+        return job_id
+    nested = item.get("canonical_job")
+    if isinstance(nested, dict):
+        nested_id = nested.get("job_id")
+        if isinstance(nested_id, str) and nested_id:
+            return nested_id
+    return None
+
+
+def _residential_yaml_urls() -> list[str]:
+    yaml_path = Path(__file__).resolve().parents[3] / "config" / "proxies.yaml"
+    if not yaml_path.is_file():
+        return []
+    try:
+        import yaml
+
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 - presence check only
+        return []
+    if not isinstance(data, dict):
+        return []
+    raw = data.get("residential") or []
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def _residential_env_urls() -> list[str]:
+    env_val = os.environ.get("JOB_FTCH_RESIDENTIAL_PROXY_LIST", "")
+    return [item.strip() for item in env_val.split(",") if item.strip()]
+
+
+def _first_residential_proxy_url(settings: Settings) -> tuple[bool, str | None]:
+    """Return (configured, first_url). first_url is never placed in public payloads."""
+    urls = [*_residential_env_urls(), *_residential_yaml_urls()]
+    gateway = str(getattr(settings, "proxy_gateway", "") or "").strip()
+    if gateway:
+        user = str(getattr(settings, "proxy_user", "") or "").strip()
+        password = str(getattr(settings, "proxy_pass", "") or "").strip()
+        if user and password and "://" in gateway:
+            scheme, rest = gateway.split("://", 1)
+            gateway = f"{scheme}://{user}:{password}@{rest}"
+        urls.append(gateway)
+    configured = bool(urls)
+    return configured, (urls[0] if urls else None)
+
+
+async def _probe_residential_proxy(proxy_url: str) -> tuple[bool, str | None]:
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(proxy=proxy_url, timeout=_RESIDENTIAL_PROBE_TIMEOUT) as client:
+            response = await client.get(_RESIDENTIAL_PROBE_URL, follow_redirects=True)
+        return response.status_code < 500, None
+    except Exception as exc:  # noqa: BLE001 - public result is class-only
+        return False, type(exc).__name__
+
+
+def _captcha_runtime_status(settings: Settings) -> list[dict[str, Any]]:
+    enabled = {str(name).strip().lower() for name in settings.captcha_enabled_providers}
+    provider = str(settings.captcha_provider or "").strip().lower()
+    labels = ["browser_wait"]
+    for name in sorted(enabled | ({provider} if provider else set())):
+        if name and name not in labels:
+            labels.append(name)
+    solvers: list[dict[str, Any]] = []
+    for label in labels:
+        if label == "browser_wait":
+            solvers.append(
+                {
+                    "id": "browser_wait",
+                    "key_present": True,
+                    "reachable": None,
+                }
+            )
+            continue
+        env_name = _CAPTCHA_PROVIDER_ENV.get(label)
+        present = bool(env_name and os.environ.get(env_name, "").strip())
+        solvers.append(
+            {
+                "id": label,
+                "key_present": present,
+                "reachable": None,
+            }
+        )
+    return solvers
+
+
+def _engine_runtime_status(inventory: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    availability_by_engine: dict[str, str] = {}
+    capabilities = inventory.get("capabilities") if isinstance(inventory, dict) else None
+    if isinstance(capabilities, list):
+        for item in capabilities:
+            if not isinstance(item, dict):
+                continue
+            engine = str(item.get("engine") or "")
+            availability = item.get("availability")
+            if engine and isinstance(availability, str):
+                availability_by_engine[engine] = availability
+    engines: dict[str, dict[str, Any]] = {}
+    for public_id, module_name, extra, inventory_name in _RUNTIME_ENGINES:
+        importable = _package_present(module_name)
+        availability = availability_by_engine.get(inventory_name)
+        available = availability == "available" if availability is not None else None
+        payload: dict[str, Any] = {
+            "importable": importable,
+            "available": available if available is not None else importable,
+            "inventory": availability,
+        }
+        if not importable:
+            payload["install_hint"] = f"uv sync --extra {extra}"
+        engines[public_id] = payload
+    return engines
+
+
+def _doctor_extras() -> dict[str, dict[str, Any]]:
+    extras = dict(_runtime_package_status())
+    if "playwright" not in extras:
+        present = _package_present("playwright")
+        extras["playwright"] = {
+            "present": present,
+            "extra": "stealth",
+            "install_hint": None if present else "uv sync --extra stealth",
+        }
+    return extras
+
+
+def _uniq_hints(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _build_doctor_report(
+    *,
+    ok: bool,
+    extras: dict[str, dict[str, Any]],
+    engines: dict[str, dict[str, Any]],
+    bypass: dict[str, Any],
+    llm: dict[str, Any],
+    proxies: dict[str, Any],
+    captcha_solvers: list[dict[str, Any]],
+    install_hints: list[str],
+) -> str:
+    """Human-readable diagnosis. Never includes proxy URLs, keys, or cookies."""
+    lines: list[str] = [
+        f"overall: {'present' if ok else 'degraded'}",
+        "",
+        "extras:",
+    ]
+    for name, info in extras.items():
+        extra = info.get("extra")
+        hint = info.get("install_hint")
+        if info.get("present"):
+            lines.append(f"- {name}: present (extra {extra})")
+            continue
+        how = hint or (f"uv sync --extra {extra}" if extra else "install the matching extra")
+        lines.append(f"- {name}: missing; {how}")
+
+    lines.extend(["", "engines:"])
+    for name, info in engines.items():
+        inventory = info.get("inventory")
+        hint = info.get("install_hint")
+        if not info.get("importable"):
+            how = hint or "install the matching extra"
+            lines.append(f"- {name}: missing; {how}")
+        elif not info.get("available"):
+            lines.append(f"- {name}: degraded (importable, inventory={inventory})")
+        else:
+            inv = f", inventory={inventory}" if inventory is not None else ""
+            lines.append(f"- {name}: present (importable{inv})")
+
+    lines.append("")
+    bypass_status = bypass.get("status")
+    caps = bypass.get("capabilities")
+    cap_n = len(caps) if isinstance(caps, list) else int(bypass.get("capability_count") or 0)
+    if bypass_status == "ok" and cap_n:
+        lines.append(f"bypass: present (status={bypass_status}, capabilities={cap_n})")
+    elif bypass_status == "ok":
+        lines.append("bypass: degraded (status=ok, no capabilities listed)")
+    elif bypass_status:
+        lines.append(f"bypass: missing (status={bypass_status})")
+    else:
+        lines.append("bypass: missing")
+
+    lines.extend(["", "proxies:"])
+    lines.append(
+        f"- http list: {'present' if proxies.get('http_list_configured') else 'missing'}"
+    )
+    lines.append(f"- gateway: {'present' if proxies.get('gateway_configured') else 'missing'}")
+    if not proxies.get("residential_configured"):
+        lines.append("- residential: missing")
+    elif proxies.get("residential_reachable"):
+        lines.append("- residential: present (hop reachable)")
+    else:
+        err = proxies.get("error_class")
+        err_bit = f", error_class={err}" if err else ""
+        lines.append(f"- residential: degraded (configured, hop not reachable{err_bit})")
+
+    lines.extend(["", "captcha:"])
+    for item in captcha_solvers:
+        solver_id = str(item.get("id") or "unknown")
+        if solver_id == "browser_wait":
+            lines.append("- browser_wait: present")
+        elif item.get("key_present"):
+            lines.append(f"- {solver_id}: present (key present)")
+        else:
+            lines.append(
+                f"- {solver_id}: missing; set the provider API key env (value never returned)"
+            )
+
+    lines.extend(["", "llm / CLIProxy:"])
+    backend = llm.get("llm_backend")
+    if backend != "openai":
+        lines.append(f"- backend={backend}: present (no gateway required)")
+    elif llm.get("ok") and llm.get("reachable"):
+        extra = ""
+        if not llm.get("configured_models_available"):
+            extra = "; degraded: configured model missing"
+        endpoint = llm.get("endpoint")
+        loc = f" at {endpoint}" if isinstance(endpoint, str) and endpoint else ""
+        lines.append(f"- backend=openai: present (GET /models{loc}){extra}")
+    else:
+        err = llm.get("error") or "unreachable"
+        lines.append(
+            "- backend=openai: missing; configure JOB_FTCH_OPENAI_BASE_URL / CLIProxy "
+            f"and check GET /models ({err})"
+        )
+
+    if install_hints:
+        lines.extend(["", "install_hints:"])
+        for hint in install_hints:
+            lines.append(f"- {hint}")
+    return "\n".join(lines)
+
+
 class TenantMCPServer:
     def __init__(
         self,
@@ -702,23 +970,6 @@ class TenantMCPServer:
         inventory = self._require_runner().list_browser_capabilities()
         return inventory_to_public_dict(inventory)
 
-    async def _browser_routes_impl(
-        self,
-        tenant_id: str | None = None,
-        source_id: str | None = None,
-        bypass: str | None = None,
-    ) -> dict[str, Any]:
-        from job_ftch.application.browser_capability_inventory import (
-            explanation_to_public_dict,
-        )
-
-        explanation = await self._require_runner().explain_browser_route(
-            tenant_id,
-            source_id,
-            bypass=bypass,
-        )
-        return explanation_to_public_dict(explanation)
-
     async def _with_setup_if_needed(
         self,
         payload: dict[str, Any],
@@ -757,295 +1008,496 @@ class TenantMCPServer:
         )
         return payload
 
-    def _register_surface(self) -> None:
-        @self.app.tool
-        async def run_pipeline(
-            tenant_id: str | None = None,
-            user_id: str | None = None,
-            scope: str = "tenant",
-            source_ids: list[str] | None = None,
-            max_items: int | None = None,
-        ) -> dict[str, Any] | list[dict[str, Any]]:
-            """Run one tenant pipeline (scope='tenant') or all tenants (scope='all')."""
-            return await self._run_pipeline_impl(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                scope=scope,
-                source_ids=source_ids,
-                max_items=max_items,
+    async def _clear_run_data_impl(
+        self,
+        tenant_id: str,
+        *,
+        clear_output_artifacts: bool = True,
+    ) -> dict[str, int]:
+        runner = self._require_runner()
+        counts = await runner.clear_run_data(tenant_id)
+        if clear_output_artifacts:
+            counts["output_artifacts"] = _clear_output_artifacts(
+                runner.get_runtime(tenant_id).settings
             )
+        return counts
 
-        @self.app.tool
-        async def get_pipeline_status(tenant_id: str) -> dict[str, Any] | None:
-            """Return latest pipeline run status for a tenant."""
-            summary = await self._require_runner().get_status(tenant_id)
-            return None if summary is None else summary.as_dict()
+    async def _get_status_impl(
+        self,
+        tenant_id: str,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        runner = self._require_runner()
+        if run_id:
+            summary = await runner.get_run(run_id, tenant_id=tenant_id)
+            return {
+                "tenant_id": tenant_id,
+                "run_id": run_id,
+                "run": None if summary is None else summary.as_dict(),
+            }
+        payload = await self._get_tenant_status_impl(tenant_id)
+        runs = await runner.list_runs(tenant_id=tenant_id, limit=20)
+        payload["recent_runs"] = [item.as_dict() for item in runs]
+        return payload
 
-        @self.app.tool
-        async def get_tenant_status(tenant_id: str) -> dict[str, Any]:
-            """Aggregate tenant status, source degradation, and latest run metadata."""
-            return await self._get_tenant_status_impl(tenant_id)
-
-        @self.app.tool
-        async def get_sources(
-            tenant_id: str,
-            include_health: bool = True,
-            include_diagnostics: bool = True,
-        ) -> dict[str, Any]:
-            """List tenant sources with optional health and diagnostics."""
-            return await self._get_sources_impl(
-                tenant_id,
-                include_health=include_health,
-                include_diagnostics=include_diagnostics,
+    async def _runtime_readiness(self) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        inventory: dict[str, Any] | None = None
+        if self.runner is not None:
+            inventory = await self._browser_capabilities_impl()
+        llm = await probe_llm_backend(self.base_settings)
+        configured, first_proxy = _first_residential_proxy_url(self.base_settings)
+        if not configured or first_proxy is None:
+            residential: dict[str, Any] = {
+                "configured": False,
+                "reachable": False,
+                "error_class": None,
+            }
+        else:
+            reachable, error_class = await _probe_residential_proxy(first_proxy)
+            residential = {
+                "configured": True,
+                "reachable": reachable,
+                "error_class": error_class,
+            }
+        engines = _engine_runtime_status(inventory)
+        captcha_solvers = _captcha_runtime_status(self.base_settings)
+        hints: list[str] = [
+            str(item["install_hint"])
+            for item in engines.values()
+            if item.get("install_hint")
+        ]
+        if self.base_settings.llm_backend == "openai" and not llm.get("ok"):
+            hints.append("configure JOB_FTCH_OPENAI_BASE_URL / CLIProxy and check /models")
+        if not configured:
+            hints.append(
+                "set JOB_FTCH_RESIDENTIAL_PROXY_LIST, config/proxies.yaml residential, or proxy gateway"
             )
+        paid = [item for item in captcha_solvers if item["id"] != "browser_wait"]
+        if paid and not any(item.get("key_present") for item in paid):
+            hints.append("set the enabled captcha provider API key env (value never returned)")
+        payload = {
+            "engines": engines,
+            "llm": llm,
+            "residential_proxies": residential,
+            "captcha_solvers": captcha_solvers,
+            "install_hints": hints,
+        }
+        return payload, inventory
 
-        @self.app.tool
-        async def add_source(
-            tenant_id: str,
-            link: str,
-            source_type: str | None = None,
-            limit: int = 100,
-            source_name: str | None = None,
-        ) -> dict[str, Any]:
-            runner = self._require_runner()
+    async def _get_runtime_impl(self) -> dict[str, Any]:
+        payload, _inventory = await self._runtime_readiness()
+        return payload
+
+    async def _doctor_impl(self) -> dict[str, Any]:
+        runtime, inventory = await self._runtime_readiness()
+        extras = _doctor_extras()
+        bypass = inventory if inventory is not None else {"status": "unavailable"}
+        residential = runtime["residential_proxies"]
+        residential_configured = bool(residential.get("configured"))
+        proxies = {
+            "http_list_configured": bool(self.base_settings.http_proxy_list),
+            "gateway_configured": bool(str(self.base_settings.proxy_gateway or "").strip()),
+            "residential_configured": residential_configured,
+            "residential_reachable": (
+                bool(residential.get("reachable")) if residential_configured else None
+            ),
+            "error_class": residential.get("error_class") if residential_configured else None,
+        }
+        engines = runtime["engines"]
+        llm = runtime["llm"]
+        captcha_solvers = runtime["captcha_solvers"]
+        llm_required_failed = self.base_settings.llm_backend == "openai" and not bool(
+            llm.get("ok")
+        )
+        browsers_present = any(bool(item.get("importable")) for item in engines.values())
+        ok = (not llm_required_failed) and browsers_present
+        hints = list(runtime["install_hints"])
+        for info in extras.values():
+            hint = info.get("install_hint")
+            if isinstance(hint, str):
+                hints.append(hint)
+        install_hints = _uniq_hints(hints)
+        report = _build_doctor_report(
+            ok=ok,
+            extras=extras,
+            engines=engines,
+            bypass=bypass,
+            llm=llm,
+            proxies=proxies,
+            captcha_solvers=captcha_solvers,
+            install_hints=install_hints,
+        )
+        return {
+            "ok": ok,
+            "report": report,
+            "extras": extras,
+            "engines": engines,
+            "bypass": bypass,
+            "llm": llm,
+            "proxies": proxies,
+            "captcha_solvers": captcha_solvers,
+            "install_hints": install_hints,
+        }
+
+    async def _update_source_impl(
+        self,
+        *,
+        tenant_id: str,
+        action: str,
+        link: str | None = None,
+        source_type: str | None = None,
+        limit: int | None = None,
+        source_name: str | None = None,
+        source_id: str | None = None,
+        enabled: bool | None = None,
+    ) -> dict[str, Any]:
+        normalized = (action or "").strip().lower()
+        if normalized not in _SOURCE_ACTIONS:
+            return {
+                "error": "invalid_arguments",
+                "message": "action must be one of add|update|remove",
+                "action": action,
+            }
+        runner = self._require_runner()
+        if normalized == "add":
+            if not link or not link.strip():
+                return {
+                    "error": "invalid_arguments",
+                    "message": "link is required for action=add",
+                    "action": action,
+                }
             spec = await build_source_spec_from_input(
                 link,
                 auth_provider=runner.get_runtime(tenant_id).auth_provider,
                 source_type=source_type,
-                limit=limit,
+                limit=100 if limit is None else limit,
                 source_name=source_name,
             )
-            return await runner.add_source_spec(
+            payload = await runner.add_source_spec(
                 tenant_id,
                 spec,
                 added_via="mcp",
                 input_value=link,
             )
+            if isinstance(payload, dict):
+                payload["action"] = "add"
+            return payload
+        if not source_id:
+            return {
+                "error": "invalid_arguments",
+                "message": "source_id is required for action=update|remove",
+                "action": action,
+            }
+        if normalized == "remove":
+            payload = await mcp_ops.remove_source(
+                runner,
+                tenant_id=tenant_id,
+                source_id=source_id,
+            )
+            if isinstance(payload, dict):
+                payload["action"] = "remove"
+            return payload
+        patch: dict[str, Any] = {}
+        if enabled is not None:
+            patch["enabled"] = enabled
+        if limit is not None:
+            patch["limit"] = limit
+        if not patch:
+            return {
+                "error": "invalid_arguments",
+                "message": "enabled and/or limit is required for action=update",
+                "action": action,
+                "source_id": source_id,
+            }
+        payload = await mcp_ops.update_source(
+            runner,
+            tenant_id=tenant_id,
+            source_id=source_id,
+            patch=patch,
+        )
+        if isinstance(payload, dict):
+            payload["action"] = "update"
+        return payload
 
-        @self.app.tool
-        async def disable_source(tenant_id: str, source_id: str) -> dict[str, Any]:
-            return await self._require_runner().disable_source(tenant_id, source_id)
+    async def _get_jobs_impl(
+        self,
+        *,
+        tenant_id: str,
+        query: str | None = None,
+        job_id: str | None = None,
+        limit: int = 20,
+        include_lineage: bool = False,
+    ) -> dict[str, Any]:
+        runner = self._require_runner()
+        limit = min(max(int(limit), 1), 100)
+        if job_id:
+            job = await runner.get_job(job_id, tenant_id=tenant_id)
+            payload: dict[str, Any] = {
+                "tenant_id": tenant_id,
+                "job_id": job_id,
+                "job": None if job is None else job.model_dump(mode="json"),
+                "jobs": [] if job is None else [job.model_dump(mode="json")],
+                "count": 0 if job is None else 1,
+            }
+            if include_lineage:
+                lineage = await runner.get_job_lineage(job_id, tenant_id=tenant_id)
+                payload["lineage"] = None if lineage is None else lineage.model_dump(mode="json")
+            return payload
+        if query:
+            groups = await runner.search_jobs(query, tenant_id=tenant_id, limit=limit)
+            jobs = [mcp_examples.public_job_group(group) for group in groups]
+            payload = {
+                "tenant_id": tenant_id,
+                "query": query,
+                "jobs": jobs,
+                "count": len(jobs),
+            }
+            if include_lineage and jobs:
+                first_id = _job_id_from_payload(jobs[0])
+                if first_id:
+                    lineage = await runner.get_job_lineage(first_id, tenant_id=tenant_id)
+                    payload["lineage"] = (
+                        None if lineage is None else lineage.model_dump(mode="json")
+                    )
+            return payload
+        latest = await runner.latest_jobs(tenant_id, limit=limit)
+        jobs = [job.model_dump(mode="json") for job in latest]
+        payload = {
+            "tenant_id": tenant_id,
+            "jobs": jobs,
+            "count": len(jobs),
+        }
+        if include_lineage and jobs:
+            first_id = _job_id_from_payload(jobs[0])
+            if first_id:
+                lineage = await runner.get_job_lineage(first_id, tenant_id=tenant_id)
+                payload["lineage"] = None if lineage is None else lineage.model_dump(mode="json")
+        return payload
 
-        @self.app.tool
-        async def list_profiles(tenant_id: str, user_id: str) -> list[dict[str, Any]]:
-            return await self._require_runner().list_candidate_profiles(tenant_id, user_id)
+    async def _run_pipeline_tool_impl(
+        self,
+        *,
+        tenant_id: str | None,
+        source_ids: list[str] | None,
+        max_items: int | None,
+        clear_first: bool,
+        user_id: str | None,
+        scope: str,
+    ) -> dict[str, Any] | list[dict[str, Any]]:
+        cleared: dict[str, int] | None = None
+        if clear_first:
+            if not tenant_id:
+                return {
+                    "error": "invalid_arguments",
+                    "message": "tenant_id is required when clear_first=true",
+                }
+            cleared = await self._clear_run_data_impl(tenant_id)
+        result = await self._run_pipeline_impl(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            scope=scope,
+            source_ids=source_ids,
+            max_items=max_items,
+        )
+        if cleared is not None and isinstance(result, dict):
+            result["cleared"] = cleared
+        return result
 
-        @self.app.tool
-        async def save_profile(
-            tenant_id: str,
-            user_id: str,
-            profile_id: str,
-            summary: str,
-        ) -> dict[str, Any]:
-            profile = build_candidate_profile_from_payload(
+    async def _get_prefilter_status_tool_impl(
+        self,
+        tenant_id: str,
+        profile_id: str | None = None,
+    ) -> dict[str, Any]:
+        from job_ftch.application.prefilter_artifacts import (
+            get_prefilter_status,
+            list_prefilter_artifacts,
+        )
+
+        settings = self._require_runner().get_runtime(tenant_id).settings
+        payload = get_prefilter_status(
+            settings,
+            tenant_id=tenant_id,
+            profile_id=profile_id,
+        )
+        payload["requirements"] = _prefilter_requirements_payload(profile_id)
+        artifacts = list_prefilter_artifacts(
+            settings,
+            tenant_id=tenant_id,
+            profile_id=profile_id,
+        )
+        payload["artifacts"] = artifacts.get("artifacts")
+        payload["artifact_count"] = artifacts.get("count")
+        return payload
+
+    async def _promote_prefilter_tool_impl(
+        self,
+        *,
+        tenant_id: str,
+        artifact_id: str | None,
+        threshold: float | None,
+        require_gate_pass: bool,
+        rollback: bool,
+    ) -> dict[str, Any]:
+        from job_ftch.application.prefilter_artifacts import (
+            promote_prefilter,
+            rollback_prefilter,
+        )
+
+        settings = self._require_runner().get_runtime(tenant_id).settings
+        if rollback:
+            return rollback_prefilter(
+                settings,
+                tenant_id=tenant_id,
+                artifact_id=artifact_id,
+            )
+        if not artifact_id:
+            return {
+                "error": "invalid_arguments",
+                "message": "artifact_id is required unless rollback=true",
+            }
+        return promote_prefilter(
+            settings,
+            tenant_id=tenant_id,
+            artifact_id=artifact_id,
+            threshold=threshold,
+            require_gate_pass=require_gate_pass,
+        )
+
+    async def _set_resume_impl(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        resume_text: str,
+        profile_id: str | None,
+        activate: bool,
+    ) -> dict[str, Any]:
+        record = await self._require_runner().ingest_resume(
+            tenant_id,
+            user_id=user_id,
+            resume_text=resume_text,
+            profile_id=profile_id,
+            activate=activate,
+        )
+        resume = record.profile.resume
+        summary = resume.summary if resume is not None else None
+        if summary is None and record.profile.search_profiles:
+            summary = record.profile.search_profiles[0].name
+        sync_error: str | None = None
+        try:
+            from job_ftch.application.shot_sync import sync_profile_to_shot_store
+
+            await sync_profile_to_shot_store(
+                profile=record,
+                tenant_id=tenant_id,
                 user_id=user_id,
-                profile_id=profile_id,
-                payload={"summary": summary, "name": profile_id},
             )
-            saved = await self._require_runner().save_candidate_profile(
-                tenant_id,
-                ManagedCandidateProfile(
-                    user_id=user_id,
-                    profile_id=profile_id,
-                    profile=profile,
-                    updated_at=datetime.now(UTC),
-                ),
-            )
-            await self._require_runner().set_active_candidate_profile(
-                tenant_id, user_id, profile_id
-            )
-            from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
+        except Exception as exc:  # noqa: BLE001 - ingest already persisted
+            sync_error = f"{type(exc).__name__}: {exc}"
+        from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
 
-            mark_prefilter_dirty(self._require_runner().get_runtime(tenant_id).settings)
-            return saved
+        mark_prefilter_dirty(self._require_runner().get_runtime(tenant_id).settings)
+        return {
+            "user_id": record.user_id,
+            "profile_id": record.profile_id,
+            "updated_at": record.updated_at.isoformat(),
+            "summary": summary,
+            "prefilter_dirty": True,
+            "shot_sync_error": sync_error,
+        }
 
-        @self.app.tool
-        async def activate_profile(
-            tenant_id: str,
-            user_id: str,
-            profile_id: str,
-        ) -> dict[str, Any]:
-            return await self._require_runner().set_active_candidate_profile(
-                tenant_id,
-                user_id,
-                profile_id,
-            )
+    async def _probe_page_impl(
+        self,
+        *,
+        tenant_id: str,
+        url: str | None,
+        source_id: str | None,
+        what: str,
+        engine: str,
+        headed: bool,
+        solve: str,
+        max_items: int,
+    ) -> dict[str, Any]:
+        normalized = (what or "listing").strip().lower()
+        if normalized not in _PAGE_WHAT:
+            return {
+                "error": "invalid_arguments",
+                "message": "what must be one of listing|detail|challenge|fingerprint",
+                "what": what,
+            }
+        solve_mode = (solve or "none").strip().lower()
+        if solve_mode not in _SOLVE_MODES:
+            return {
+                "error": "invalid_arguments",
+                "message": "solve must be none|browser_wait|provider",
+                "solve": solve,
+            }
+        from job_ftch.application.source_operations import (
+            run_browser_probe as run_browser_probe_op,
+        )
 
-        @self.app.tool
-        async def list_pipeline_runs(
-            tenant_id: str | None = None,
-            limit: int = 20,
-        ) -> list[dict[str, Any]]:
-            """List recent pipeline runs (optionally tenant-scoped)."""
-            summaries = await self._require_runner().list_runs(tenant_id=tenant_id, limit=limit)
-            return [summary.as_dict() for summary in summaries]
+        payload = await run_browser_probe_op(
+            self._require_runner(),
+            tenant_id=tenant_id,
+            source_id=source_id,
+            url=url,
+            probe=normalized,
+            engine=engine,
+            headed=headed,
+            max_items=max_items,
+            solve=solve_mode,
+        )
+        payload["ingest"] = False
+        return await self._with_setup_if_needed(payload, goal="browser")
 
-        @self.app.tool
-        async def get_pipeline_run(
-            run_id: str,
-            tenant_id: str | None = None,
-        ) -> dict[str, Any] | None:
-            """Fetch a single pipeline run by id."""
-            summary = await self._require_runner().get_run(run_id, tenant_id=tenant_id)
-            return None if summary is None else summary.as_dict()
+    async def _browser_session_impl(
+        self,
+        *,
+        action: str,
+        tenant_id: str | None,
+        session_id: str | None,
+        source_id: str | None,
+        url: str | None,
+        engine: str,
+        headed: bool,
+        bypass: str | None,
+        profile: str,
+        manual_challenge: bool,
+        artifact_type: str,
+        solve: str | None,
+    ) -> dict[str, Any]:
+        from job_ftch.application.source_operations import (
+            capture_browser_artifact as capture_browser_artifact_op,
+        )
+        from job_ftch.application.source_operations import (
+            close_browser_session as close_browser_session_op,
+        )
+        from job_ftch.application.source_operations import (
+            continue_browser_session as continue_browser_session_op,
+        )
+        from job_ftch.application.source_operations import (
+            get_browser_session as get_browser_session_op,
+        )
+        from job_ftch.application.source_operations import (
+            open_browser_session as open_browser_session_op,
+        )
 
-        @self.app.tool
-        async def list_tenants() -> list[dict[str, Any]]:
-            tenants = await self._require_runner().list_tenants()
-            return [tenant.model_dump(mode="json") for tenant in tenants]
-
-        @self.app.tool
-        async def get_bypass_capabilities() -> dict[str, Any]:
-            """Read-only inventory of browser/bypass routes and availability."""
-            return await self._browser_capabilities_impl()
-
-        @self.app.tool
-        async def get_llm_backend_health() -> dict[str, Any]:
-            """Probe CLIProxy/OpenAI-compatible model routing without generation."""
-            return await probe_llm_backend(self.base_settings)
-
-        @self.app.tool
-        async def get_bypass_routes(
-            tenant_id: str | None = None,
-            source_id: str | None = None,
-            bypass: str | None = None,
-        ) -> dict[str, Any]:
-            """Explain why a browser/bypass route is selected or unavailable."""
-            return await self._browser_routes_impl(tenant_id, source_id, bypass)
-
-        @self.app.tool
-        async def probe_source(
-            tenant_id: str,
-            source_id: str,
-            mode: str = "cheap",
-            max_items: int = 5,
-        ) -> dict[str, Any]:
-            """Diagnose a source (cheap) or run a bounded source-scoped ingest (full)."""
-            from job_ftch.application.source_operations import probe_source as probe_source_op
-
-            payload = await probe_source_op(
-                self._require_runner(),
-                tenant_id=tenant_id,
-                source_id=source_id,
-                mode=mode,
-                max_items=max_items,
-            )
-            return await self._with_setup_if_needed(payload)
-
-        @self.app.tool
-        async def run_source(
-            tenant_id: str,
-            source_id: str,
-            max_items: int | None = None,
-            parser: str | None = None,
-            bypass: str | None = None,
-        ) -> dict[str, Any]:
-            """Run one source. omit bypass/parser for defaults; pass a name to pin one mechanic."""
-            from job_ftch.application.source_operations import run_source as run_source_op
-
-            payload = await run_source_op(
-                self._require_runner(),
-                tenant_id=tenant_id,
-                source_id=source_id,
-                max_items=max_items,
-                parser=parser,
-                bypass=bypass,
-            )
-            return await self._with_setup_if_needed(payload)
-
-        @self.app.tool
-        async def run_source_escalation(
-            tenant_id: str,
-            source_id: str,
-            strategy: str = "recommended",
-            max_tier: str | None = None,
-            max_items: int = 5,
-        ) -> dict[str, Any]:
-            """recommended = adaptive ladder; all = bounded per-route sweep with parse diagnosis."""
-            from job_ftch.application.source_operations import (
-                run_source_escalation as run_source_escalation_op,
-            )
-
-            payload = await run_source_escalation_op(
-                self._require_runner(),
-                tenant_id=tenant_id,
-                source_id=source_id,
-                strategy=strategy,
-                max_tier=max_tier,
-                max_items=max_items,
-            )
-            return await self._with_setup_if_needed(payload, goal="bypass")
-
-        @self.app.tool
-        async def probe_bypass_route(
-            tenant_id: str,
-            source_id: str,
-            bypass: str,
-            max_items: int = 3,
-        ) -> dict[str, Any]:
-            """Run one named bypass (listing probe for browsers, pinned ingest otherwise)."""
-            from job_ftch.application.source_operations import (
-                probe_bypass_route as probe_bypass_route_op,
-            )
-
-            payload = await probe_bypass_route_op(
-                self._require_runner(),
-                tenant_id=tenant_id,
-                source_id=source_id,
-                bypass=bypass,
-                max_items=max_items,
-            )
-            return await self._with_setup_if_needed(payload, goal="bypass")
-
-        @self.app.tool
-        async def run_browser_probe(
-            tenant_id: str,
-            source_id: str | None = None,
-            url: str | None = None,
-            probe: str = "listing",
-            engine: str = "auto",
-            bypass: str | None = None,
-            headed: bool = False,
-            max_items: int = 5,
-            solve: str = "none",
-        ) -> dict[str, Any]:
-            """Live listing/detail/challenge/fingerprint/custom_safe probe."""
-            from job_ftch.application.source_operations import (
-                run_browser_probe as run_browser_probe_op,
-            )
-
-            payload = await run_browser_probe_op(
-                self._require_runner(),
-                tenant_id=tenant_id,
-                source_id=source_id,
-                url=url,
-                probe=probe,
-                engine=engine,
-                bypass=bypass,
-                headed=headed,
-                max_items=max_items,
-                solve=solve,
-            )
-            return await self._with_setup_if_needed(payload, goal="browser")
-
-        @self.app.tool
-        async def open_browser_session(
-            tenant_id: str,
-            source_id: str | None = None,
-            url: str | None = None,
-            engine: str = "auto",
-            headed: bool = True,
-            bypass: str | None = None,
-            profile: str = "ephemeral",
-            manual_challenge: bool = False,
-        ) -> dict[str, Any]:
-            """Open an ephemeral, persistent, or domain operator browser session."""
-            from job_ftch.application.source_operations import (
-                open_browser_session as open_browser_session_op,
-            )
-
+        normalized = (action or "").strip().lower()
+        if normalized not in _SESSION_ACTIONS:
+            return {
+                "error": "invalid_arguments",
+                "message": "action must be one of open|status|wait|solve|goto|capture|close",
+                "action": action,
+            }
+        runner = self._require_runner()
+        if normalized == "open":
+            if not tenant_id:
+                return {
+                    "error": "invalid_arguments",
+                    "message": "tenant_id is required for action=open",
+                }
             payload = await open_browser_session_op(
-                self._require_runner(),
+                runner,
                 tenant_id=tenant_id,
                 source_id=source_id,
                 url=url,
@@ -1056,580 +1508,414 @@ class TenantMCPServer:
                 manual_challenge=manual_challenge,
             )
             return await self._with_setup_if_needed(payload, goal="browser")
-
-        @self.app.tool
-        async def get_browser_session(session_id: str) -> dict[str, Any]:
-            """Return a public snapshot of an operator browser session."""
-            from job_ftch.application.source_operations import (
-                get_browser_session as get_browser_session_op,
-            )
-
-            return await get_browser_session_op(self._require_runner(), session_id=session_id)
-
-        @self.app.tool
-        async def continue_browser_session(
-            session_id: str,
-            instruction: str | None = None,
-        ) -> dict[str, Any]:
-            """wait|reload|wait_challenge|extend|solve|navigate <url> on an open session."""
-            from job_ftch.application.source_operations import (
-                continue_browser_session as continue_browser_session_op,
-            )
-
-            payload = await continue_browser_session_op(
-                self._require_runner(),
-                session_id=session_id,
-                instruction=instruction,
-            )
-            return await self._with_setup_if_needed(payload, goal="captcha")
-
-        @self.app.tool
-        async def capture_browser_artifact(
-            session_id: str,
-            artifact_type: str = "text",
-        ) -> dict[str, Any]:
-            """Capture text, truncated html, cookie names, screenshot, or trace."""
-            from job_ftch.application.source_operations import (
-                capture_browser_artifact as capture_browser_artifact_op,
-            )
-
+        if not session_id:
+            return {
+                "error": "invalid_arguments",
+                "message": f"session_id is required for action={normalized}",
+                "action": normalized,
+            }
+        if normalized == "status":
+            return await get_browser_session_op(runner, session_id=session_id)
+        if normalized == "capture":
             return await capture_browser_artifact_op(
-                self._require_runner(),
+                runner,
                 session_id=session_id,
                 artifact_type=artifact_type,
             )
-
-        @self.app.tool
-        async def close_browser_session(session_id: str) -> dict[str, Any]:
-            """Close an operator browser session and release the runtime."""
-            from job_ftch.application.source_operations import (
-                close_browser_session as close_browser_session_op,
-            )
-
-            return await close_browser_session_op(self._require_runner(), session_id=session_id)
-
-        @self.app.tool
-        async def recommend_runtime_setup(
-            tenant_id: str | None = None,
-            source_id: str | None = None,
-            goal: str = "basic",
-            platform: str | None = None,
-        ) -> dict[str, Any]:
-            """Recommend installs/config for MCP, browser, bypass, or prefilter goals.
-
-            Read-only: does not install packages or expose secret values.
-            """
-            normalized = (goal or "basic").strip().lower()
-            if normalized not in _RUNTIME_GOALS:
+        if normalized == "close":
+            return await close_browser_session_op(runner, session_id=session_id)
+        if normalized == "wait":
+            instruction = "wait"
+        elif normalized == "solve":
+            mode = (solve or "browser_wait").strip().lower()
+            instruction = "solve" if mode in {"", "none", "browser_wait"} else f"solve:{mode}"
+        elif normalized == "goto":
+            if not url:
                 return {
-                    "error": "unsupported_goal",
-                    "message": f"goal must be one of {sorted(_RUNTIME_GOALS)}",
-                    "goal": goal,
+                    "error": "invalid_arguments",
+                    "message": "url is required for action=goto",
+                    "action": normalized,
+                    "session_id": session_id,
                 }
-            inventory: dict[str, Any] | None = None
-            source_context: dict[str, Any] | None = None
-            if normalized in {
-                "browser",
-                "bypass",
-                "career_sites",
-                "protected_sites",
-                "captcha",
-                "full",
-            }:
-                inventory = await self._browser_capabilities_impl()
-            if tenant_id and source_id:
-                sources = await self._require_runner().list_sources(tenant_id)
-                for item in sources:
-                    if str(item.get("source_id") or "") == source_id:
-                        source_context = item
-                        break
-                if source_context is None:
-                    return {
-                        "error": "source_not_found",
-                        "tenant_id": tenant_id,
-                        "source_id": source_id,
-                        "goal": normalized,
-                    }
-            return _recommend_runtime_setup(
-                goal=normalized,
-                platform=platform,
-                inventory=inventory,
-                source_context=source_context,
-            )
+            instruction = f"navigate {url}"
+        else:
+            instruction = None
+        payload = await continue_browser_session_op(
+            runner,
+            session_id=session_id,
+            instruction=instruction,
+        )
+        return await self._with_setup_if_needed(payload, goal="captcha")
 
-        @self.app.tool
-        async def validate_runtime_setup(
-            goal: str = "mcp",
-            tenant_id: str | None = None,
-            source_id: str | None = None,
-        ) -> dict[str, Any]:
-            """Validate current runtime readiness without disclosing secrets."""
-            normalized = (goal or "mcp").strip().lower()
-            if normalized not in _RUNTIME_GOALS:
-                return {
-                    "error": "unsupported_goal",
-                    "message": f"goal must be one of {sorted(_RUNTIME_GOALS)}",
-                    "goal": goal,
-                }
-            inventory: dict[str, Any] | None = None
-            if normalized in {
-                "browser",
-                "bypass",
-                "career_sites",
-                "protected_sites",
-                "captcha",
-                "full",
-            }:
-                inventory = await self._browser_capabilities_impl()
-            payload = _validate_runtime_setup(goal=normalized, inventory=inventory)
-            # tenant_id/source_id reserved for future source-scoped checks.
-            payload["tenant_id"] = tenant_id
-            payload["source_id"] = source_id
-            return payload
-
-        @self.app.tool
-        async def get_prefilter_requirements(
-            profile_type: str | None = None,
-        ) -> dict[str, Any]:
-            """Return dataset format/size requirements for TF-IDF/LogReg prefilter training."""
-            return _prefilter_requirements_payload(profile_type)
-
-        @self.app.tool
-        async def get_prefilter_status(
-            tenant_id: str,
-            profile_id: str | None = None,
-        ) -> dict[str, Any]:
-            """Return dirty flag, current artifact, and training readiness."""
-            from job_ftch.application.prefilter_artifacts import get_prefilter_status
-
-            return get_prefilter_status(
-                self._require_runner().get_runtime(tenant_id).settings,
-                tenant_id=tenant_id,
-                profile_id=profile_id,
-            )
-
-        @self.app.tool
-        async def prepare_prefilter_dataset(
-            tenant_id: str,
-            profile_id: str | None = None,
-            source: str = "examples",
-            output: str | None = None,
-            user_id: str = "mcp",
-        ) -> dict[str, Any]:
-            """Build a training JSONL from examples, feedback, eval dataset, or mixed."""
-            from job_ftch.application.prefilter_artifacts import prepare_prefilter_dataset
-
-            return await prepare_prefilter_dataset(
-                self._require_runner(),
-                tenant_id=tenant_id,
-                profile_id=profile_id,
-                source=source,
-                output=output,
-                user_id=user_id,
-            )
-
-        @self.app.tool
-        async def validate_prefilter_dataset(
-            dataset_id_or_path: str,
-            tenant_id: str | None = None,
-        ) -> dict[str, Any]:
-            """Validate JSONL size/label contract without training."""
-            from job_ftch.application.prefilter_artifacts import validate_prefilter_dataset
-
-            settings = None
-            if tenant_id:
-                settings = self._require_runner().get_runtime(tenant_id).settings
-            return validate_prefilter_dataset(dataset_id_or_path, settings)
-
-        @self.app.tool
-        async def train_prefilter(
-            tenant_id: str,
-            profile_id: str | None = None,
-            dataset_id_or_path: str | None = None,
-            dry_run: bool = True,
-            threshold: float = 0.30,
-        ) -> dict[str, Any]:
-            """Train a TF-IDF/LogReg artifact. Default dry_run does not write."""
-            from job_ftch.application.prefilter_artifacts import train_prefilter
-
-            return train_prefilter(
-                self._require_runner().get_runtime(tenant_id).settings,
-                tenant_id=tenant_id,
-                profile_id=profile_id,
-                dataset_id_or_path=dataset_id_or_path,
-                dry_run=dry_run,
-                threshold=threshold,
-            )
-
-        @self.app.tool
-        async def evaluate_prefilter(
-            tenant_id: str,
-            artifact_id: str,
-            dataset_id_or_path: str | None = None,
-            threshold: float | None = None,
-        ) -> dict[str, Any]:
-            """Evaluate a trained artifact against stored holdout and optional dataset."""
-            from job_ftch.application.prefilter_artifacts import evaluate_prefilter
-
-            return evaluate_prefilter(
-                self._require_runner().get_runtime(tenant_id).settings,
-                tenant_id=tenant_id,
-                artifact_id=artifact_id,
-                dataset_id_or_path=dataset_id_or_path,
-                threshold=threshold,
-            )
-
-        @self.app.tool
-        async def promote_prefilter(
-            tenant_id: str,
-            artifact_id: str,
-            threshold: float | None = None,
-            require_gate_pass: bool = True,
-        ) -> dict[str, Any]:
-            """Promote an artifact to current after an eval gate."""
-            from job_ftch.application.prefilter_artifacts import promote_prefilter
-
-            return promote_prefilter(
-                self._require_runner().get_runtime(tenant_id).settings,
-                tenant_id=tenant_id,
-                artifact_id=artifact_id,
-                threshold=threshold,
-                require_gate_pass=require_gate_pass,
-            )
-
-        @self.app.tool
-        async def rollback_prefilter(
-            tenant_id: str,
-            artifact_id: str | None = None,
-        ) -> dict[str, Any]:
-            """Roll current artifact back to previous or an explicit id."""
-            from job_ftch.application.prefilter_artifacts import rollback_prefilter
-
-            return rollback_prefilter(
-                self._require_runner().get_runtime(tenant_id).settings,
-                tenant_id=tenant_id,
-                artifact_id=artifact_id,
-            )
-
-        @self.app.tool
-        async def list_prefilter_artifacts(
-            tenant_id: str,
-            profile_id: str | None = None,
-        ) -> dict[str, Any]:
-            """List trained tenant artifacts and which one is current."""
-            from job_ftch.application.prefilter_artifacts import list_prefilter_artifacts
-
-            return list_prefilter_artifacts(
-                self._require_runner().get_runtime(tenant_id).settings,
-                tenant_id=tenant_id,
-                profile_id=profile_id,
-            )
-
-        @self.app.tool
-        async def ingest_resume(
-            tenant_id: str,
-            user_id: str,
-            resume_text: str,
-            profile_id: str | None = None,
-            activate: bool = True,
-        ) -> dict[str, Any]:
-            """Ingest resume text into a managed candidate profile (not stored on sessions)."""
-            record = await self._require_runner().ingest_resume(
-                tenant_id,
-                user_id=user_id,
-                resume_text=resume_text,
-                profile_id=profile_id,
-                activate=activate,
-            )
-            resume = record.profile.resume
-            summary = resume.summary if resume is not None else None
-            if summary is None and record.profile.search_profiles:
-                summary = record.profile.search_profiles[0].name
-            sync_error: str | None = None
-            try:
-                from job_ftch.application.shot_sync import sync_profile_to_shot_store
-
-                await sync_profile_to_shot_store(
-                    profile=record,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                )
-            except Exception as exc:  # noqa: BLE001 - ingest already persisted
-                sync_error = f"{type(exc).__name__}: {exc}"
-            from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
-
-            mark_prefilter_dirty(self._require_runner().get_runtime(tenant_id).settings)
+    async def _run_source_tool_impl(
+        self,
+        *,
+        tenant_id: str,
+        source_id: str,
+        engine: str | None,
+        bypass: str | None,
+        parser: str | None,
+        escalation: str,
+        solve: str,
+        session_id: str | None,
+        max_items: int | None,
+        max_tier: str | None = None,
+    ) -> dict[str, Any]:
+        normalized = (escalation or "adaptive").strip().lower()
+        if normalized not in _ESCALATION_MODES:
             return {
-                "user_id": record.user_id,
-                "profile_id": record.profile_id,
-                "updated_at": record.updated_at.isoformat(),
-                "summary": summary,
-                "prefilter_dirty": True,
-                "shot_sync_error": sync_error,
+                "error": "invalid_arguments",
+                "message": "escalation must be adaptive|all",
+                "escalation": escalation,
             }
+        solve_mode = (solve or "none").strip().lower()
+        if solve_mode not in _SOLVE_MODES:
+            return {
+                "error": "invalid_arguments",
+                "message": "solve must be none|browser_wait|provider",
+                "solve": solve,
+            }
+        from job_ftch.application.source_operations import run_source as run_source_op
+        from job_ftch.application.source_operations import (
+            run_source_escalation as run_source_escalation_op,
+        )
 
-        @self.app.tool
-        async def get_examples_summary(
-            tenant_id: str,
-            user_id: str,
-            profile_id: str | None = None,
-        ) -> dict[str, Any]:
-            """Return example counts for a user profile (resume/vacancy × polarity)."""
-            return await mcp_examples.get_examples_summary(
+        pin = bypass or engine
+        if normalized == "all":
+            payload = await run_source_escalation_op(
                 self._require_runner(),
                 tenant_id=tenant_id,
-                user_id=user_id,
-                profile_id=profile_id,
+                source_id=source_id,
+                strategy="all",
+                max_tier=max_tier,
+                max_items=5 if max_items is None else max_items,
+                session_id=session_id,
+            )
+            goal = "bypass"
+        else:
+            payload = await run_source_op(
+                self._require_runner(),
+                tenant_id=tenant_id,
+                source_id=source_id,
+                max_items=max_items,
+                parser=parser,
+                bypass=pin,
+                session_id=session_id,
+            )
+            goal = "protected_sites"
+        payload["requested_solve"] = solve_mode
+        payload["escalation"] = normalized
+        return await self._with_setup_if_needed(payload, goal=goal)
+
+    def _register_surface(self) -> None:
+        surface = mcp_examples.resolve_surface()
+        register_mass = surface in {"all", "mass"}
+        register_personal = surface in {"all", "personal"}
+
+        @self.app.tool
+        async def list_tenants() -> list[dict[str, Any]]:
+            tenants = await self._require_runner().list_tenants()
+            return [tenant.model_dump(mode="json") for tenant in tenants]
+
+        @self.app.tool
+        async def get_status(tenant_id: str, run_id: str | None = None) -> dict[str, Any]:
+            """Tenant snapshot + latest/recent runs + source degradation. Pass run_id for one run."""
+            return await self._get_status_impl(tenant_id, run_id)
+
+        @self.app.tool
+        async def get_runtime() -> dict[str, Any]:
+            """Live readiness for engines, LLM/CLIProxy, residential proxies, and captcha solvers."""
+            return await self._get_runtime_impl()
+
+        @self.app.tool
+        async def doctor() -> dict[str, Any]:
+            """Written diagnosis of extras, browsers, proxies, captcha, and CLIProxy. No secrets."""
+            return await self._doctor_impl()
+
+        @self.app.tool
+        async def get_sources(
+            tenant_id: str,
+            include_health: bool = True,
+            include_diagnostics: bool = True,
+        ) -> dict[str, Any]:
+            """List tenant sources with health, assessment, and recommended_route."""
+            return await self._get_sources_impl(
+                tenant_id,
+                include_health=include_health,
+                include_diagnostics=include_diagnostics,
             )
 
         @self.app.tool
-        async def list_examples(
+        async def update_source(
+            tenant_id: str,
+            action: str,
+            link: str | None = None,
+            source_type: str | None = None,
+            limit: int | None = None,
+            source_name: str | None = None,
+            source_id: str | None = None,
+            enabled: bool | None = None,
+        ) -> dict[str, Any]:
+            """Add, patch enabled/limit, or remove a source."""
+            return await self._update_source_impl(
+                tenant_id=tenant_id,
+                action=action,
+                link=link,
+                source_type=source_type,
+                limit=limit,
+                source_name=source_name,
+                source_id=source_id,
+                enabled=enabled,
+            )
+
+        @self.app.tool
+        async def get_jobs(
+            tenant_id: str,
+            query: str | None = None,
+            job_id: str | None = None,
+            limit: int = 20,
+            include_lineage: bool = False,
+        ) -> dict[str, Any]:
+            """Latest jobs, search, or one job; optionally attach lineage."""
+            return await self._get_jobs_impl(
+                tenant_id=tenant_id,
+                query=query,
+                job_id=job_id,
+                limit=limit,
+                include_lineage=include_lineage,
+            )
+
+        @self.app.tool
+        async def update_shot(
             tenant_id: str,
             user_id: str,
-            profile_id: str | None = None,
-            kind: str = "all",
+            action: str,
+            kind: str | None = None,
             label: str | None = None,
-        ) -> dict[str, Any]:
-            """List resume/vacancy examples, optionally filtered by kind and label."""
-            return await mcp_examples.list_operator_examples(
-                self._require_runner(),
-                tenant_id=tenant_id,
-                user_id=user_id,
-                profile_id=profile_id,
-                kind=kind,
-                label=label,
-            )
-
-        @self.app.tool
-        async def add_example(
-            tenant_id: str,
-            user_id: str,
-            kind: str,
-            label: str,
             text: str = "",
             texts: list[str] | None = None,
+            index: int | None = None,
             profile_id: str | None = None,
-            refresh_policy: str = "auto",
+            dry_run: bool = False,
         ) -> dict[str, Any]:
-            """Add one or many positive/negative resume or vacancy examples and compile once."""
-            return await mcp_examples.add_operator_example(
+            """List (default all shots), add, remove, clear, or compile resume/vacancy shots."""
+            return await mcp_examples.update_operator_shot(
                 self._require_runner(),
                 tenant_id=tenant_id,
                 user_id=user_id,
+                action=action,
                 kind=kind,
                 label=label,
                 text=text,
                 texts=texts,
-                profile_id=profile_id,
-                refresh_policy=refresh_policy,
-            )
-
-        @self.app.tool
-        async def remove_example(
-            tenant_id: str,
-            user_id: str,
-            kind: str,
-            label: str,
-            index: int,
-            profile_id: str | None = None,
-        ) -> dict[str, Any]:
-            """Remove one example by kind, label, and index."""
-            return await mcp_examples.remove_operator_example(
-                self._require_runner(),
-                tenant_id=tenant_id,
-                user_id=user_id,
-                kind=kind,
-                label=label,
                 index=index,
                 profile_id=profile_id,
+                dry_run=dry_run,
             )
 
-        @self.app.tool
-        async def clear_examples(
-            tenant_id: str,
-            user_id: str,
-            kind: str = "all",
-            profile_id: str | None = None,
-        ) -> dict[str, Any]:
-            """Clear resume, vacancy, or all examples for a profile."""
-            return await mcp_examples.clear_operator_examples(
-                self._require_runner(),
-                tenant_id=tenant_id,
-                user_id=user_id,
-                kind=kind,
-                profile_id=profile_id,
-            )
+        if register_mass:
 
-        @self.app.tool
-        async def create_search_session(
-            tenant_id: str,
-            user_id: str | None = None,
-            profile_id: str | None = None,
-            source_scope: list[str] | None = None,
-            max_items: int | None = None,
-            max_sources: int | None = None,
-            result_limit: int = 20,
-        ) -> dict[str, Any]:
-            """Create a resume-driven search session for plan/approve/run workflow."""
-            from job_ftch.application.search_session import session_to_public_dict
-
-            session = await self._require_runner().create_search_session(
-                tenant_id,
-                user_id=user_id,
-                profile_id=profile_id,
-                source_scope=source_scope,
-                max_items=max_items,
-                max_sources=max_sources,
-                result_limit=result_limit,
-            )
-            return session_to_public_dict(session)
-
-        @self.app.tool
-        async def plan_search_session(session_id: str) -> dict[str, Any]:
-            """Plan per-source routes for a search session using capability diagnostics."""
-            from job_ftch.application.search_session import session_to_public_dict
-
-            session = await self._require_runner().plan_source_routes(session_id)
-            return session_to_public_dict(session)
-
-        @self.app.tool
-        async def approve_search_session(
-            session_id: str,
-            approved_source_ids: list[str] | None = None,
-            approved_capability_ids: list[str] | None = None,
-            approve_all_sensitive: bool = False,
-            note: str | None = None,
-        ) -> dict[str, Any]:
-            """Approve sensitive routes/budgets before running a search session."""
-            from job_ftch.application.search_session import session_to_public_dict
-
-            session = await self._require_runner().approve_search_session(
-                session_id,
-                approved_source_ids=approved_source_ids,
-                approved_capability_ids=approved_capability_ids,
-                approve_all_sensitive=approve_all_sensitive,
-                note=note,
-            )
-            return session_to_public_dict(session)
-
-        @self.app.tool
-        async def run_search_session(
-            session_id: str,
-            skip_pipeline: bool = False,
-        ) -> dict[str, Any]:
-            """Run a search session via existing tenant pipeline + profile ranking."""
-            from job_ftch.application.search_session import session_to_public_dict
-
-            session = await self._require_runner().run_search_session(
-                session_id,
-                skip_pipeline=skip_pipeline,
-            )
-            return session_to_public_dict(session)
-
-        @self.app.tool
-        async def get_search_session(session_id: str) -> dict[str, Any]:
-            """Return search session status, route plan, and budgets."""
-            from job_ftch.application.search_session import session_to_public_dict
-
-            session = await self._require_runner().get_search_session_status(session_id)
-            return session_to_public_dict(session)
-
-        @self.app.tool
-        async def list_search_session_results(
-            session_id: str,
-            limit: int | None = None,
-        ) -> list[dict[str, Any]]:
-            """List ranked job result refs for a search session."""
-            refs = await self._require_runner().list_search_results(session_id, limit=limit)
-            return [ref.model_dump(mode="json") for ref in refs]
-
-        @self.app.tool
-        async def explain_search_session(
-            session_id: str,
-            source_id: str | None = None,
-            job_id: str | None = None,
-        ) -> dict[str, Any]:
-            """Explain rejected/degraded sources or non-selected jobs."""
-            from job_ftch.application.search_session import explanation_to_dict
-
-            explanation = await self._require_runner().explain_search_session(
-                session_id,
-                source_id=source_id,
-                job_id=job_id,
-            )
-            return explanation_to_dict(explanation)
-
-        @self.app.tool
-        async def cancel_search_session(session_id: str) -> dict[str, Any]:
-            """Cancel a search session (cooperative if a run is in flight)."""
-            from job_ftch.application.search_session import session_to_public_dict
-
-            session = await self._require_runner().cancel_search_session(session_id)
-            return session_to_public_dict(session)
-
-        @self.app.tool
-        async def search_jobs(
-            query: str,
-            tenant_id: str | None = None,
-            user_id: str | None = None,
-            limit: int = 20,
-        ) -> list[dict[str, Any]]:
-            limit = min(limit, 100)
-            groups = await self._require_runner().search_jobs(
-                query, tenant_id=tenant_id, user_id=user_id, limit=limit
-            )
-            from job_ftch.adapters.mcp.product_surface import public_job_group
-
-            return [public_job_group(group) for group in groups]
-
-        @self.app.tool
-        async def get_job(job_id: str, tenant_id: str | None = None) -> dict[str, Any] | None:
-            job = await self._require_runner().get_job(job_id, tenant_id=tenant_id)
-            return None if job is None else job.model_dump(mode="json")
-
-        @self.app.tool
-        async def get_job_lineage(
-            job_id: str,
-            tenant_id: str | None = None,
-        ) -> dict[str, Any] | None:
-            lineage = await self._require_runner().get_job_lineage(job_id, tenant_id=tenant_id)
-            return None if lineage is None else lineage.model_dump(mode="json")
-
-        @self.app.tool
-        async def reset_tenant(tenant_id: str) -> None:
-            await self._require_runner().reset_tenant(tenant_id)
-
-        @self.app.tool
-        async def clear_run_data(
-            tenant_id: str,
-            clear_output_artifacts: bool = True,
-        ) -> dict[str, int]:
-            """Clear run-scoped state before a /run-like ingest without deleting profiles."""
-            runner = self._require_runner()
-            counts = await runner.clear_run_data(tenant_id)
-            if clear_output_artifacts:
-                counts["output_artifacts"] = _clear_output_artifacts(
-                    runner.get_runtime(tenant_id).settings
+            @self.app.tool
+            async def run_pipeline(
+                tenant_id: str | None = None,
+                source_ids: list[str] | None = None,
+                max_items: int | None = None,
+                clear_first: bool = False,
+                user_id: str | None = None,
+                scope: str = "tenant",
+            ) -> dict[str, Any] | list[dict[str, Any]]:
+                """Run one tenant or all tenants. clear_first wipes run state and output files."""
+                return await self._run_pipeline_tool_impl(
+                    tenant_id=tenant_id,
+                    source_ids=source_ids,
+                    max_items=max_items,
+                    clear_first=clear_first,
+                    user_id=user_id,
+                    scope=scope,
                 )
-            return counts
 
-        @self.app.resource("jobs://{tenant_id}/latest")
-        async def latest_jobs_resource(tenant_id: str) -> str:
-            jobs = await self._require_runner().latest_jobs(tenant_id, limit=10)
-            return json.dumps(
-                [job.model_dump(mode="json") for job in jobs],
-                ensure_ascii=False,
-                default=_json_default,
-            )
+            @self.app.tool
+            async def get_prefilter_status(
+                tenant_id: str,
+                profile_id: str | None = None,
+            ) -> dict[str, Any]:
+                """Dirty flag, current/previous artifacts, and dataset contract."""
+                return await self._get_prefilter_status_tool_impl(tenant_id, profile_id)
 
-        @self.app.resource("jobs://{tenant_id}/run_summary")
-        async def run_summary_resource(tenant_id: str) -> str:
-            summary = await self._require_runner().get_status(tenant_id)
-            return json.dumps(
-                None if summary is None else summary.as_dict(),
-                ensure_ascii=False,
-                default=_json_default,
-            )
+            @self.app.tool
+            async def prepare_prefilter_dataset(
+                tenant_id: str,
+                profile_id: str | None = None,
+                source: str = "examples",
+                output: str | None = None,
+                user_id: str = "mcp",
+            ) -> dict[str, Any]:
+                """Build a training JSONL from examples, feedback, eval dataset, or mixed."""
+                from job_ftch.application.prefilter_artifacts import prepare_prefilter_dataset
+
+                return await prepare_prefilter_dataset(
+                    self._require_runner(),
+                    tenant_id=tenant_id,
+                    profile_id=profile_id,
+                    source=source,
+                    output=output,
+                    user_id=user_id,
+                )
+
+            @self.app.tool
+            async def train_prefilter(
+                tenant_id: str,
+                profile_id: str | None = None,
+                dataset_id_or_path: str | None = None,
+                dry_run: bool = True,
+                threshold: float = 0.30,
+            ) -> dict[str, Any]:
+                """Train a TF-IDF/LogReg artifact. Default dry_run does not write."""
+                from job_ftch.application.prefilter_artifacts import train_prefilter
+
+                return train_prefilter(
+                    self._require_runner().get_runtime(tenant_id).settings,
+                    tenant_id=tenant_id,
+                    profile_id=profile_id,
+                    dataset_id_or_path=dataset_id_or_path,
+                    dry_run=dry_run,
+                    threshold=threshold,
+                )
+
+            @self.app.tool
+            async def evaluate_prefilter(
+                tenant_id: str,
+                artifact_id: str,
+                dataset_id_or_path: str | None = None,
+                threshold: float | None = None,
+            ) -> dict[str, Any]:
+                """Evaluate a trained artifact against stored holdout and optional dataset."""
+                from job_ftch.application.prefilter_artifacts import evaluate_prefilter
+
+                return evaluate_prefilter(
+                    self._require_runner().get_runtime(tenant_id).settings,
+                    tenant_id=tenant_id,
+                    artifact_id=artifact_id,
+                    dataset_id_or_path=dataset_id_or_path,
+                    threshold=threshold,
+                )
+
+            @self.app.tool
+            async def promote_prefilter(
+                tenant_id: str,
+                artifact_id: str | None = None,
+                threshold: float | None = None,
+                require_gate_pass: bool = True,
+                rollback: bool = False,
+            ) -> dict[str, Any]:
+                """Promote an artifact after the eval gate, or rollback when rollback=true."""
+                return await self._promote_prefilter_tool_impl(
+                    tenant_id=tenant_id,
+                    artifact_id=artifact_id,
+                    threshold=threshold,
+                    require_gate_pass=require_gate_pass,
+                    rollback=rollback,
+                )
+
+        if register_personal:
+
+            @self.app.tool
+            async def set_resume(
+                tenant_id: str,
+                user_id: str,
+                resume_text: str,
+                profile_id: str | None = None,
+                activate: bool = True,
+            ) -> dict[str, Any]:
+                """Ingest resume text into a managed profile and mark shots/prefilter dirty."""
+                return await self._set_resume_impl(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    resume_text=resume_text,
+                    profile_id=profile_id,
+                    activate=activate,
+                )
+
+            @self.app.tool
+            async def probe_page(
+                tenant_id: str,
+                url: str | None = None,
+                source_id: str | None = None,
+                what: str = "listing",
+                engine: str = "auto",
+                headed: bool = False,
+                solve: str = "none",
+                max_items: int = 5,
+            ) -> dict[str, Any]:
+                """Live listing/detail/challenge/fingerprint probe. This is not ingest."""
+                return await self._probe_page_impl(
+                    tenant_id=tenant_id,
+                    url=url,
+                    source_id=source_id,
+                    what=what,
+                    engine=engine,
+                    headed=headed,
+                    solve=solve,
+                    max_items=max_items,
+                )
+
+            @self.app.tool
+            async def browser_session(
+                action: str,
+                tenant_id: str | None = None,
+                session_id: str | None = None,
+                source_id: str | None = None,
+                url: str | None = None,
+                engine: str = "auto",
+                headed: bool = True,
+                bypass: str | None = None,
+                profile: str = "ephemeral",
+                manual_challenge: bool = False,
+                artifact_type: str = "text",
+                solve: str | None = None,
+            ) -> dict[str, Any]:
+                """Open, poll, wait/solve/goto, capture, or close an operator browser session."""
+                return await self._browser_session_impl(
+                    action=action,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    source_id=source_id,
+                    url=url,
+                    engine=engine,
+                    headed=headed,
+                    bypass=bypass,
+                    profile=profile,
+                    manual_challenge=manual_challenge,
+                    artifact_type=artifact_type,
+                    solve=solve,
+                )
+
+            @self.app.tool
+            async def run_source(
+                tenant_id: str,
+                source_id: str,
+                engine: str | None = None,
+                bypass: str | None = None,
+                parser: str | None = None,
+                escalation: str = "adaptive",
+                solve: str = "none",
+                session_id: str | None = None,
+                max_items: int | None = None,
+                max_tier: str | None = None,
+            ) -> dict[str, Any]:
+                """Adaptive ingest, pin engine/bypass, or walk the full ladder when escalation=all."""
+                return await self._run_source_tool_impl(
+                    tenant_id=tenant_id,
+                    source_id=source_id,
+                    engine=engine,
+                    bypass=bypass,
+                    parser=parser,
+                    escalation=escalation,
+                    solve=solve,
+                    session_id=session_id,
+                    max_items=max_items,
+                    max_tier=max_tier,
+                )
 
         @self.app.resource("config://{tenant_id}")
         async def config_resource(tenant_id: str) -> str:

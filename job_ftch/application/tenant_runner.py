@@ -67,6 +67,14 @@ from job_ftch.domain.browser_capability_inventory import (
 )
 from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
 
+
+class OperatorSessionAttachError(Exception):
+    """Borrow of an operator browser session failed before ingest."""
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.payload = payload
+        super().__init__(str(payload.get("error") or "session_attach_failed"))
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -255,6 +263,45 @@ def _update_source_health_payload(
         last_error_at=None,
         last_error_kind=None,
     )
+
+
+def _canonical_base_source_id(
+    runtime: TenantRuntime,
+    source_id: str,
+    listed_item: dict[str, Any] | None,
+) -> str | None:
+    base_by_id = {source_spec_identifier(spec): spec for spec in runtime.base_sources}
+    if source_id in base_by_id:
+        return source_id
+    if listed_item is None:
+        return None
+    name = listed_item.get("source_name")
+    locator = listed_item.get("locator")
+    for ident, spec in base_by_id.items():
+        if source_spec_name(spec) == name or source_spec_locator(spec) == locator:
+            return ident
+    return None
+
+
+def _listing_payload_for_source(
+    payloads: list[dict[str, Any]],
+    source_id: str,
+    runtime: TenantRuntime,
+) -> dict[str, Any] | None:
+    for payload in payloads:
+        if payload.get("source_id") == source_id:
+            return payload
+    name = None
+    for spec in runtime.base_sources:
+        if source_spec_identifier(spec) == source_id:
+            name = source_spec_name(spec)
+            break
+    if name is None:
+        return None
+    for payload in payloads:
+        if payload.get("origin") == "config" and payload.get("source_name") == name:
+            return payload
+    return None
 
 
 def _build_source_listing_payload(
@@ -1260,6 +1307,155 @@ class TenantRunner:
         msg = f"Failed to disable source: {source_id}"
         raise RuntimeError(msg)
 
+    async def update_source(
+        self,
+        tenant_id: str,
+        source_id: str,
+        patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        unknown = [key for key in patch if key not in {"enabled", "limit"}]
+        if unknown:
+            return {
+                "error": "invalid_arguments",
+                "message": "patch may only include enabled and/or limit",
+                "unknown_keys": unknown,
+                "source_id": source_id,
+            }
+        if "enabled" in patch and not isinstance(patch["enabled"], bool):
+            return {
+                "error": "invalid_arguments",
+                "message": "enabled must be a boolean",
+                "source_id": source_id,
+            }
+        if "limit" in patch and patch["limit"] is not None and not isinstance(patch["limit"], int):
+            return {
+                "error": "invalid_arguments",
+                "message": "limit must be an int or null",
+                "source_id": source_id,
+            }
+
+        runtime = self.get_runtime(tenant_id)
+        await self._ensure_runtime_sources_loaded(runtime)
+        listed = await self.list_sources(tenant_id)
+        listed_item = next((item for item in listed if item.get("source_id") == source_id), None)
+        base_ids = {source_spec_identifier(item) for item in runtime.base_sources}
+        runtime_record = runtime.runtime_sources.get(source_id)
+        is_config = source_id in base_ids or (
+            listed_item is not None and listed_item.get("origin") == "config"
+        )
+        if not is_config and runtime_record is None:
+            msg = f"Unknown source_id: {source_id}"
+            raise KeyError(msg)
+
+        if is_config and "limit" in patch:
+            return {
+                "status": "unsupported",
+                "error": "config_limit_not_updatable",
+                "source_id": source_id,
+                "hint": "do not rewrite YAML; add a runtime source to change limit",
+            }
+        if is_config:
+            target_id = _canonical_base_source_id(runtime, source_id, listed_item) or source_id
+            if patch.get("enabled") is False:
+                try:
+                    return await self.disable_source(tenant_id, target_id)
+                except RuntimeError:
+                    payload = _listing_payload_for_source(
+                        await self.list_sources(tenant_id),
+                        target_id,
+                        runtime,
+                    )
+                    if payload is None:
+                        payload = listed_item
+                    if payload is not None:
+                        return payload
+                    raise
+            if patch.get("enabled") is True:
+                await runtime.store.set_source_disabled(target_id, False)
+                runtime.disabled_source_ids.discard(target_id)
+                self._apply_runtime_sources(runtime)
+            payloads = await self.list_sources(tenant_id)
+            for payload in payloads:
+                if payload["source_id"] in {source_id, target_id}:
+                    return payload
+            msg = f"Failed to update source: {source_id}"
+            raise RuntimeError(msg)
+
+        if runtime_record is None:
+            msg = f"Unknown source_id: {source_id}"
+            raise KeyError(msg)
+        new_spec = runtime_record.spec
+        if "limit" in patch:
+            fields = getattr(type(new_spec), "model_fields", {})
+            if "limit" not in fields:
+                return {
+                    "status": "unsupported",
+                    "error": "limit_not_supported",
+                    "source_id": source_id,
+                    "hint": "this source spec has no limit field",
+                }
+            new_spec = new_spec.model_copy(update={"limit": patch["limit"]})
+        enabled = runtime_record.enabled if "enabled" not in patch else bool(patch["enabled"])
+        updated = runtime_record.model_copy(update={"spec": new_spec, "enabled": enabled})
+        previous = runtime_record
+        try:
+            await runtime.store.save_runtime_source(updated)
+            if "enabled" in patch:
+                await runtime.store.set_source_disabled(source_id, not enabled)
+        except Exception:
+            with suppress(Exception):
+                await runtime.store.save_runtime_source(previous)
+            await self._reload_runtime_sources(runtime)
+            raise
+        runtime.runtime_sources[source_id] = updated
+        if enabled:
+            runtime.disabled_source_ids.discard(source_id)
+        else:
+            runtime.disabled_source_ids.add(source_id)
+        self._apply_runtime_sources(runtime)
+        payloads = await self.list_sources(tenant_id)
+        for payload in payloads:
+            if payload["source_id"] == source_id:
+                return payload
+        msg = f"Failed to update source: {source_id}"
+        raise RuntimeError(msg)
+
+    async def remove_source(self, tenant_id: str, source_id: str) -> dict[str, Any]:
+        runtime = self.get_runtime(tenant_id)
+        await self._ensure_runtime_sources_loaded(runtime)
+        listed = await self.list_sources(tenant_id)
+        listed_item = next((item for item in listed if item.get("source_id") == source_id), None)
+        base_ids = {source_spec_identifier(item) for item in runtime.base_sources}
+        if source_id in base_ids or (
+            listed_item is not None and listed_item.get("origin") == "config"
+        ):
+            return {
+                "status": "unsupported",
+                "error": "config_source_not_deletable",
+                "source_id": source_id,
+                "hint": "use disable_source for config/base sources",
+            }
+        runtime_record = runtime.runtime_sources.get(source_id)
+        if runtime_record is None:
+            msg = f"Unknown source_id: {source_id}"
+            raise KeyError(msg)
+        previous = runtime_record
+        try:
+            await runtime.store.delete_runtime_source(source_id)
+        except Exception:
+            with suppress(Exception):
+                await runtime.store.save_runtime_source(previous)
+            await self._reload_runtime_sources(runtime)
+            raise
+        runtime.runtime_sources.pop(source_id, None)
+        runtime.disabled_source_ids.discard(source_id)
+        self._apply_runtime_sources(runtime)
+        return {
+            "status": "removed",
+            "source_id": source_id,
+            "origin": previous.origin,
+        }
+
     async def clear_sources(self, tenant_id: str) -> None:
         """Clear all runtime sources and disable base config sources."""
         runtime = self.get_runtime(tenant_id)
@@ -1301,16 +1497,32 @@ class TenantRunner:
         bypass_override: str | None = None,
         parser_override: str | None = None,
         ignore_schedule_gates: bool = False,
+        operator_session_id: str | None = None,
     ) -> RunSummary:
         """Run acquisition and policy under one correlated trace/run id."""
         run_id = uuid.uuid4().hex
         context_tokens = bind_contextvars(tenant_id=tenant_id, source_run_id=run_id)
         tracer = trace.get_tracer("job_ftch.tenant_runner")
+        attach_token = None
+        borrowed = False
         try:
             with tracer.start_as_current_span("ingest.run") as span:
                 span.set_attribute("job_ftch.source_run_id", run_id)
                 span.set_attribute("job_ftch.tenant_id", tenant_id)
                 runtime = self.get_runtime(tenant_id)
+                if operator_session_id:
+                    from job_ftch.infrastructure.sources.browser_utils import (
+                        attach_operator_page,
+                    )
+
+                    attached = await self._session_service().borrow(
+                        operator_session_id,
+                        tenant_id,
+                    )
+                    if isinstance(attached, dict):
+                        raise OperatorSessionAttachError(attached)
+                    borrowed = True
+                    attach_token = attach_operator_page(attached.page)
                 try:
                     async with _tenant_run_lock(runtime.settings, tenant_id):
                         summary = await self._run_tenant_bound(
@@ -1348,6 +1560,14 @@ class TenantRunner:
                 span.set_attribute("job_ftch.failed", summary.failed)
                 return summary
         finally:
+            if attach_token is not None:
+                from job_ftch.infrastructure.sources.browser_utils import (
+                    reset_operator_page,
+                )
+
+                reset_operator_page(attach_token)
+            if borrowed and operator_session_id:
+                await self._session_service().release(operator_session_id)
             reset_contextvars(**context_tokens)
 
     async def _run_tenant_bound(
@@ -1903,6 +2123,18 @@ class TenantRunner:
             return next(iter(self._runtimes.values())).settings
         return get_settings()
 
+    def default_escalation_ladder(self) -> list[str]:
+        """Registered adaptive order (noop → cloak). Composition-root only."""
+        from job_ftch.application.registry import list_bypass_capabilities
+        from job_ftch.infrastructure.bypass.adaptive import DEFAULT_TIER_ORDER
+
+        try:
+            registered = set(list_bypass_capabilities())
+        except Exception:
+            registered = set()
+        names = [name for name in DEFAULT_TIER_ORDER if not registered or name in registered]
+        return names or ["noop"]
+
     def list_browser_capabilities(
         self,
         tenant_id: str | None = None,
@@ -1963,6 +2195,7 @@ class TenantRunner:
         bypass_config: dict[str, Any] | None = None,
         probe: str = "listing",
         solve: str = "none",
+        url_filter: Any = None,
     ) -> dict[str, Any]:
         """Open one ephemeral page. Does not ingest or keep a session."""
         from job_ftch.infrastructure.browser_probe import LiveBrowserSessionProbe
@@ -1977,6 +2210,7 @@ class TenantRunner:
             max_items=max_items,
             bypass_config=bypass_config,
             solve=solve,
+            url_filter=url_filter,
         )
 
     def _session_service(self) -> Any:

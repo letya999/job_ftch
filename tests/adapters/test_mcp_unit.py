@@ -281,19 +281,18 @@ async def test_probe_llm_backend_transport_error(monkeypatch: pytest.MonkeyPatch
     assert "ConnectionError" in (result["error"] or "")
 
 
-@pytest.mark.asyncio
-async def test_deprecated_adapter_shim(
+def test_create_server_constructs_without_shim(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setitem(sys.modules, "fastmcp", SimpleNamespace(FastMCP=_fake_mcp_module()))
-    settings = _minimal_settings()
-    monkeypatch.setattr(
-        "job_ftch.adapters.mcp.server.get_settings",
-        lambda: settings,
-    )
-    from job_ftch.adapters.mcp.adapter import create_mcp_server
-
-    with pytest.warns(DeprecationWarning, match="create_mcp_server"):
-        server = create_mcp_server(SimpleNamespace())
+    configs = _tenant_configs(tmp_path)
+    server = create_server(configs_dir=configs, base_settings=_minimal_settings())
     assert server.name == "job_ftch"
+    assert "run_pipeline" in server.app.tools
+    assert "update_source" in server.app.tools
+    assert set(server.app.resources) == {"config://{tenant_id}"}
+    assert "get_status" in server.app.tools
+    assert "get_runtime" in server.app.tools
+    assert "doctor" in server.app.tools
+    assert "update_shot" in server.app.tools

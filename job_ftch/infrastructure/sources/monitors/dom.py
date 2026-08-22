@@ -294,6 +294,85 @@ def extract_static_job_links(
     return filtered[:limit]
 
 
+# Visible href harvest used by the DOM monitor after navigate(). Listing probes
+# evaluate this on an already-open page — do not pair it with a second goto.
+_RENDERED_HREF_JS = """
+    () => {
+        let links = [];
+        function isVisible(el) {
+            if (!el || !el.getBoundingClientRect) return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none') return false;
+            if (style.visibility === 'hidden') return false;
+            if (parseFloat(style.opacity) === 0) return false;
+            if (el.getAttribute('aria-hidden') === 'true') return false;
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) return false;
+            if (rect.right < 0 || rect.bottom < 0) return false;
+            if (rect.left > window.innerWidth || rect.top > window.innerHeight * 3) return false;
+            return true;
+        }
+        document.querySelectorAll('a').forEach(a => {
+            if (a.href && isVisible(a)) links.push(a.href);
+        });
+        document.querySelectorAll('[role="link"], [data-automation-id="job-title"], [class*="job-card"], [class*="job_card"]').forEach(el => {
+            let href = el.getAttribute('href') || el.getAttribute('data-href');
+            if (href && isVisible(el)) {
+                links.push(new URL(href, window.location.href).href);
+            }
+        });
+        return links.filter(href => href.startsWith('http'));
+    }
+"""
+
+
+async def visible_job_links_on_page(
+    page: Any,
+    board_url: str,
+    *,
+    url_filter: Any = None,
+    limit: int = 3,
+) -> list[str]:
+    """Rank visible job hrefs on an already-open page. Does not navigate."""
+    matcher = _build_url_matcher(url_filter)
+    evaluate = getattr(page, "evaluate", None)
+    if not callable(evaluate):
+        return []
+    raw: object = []
+    try:
+        raw = evaluate(_RENDERED_HREF_JS)
+        if hasattr(raw, "__await__"):
+            raw = await raw
+    except TypeError:
+        try:
+            raw = evaluate(_RENDERED_HREF_JS, None)
+            if hasattr(raw, "__await__"):
+                raw = await raw
+        except Exception:
+            return []
+    except Exception as exc:
+        log.info("dom.visible_hrefs_failed", error=type(exc).__name__)
+        return []
+    if not isinstance(raw, list):
+        return []
+    filtered: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str) or not item.startswith("http"):
+            continue
+        if matcher:
+            if matcher.search(item):
+                filtered.add(item)
+        elif is_probable_job_url(item, board_url=board_url):
+            filtered.add(item)
+    normalized_board = board_url.rstrip("/")
+    ranked = [
+        url
+        for url in rank_job_urls(filtered, board_url=board_url)
+        if url.rstrip("/") != normalized_board
+    ]
+    return ranked[:limit]
+
+
 def _extract_regex_urls(html: str, base_url: str, url_matcher: re.Pattern[str]) -> set[str]:
     """Extract regex-matching URLs from raw HTML, including relative URLs in embedded JSON."""
     candidates: set[str] = set()
@@ -361,35 +440,7 @@ async def _extract_links_rendered(
     raise_if_browser_challenge(html, url=board_url)
     check_ats_redirect(html, board_url)
 
-    js_extract = """
-    () => {
-        let links = [];
-        function isVisible(el) {
-            if (!el || !el.getBoundingClientRect) return false;
-            const style = window.getComputedStyle(el);
-            if (style.display === 'none') return false;
-            if (style.visibility === 'hidden') return false;
-            if (parseFloat(style.opacity) === 0) return false;
-            if (el.getAttribute('aria-hidden') === 'true') return false;
-            const rect = el.getBoundingClientRect();
-            if (rect.width === 0 && rect.height === 0) return false;
-            if (rect.right < 0 || rect.bottom < 0) return false;
-            if (rect.left > window.innerWidth || rect.top > window.innerHeight * 3) return false;
-            return true;
-        }
-        document.querySelectorAll('a').forEach(a => {
-            if (a.href && isVisible(a)) links.push(a.href);
-        });
-        document.querySelectorAll('[role="link"], [data-automation-id="job-title"], [class*="job-card"], [class*="job_card"]').forEach(el => {
-            let href = el.getAttribute('href') || el.getAttribute('data-href');
-            if (href && isVisible(el)) {
-                links.push(new URL(href, window.location.href).href);
-            }
-        });
-        return links.filter(href => href.startsWith('http'));
-    }
-    """
-    urls: list[str] = await page.evaluate(js_extract)
+    urls: list[str] = await page.evaluate(_RENDERED_HREF_JS)
 
     filtered: set[str] = set()
     for url in urls:
