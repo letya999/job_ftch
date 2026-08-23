@@ -7,6 +7,7 @@ import json
 import random
 import uuid
 from contextlib import nullcontext, suppress
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
@@ -74,6 +75,7 @@ class OperatorSessionAttachError(Exception):
     def __init__(self, payload: dict[str, Any]) -> None:
         self.payload = payload
         super().__init__(str(payload.get("error") or "session_attach_failed"))
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -985,7 +987,9 @@ class TenantRunner:
         run_id: str,
         user_id: str | None = None,
         relevance_prompts: dict[str, str | None] | None = None,
-    ) -> tuple[PipelineBuilder, SnapshotFilterNode]:
+        personal_mode: bool = False,
+        personal_max_items: int | None = None,
+    ) -> tuple[PipelineBuilder, SnapshotFilterNode | None]:
         # Load the live ontology from the Postgres/SQLite store
         # so the builder has both the static fixtures seed and
         # whatever the LLM has extracted from the user's recent
@@ -1053,6 +1057,7 @@ class TenantRunner:
             ontology_store=runtime.ontology_store,
             relevance_prompts=relevance_prompts,
             derived_ontology_override=runtime_derived_ontology,
+            personal_mode=personal_mode,
         )
         if runtime.settings.pipeline_graph_path is not None:
             from job_ftch.application.graph import build_v2_executor, compile_graph, load_graph
@@ -1068,6 +1073,27 @@ class TenantRunner:
                     "Configured pipeline graph hash mismatch: "
                     f"expected {expected_hash}, got {graph.graph_hash} "
                     f"for {runtime.settings.pipeline_graph_path}"
+                )
+            if personal_mode:
+                # MCP's personal audit must inspect fetched vacancies. Keep the
+                # production prefilter gate unchanged; only this ephemeral run
+                # records the negative signal and lets the card reach the LLM.
+                personal_nodes = []
+                for graph_node in graph.spec.nodes:
+                    if graph_node.node == "tfidf_logreg_prefilter":
+                        graph_node.params["mode"] = "shadow"
+                    if graph_node.node == "extraction":
+                        graph_node = replace(
+                            graph_node,
+                            timeout_ms=max(
+                                int(graph_node.timeout_ms or 0),
+                                int(runtime.settings.openai_timeout_seconds * 1000),
+                            ),
+                        )
+                    personal_nodes.append(graph_node)
+                graph = replace(
+                    graph,
+                    spec=replace(graph.spec, nodes=tuple(personal_nodes)),
                 )
             if runtime.settings.llm_backend == "openai":
                 relevance_settings = runtime.settings.model_copy(
@@ -1102,6 +1128,7 @@ class TenantRunner:
                     )
                 )[:60],
                 capture_payloads=runtime.settings.tracing_capture_payloads,
+                audit_mode=personal_mode,
             )
             executor = build_v2_executor(
                 graph,
@@ -1117,9 +1144,12 @@ class TenantRunner:
                 },
             )
             nodes = [GraphPipelineStage(executor)]
-        output_sink, main_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
+        output_sink, main_sink, review_sink, posting_sink = build_output_sinks(
+            runtime.settings,
+            max_output_items=personal_max_items if personal_mode else None,
+        )
         rejected_counted, rejected_sink = build_rejected_sink(runtime.settings)
-        if _snapshot_filter is None:
+        if _snapshot_filter is None and not personal_mode:
             msg = "build_nodes() must return SnapshotFilterNode when run_id is set"
             raise RuntimeError(msg)
         snapshot_filter = _snapshot_filter
@@ -1129,9 +1159,10 @@ class TenantRunner:
         builder.auth(runtime.auth_provider)
         builder.store(runtime.store)
         builder.stage(sanitize_node)
-        builder.with_snapshot_filter(
-            run_id, tenant_id=runtime.tenant.tenant_id, snapshot_filter=snapshot_filter
-        )
+        if snapshot_filter is not None:
+            builder.with_snapshot_filter(
+                run_id, tenant_id=runtime.tenant.tenant_id, snapshot_filter=snapshot_filter
+            )
         for node in nodes:
             builder.stage(node)
         builder.sink(output_sink)
@@ -1267,12 +1298,15 @@ class TenantRunner:
             runtime.disabled_source_ids.discard(source_id)
 
         self._apply_runtime_sources(runtime)
-        payloads = await self.list_sources(tenant_id)
-        for payload in payloads:
-            if payload["source_id"] == source_id:
-                return payload
-        msg = f"Failed to activate source: {source_id}"
-        raise RuntimeError(msg)
+        return await _attach_source_assessment(
+            runtime,
+            _build_source_listing_payload(
+                spec,
+                origin="runtime",
+                enabled=True,
+                health=None,
+            ),
+        )
 
     async def disable_source(self, tenant_id: str, source_id: str) -> dict[str, Any]:
         runtime = self.get_runtime(tenant_id)
@@ -1498,6 +1532,7 @@ class TenantRunner:
         parser_override: str | None = None,
         ignore_schedule_gates: bool = False,
         operator_session_id: str | None = None,
+        personal_mode: bool = False,
     ) -> RunSummary:
         """Run acquisition and policy under one correlated trace/run id."""
         run_id = uuid.uuid4().hex
@@ -1535,6 +1570,7 @@ class TenantRunner:
                             parser_override=parser_override,
                             ignore_schedule_gates=ignore_schedule_gates,
                             lock_already_held=True,
+                            personal_mode=personal_mode,
                         )
                 except TenantRunAlreadyActiveError:
                     logger.info("tenant_run_skipped_already_active", tenant_id=tenant_id)
@@ -1582,6 +1618,7 @@ class TenantRunner:
         parser_override: str | None = None,
         ignore_schedule_gates: bool = False,
         lock_already_held: bool = False,
+        personal_mode: bool = False,
     ) -> RunSummary:
         runtime = self.get_runtime(tenant_id)
         await self._ensure_runtime_sources_loaded(runtime)
@@ -1698,13 +1735,29 @@ class TenantRunner:
             async def _prepare(spec: SourceSpec) -> tuple[str, SourceSpec]:
                 async with semaphore:
                     sid = source_spec_identifier(spec)
-                    return await self._prepare_effective_source(
+                    prepared_sid, prepared_spec = await self._prepare_effective_source(
                         runtime,
                         spec,
                         assessment_service=assessment_service,
                         health=health_map.get(sid),
                         now=now,
                     )
+                    from job_ftch.domain.source_spec import CareerSiteSpec
+
+                    if personal_mode and isinstance(prepared_spec, CareerSiteSpec):
+                        # A manual MCP audit is source/run scoped; a previous
+                        # bootstrap cutoff must not hide live detail cards. Its
+                        # item cap belongs at the source frontier; using the
+                        # pipeline work budget would spend the cap on a parent
+                        # before its CandidateSpan can reach extraction.
+                        personal_limit = int(max_items) if max_items is not None else None
+                        prepared_spec = prepared_spec.model_copy(
+                            update={
+                                "freshness_cutoff_utc": None,
+                                **({"limit": personal_limit} if personal_limit else {}),
+                            }
+                        )
+                    return prepared_sid, prepared_spec
 
             prepared = await asyncio.gather(*(_prepare(spec) for spec in runnable_specs))
             for sid, effective_spec in prepared:
@@ -1744,15 +1797,21 @@ class TenantRunner:
                     catalog, relevance_prompts = await self._build_runtime_catalog(
                         runtime, user_id=user_id
                     )
-                    builder, snapshot_filter = await self._build_runtime_builder(
-                        runtime,
-                        effective_sources=effective_sources,
-                        catalog=catalog,
-                        run_id=run_id,
-                        user_id=user_id,
-                        relevance_prompts=relevance_prompts,
+                    builder_kwargs: dict[str, Any] = {
+                        "runtime": runtime,
+                        "effective_sources": effective_sources,
+                        "catalog": catalog,
+                        "run_id": run_id,
+                        "user_id": user_id,
+                        "relevance_prompts": relevance_prompts,
+                    }
+                    if personal_mode:
+                        builder_kwargs["personal_mode"] = True
+                        builder_kwargs["personal_max_items"] = max_items
+                    builder, snapshot_filter = await self._build_runtime_builder(**builder_kwargs)
+                    summary = await builder.run_async(
+                        max_items=None if personal_mode else max_items
                     )
-                    summary = await builder.run_async(max_items=max_items)
                 summary.llm_usage_requests = usage.requests
                 summary.llm_tokens_in = usage.tokens_in
                 summary.llm_cached_tokens_in = usage.cached_tokens_in

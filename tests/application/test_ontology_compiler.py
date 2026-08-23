@@ -168,10 +168,7 @@ async def test_compile_skips_failed_chunk_and_keeps_later_terms() -> None:
         ]
     )
     # chunk_size=8: first parallel chunk fails, later chunk still contributes terms.
-    shots = [
-        ("positive_job", f"Backend engineer Java Spring {idx}")
-        for idx in range(8)
-    ] + [
+    shots = [("positive_job", f"Backend engineer Java Spring {idx}") for idx in range(8)] + [
         ("positive_job", _POS),
         ("negative_job", _NEG),
     ]
@@ -614,7 +611,10 @@ async def test_compile_runs_coverage_after_candidate_chunks_fail() -> None:
     ]
     result = await compile_ontology_from_shots(shots=shots, llm=llm, prompt_path=_PROMPT)
     assert "python" in result.materialized.positive_skills
-    assert any("coverage" in prompt.casefold() or "named-technology" in prompt.casefold() for prompt in llm.prompts)
+    assert any(
+        "coverage" in prompt.casefold() or "named-technology" in prompt.casefold()
+        for prompt in llm.prompts
+    )
 
 
 @pytest.mark.asyncio
@@ -724,9 +724,7 @@ async def test_compile_profile_ontology_uses_compiler_model_not_extraction(
     managed = _empty_profile()
     managed = add_example_to_profile(managed, _POS, kind="positive_job")
     managed = add_example_to_profile(managed, _NEG, kind="negative_job")
-    payload = await compile_profile_ontology(
-        managed, llm=_Extraction(), ontology_store=store
-    )
+    payload = await compile_profile_ontology(managed, llm=_Extraction(), ontology_store=store)
     assert captured["openai_model"] == "gpt-4.1-mini"
     assert captured["timeout"] == 120.0
     assert payload.get("model") == "gpt-4.1-mini"

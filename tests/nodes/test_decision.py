@@ -63,6 +63,17 @@ async def test_accept_requires_jobness_and_one_profile(make_job_record):
     assert result.assessed_job.record.post_type is PostType.JOB_POSTING
 
 
+async def test_personal_audit_routes_to_full_extraction(make_job_record):
+    node = DecisionNode()
+    node.enable_audit_mode()
+
+    result = await node.process(AssessedJob(record=make_job_record()))
+
+    assert result.routing_decision is MatchDecision.ACCEPT
+    assert result.reasons == ("personal_audit_full_extraction",)
+    assert result.assessed_job.record.post_type is PostType.JOB_POSTING
+
+
 async def test_cheap_positive_profile_evidence_cannot_accept_without_llm(make_job_record):
     item = AssessedJob(
         record=make_job_record(),

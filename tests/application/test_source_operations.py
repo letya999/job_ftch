@@ -142,6 +142,7 @@ async def test_run_source_pins_foreign_bypass(monkeypatch: pytest.MonkeyPatch) -
         tenant_id="t1",
         source_id="debug:fixture",
         bypass="cloak",
+        personal_mode=True,
     )
     assert payload["executed"] is True
     assert payload["parse"]["stage"] in {"ingest", "fetch", "parse", "pipeline"}
@@ -149,6 +150,23 @@ async def test_run_source_pins_foreign_bypass(monkeypatch: pytest.MonkeyPatch) -
     kwargs = runner.run_tenant.await_args.kwargs
     assert kwargs["bypass_override"] == "cloak"
     assert kwargs["ignore_schedule_gates"] is True
+    assert kwargs["personal_mode"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_source_personal_mode_only_shadows_prefilter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _FakeRunner()
+    payload = await run_source(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        personal_mode=True,
+    )
+    assert payload["executed"] is True
+    assert "shadow prefilter" in " ".join(payload["notes"])
+    assert runner.run_tenant.await_args.kwargs["personal_mode"] is True
 
 
 @pytest.mark.asyncio
@@ -170,6 +188,31 @@ async def test_run_source_escalation_all_sweeps_ladder(monkeypatch: pytest.Monke
     assert len(payload["attempts"]) == len(payload["escalation_ladder"])
     assert all("parse" in item and "stage" in item["parse"] for item in payload["attempts"])
     assert runner.run_tenant.await_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_run_source_escalation_preserves_parser_and_personal_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "job_ftch.application.source_operations._registered_bypass_names",
+        lambda: {"noop"},
+    )
+    runner = _FakeRunner()
+
+    await run_source_escalation(
+        runner,
+        tenant_id="t1",
+        source_id="debug:fixture",
+        strategy="all",
+        max_tier="noop",
+        parser="fixture_parser",
+        personal_mode=True,
+    )
+
+    kwargs = runner.run_tenant.await_args.kwargs
+    assert kwargs["parser_override"] == "fixture_parser"
+    assert kwargs["personal_mode"] is True
 
 
 @pytest.mark.asyncio
@@ -589,15 +632,76 @@ def test_parse_diagnosis_confirmed_empty() -> None:
             "fetched": 0,
             "extracted": 0,
             "failed": 0,
-            "source_outcomes": [
-                {"zero_reason": "confirmed_empty", "yielded": 0, "status": "ok"}
-            ],
+            "source_outcomes": [{"zero_reason": "confirmed_empty", "yielded": 0, "status": "ok"}],
             "source_failures": [],
         }
     )
     assert result["stage"] == "parse"
     assert result["reason"] == "confirmed_empty"
     assert result["ok"] is False
+
+
+@pytest.mark.parametrize(
+    ("summary", "expected"),
+    [
+        ({"fetched": 1, "emitted": 1, "failed": 0, "source_outcomes": []}, "ok_complete"),
+        (
+            {
+                "fetched": 1,
+                "emitted": 1,
+                "failed": 0,
+                "source_outcomes": [{"completion_state": "partial"}],
+            },
+            "ok_partial",
+        ),
+        ({"fetched": 1, "emitted": 0, "failed": 0, "source_outcomes": []}, "quality_failed"),
+        ({"fetched": 0, "emitted": 0, "failed": 0, "source_outcomes": []}, "empty"),
+        (
+            {
+                "fetched": 0,
+                "emitted": 0,
+                "failed": 0,
+                "source_outcomes": [{"zero_reason": "waf_challenge"}],
+            },
+            "protected",
+        ),
+        ({"fetched": 0, "emitted": 0, "failed": 1, "source_outcomes": []}, "parser_error"),
+    ],
+)
+def test_audit_verdict(summary: dict[str, Any], expected: str) -> None:
+    from job_ftch.application.source_operations import _audit_verdict
+
+    assert _audit_verdict(summary) == expected
+
+
+def test_parser_provenance_comes_from_source_outcome() -> None:
+    from job_ftch.application.source_operations import _parser_provenance
+
+    result = _parser_provenance(
+        {
+            "source_outcomes": [
+                {
+                    "actual_parser": "uzum_career",
+                    "fallback_chain": ["uzum_career"],
+                    "generic_monitor_used": False,
+                    "generic_scraper_used": False,
+                    "parser_urls_discovered": 4,
+                    "detail_cards_extracted": 3,
+                }
+            ]
+        },
+        "uzum_career",
+    )
+
+    assert result == {
+        "requested_parser": "uzum_career",
+        "actual_parser": "uzum_career",
+        "fallback_chain": ["uzum_career"],
+        "generic_monitor_used": False,
+        "generic_scraper_used": False,
+        "parser_urls_discovered": 4,
+        "detail_cards_extracted": 3,
+    }
 
 
 @pytest.mark.asyncio

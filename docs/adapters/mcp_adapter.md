@@ -82,7 +82,7 @@ forbidden-name list so extra names are not registered.
 | `set_resume(tenant_id, user_id, resume_text, profile_id=null, activate=true)` | ingest resume + shot sync / prefilter dirty |
 | `probe_page(..., what=listing\|detail\|challenge\|fingerprint)` | live page probe; **not** ingest |
 | `browser_session(action=open\|status\|wait\|solve\|goto\|capture\|close, ...)` | operator browser session; no cookie values |
-| `run_source(..., escalation=adaptive\|all, session_id=null)` | adaptive ingest, pin, or `fallback_order` sweep. `session_id` reuses the open operator page (same tab, not a second browser) |
+| `run_source(..., escalation=adaptive\|all, session_id=null, personal_mode=false)` | adaptive ingest, strict parser pin, or `fallback_order` sweep. Personal mode applies `max_items` after final fan-out/dedup |
 
 Search sessions, vacancy feedback, standalone setup/bypass inventory tools, and
 `jobs://` resources are not registered. Use `get_jobs` / `get_status` /
@@ -106,7 +106,10 @@ copy). The session stays open after ingest; close it with
 ladder (`noop` → `cloak`); the attached session engine reuses that tab, other
 tiers do not. `engine=playwright` / `stealth_browser` launches vanilla
 Playwright when Patchright is not required. Each ingest attempt returns
-`parse` (`stage` + `reason`). Missing extras return `unavailable`. MCP does
+`parse` (`stage` + `reason`), the six-state `verdict`, and `parser_provenance`
+(requested/actual parser, fallback chain, generic usage, URL/card counts). An
+explicit special parser pin cannot continue through generic monitors or
+scrapers. Missing extras return `unavailable`. MCP does
 not import Playwright/Patchright/nodriver clients.
 
 ## Config directory

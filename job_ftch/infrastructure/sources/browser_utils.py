@@ -614,7 +614,9 @@ async def _resolve_bypass_context(config: dict[str, Any]) -> Any:
 def _prefer_patchright(config: dict[str, Any], bypass_strategy: Any) -> bool:
     if bool(config.get("_patchright_required")):
         return True
-    return bool(bypass_strategy is not None and getattr(bypass_strategy, "requires_process_identity", False))
+    return bool(
+        bypass_strategy is not None and getattr(bypass_strategy, "requires_process_identity", False)
+    )
 
 
 def _load_async_playwright(*, prefer_patchright: bool) -> Any:

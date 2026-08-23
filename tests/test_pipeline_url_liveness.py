@@ -161,7 +161,9 @@ async def test_url_liveness_does_not_hide_accepted_job_on_head_block_or_timeout(
 async def test_url_liveness_uses_pinned_resolver() -> None:
     url = "https://example.com/job"
     with patch("socket.getaddrinfo") as mock_dns:
-        mock_dns.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+        mock_dns.return_value = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+        ]
 
         response = MagicMock()
         response.status = 200

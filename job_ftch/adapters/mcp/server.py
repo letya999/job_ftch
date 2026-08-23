@@ -56,7 +56,7 @@ _RUNTIME_ENGINES: tuple[tuple[str, str, str, str], ...] = (
     ("cloak", "cloakbrowser", "browser", "cloak"),
 )
 _RESIDENTIAL_PROBE_URL = "https://example.com"
-_RESIDENTIAL_PROBE_TIMEOUT = 3.0
+_RESIDENTIAL_PROBE_TIMEOUT = 15.0
 _HEALTH_KEYS = frozenset(
     {
         "status",
@@ -177,14 +177,14 @@ async def probe_llm_backend(settings: Settings) -> dict[str, Any]:
         data = payload.get("data") if isinstance(payload, dict) else None
         ids = [
             str(item["id"])
-            for item in (data if isinstance(data, list) else [])[:20]
+            for item in (data if isinstance(data, list) else [])
             if isinstance(item, dict) and isinstance(item.get("id"), str)
         ]
         required = {settings.openai_model, settings.relevance_llm_model} - {None, ""}
         result.update(
             ok=True,
             reachable=True,
-            models_sample=ids,
+            models_sample=ids[:20],
             configured_models_available=required.issubset(ids),
         )
         if ids and not result["configured_models_available"]:
@@ -621,25 +621,35 @@ def _first_residential_proxy_url(settings: Settings) -> tuple[bool, str | None]:
     urls = [*_residential_env_urls(), *_residential_yaml_urls()]
     gateway = str(getattr(settings, "proxy_gateway", "") or "").strip()
     if gateway:
-        user = str(getattr(settings, "proxy_user", "") or "").strip()
-        password = str(getattr(settings, "proxy_pass", "") or "").strip()
-        if user and password and "://" in gateway:
-            scheme, rest = gateway.split("://", 1)
-            gateway = f"{scheme}://{user}:{password}@{rest}"
-        urls.append(gateway)
+        from job_ftch.infrastructure.bypass.proxy_bypass import GatewayProxyProvider
+
+        provider = GatewayProxyProvider(
+            provider=str(getattr(settings, "proxy_provider", "raw") or "raw"),
+            gateway=gateway,
+            user=str(getattr(settings, "proxy_user", "") or ""),
+            password=str(getattr(settings, "proxy_pass", "") or ""),
+            default_country=str(getattr(settings, "proxy_country_default", "") or ""),
+            sticky_ttl_seconds=int(getattr(settings, "proxy_sticky_ttl_seconds", 600)),
+        )
+        urls.append(provider.get_proxy_url(domain="mcp-runtime-probe"))
     configured = bool(urls)
     return configured, (urls[0] if urls else None)
 
 
 async def _probe_residential_proxy(proxy_url: str) -> tuple[bool, str | None]:
-    try:
-        import httpx
+    import httpx
 
-        async with httpx.AsyncClient(proxy=proxy_url, timeout=_RESIDENTIAL_PROBE_TIMEOUT) as client:
-            response = await client.get(_RESIDENTIAL_PROBE_URL, follow_redirects=True)
-        return response.status_code < 500, None
-    except Exception as exc:  # noqa: BLE001 - public result is class-only
-        return False, type(exc).__name__
+    error_class: str | None = None
+    for _attempt in range(2):
+        try:
+            async with httpx.AsyncClient(
+                proxy=proxy_url, timeout=_RESIDENTIAL_PROBE_TIMEOUT
+            ) as client:
+                response = await client.get(_RESIDENTIAL_PROBE_URL, follow_redirects=True)
+            return response.status_code < 500, None
+        except Exception as exc:  # noqa: BLE001 - public result is class-only
+            error_class = type(exc).__name__
+    return False, error_class
 
 
 def _captcha_runtime_status(settings: Settings) -> list[dict[str, Any]]:
@@ -775,9 +785,7 @@ def _build_doctor_report(
         lines.append("bypass: missing")
 
     lines.extend(["", "proxies:"])
-    lines.append(
-        f"- http list: {'present' if proxies.get('http_list_configured') else 'missing'}"
-    )
+    lines.append(f"- http list: {'present' if proxies.get('http_list_configured') else 'missing'}")
     lines.append(f"- gateway: {'present' if proxies.get('gateway_configured') else 'missing'}")
     if not proxies.get("residential_configured"):
         lines.append("- residential: missing")
@@ -1062,9 +1070,7 @@ class TenantMCPServer:
         engines = _engine_runtime_status(inventory)
         captcha_solvers = _captcha_runtime_status(self.base_settings)
         hints: list[str] = [
-            str(item["install_hint"])
-            for item in engines.values()
-            if item.get("install_hint")
+            str(item["install_hint"]) for item in engines.values() if item.get("install_hint")
         ]
         if self.base_settings.llm_backend == "openai" and not llm.get("ok"):
             hints.append("configure JOB_FTCH_OPENAI_BASE_URL / CLIProxy and check /models")
@@ -1106,8 +1112,8 @@ class TenantMCPServer:
         engines = runtime["engines"]
         llm = runtime["llm"]
         captcha_solvers = runtime["captcha_solvers"]
-        llm_required_failed = self.base_settings.llm_backend == "openai" and not bool(
-            llm.get("ok")
+        llm_required_failed = self.base_settings.llm_backend == "openai" and (
+            not bool(llm.get("ok")) or not bool(llm.get("configured_models_available"))
         )
         browsers_present = any(bool(item.get("importable")) for item in engines.values())
         ok = (not llm_required_failed) and browsers_present
@@ -1227,9 +1233,67 @@ class TenantMCPServer:
         job_id: str | None = None,
         limit: int = 20,
         include_lineage: bool = False,
+        source_id: str | None = None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
         runner = self._require_runner()
         limit = min(max(int(limit), 1), 100)
+        if source_id or run_id:
+            runtime = runner.get_runtime(tenant_id)
+            source_names: set[str] = set()
+            if source_id:
+                for source in await runner.list_sources(tenant_id):
+                    if str(source.get("source_id") or "") != source_id:
+                        continue
+                    for value in (
+                        source.get("source_name"),
+                        (source.get("spec") or {}).get("source_name")
+                        if isinstance(source.get("spec"), dict)
+                        else None,
+                    ):
+                        if value:
+                            source_names.add(str(value))
+                    break
+            candidates = await runtime.job_backend.list_jobs(limit=min(limit * 25, 1000), offset=0)
+
+            def in_scope(job: Any) -> bool:
+                if source_id and not source_names:
+                    return False
+                metadata = getattr(job, "metadata", {}) or {}
+                if run_id and str(metadata.get("source_run_id") or "") != run_id:
+                    return False
+                return not source_names or str(getattr(job, "source_name", "")) in source_names
+
+            scoped = [job for job in candidates if in_scope(job)]
+            if job_id:
+                scoped = [job for job in scoped if str(getattr(job, "job_id", "")) == job_id]
+            if query:
+                needle = query.casefold()
+                scoped = [
+                    job
+                    for job in scoped
+                    if needle
+                    in "\n".join(
+                        str(value or "") for value in (job.title, job.company, job.description)
+                    ).casefold()
+                ]
+            jobs = [job.model_dump(mode="json") for job in scoped[:limit]]
+            scoped_payload: dict[str, Any] = {
+                "tenant_id": tenant_id,
+                "source_id": source_id,
+                "run_id": run_id,
+                "scope": "source_run" if source_id and run_id else "scoped",
+                "jobs": jobs,
+                "count": len(jobs),
+            }
+            if include_lineage and jobs:
+                first_id = _job_id_from_payload(jobs[0])
+                if first_id:
+                    lineage = await runner.get_job_lineage(first_id, tenant_id=tenant_id)
+                    scoped_payload["lineage"] = (
+                        None if lineage is None else lineage.model_dump(mode="json")
+                    )
+            return scoped_payload
         if job_id:
             job = await runner.get_job(job_id, tenant_id=tenant_id)
             payload: dict[str, Any] = {
@@ -1560,6 +1624,7 @@ class TenantMCPServer:
         session_id: str | None,
         max_items: int | None,
         max_tier: str | None = None,
+        personal_mode: bool = False,
     ) -> dict[str, Any]:
         normalized = (escalation or "adaptive").strip().lower()
         if normalized not in _ESCALATION_MODES:
@@ -1589,6 +1654,8 @@ class TenantMCPServer:
                 strategy="all",
                 max_tier=max_tier,
                 max_items=5 if max_items is None else max_items,
+                parser=parser,
+                personal_mode=personal_mode,
                 session_id=session_id,
             )
             goal = "bypass"
@@ -1601,6 +1668,7 @@ class TenantMCPServer:
                 parser=parser,
                 bypass=pin,
                 session_id=session_id,
+                personal_mode=personal_mode,
             )
             goal = "protected_sites"
         payload["requested_solve"] = solve_mode
@@ -1675,14 +1743,18 @@ class TenantMCPServer:
             job_id: str | None = None,
             limit: int = 20,
             include_lineage: bool = False,
+            source_id: str | None = None,
+            run_id: str | None = None,
         ) -> dict[str, Any]:
-            """Latest jobs, search, or one job; optionally attach lineage."""
+            """Latest/search jobs; source_id+run_id scopes audit reads to one ingest."""
             return await self._get_jobs_impl(
                 tenant_id=tenant_id,
                 query=query,
                 job_id=job_id,
                 limit=limit,
                 include_lineage=include_lineage,
+                source_id=source_id,
+                run_id=run_id,
             )
 
         @self.app.tool
@@ -1902,6 +1974,7 @@ class TenantMCPServer:
                 session_id: str | None = None,
                 max_items: int | None = None,
                 max_tier: str | None = None,
+                personal_mode: bool = False,
             ) -> dict[str, Any]:
                 """Adaptive ingest, pin engine/bypass, or walk the full ladder when escalation=all."""
                 return await self._run_source_tool_impl(
@@ -1915,6 +1988,7 @@ class TenantMCPServer:
                     session_id=session_id,
                     max_items=max_items,
                     max_tier=max_tier,
+                    personal_mode=personal_mode,
                 )
 
         @self.app.resource("config://{tenant_id}")

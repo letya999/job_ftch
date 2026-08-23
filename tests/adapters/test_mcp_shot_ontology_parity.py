@@ -323,9 +323,7 @@ async def test_mcp_add_shots_compiles_roles_skills_anti_and_graph(tmp_path: Any)
     )
     tenant_store = TenantStore("local_mcp", create_store(settings))
     ontology = create_ontology_store(settings)
-    runner = _FakeRunner(
-        _FakeRuntime(tenant_store, ontology, _CompilerLLM(chunk, compiled))
-    )
+    runner = _FakeRunner(_FakeRuntime(tenant_store, ontology, _CompilerLLM(chunk, compiled)))
     empty = ManagedCandidateProfile(
         user_id="mcp",
         profile_id="mcp_default",
@@ -374,7 +372,9 @@ async def test_mcp_add_shots_compiles_roles_skills_anti_and_graph(tmp_path: Any)
 
 
 @pytest.mark.asyncio
-async def test_mcp_add_shots_compiles_full_profile_once(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_mcp_add_shots_compiles_full_profile_once(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
     settings = Settings(
         llm_backend="heuristic",
         store_backend="sqlite",
@@ -402,7 +402,9 @@ async def test_mcp_add_shots_compiles_full_profile_once(tmp_path: Any, monkeypat
 
     calls: list[int] = []
 
-    async def _fake_compile(managed: ManagedCandidateProfile, **kwargs: object) -> dict[str, object]:
+    async def _fake_compile(
+        managed: ManagedCandidateProfile, **kwargs: object
+    ) -> dict[str, object]:
         del kwargs
         from job_ftch.application.profile_inputs import list_examples
 

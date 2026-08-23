@@ -1297,6 +1297,7 @@ def build_v2_typed_bindings(
     post_accept_max_calls: int | None = None,
     post_accept_target_roles: tuple[str, ...] = (),
     capture_payloads: bool = False,
+    audit_mode: bool = False,
 ) -> dict[str, Any]:
     """Expose the configured legacy bridge as individual schema-v2 stages.
 
@@ -1321,20 +1322,23 @@ def build_v2_typed_bindings(
             ),
             AcceptTemplatePresentationNode(),
         )
+    relevance_evidence = LLMRelevanceEvidenceNode(
+        llm=relevance_llm,
+        store=store,
+        catalog=catalog,
+        low_threshold=low_threshold,
+        high_threshold=high_threshold,
+        max_per_run=max_per_run,
+        relevance_prompts=relevance_prompts,
+        tenant_id=tenant_id,
+        graph_hash=graph_hash,
+    )
+    if audit_mode:
+        relevance_evidence.enable_audit_mode()
     return {
         "evidence_fanout": fanout,
         "decision": decision,
-        "llm_relevance_evidence": LLMRelevanceEvidenceNode(
-            llm=relevance_llm,
-            store=store,
-            catalog=catalog,
-            low_threshold=low_threshold,
-            high_threshold=high_threshold,
-            max_per_run=max_per_run,
-            relevance_prompts=relevance_prompts,
-            tenant_id=tenant_id,
-            graph_hash=graph_hash,
-        ),
+        "llm_relevance_evidence": relevance_evidence,
         "post_accept_enrichment": PostAcceptEnrichment(
             stages=post_accept_stages,
             group_store=post_accept_group_store,
@@ -1356,6 +1360,7 @@ def build_nodes(
     relevance_prompts: dict[str, str | None] | None = None,
     derived_ontology_override: dict[str, Any] | None = None,
     bgem3_provider: BgeMThreeProviderPort | None = None,
+    personal_mode: bool = False,
 ) -> tuple[SanitizingNode[RawItem], SnapshotFilterNode | None, Sequence[Stage[Any, Any]]]:
     """Return (SanitizeNode, optional SnapshotFilterNode, processing nodes).
 
@@ -1437,7 +1442,7 @@ def build_nodes(
 
     normalizer = get_default_normalizer()
     snapshot_filter: SnapshotFilterNode | None = None
-    if run_id is not None:
+    if run_id is not None and not personal_mode:
         snapshot_filter = SnapshotFilterNode(
             store,
             tenant_id=tenant_id,
@@ -1507,9 +1512,9 @@ def build_nodes(
                 spam_tokens=load_spam_tokens(),
             ),
             HardFilterNode(catalog),
-            DedupNode(store, defer_commit=True),
         ]
     )
+    nodes.append(DedupNode(store, defer_commit=True, personal_mode=personal_mode))
 
     _bgem3_provider: BgeMThreeProviderPort | None = None
     _bgem3_pos_dense = None
@@ -1533,7 +1538,7 @@ def build_nodes(
                 reason="FlagEmbedding not installed",
             )
             _bgem3_provider = None
-    elif settings.embedding_prefilter_enabled:
+    elif settings.embedding_prefilter_enabled and not personal_mode:
         try:
             from job_ftch.infrastructure.embeddings.sentence_transformers_provider import (
                 LocalSentenceTransformersProvider,
@@ -1732,19 +1737,20 @@ def build_nodes(
     nodes.append(
         TfidfLogregRelevancePrefilterNode(
             threshold=0.35,
-            mode="gate",
+            mode="shadow" if personal_mode else "gate",
             model_path=resolve_prefilter_model_path(
                 settings, "fixtures/prefilter/tfidf_logreg_v1.json"
             ),
         )
     )
-    nodes.append(
-        SemanticPrefilterNode(
-            catalog,
-            relevance_scorer=_relevance_scorer,
-            relevance_threshold=getattr(settings, "relevance_shot_threshold", 0.0),
-        )
+    semantic_prefilter = SemanticPrefilterNode(
+        catalog,
+        relevance_scorer=_relevance_scorer,
+        relevance_threshold=getattr(settings, "relevance_shot_threshold", 0.0),
     )
+    if personal_mode:
+        semantic_prefilter.enable_audit_mode()
+    nodes.append(semantic_prefilter)
     if settings.pipeline_jobness_decision_enabled:
         from job_ftch.nodes.jobness import RawJobnessEvidenceNode
 
@@ -1762,18 +1768,21 @@ def build_nodes(
 
     if settings.pipeline_completeness_gate_enabled:
         nodes.append(CompletenessGateNode(threshold=settings.pipeline_completeness_threshold))
+    extraction_node = ExtractionNode(
+        llm,
+        max_calls=settings.pipeline_full_extraction_max_calls_per_run,
+        budget=full_extraction_budget,
+        target_roles=_target_roles_tuple,
+        min_search_relevance=settings.extraction_min_search_relevance,
+        min_hiring_intent=settings.extraction_min_hiring_intent,
+        capture_payloads=settings.tracing_capture_payloads,
+        scope="core",
+    )
+    if personal_mode:
+        extraction_node.enable_audit_mode()
     nodes.extend(
         [
-            ExtractionNode(
-                llm,
-                max_calls=settings.pipeline_full_extraction_max_calls_per_run,
-                budget=full_extraction_budget,
-                target_roles=_target_roles_tuple,
-                min_search_relevance=settings.extraction_min_search_relevance,
-                min_hiring_intent=settings.extraction_min_hiring_intent,
-                capture_payloads=settings.tracing_capture_payloads,
-                scope="core",
-            ),
+            extraction_node,
             ExtractionValidationNode(),
             TitleCompanyNormalizationNode(normalizer),
             SkillNormalizationNode(normalizer),
@@ -1846,10 +1855,13 @@ def build_nodes(
         tenant_id=tenant_id,
     )
     llm_relevance_node.configure_graph_params({"call_policy": "force_all"})
+    evidence_decision = EvidenceDecisionNode(settings=settings)
+    if personal_mode:
+        evidence_decision.enable_audit_mode()
     nodes.extend(
         [
             llm_relevance_node,
-            EvidenceDecisionNode(settings=settings),
+            evidence_decision,
             JobAggregationNode(job_group_store, attach_group_id=True),
         ]
     )
@@ -1936,6 +1948,8 @@ def build_rejected_sink(
 def build_output_sinks(
     settings: Settings,
     store: Store | None = None,
+    *,
+    max_output_items: int | None = None,
 ) -> tuple[
     Sink[JobRecord],
     CountedSink[JobRecord],
@@ -1955,7 +1969,12 @@ def build_output_sinks(
     )
     review_counted: CountedSink[JobRecord] = CountedSink(CompactReviewSink(review_inner))
     posting_sink: CountedSink[JobRecord] | None = None
-    accept_targets: list[Sink[JobRecord]] = [main_sink]
+    accept_target: Sink[JobRecord] = main_sink
+    if max_output_items is not None:
+        from job_ftch.sinks.counted import LimitedSink
+
+        accept_target = LimitedSink(main_sink, max_output_items)
+    accept_targets: list[Sink[JobRecord]] = [accept_target]
     if not settings.dry_run and settings.posting_backend != "none":
         posting_counted: CountedSink[JobRecord] = CountedSink(
             create_sink(settings.posting_settings())  # type: ignore[arg-type]

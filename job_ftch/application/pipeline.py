@@ -486,9 +486,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
             source_kind_stats.rich_emitted += result.rich_emitted
             source_kind_stats.scraped += result.scraped
             source_kind_stats.scrape_fallback_used += result.scrape_fallback_used
-            source_kind_stats.browser_navigations_attempted += (
-                result.browser_navigations_attempted
-            )
+            source_kind_stats.browser_navigations_attempted += result.browser_navigations_attempted
             source_kind_stats.monitor_truncated += result.monitor_truncated
             source_kind_stats.source_partial = source_kind_stats.source_partial or result.partial
             if source_identity is not None:
@@ -496,9 +494,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 source_identity.rich_emitted = result.rich_emitted
                 source_identity.scraped = result.scraped
                 source_identity.scrape_fallback_used = result.scrape_fallback_used
-                source_identity.browser_navigations_attempted = (
-                    result.browser_navigations_attempted
-                )
+                source_identity.browser_navigations_attempted = result.browser_navigations_attempted
                 source_identity.monitor_truncated = result.monitor_truncated
                 source_identity.source_partial = result.partial
             summary.monitored += result.monitored
@@ -525,6 +521,13 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     "parser_duplicates_suppressed": result.parser_duplicates_suppressed,
                     "zero_reason": result.zero_reason,
                     "error": result.error,
+                    "requested_parser": result.requested_parser,
+                    "actual_parser": result.actual_parser,
+                    "fallback_chain": result.fallback_chain or [],
+                    "generic_monitor_used": result.generic_monitor_used,
+                    "generic_scraper_used": result.generic_scraper_used,
+                    "parser_urls_discovered": result.parser_urls_discovered,
+                    "detail_cards_extracted": result.detail_cards_extracted,
                 }
             )
             if result.failed:
@@ -911,6 +914,13 @@ class Pipeline[PipelineInput, PipelineOutput]:
         elif outcome == "dropped_node":
             trace_drop_reason = _drop_reason(res)
             trace_drop_stage = self._optional_str(res.get("drop_stage"))
+            self._logger.info(
+                "pipeline_item_dropped",
+                source_kind=source_kind,
+                source_name=source_name,
+                stage=trace_drop_stage,
+                reason=trace_drop_reason,
+            )
             final_status = "REJECT"
             summary.sanitized += 1
             summary.source_stats(source_kind).sanitized += 1
@@ -1100,6 +1110,8 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 item_id=item_id,
                 reason=res["failure_reason"],
                 stage=res["failure_stage"],
+                error_type=failed_exc.__class__.__name__,
+                error=str(failed_exc),
             )
             if not await self._emit_rejected_item(
                 item=item,
@@ -1166,7 +1178,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
             targets.append(persisted)
         return tuple(targets)
 
-    async def _emit_outbox_targets(self, delivery: object, targets: tuple[OutboxRecord, ...]) -> None:
+    async def _emit_outbox_targets(
+        self, delivery: object, targets: tuple[OutboxRecord, ...]
+    ) -> None:
         if not targets:
             await self._sink.emit(cast("PipelineOutput", delivery))
             return

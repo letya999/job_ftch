@@ -403,6 +403,41 @@ def _run_status(summary: dict[str, Any]) -> tuple[str, bool]:
     return "ok", True
 
 
+def _audit_verdict(summary: dict[str, Any]) -> str:
+    outcomes = summary.get("source_outcomes") or []
+    outcome = outcomes[0] if outcomes and isinstance(outcomes[0], dict) else {}
+    reason = str(outcome.get("zero_reason") or outcome.get("status") or "")
+    error = str(outcome.get("error") or "")
+    if reason in {"waf_challenge", "blocked_no_bypass_left", "provider_tunnel_denied"}:
+        return "protected"
+    if error or int(summary.get("failed") or 0):
+        return "parser_error"
+    if not int(summary.get("fetched") or 0):
+        return "empty"
+    if int(summary.get("emitted") or 0) <= 0:
+        return "quality_failed"
+    if (
+        outcome.get("completion_state") == "partial"
+        or outcome.get("status") == "partial_with_items"
+    ):
+        return "ok_partial"
+    return "ok_complete"
+
+
+def _parser_provenance(summary: dict[str, Any], requested_parser: str | None) -> dict[str, Any]:
+    outcomes = summary.get("source_outcomes") or []
+    outcome = outcomes[0] if outcomes and isinstance(outcomes[0], dict) else {}
+    return {
+        "requested_parser": requested_parser,
+        "actual_parser": outcome.get("actual_parser"),
+        "fallback_chain": outcome.get("fallback_chain") or [],
+        "generic_monitor_used": bool(outcome.get("generic_monitor_used")),
+        "generic_scraper_used": bool(outcome.get("generic_scraper_used")),
+        "parser_urls_discovered": int(outcome.get("parser_urls_discovered") or 0),
+        "detail_cards_extracted": int(outcome.get("detail_cards_extracted") or 0),
+    }
+
+
 async def _execute_source_run(
     runner: Any,
     *,
@@ -414,6 +449,7 @@ async def _execute_source_run(
     parser_override: str | None = None,
     ignore_schedule_gates: bool = False,
     operator_session_id: str | None = None,
+    personal_mode: bool = False,
 ) -> dict[str, Any]:
     try:
         summary = await runner.run_tenant(
@@ -424,6 +460,7 @@ async def _execute_source_run(
             parser_override=parser_override,
             ignore_schedule_gates=ignore_schedule_gates,
             operator_session_id=operator_session_id,
+            personal_mode=personal_mode,
         )
     except OperatorSessionAttachError as exc:
         payload = dict(exc.payload)
@@ -453,6 +490,8 @@ async def _execute_source_run(
         "error": None,
         "run": payload,
         "parse": _parse_diagnosis(run=payload),
+        "verdict": _audit_verdict(payload),
+        "parser_provenance": _parser_provenance(payload, parser_override),
     }
     if operator_session_id:
         result["session_id"] = operator_session_id
@@ -524,12 +563,13 @@ async def _attempt_bypass(
     bypass: str,
     max_items: int,
     parser_override: str | None = None,
+    personal_mode: bool = False,
     session_id: str | None = None,
 ) -> dict[str, Any]:
     listing_url = _listing_url(source, None)
     browser = bypass in _BROWSER_ENGINES
     probe_fn = getattr(runner, "probe_browser_listing", None)
-    if browser and listing_url and callable(probe_fn) and not session_id:
+    if browser and listing_url and callable(probe_fn) and not session_id and not personal_mode:
         listing = await probe_fn(
             tenant_id,
             url=listing_url,
@@ -564,6 +604,7 @@ async def _attempt_bypass(
         parser_override=parser_override,
         ignore_schedule_gates=True,
         operator_session_id=session_id,
+        personal_mode=personal_mode,
     )
     run = executed.get("run") if isinstance(executed.get("run"), dict) else {}
     parse = executed.get("parse") or _parse_diagnosis(run=run)
@@ -579,6 +620,8 @@ async def _attempt_bypass(
         "items": [],
         "page_title": None,
         "parse": parse,
+        "verdict": executed.get("verdict"),
+        "parser_provenance": executed.get("parser_provenance"),
         "run": run,
         **_session_fields(executed, session_id),
     }
@@ -690,6 +733,7 @@ async def run_source(
     parser: str | None = None,
     bypass: str | None = None,
     session_id: str | None = None,
+    personal_mode: bool = False,
 ) -> dict[str, Any]:
     if max_items is not None and int(max_items) <= 0:
         return _envelope(
@@ -763,6 +807,7 @@ async def run_source(
             bypass=pin,
             max_items=int(max_items) if max_items is not None else 5,
             parser_override=parser_pin,
+            personal_mode=personal_mode,
             session_id=session_id,
         )
         return _envelope(
@@ -784,6 +829,8 @@ async def run_source(
             requested_parser=requested_parser,
             attempt=attempt,
             parse=attempt.get("parse"),
+            verdict=attempt.get("verdict"),
+            parser_provenance=attempt.get("parser_provenance"),
             run=attempt.get("run"),
             challenge=attempt.get("challenge"),
             item_count=attempt.get("item_count"),
@@ -822,6 +869,7 @@ async def run_source(
         parser_override=parser_pin,
         ignore_schedule_gates=True,
         operator_session_id=session_id,
+        personal_mode=personal_mode,
     )
     parser_notes = (
         [f"pinned parser {parser_pin} for this call only"]
@@ -839,6 +887,9 @@ async def run_source(
         error=executed.get("error"),
         notes=_notes(
             "run_source is a source-scoped TenantRunner ingest",
+            "personal_mode uses a shadow prefilter for this call only"
+            if personal_mode
+            else "personal_mode=false keeps the production prefilter gate",
             "no bypass pin: source uses the standard adaptive ladder",
             *parser_notes,
         ),
@@ -849,6 +900,8 @@ async def run_source(
         requested_parser=requested_parser,
         parser_host_mismatch=bool(mismatch),
         parse=executed.get("parse"),
+        verdict=executed.get("verdict"),
+        parser_provenance=executed.get("parser_provenance"),
         run=executed.get("run"),
         browser_required=_is_browser_route(route, source),
         max_items=max_items,
@@ -864,6 +917,8 @@ async def run_source_escalation(
     strategy: str = "recommended",
     max_tier: str | None = None,
     max_items: int = 5,
+    parser: str | None = None,
+    personal_mode: bool = False,
     session_id: str | None = None,
 ) -> dict[str, Any]:
     normalized = (strategy or "recommended").strip().lower()
@@ -926,6 +981,7 @@ async def run_source_escalation(
                 session_attached=False,
             )
         session_engine = await _session_engine_name(runner, session_id)
+        parser_pin = (parser or "").strip() or None
         registered = _registered_bypass_names()
         attempts: list[dict[str, Any]] = []
         for name in ladder:
@@ -956,6 +1012,8 @@ async def run_source_escalation(
                     source_id=source_id,
                     bypass=name,
                     max_items=int(max_items),
+                    parser_override=parser_pin,
+                    personal_mode=personal_mode,
                     session_id=attach,
                 )
             )

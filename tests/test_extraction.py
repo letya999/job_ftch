@@ -128,6 +128,14 @@ def test_extraction_node_rejects_unknown_graph_mode() -> None:
         node.configure_graph_params({"extraction_mode": "magic"})
 
 
+def test_audit_mode_keeps_llm_extraction_when_graph_requests_heuristic() -> None:
+    node = ExtractionNode(ExplodingLLMProvider())
+    node.enable_audit_mode()
+    node.configure_graph_params({"extraction_mode": "structured_or_heuristic"})
+
+    assert node._extraction_mode == "llm_or_structured"
+
+
 def test_fallback_title_skips_published_time_prefix() -> None:
     item = RawItem(
         source_kind=SourceKind.TELEGRAM_CHANNEL,

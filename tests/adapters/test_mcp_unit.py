@@ -12,12 +12,64 @@ from typing import Any
 import pytest
 
 from job_ftch.adapters.mcp.server import (
+    _first_residential_proxy_url,
     _json_default,
+    _probe_residential_proxy,
     _tool_annotations,
     create_server,
     probe_llm_backend,
 )
 from job_ftch.config import Settings
+
+
+def test_residential_runtime_probe_uses_provider_gateway_format() -> None:
+    configured, url = _first_residential_proxy_url(
+        _minimal_settings(
+            proxy_provider="dataimpulse",
+            proxy_gateway="http://gw.dataimpulse.com:823",
+            proxy_user="user",
+            proxy_pass="pass",
+            proxy_country_default="RU",
+        )
+    )
+
+    assert configured is True
+    assert url is not None
+    assert "cr.ru" in url
+    assert ";sessttl." in url
+
+
+@pytest.mark.asyncio
+async def test_residential_runtime_probe_retries_transient_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    class _Client:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def get(self, url: str, **kwargs: Any) -> SimpleNamespace:
+            nonlocal attempts
+            del url, kwargs
+            attempts += 1
+            if attempts == 1:
+                raise TimeoutError
+            return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr("httpx.AsyncClient", _Client)
+
+    reachable, error = await _probe_residential_proxy("http://proxy.invalid")
+
+    assert reachable is True
+    assert error is None
+    assert attempts == 2
 
 
 def _fake_mcp_module() -> type:
@@ -252,6 +304,51 @@ async def test_probe_llm_backend_model_warning(monkeypatch: pytest.MonkeyPatch) 
     assert result["reachable"] is True
     assert result["configured_models_available"] is False
     assert result["error"] == "configured_model_missing"
+
+
+@pytest.mark.asyncio
+async def test_probe_llm_backend_checks_models_beyond_public_sample(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Resp:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "data": [
+                    *({"id": f"other-model-{index}"} for index in range(20)),
+                    {"id": "configured-model"},
+                ]
+            }
+
+    class _Client:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def get(self, url: str, headers: dict[str, str] | None = None) -> _Resp:
+            del url, headers
+            return _Resp()
+
+    monkeypatch.setattr("httpx.AsyncClient", _Client)
+    settings = _minimal_settings(
+        llm_backend="openai",
+        openai_api_key="k",  # type: ignore[arg-type]
+        openai_base_url="http://127.0.0.1:8317/v1",
+        openai_model="configured-model",
+        relevance_llm_model="configured-model",
+    )
+
+    result = await probe_llm_backend(settings)
+
+    assert result["configured_models_available"] is True
+    assert result["error"] is None
+    assert "configured-model" not in result["models_sample"]
 
 
 @pytest.mark.asyncio

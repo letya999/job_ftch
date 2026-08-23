@@ -372,7 +372,10 @@ async def test_sqlite_clear_run_artifacts_removes_processed_dedup_and_ledgers():
     assert counts["outbox"] == 1
     assert counts["source_assessments"] == 1
     assert await tenant.get_source_assessment("ai_jobs", assessment.source_id) is None
-    assert await store.get_source_assessment("other_tenant", other_assessment.source_id) == other_assessment
+    assert (
+        await store.get_source_assessment("other_tenant", other_assessment.source_id)
+        == other_assessment
+    )
     assert await tenant.has_processed(raw.stable_id) is False
     assert await tenant.has_dedup_key(dedup.key) is False
     assert await tenant.get_observation(raw.stable_id, observation.content_hash) is None

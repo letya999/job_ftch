@@ -451,7 +451,9 @@ async def add_operator_example(
             runner, tenant_id=tenant_id, user_id=user_id, profile_id=profile_id
         )
         for cleaned in items:
-            managed = add_example_to_profile(managed, cleaned, kind=example_kind(polarity, shot_kind))
+            managed = add_example_to_profile(
+                managed, cleaned, kind=example_kind(polarity, shot_kind)
+            )
         await runner.save_and_activate_candidate_profile(tenant_id, managed)
         from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
 

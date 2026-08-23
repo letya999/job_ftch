@@ -127,6 +127,9 @@ class SberParser:
             "publication_id": vacancy.get("publicationId"),
             "parser": "sber-public-api",
         }
+        salary = _sber_salary_metadata(vacancy)
+        if salary:
+            metadata.update(salary)
         return build_raw_item(
             source_kind=SourceKind.CAREER_SITE,
             source_name=source_name,
@@ -144,6 +147,74 @@ class SberParser:
                 legacy_kind=SourceKind.CAREER_SITE.value,
             ),
         )
+
+
+_SALARY_TEXT_KEYS = ("salaryText", "salary_text", "salary", "compensation", "salaryRange")
+_SALARY_MIN_KEYS = ("min", "from", "salaryFrom", "salaryMin", "minSalary")
+_SALARY_MAX_KEYS = ("max", "to", "salaryTo", "salaryMax", "maxSalary")
+
+
+def _sber_amount(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return int(value) if value >= 0 else None
+    if not isinstance(value, str):
+        return None
+    digits = re.sub(r"\D", "", value)
+    return int(digits) if digits else None
+
+
+def _sber_salary_metadata(vacancy: dict[str, Any]) -> dict[str, Any]:
+    """Keep only explicit salary fields; bonuses in ``conditions`` are not salary."""
+
+    result: dict[str, Any] = {}
+    raw = next(
+        (vacancy.get(key) for key in _SALARY_TEXT_KEYS if vacancy.get(key) is not None), None
+    )
+    if isinstance(raw, str) and any(char.isdigit() for char in raw):
+        result["salary_text"] = raw.strip()
+
+    payloads = [raw] if isinstance(raw, dict) else []
+    payloads.append(vacancy)
+    minimum = maximum = None
+    currency: str | None = None
+    for payload in payloads:
+        if not isinstance(payload, dict):
+            continue
+        if minimum is None:
+            minimum = next(
+                (
+                    _sber_amount(payload.get(key))
+                    for key in _SALARY_MIN_KEYS
+                    if payload.get(key) is not None
+                ),
+                None,
+            )
+        if maximum is None:
+            maximum = next(
+                (
+                    _sber_amount(payload.get(key))
+                    for key in _SALARY_MAX_KEYS
+                    if payload.get(key) is not None
+                ),
+                None,
+            )
+        currency = currency or next(
+            (
+                str(payload.get(key)).strip().upper()
+                for key in ("currency", "salaryCurrency")
+                if payload.get(key)
+            ),
+            None,
+        )
+    if minimum is not None or maximum is not None:
+        result["base_salary"] = {
+            "currency": currency or "RUB",
+            "min": minimum,
+            "max": maximum,
+        }
+    return result
 
 
 _TRANSLIT = str.maketrans(

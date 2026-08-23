@@ -234,9 +234,7 @@ class OpenAIInstructorLLMProvider:
         # An explicit per-call timeout (ontology compile) is the whole deadline.
         # Multiplying by retries made CLIProxy classify wait 120s * (retries+1).
         explicit_timeout = timeout_seconds is not None
-        operation_timeout = (
-            per_attempt if explicit_timeout else self._operation_timeout_seconds
-        )
+        operation_timeout = per_attempt if explicit_timeout else self._operation_timeout_seconds
         instructor_retries = 0 if explicit_timeout else self._max_retries
         request_kwargs: dict[str, Any] = _completion_token_limit_kwargs(self._model, max_tokens)
         if timeout_seconds is not None:

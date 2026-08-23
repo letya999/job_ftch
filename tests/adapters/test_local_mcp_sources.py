@@ -35,8 +35,7 @@ def test_local_mcp_sources_match_ai_jobs_fixture_count_and_names() -> None:
 
     fixture_names = {_source_name(spec) for spec in fixture}
     tenant_names = {
-        str(row.get("source_name") or row.get("entity") or row.get("url"))
-        for row in tenant_sources
+        str(row.get("source_name") or row.get("entity") or row.get("url")) for row in tenant_sources
     }
     assert fixture_names == tenant_names
 

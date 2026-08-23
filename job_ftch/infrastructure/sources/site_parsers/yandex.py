@@ -39,6 +39,9 @@ _VACANCY_LINK_RE = re.compile(
     r"/jobs/vacancies/(?!city_|team_|office_|service_|profession_|tag_)([a-z0-9-]+-\d+)",
     re.IGNORECASE,
 )
+_NON_VACANCY_TITLE_RE = re.compile(
+    r"\b(?:карьерн\w*\s+консультац\w*|стажировк\w*|мероприят\w*)\b", re.IGNORECASE
+)
 
 
 def _clean_text(value: str | None) -> str:
@@ -50,7 +53,7 @@ def _clean_text(value: str | None) -> str:
 def _item_from_api(payload: dict[str, Any], base_url: str, source_name: str) -> RawItem | None:
     """Convert a single /api/publications result dict into a RawItem."""
     title = _clean_text(payload.get("title"))
-    if not title:
+    if not title or _NON_VACANCY_TITLE_RE.search(title):
         return None
 
     slug = payload.get("publication_slug_url") or ""
@@ -112,7 +115,7 @@ def _item_from_detail_html(detail_url: str, html_text: str, source_name: str) ->
     main_node = tree.css_first("main")
     title = _clean_text(title_node.text(strip=True) if title_node else None)
     main_text = _clean_text(main_node.text(separator=" ", strip=True) if main_node else None)
-    if not title:
+    if not title or _NON_VACANCY_TITLE_RE.search(title):
         return None
 
     text = "\n".join(part for part in (title, main_text) if part)

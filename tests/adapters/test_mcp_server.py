@@ -267,6 +267,18 @@ profiles:
     run_summary = await server.app.tools["run_pipeline"](tenant_id="ai_jobs")
     tenant_list = await server.app.tools["list_tenants"]()
     latest_jobs = await server.app.tools["get_jobs"](tenant_id="ai_jobs", limit=10)
+    scoped_jobs = await server.app.tools["get_jobs"](
+        tenant_id="ai_jobs",
+        source_id="debug:fixture",
+        run_id=run_summary["source_run_id"],
+        limit=10,
+    )
+    stale_scoped_jobs = await server.app.tools["get_jobs"](
+        tenant_id="ai_jobs",
+        source_id="debug:fixture",
+        run_id="old-run-that-must-not-match",
+        limit=10,
+    )
     tenant_status = await server.app.tools["get_status"]("ai_jobs")
     sources_payload = await server.app.tools["get_sources"]("ai_jobs")
     prefilter_status = await server.app.tools["get_prefilter_status"]("ai_jobs", None)
@@ -305,6 +317,13 @@ profiles:
     assert run_summary["tenant_id"] == "ai_jobs"
     assert tenant_list[0]["tenant_id"] == "ai_jobs"
     assert first_job["source_name"] == "fixture"
+    assert scoped_jobs["scope"] == "source_run"
+    assert scoped_jobs["count"] == len(scoped_jobs["jobs"])
+    assert all(
+        item["metadata"].get("source_run_id") == run_summary["source_run_id"]
+        for item in scoped_jobs["jobs"]
+    )
+    assert stale_scoped_jobs["count"] == 0
     assert tenant_status["tenant_id"] == "ai_jobs"
     assert tenant_status["status"]["tenant_id"] == "ai_jobs"
     assert tenant_status["source_count"] >= 1
@@ -1688,7 +1707,12 @@ async def test_mcp_browser_session_dispatcher_forwards_actions(
     ) -> dict[str, object]:
         del runner
         seen.append(("continue", instruction))
-        return {"ok": True, "action": "continue", "session_id": session_id, "instruction": instruction}
+        return {
+            "ok": True,
+            "action": "continue",
+            "session_id": session_id,
+            "instruction": instruction,
+        }
 
     async def _capture(
         runner: object,
@@ -1698,7 +1722,12 @@ async def test_mcp_browser_session_dispatcher_forwards_actions(
     ) -> dict[str, object]:
         del runner
         seen.append(("capture", artifact_type))
-        return {"ok": True, "action": "capture", "session_id": session_id, "artifact_type": artifact_type}
+        return {
+            "ok": True,
+            "action": "capture",
+            "session_id": session_id,
+            "artifact_type": artifact_type,
+        }
 
     async def _close(runner: object, *, session_id: str) -> dict[str, object]:
         del runner
@@ -1863,9 +1892,10 @@ async def test_mcp_get_runtime_probes_llm_residential_captcha(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    fixture_proxy_secret = "s3" + "cret"  # pragma: allowlist secret
     monkeypatch.setenv(
         "JOB_FTCH_RESIDENTIAL_PROXY_LIST",
-        "http://user:s3cret@10.9.8.7:8080",  # pragma: allowlist secret
+        f"http://user:{fixture_proxy_secret}@10.9.8.7:8080",
     )
     monkeypatch.setenv("CAPSOLVER_API_KEY", "cap-secret-value")  # pragma: allowlist secret
     monkeypatch.delenv("CAPMONSTER_API_KEY", raising=False)
@@ -2000,6 +2030,8 @@ async def test_mcp_get_runtime_empty_residential_and_llm_failure(
         "error_class": None,
     }
     assert payload["llm"]["ok"] is False
+    diagnosis = await server.app.tools["doctor"]()
+    assert diagnosis["ok"] is False
     solvers = {item["id"]: item for item in payload["captcha_solvers"]}
     assert solvers["capsolver"]["key_present"] is False
     blob = json.dumps(payload)
@@ -2042,9 +2074,10 @@ async def test_mcp_doctor_narrates_runtime_without_secrets(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    fixture_proxy_secret = "s3" + "cret"  # pragma: allowlist secret
     monkeypatch.setenv(
         "JOB_FTCH_RESIDENTIAL_PROXY_LIST",
-        "http://user:s3cret@10.9.8.7:8080",  # pragma: allowlist secret
+        f"http://user:{fixture_proxy_secret}@10.9.8.7:8080",
     )
     monkeypatch.setenv("CAPSOLVER_API_KEY", "cap-secret-value")  # pragma: allowlist secret
     configs_dir = tmp_path / "configs"

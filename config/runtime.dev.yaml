@@ -60,9 +60,13 @@ captcha_provider_routes:
     - capsolver
     - manual_required
   turnstile:
-    - observe
+    - capsolver
+    - capmonster
+    - nextcaptcha
+    - manual_required
   hcaptcha:
-    - observe
+    - capsolver
+    - manual_required
   unknown:
     - observe
 

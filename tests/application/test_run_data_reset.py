@@ -61,7 +61,9 @@ async def test_clear_run_artifacts_preserves_profiles_sources_and_history() -> N
     assert counts["kv"] == len(removed)
     assert counts["source_assessments"] == 1
     assert await store.get_source_assessment("ai_jobs", "career_site:test") is None
-    assert await other.get_source_assessment("other_tenant", "career_site:other") == other_assessment
+    assert (
+        await other.get_source_assessment("other_tenant", "career_site:other") == other_assessment
+    )
     for key in preserved:
         assert await store.get_run_state(key) is not None
     for key in removed:

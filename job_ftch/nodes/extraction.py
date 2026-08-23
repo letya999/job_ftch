@@ -50,7 +50,7 @@ _NEUTRAL_HIRING_INTENT = 0.5
 _TITLE_METADATA_KEYS = ("title", "job_title", "role")
 _COMPANY_METADATA_KEYS = ("company", "company_name", "employer", "organization", "org", "service")
 _URL_METADATA_KEYS = ("job_url", "canonical_url", "apply_url", "origin_url")
-_LOCATION_METADATA_KEYS = ("location", "city", "region", "cities")
+_LOCATION_METADATA_KEYS = ("location", "locations", "city", "region", "cities")
 _URL_ADAPTER = TypeAdapter(AnyHttpUrl)
 # Work modes that the heuristic accepts in any casing. Sourced from Telegram
 # and Russian career-site vocabulary.
@@ -438,7 +438,14 @@ class ExtractionNode:
             raise ValueError("Extraction scope must be 'core' or 'full'.")
         self._scope = scope
         self._extraction_mode = "llm_or_structured"
+        self._audit_mode = False
         self._call_count = 0
+
+    def enable_audit_mode(self) -> None:
+        self._audit_mode = True
+        self._extraction_mode = "llm_or_structured"
+        self._min_search_relevance = 0.0
+        self._min_hiring_intent = 0.0
 
     def configure_graph_params(self, params: dict[str, object]) -> None:
         if "extraction_mode" not in params:
@@ -446,7 +453,7 @@ class ExtractionNode:
         mode = str(params["extraction_mode"])
         if mode not in {"llm_or_structured", "structured_or_heuristic"}:
             raise ValueError(f"unsupported extraction_mode: {mode}")
-        self._extraction_mode = mode
+        self._extraction_mode = "llm_or_structured" if self._audit_mode else mode
 
     def _should_override_non_job_post_type(
         self,

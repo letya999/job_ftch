@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlparse
 
 import httpx
 import structlog
@@ -101,6 +102,10 @@ class ZeroYieldReason(StrEnum):
 
 @dataclass
 class FetchStats:
+    requested_parser: str | None = None
+    actual_parser: str | None = None
+    parser_urls_discovered: int = 0
+    detail_cards_extracted: int = 0
     monitored: int = 0
     detail_attempted: int = 0
     rich_emitted: int = 0
@@ -127,6 +132,13 @@ class FetchStats:
 
     def to_log_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
+            "requested_parser": self.requested_parser,
+            "actual_parser": self.actual_parser,
+            "fallback_chain": self.fallback_chain,
+            "generic_monitor_used": bool(self.monitor_attempts),
+            "generic_scraper_used": self.scrape_fallback_used > 0,
+            "parser_urls_discovered": self.parser_urls_discovered,
+            "detail_cards_extracted": self.detail_cards_extracted,
             "monitored": self.monitored,
             "detail_attempted": self.detail_attempted,
             "rich_emitted": self.rich_emitted,
@@ -152,6 +164,20 @@ class FetchStats:
         if self.zero_reason is not None:
             d["zero_reason"] = self.zero_reason.value
         return d
+
+    @property
+    def fallback_chain(self) -> list[str]:
+        return list(
+            dict.fromkeys(
+                value
+                for value in (
+                    self.actual_parser,
+                    *self.monitor_attempts,
+                    self.successful_scraper,
+                )
+                if value
+            )
+        )
 
 
 def _parse_retry_after(raw_value: str | None) -> float | None:
@@ -508,6 +534,10 @@ class CareerSiteSource(Source["RawItem"]):
         owned by the caller and otherwise survive every retry until process
         exit, exhausting sockets in long batch runs.
         """
+        # Directly pinned proxy tiers do not own a BypassContext, but still
+        # need the source host for allow-listing and sticky gateway sessions.
+        with contextlib.suppress(AttributeError, TypeError):
+            original_http._domain_hint = urlparse(self.spec.url).netloc.lower()
         active_http = await self.bypass_strategy.apply_http(original_http)
         self._remember_temporary_http_client(active_http, original_http)
         return active_http
@@ -816,6 +846,21 @@ class CareerSiteSource(Source["RawItem"]):
         from job_ftch.application.registry import resolve_site_parser_for_spec
 
         site_parser = resolve_site_parser_for_spec(self.spec)
+        self.stats.requested_parser = self.spec.site_parser
+        self.stats.actual_parser = (
+            getattr(site_parser, "parser_name", None) or type(site_parser).__name__
+            if site_parser is not None
+            else None
+        )
+        logger.info(
+            "site_parser_dispatch",
+            url=self.spec.url,
+            pinned_parser=self.spec.site_parser,
+            parser=type(site_parser).__name__ if site_parser is not None else None,
+            custom_parse=bool(getattr(site_parser, "has_custom_parse", False))
+            if site_parser is not None
+            else False,
+        )
         if site_parser is not None and getattr(site_parser, "has_custom_parse", True):
             parser_spec = self._runtime_monitor_spec()
             parser_monitor_config = dict(self.spec.monitor_config)
@@ -844,6 +889,7 @@ class CareerSiteSource(Source["RawItem"]):
                         if urls:
                             self._trusted_parser_urls.update(urls)
                             self.stats.monitored = len(urls)
+                            self.stats.parser_urls_discovered = len(urls)
                             candidates = [
                                 DiscoveredCandidate(url=u, completeness=0.1) for u in urls
                             ]
@@ -855,7 +901,16 @@ class CareerSiteSource(Source["RawItem"]):
                             async for enriched_item in self._enrich_candidates(
                                 candidates, scraper_chain, source_name
                             ):
-                                yield enriched_item
+                                metadata = dict(getattr(enriched_item, "metadata", {}) or {})
+                                metadata["parser"] = getattr(
+                                    site_parser, "parser_name", type(site_parser).__name__
+                                )
+                                company = getattr(site_parser, "company", None)
+                                if company:
+                                    metadata.setdefault("company", company)
+                                    metadata["company_authoritative"] = True
+                                self.stats.detail_cards_extracted += 1
+                                yield enriched_item.model_copy(update={"metadata": metadata})
                         elif getattr(site_parser, "confirmed_empty_on_empty", False):
                             self.stats.zero_reason = ZeroYieldReason.CONFIRMED_EMPTY
                             self._parser_failure_is_terminal = True
@@ -869,6 +924,7 @@ class CareerSiteSource(Source["RawItem"]):
                             attempt_items.append(parsed_item)
                         if attempt_items:
                             unique_items = self._dedupe_parser_items(attempt_items)
+                            self.stats.detail_cards_extracted += len(unique_items)
                             for unique_item in unique_items:
                                 yield unique_item
                             return
@@ -879,6 +935,12 @@ class CareerSiteSource(Source["RawItem"]):
                             # The parser consulted an authoritative listing
                             # API.  Do not let a generic crawl overwrite this
                             # factual empty-board result.
+                            self._parser_failure_is_terminal = True
+                            return
+                        if self.spec.site_parser:
+                            # An operator pin is an audit contract: do not
+                            # silently replace the requested special parser
+                            # with a generic monitor after a zero-yield parse.
                             self._parser_failure_is_terminal = True
                             return
                         else:
@@ -916,6 +978,11 @@ class CareerSiteSource(Source["RawItem"]):
                             self.stats.freshness_filtered = freshness_filtered_before
                             self.stats.freshness_undated_passed = freshness_undated_before
                         continue
+                    if self.spec.site_parser:
+                        # Pinned parser failures must remain visible to the
+                        # audit; generic fallback would produce false health.
+                        self._parser_failure_is_terminal = True
+                        raise
                     if not supports_discover and attempt_items:
                         self.stats.source_partial = True
                         logger.warning(

@@ -136,6 +136,17 @@ class _RetryingSiteParser:
         )
 
 
+class _EmptySiteParser:
+    has_custom_parse = True
+    supports_discover = False
+    parser_name = "empty_special"
+
+    async def parse(self, spec: CareerSiteSpec, client: object):  # type: ignore[no-untyped-def]
+        del spec, client
+        if False:
+            yield
+
+
 def test_should_enable_render_on_monitor_retry_for_browser_tiers() -> None:
     browser = SimpleNamespace(requires_browser=True)
     http_only = SimpleNamespace(requires_browser=False)
@@ -221,6 +232,30 @@ async def test_custom_site_parser_does_not_emit_duplicates_across_retry(
     assert [item.external_id for item in items] == ["same-vacancy"]
     assert parser.calls == 2
     assert source.stats.parser_duplicates_suppressed == 1
+
+
+@pytest.mark.asyncio
+async def test_pinned_special_parser_empty_is_terminal(monkeypatch: MonkeyPatch) -> None:
+    source = CareerSiteSource(
+        spec=CareerSiteSpec(
+            url="https://example.com/jobs",
+            source_name="example",
+            site_parser="empty_special",
+        ),
+        http_client=object(),
+        auth=MagicMock(),
+    )
+    source.bypass_strategy = _NoopBypass()
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser",
+        lambda _: _EmptySiteParser(),
+    )
+
+    assert [item async for item in source._try_site_parser(object())] == []
+    assert source._parser_failure_is_terminal is True
+    assert source.stats.requested_parser == "empty_special"
+    assert source.stats.actual_parser == "empty_special"
+    assert source.stats.monitor_attempts == []
 
 
 def test_resolve_scraper_chain_prefers_json_ld_for_generic_and_dom() -> None:

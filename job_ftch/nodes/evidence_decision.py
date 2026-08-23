@@ -33,6 +33,9 @@ class EvidenceDecisionNode:
         self._decision = decision or DecisionNode()
         self._need_more = NeedMoreEvidenceNode()
 
+    def enable_audit_mode(self) -> None:
+        self._decision.enable_audit_mode()
+
     async def process(self, item: JobRecord) -> JobRecord:
         assessed = await self._fanout.process(item)
         result = await self._decision.process(assessed)

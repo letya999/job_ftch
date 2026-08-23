@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
@@ -25,6 +26,26 @@ class CountedSink[ItemT]:
         self.by_source_kind[source_kind] = self.by_source_kind.get(source_kind, 0) + 1
         source_id = f"{source_kind}:{source_name}"
         self.by_source_id[source_id] = self.by_source_id.get(source_id, 0) + 1
+
+    async def flush(self) -> None:
+        if hasattr(self._sink, "flush"):
+            await self._sink.flush()
+
+
+class LimitedSink[ItemT]:
+    """Cap successful final emits; used only by bounded personal MCP runs."""
+
+    def __init__(self, sink: Sink[ItemT], limit: int) -> None:
+        self._sink = sink
+        self._remaining = limit
+        self._lock = asyncio.Lock()
+
+    async def emit(self, item: ItemT) -> None:
+        async with self._lock:
+            if self._remaining <= 0:
+                return
+            await self._sink.emit(item)
+            self._remaining -= 1
 
     async def flush(self) -> None:
         if hasattr(self._sink, "flush"):

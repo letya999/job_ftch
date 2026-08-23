@@ -306,9 +306,7 @@ async def _dom_listing_fallback(
 
     resolved_filter = url_filter or _url_filter_from_parser(page_url)
     static_urls = _strong_detail_urls(
-        extract_static_job_links(
-            html, page_url, url_filter=resolved_filter, limit=max_items
-        ),
+        extract_static_job_links(html, page_url, url_filter=resolved_filter, limit=max_items),
         board_url=page_url,
         max_items=max_items,
     )
@@ -449,6 +447,7 @@ async def _absorb_blocked_navigation(
         status_code=blocked_navigation_status(exc),
         body=html,
     )
+    label: str | None
     if detection.challenge_type:
         label = str(detection.challenge_type)
     elif detection.detected:
@@ -792,9 +791,7 @@ async def probe_challenge(
                 )
                 solve_payload = _public_solve(result)
                 html = await _page_html(page)
-                challenge = (
-                    _observed_challenge(challenge_sink) or _classify_html(html) or challenge
-                )
+                challenge = _observed_challenge(challenge_sink) or _classify_html(html) or challenge
                 if result.solved:
                     result_notes.append(f"challenge solve via {result.method}")
                 elif result.error:

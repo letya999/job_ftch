@@ -268,7 +268,7 @@ parsers:
     wait: "domcontentloaded"
     include_if_detail_page: false
   - name: lamoda
-    domain_pattern: "^https?://(?:(?:www\\.)?lamoda\\.ru/careers|job\\.lamoda\\.ru)(?:/|$)"
+    domain_pattern: "^https?://(?:(?:www\\.)?lamoda\\.ru/careers?|job\\.lamoda\\.ru)(?:/|$)"
     has_custom_parse: true
     supports_discover: false
     render: false

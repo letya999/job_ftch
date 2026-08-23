@@ -323,9 +323,7 @@ class PostgreSQLStore(SQLStoreAdapter):
             await conn.execute("DELETE FROM jf_source_ingest_state WHERE tenant_id = $1", tenant_id)
             await conn.execute("DELETE FROM jf_dedup_claims WHERE claim_key LIKE $1", f"{prefix}%")
             await conn.execute("DELETE FROM jf_outbox WHERE tenant_id = $1", tenant_id)
-            await conn.execute(
-                "DELETE FROM jf_source_assessments WHERE tenant_id = $1", tenant_id
-            )
+            await conn.execute("DELETE FROM jf_source_assessments WHERE tenant_id = $1", tenant_id)
             return counts
 
     async def ping(self) -> bool:

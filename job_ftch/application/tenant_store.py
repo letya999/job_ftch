@@ -847,9 +847,9 @@ class TenantStore:
             msg = f"unsupported operational outcome lane: {lane}"
             raise ValueError(msg)
         body = dict(payload)
-        run_id = str(
-            body.get("source_run_id") or body.get("run_id") or "unknown"
-        ).strip() or "unknown"
+        run_id = (
+            str(body.get("source_run_id") or body.get("run_id") or "unknown").strip() or "unknown"
+        )
         body["source_run_id"] = run_id
         body["tenant_id"] = self._tenant_id
         body["lane"] = normalized_lane
@@ -931,7 +931,10 @@ class TenantStore:
                 continue
             if not isinstance(payload, dict):
                 continue
-            if outcome_cf is not None and str(payload.get("outcome") or "").casefold() != outcome_cf:
+            if (
+                outcome_cf is not None
+                and str(payload.get("outcome") or "").casefold() != outcome_cf
+            ):
                 continue
             if reason_cf is not None and str(payload.get("reason") or "").casefold() != reason_cf:
                 continue

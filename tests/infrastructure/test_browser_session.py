@@ -184,7 +184,9 @@ async def test_unknown_instruction_is_unsupported(monkeypatch: pytest.MonkeyPatc
 _DUMMY_PAGE = object()
 
 
-def _hand_built_session(*, tenant_id: str = "t1", page: Any | None = _DUMMY_PAGE) -> session_mod._LiveSession:
+def _hand_built_session(
+    *, tenant_id: str = "t1", page: Any | None = _DUMMY_PAGE
+) -> session_mod._LiveSession:
     session = session_mod._LiveSession(
         tenant_id=tenant_id,
         url="https://example.com/jobs",

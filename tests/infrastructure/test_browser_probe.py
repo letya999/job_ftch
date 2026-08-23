@@ -400,9 +400,7 @@ _CAREER_HTML = """
 """
 
 
-def _patch_live_probe(
-    monkeypatch: pytest.MonkeyPatch, page: Any
-) -> None:
+def _patch_live_probe(monkeypatch: pytest.MonkeyPatch, page: Any) -> None:
     @asynccontextmanager
     async def fake_open_page(config: dict[str, Any], *, bypass_strategy: Any = None):
         del config, bypass_strategy
@@ -480,11 +478,9 @@ async def test_probe_listing_challenge_does_not_use_dom_fallback(
 ) -> None:
     class _ChallengeCareerPage(_FakePage):
         url = "https://example.com/jobs"
-        html = (
-            _CLOUDFLARE_HTML.replace(
-                "</body>",
-                '<a href="/career/ml-engineer">Careers</a></body>',
-            )
+        html = _CLOUDFLARE_HTML.replace(
+            "</body>",
+            '<a href="/career/ml-engineer">Careers</a></body>',
         )
 
         async def evaluate(self, script: str, arg: object = None) -> object:

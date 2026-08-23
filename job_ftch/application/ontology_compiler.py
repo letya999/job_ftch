@@ -618,7 +618,11 @@ async def _classify_schema(
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
         try:
-            raw = await classify(prompt, schema, **kwargs) if kwargs else await classify(prompt, schema)
+            raw = (
+                await classify(prompt, schema, **kwargs)
+                if kwargs
+                else await classify(prompt, schema)
+            )
         except TypeError:
             raw = await classify(prompt, schema)
         return _normalize_classify_result(raw, schema)
@@ -1354,9 +1358,7 @@ async def compile_ontology_from_shots(
             continue
         consecutive_failures = 0
         candidate_chunks.append(candidate)
-    if len(labeled) > 1 and not any(
-        chunk.terms or chunk.relations for chunk in candidate_chunks
-    ):
+    if len(labeled) > 1 and not any(chunk.terms or chunk.relations for chunk in candidate_chunks):
         consecutive_failures = 0
         for chunk in _chunks(labeled, prompts.coverage_chunk_size):
             user_prompt = _format_prompt(
