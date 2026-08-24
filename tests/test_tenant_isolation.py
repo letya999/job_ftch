@@ -50,9 +50,7 @@ async def test_single_tenant_cli_uses_namespaced_keys(
         del settings, store
         return object(), None, None, None
 
-    def fake_rejected_sink(
-        settings: Settings, store: object | None = None
-    ) -> tuple[None, object]:
+    def fake_rejected_sink(settings: Settings, store: object | None = None) -> tuple[None, object]:
         del settings, store
         return None, object()
 
