@@ -1,0 +1,44 @@
+# systemd unit for job_ftch MCP (VPS / Linux / WSL with systemd).
+#
+# Install:
+#   sudo cp deploy/mcp/job-ftch-mcp.service /etc/systemd/system/
+#   sudo mkdir -p /etc/job_ftch /var/lib/job_ftch
+#   # put tenants in /etc/job_ftch/tenants and env in /etc/job_ftch/mcp.env
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now job-ftch-mcp
+#
+# Edit WorkingDirectory and ExecStart paths to your checkout / uv binary.
+
+[Unit]
+Description=job_ftch MCP server (streamable-http)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jobftch
+Group=jobftch
+WorkingDirectory=/opt/job_ftch
+EnvironmentFile=-/etc/job_ftch/mcp.env
+Environment=JOB_FTCH_TRACING_ENABLED=false
+Environment=JOB_FTCH_OPENOBSERVE_ENABLED=false
+Environment=JOB_FTCH_STORE_BACKEND=sqlite
+Environment=JOB_FTCH_JOB_BACKEND=sqlite
+Environment=JOB_FTCH_SEARCH_BACKEND=sqlite
+Environment=JOB_FTCH_JOB_GROUP_STORE_BACKEND=sqlite
+Environment=JOB_FTCH_CONFIGS_DIR=/etc/job_ftch/tenants
+Environment=JOB_FTCH_STORE_PATH=/var/lib/job_ftch/{tenant_id}/store.db
+# Prefer a dedicated venv: /opt/job_ftch/.venv/bin/job_ftch
+ExecStart=/opt/job_ftch/.venv/bin/job_ftch mcp-server \
+  --configs-dir /etc/job_ftch/tenants \
+  --transport streamable-http \
+  --host 127.0.0.1 \
+  --port 8000
+Restart=on-failure
+RestartSec=5
+# Hardening (optional; adjust for browser scrapers)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

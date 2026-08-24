@@ -250,6 +250,21 @@ class FileOntologyStore:
             }
             self._save(self._term_stats_path, data)
 
+    async def reset_live_projection(self) -> None:
+        async with self._lock:
+            for path in (
+                self._skill_path,
+                self._role_path,
+                self._seniority_path,
+                self._anti_path,
+                self._positive_keywords_path,
+                self._negative_keywords_path,
+                self._graph_path,
+                self._term_stats_path,
+                self._compiled_ontology_path,
+            ):
+                self._save(path, {})
+
     async def upsert_compiled_ontology(self, ontology: CompiledOntology) -> None:
         async with self._lock:
             self._save(self._compiled_ontology_path, ontology.model_dump(mode="json"))

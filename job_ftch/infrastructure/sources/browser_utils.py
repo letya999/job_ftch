@@ -5,6 +5,7 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager, suppress
+from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -21,6 +22,20 @@ if TYPE_CHECKING:
     from patchright.async_api import Browser, BrowserContext, Page, Playwright
 
 log = structlog.get_logger()
+
+_ATTACHED_OPERATOR_PAGE: ContextVar[Any | None] = ContextVar(
+    "_ATTACHED_OPERATOR_PAGE",
+    default=None,
+)
+
+
+def attach_operator_page(page: Any) -> Token[Any | None]:
+    """Bind a live operator page for this task so open_page reuses it."""
+    return _ATTACHED_OPERATOR_PAGE.set(page)
+
+
+def reset_operator_page(token: Token[Any | None]) -> None:
+    _ATTACHED_OPERATOR_PAGE.reset(token)
 
 
 def resolve_identity_ua(config: dict[str, Any], persona_kw: dict[str, Any]) -> str | None:
@@ -479,6 +494,10 @@ async def open_page(
     """
     High-level entry point to open a browser page with optional stealth and proxy.
     """
+    attached = _ATTACHED_OPERATOR_PAGE.get()
+    if attached is not None:
+        yield attached
+        return
     prepare_config = getattr(bypass_strategy, "prepare_browser_config", None)
     if callable(prepare_config):
         config = prepare_config(config)
@@ -536,14 +555,9 @@ async def open_page(
                     log.warning("browser.session_bypass_cleanup_failed", error=str(exc))
             return
 
-        try:
-            from patchright.async_api import async_playwright
-        except ImportError as exc:
-            raise RuntimeError(
-                "patchright is required for browser-backed scraping. "
-                "Install: pip install patchright && patchright install chromium"
-            ) from exc
-        _install_patchright_cancellation_fix()
+        async_playwright = _load_async_playwright(
+            prefer_patchright=_prefer_patchright(config, bypass_strategy)
+        )
 
         persistent = config.get("persistent_context", False)
         if persistent:
@@ -595,6 +609,33 @@ async def _resolve_bypass_context(config: dict[str, Any]) -> Any:
         return await BypassContext.for_url(url, config=config)
     except Exception:
         return None
+
+
+def _prefer_patchright(config: dict[str, Any], bypass_strategy: Any) -> bool:
+    if bool(config.get("_patchright_required")):
+        return True
+    return bool(
+        bypass_strategy is not None and getattr(bypass_strategy, "requires_process_identity", False)
+    )
+
+
+def _load_async_playwright(*, prefer_patchright: bool) -> Any:
+    if not prefer_patchright:
+        try:
+            from playwright.async_api import async_playwright as playwright_async_playwright
+
+            return playwright_async_playwright
+        except ImportError:
+            pass
+    try:
+        from patchright.async_api import async_playwright as patchright_async_playwright
+    except ImportError as exc:
+        raise RuntimeError(
+            "patchright is required for browser-backed scraping. "
+            "Install: pip install patchright && patchright install chromium"
+        ) from exc
+    _install_patchright_cancellation_fix()
+    return patchright_async_playwright
 
 
 def _playwright_launcher(pw: Playwright, launch_kwargs: dict[str, Any]) -> Any:
@@ -706,7 +747,8 @@ async def _open_playwright_page(
         # prepare_browser_config already filled an older persona UA; otherwise
         # window headers say one Chrome major while workers expose the native
         # runtime major.
-        context_kwargs["user_agent"] = bypass_ctx.persona.ua
+        if identity_ua:
+            context_kwargs["user_agent"] = bypass_ctx.persona.ua
 
     context: BrowserContext = await await_with_source_deadline(
         browser.new_context(**context_kwargs)
@@ -980,7 +1022,93 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
             )
 
     if resp is not None and resp.status in blocked:
+        await _observe_blocked_navigation(
+            page,
+            resp,
+            controller=config.get("_bypass_strategy"),
+        )
         raise RuntimeError(f"Browser navigation blocked with status {resp.status}")
+
+
+def is_blocked_navigation_error(exc: BaseException) -> bool:
+    """True when navigate() gave up on a 401/403/429/503 response."""
+    return isinstance(exc, RuntimeError) and str(exc).startswith(
+        "Browser navigation blocked with status"
+    )
+
+
+def blocked_navigation_status(exc: BaseException) -> int | None:
+    if not is_blocked_navigation_error(exc):
+        return None
+    try:
+        return int(str(exc).rsplit(" ", 1)[-1])
+    except ValueError:
+        return None
+
+
+async def _observe_blocked_navigation(
+    page: Any,
+    resp: Any,
+    *,
+    controller: Any = None,
+) -> None:
+    """Classify body+status onto the bypass before navigate() raises."""
+    if controller is None:
+        return
+    observed = getattr(controller, "observed_challenge_type", None)
+    if isinstance(observed, str) and observed.strip():
+        return
+    setter = getattr(controller, "set_observed_challenge_type", None)
+    if not callable(setter):
+        return
+    body = await _blocked_navigation_body(page, resp)
+    headers: dict[str, str] = {}
+    raw_headers = getattr(resp, "headers", None)
+    if isinstance(raw_headers, dict):
+        headers = {str(key): str(value) for key, value in raw_headers.items()}
+    from job_ftch.infrastructure.bypass.challenge_classifier import classify_challenge
+
+    detection = classify_challenge(
+        surface="browser",
+        status_code=int(getattr(resp, "status", 0) or 0) or None,
+        headers=headers or None,
+        body=body,
+    )
+    if not detection.detected:
+        return
+    challenge_type = str(detection.challenge_type or "unknown")
+    maybe = setter(challenge_type)
+    if hasattr(maybe, "__await__"):
+        await maybe
+
+
+async def _blocked_navigation_body(page: Any, resp: Any) -> bytes | None:
+    for attr in ("body", "text"):
+        fn = getattr(resp, attr, None)
+        if not callable(fn):
+            continue
+        try:
+            raw = fn()
+            if hasattr(raw, "__await__"):
+                raw = await raw
+        except Exception:
+            continue
+        if isinstance(raw, bytes):
+            return raw[:100_000]
+        if isinstance(raw, str) and raw:
+            return raw.encode("utf-8", errors="ignore")[:100_000]
+    content_fn = getattr(page, "content", None)
+    if not callable(content_fn):
+        return None
+    try:
+        html = content_fn()
+        if hasattr(html, "__await__"):
+            html = await html
+    except Exception:
+        return None
+    if not html:
+        return None
+    return str(html).encode("utf-8", errors="ignore")[:100_000]
 
 
 async def install_challenge_response_detector(

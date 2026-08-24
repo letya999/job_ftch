@@ -8,7 +8,11 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
-from job_ftch.infrastructure.sources.site_parsers.helpers import safe_fetch
+from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    normalize_search_keywords,
+    safe_fetch,
+    with_query_params,
+)
 
 if TYPE_CHECKING:
     from job_ftch.domain.source_spec import CareerSiteSpec
@@ -18,6 +22,21 @@ class VkTeamParser:
     domain_pattern = r"^https?://team\.vk\.company/vacancy/"
     has_custom_parse = True
     supports_discover = True
+    supports_search = True
+    search_mode = "combined"
+
+    def build_search_urls(
+        self,
+        base_url: str,
+        keywords: Any,
+        *,
+        limit: int | None = None,
+    ) -> list[str]:
+        del limit
+        terms = normalize_search_keywords(keywords)
+        if not terms:
+            return []
+        return [with_query_params(base_url, {"query": " OR ".join(terms)})]
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url

@@ -1,7 +1,7 @@
 ---
 title: "Search query ingest"
 description: "How career-site source URLs are expanded into keyword-search ingest targets."
-updated: 2026-07-30
+updated: 2026-08-22
 status: current
 audience: engineers configuring career-site ingest
 ---
@@ -36,6 +36,8 @@ see `job_ftch/infrastructure/sources/site_parsers/`):
 | career.habr.com | combined | `q=A OR B` + `type=all` | Uppercase `OR`. |
 | geekjob.ru | per_keyword | `qs=<role>` per role | `qs` is all-terms and has no OR operator, so a combined query matches nothing. |
 | hirify.me | combined | `search=A or B` + `params=title,company` | Lowercase ` or `. Search runs through the `/api/vacancies` endpoint; the page URL carries `search`/`params` which `_query_for_spec` forwards. |
+| team.vk.company | combined | `query=A OR B` | Discover already reads `query`/`search`/`title` and maps it to the API `title` param. |
+| rabota.sber.ru | combined | `query=A OR B` | Parse already maps listing `query` to API `searchString`. |
 
 For `combined` a single search URL replaces the bare source and keeps the
 original `source_name`. For `per_keyword` each URL becomes its own source with a
@@ -48,11 +50,13 @@ Adding a new aggregator = add `supports_search`, `search_mode`, and
 
 ## Tier-1: generic search-form detection (best-effort)
 
-For a career site with no dedicated parser, the source attempts runtime search-
-form detection (`site_parsers/generic_search.py`). Expansion attaches the
-keywords to `monitor_config["_search_keywords"]`; at run time
-`CareerSiteSource._maybe_apply_generic_search` (only for sites without any site
-parser and without an explicit query) does:
+For a career site whose parser does **not** advertise `supports_search` (or
+that has no parser), expansion attaches the keywords to
+`monitor_config["_search_keywords"]`. At run time
+`CareerSiteSource._maybe_apply_generic_search` runs **before** `_try_site_parser`
+so a parser without `supports_search` still sees the rewritten URL. It skips
+only when the URL already has a known search query or the resolved parser has
+`supports_search=True`. It then:
 
 1. `detect_search_form(html, base_url)` - finds a `<form>` with a text/search
    input. GET forms are preferred (their query parameter is reproducible as a

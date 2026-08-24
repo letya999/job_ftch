@@ -1,5 +1,5 @@
 import socket
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import aiohttp
 import pytest
@@ -7,6 +7,7 @@ import pytest
 from job_ftch.adapters.telegram_bot.formatter import resolve_job_url
 from job_ftch.adapters.telegram_bot.handlers.pipeline import (
     _host_resolves_to_blocked_ip,
+    _PinnedHostResolver,
     _url_is_alive,
 )
 
@@ -50,6 +51,15 @@ async def test_url_is_alive_telegram_passthrough():
 
 
 @pytest.mark.asyncio
+async def test_url_is_alive_telegram_lookalike_does_not_bypass_ssrf_guard():
+    with patch("socket.getaddrinfo") as mock_dns:
+        mock_dns.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))]
+        with patch("aiohttp.ClientSession") as mock_session:
+            assert await _url_is_alive("https://evil-t.me.example/job") is False
+            mock_session.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_url_is_alive_scheme_guard():
     assert await _url_is_alive("ftp://example.com/file") is False
     assert await _url_is_alive("file:///etc/passwd") is False
@@ -70,6 +80,16 @@ async def test_url_is_alive_ssrf_blocked():
         assert await _url_is_alive("http://127.0.0.1:8080") is False
         mock_session.assert_not_called()
 
+    # 3. Mixed public/private answers are blocked as a set.
+    with patch("socket.getaddrinfo") as mock_dns:
+        mock_dns.return_value = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 80)),
+        ]
+        with patch("aiohttp.ClientSession") as mock_session:
+            assert await _url_is_alive("http://mixed.example/api") is False
+            mock_session.assert_not_called()
+
 
 @pytest.mark.asyncio
 async def test_url_is_alive_happy_path():
@@ -86,8 +106,9 @@ async def test_url_is_alive_happy_path():
         mock_session.head.return_value = mock_resp
         mock_session.__aenter__.return_value = mock_session
 
-        with patch("aiohttp.ClientSession", return_value=mock_session):
+        with patch("aiohttp.ClientSession", return_value=mock_session) as client_session:
             assert await _url_is_alive(url) is True
+            client_session.assert_called_once_with(connector=ANY)
             mock_session.head.assert_called_once_with(
                 url, timeout=pytest.any_instance_of(aiohttp.ClientTimeout), allow_redirects=False
             )
@@ -109,9 +130,10 @@ async def test_url_is_alive_redirect_treated_as_alive():
         mock_session.head.return_value = mock_resp
         mock_session.__aenter__.return_value = mock_session
 
-        with patch("aiohttp.ClientSession", return_value=mock_session):
+        with patch("aiohttp.ClientSession", return_value=mock_session) as client_session:
             # We expect True because 301 < 400, even though allow_redirects=False
             assert await _url_is_alive(url) is True
+            client_session.assert_called_once_with(connector=ANY)
             mock_session.head.assert_called_once_with(
                 url, timeout=pytest.any_instance_of(aiohttp.ClientTimeout), allow_redirects=False
             )
@@ -133,6 +155,33 @@ async def test_url_liveness_does_not_hide_accepted_job_on_head_block_or_timeout(
 
         with patch("aiohttp.ClientSession", side_effect=TimeoutError):
             assert await _url_is_alive(url) is True
+
+
+@pytest.mark.asyncio
+async def test_url_liveness_uses_pinned_resolver() -> None:
+    url = "https://example.com/job"
+    with patch("socket.getaddrinfo") as mock_dns:
+        mock_dns.return_value = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+        ]
+
+        response = MagicMock()
+        response.status = 200
+        response.__aenter__.return_value = response
+        session = MagicMock()
+        session.head.return_value = response
+        session.__aenter__.return_value = session
+
+        with patch("aiohttp.ClientSession", return_value=session) as client_session:
+            assert await _url_is_alive(url) is True
+
+    connector = client_session.call_args.kwargs["connector"]
+    resolver = connector._resolver
+    assert isinstance(resolver, _PinnedHostResolver)
+    pinned = await resolver.resolve("example.com", 443)
+    assert [entry["host"] for entry in pinned] == ["93.184.216.34"]
+    mock_dns.assert_called_once()
+    await connector.close()
 
 
 # Helper for fuzzy matching in assert_called_once_with

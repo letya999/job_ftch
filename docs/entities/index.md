@@ -8,7 +8,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 
 - [Сущности и контракты](README.md) - Ключевые entity-карточки плюс полные карты domain/application модулей. (Updated: 2026-07-28)
 - [Adapters and plugins](adapters_and_plugins.md) - `job_ftch` uses several extension shapes. The names are intentionally (Updated: 2026-07-24)
-- [Application Model Map](application_model_map.md) - Полный индекс `job_ftch/application/*`: composition roots, ports, runtime orchestration, registries и helper modules. (Updated: 2026-07-28)
+- [Application Model Map](application_model_map.md) - Полный индекс `job_ftch/application/*`: composition roots, ports, runtime orchestration, registries и helper modules. (Updated: 2026-08-19)
 - [AuthProvider](auth_provider.md) - **Слой**: `application` (Updated: 2026-07-24)
 - [Backends (Бэкенды хранения вакансий)](backend.md) - Backends в проекте `job_ftch` — это собирательное название (Updated: 2026-07-24)
 - [BypassStrategy (Стратегия обхода защит)](bypass_strategy.md) - BypassStrategy — это слой абстракции над HTTP-клиентом или (Updated: 2026-07-24)

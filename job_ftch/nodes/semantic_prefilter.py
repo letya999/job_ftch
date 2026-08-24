@@ -151,6 +151,10 @@ class SemanticPrefilterNode:
         self._relevance_scorer = relevance_scorer
         self._relevance_threshold = relevance_threshold
         self._rescue_logic = "strong_ai_signal"
+        self._audit_mode = False
+
+    def enable_audit_mode(self) -> None:
+        self._audit_mode = True
 
     def configure_graph_params(self, params: dict[str, object]) -> None:
         if "dense_margin_threshold" in params:
@@ -163,6 +167,10 @@ class SemanticPrefilterNode:
     async def process(self, item: RawItem) -> RawItem | None:
         with _tracer.start_as_current_span("semantic_prefilter.check") as span:
             span.set_attribute("job_ftch.node", "SemanticPrefilterNode")
+
+            if self._audit_mode:
+                span.set_attribute("job_ftch.node.result", "audit_passthrough")
+                return item
 
             if self._relevance_scorer is not None:
                 # `score_text` may run a sentence-transformers encode, which is

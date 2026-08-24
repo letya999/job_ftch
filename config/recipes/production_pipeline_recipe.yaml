@@ -12,6 +12,7 @@ runtime:
   graph_hash: 0d73de0663d220da62e37d9a41159542547d167f9f096088f7ae85ec587e44fb  # pragma: allowlist secret -- immutable graph content hash
   openai_model: gpt-5.4-nano
   relevance_llm_model: gpt-4.1-mini
+  ontology_compiler_model: gpt-4.1-mini
   store_backend: postgres
   job_group_store_backend: postgres
   job_backend: postgres
@@ -46,6 +47,7 @@ oss_reproduction:
   required_runtime_settings:
     openai_model: gpt-5.4-nano
     relevance_llm_model: gpt-4.1-mini
+    ontology_compiler_model: gpt-4.1-mini
     pipeline_graph_path: config/pipelines/evidence_v2_compact_prefilter.yaml
     pipeline_graph_expected_hash: 0d73de0663d220da62e37d9a41159542547d167f9f096088f7ae85ec587e44fb  # pragma: allowlist secret -- immutable graph content hash
     source_preparation_concurrency: 1

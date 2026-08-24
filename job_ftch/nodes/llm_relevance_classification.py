@@ -1122,6 +1122,10 @@ class LLMRelevanceEvidenceNode:
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._classifier = LLMRelevanceClassificationNode(*args, **kwargs)
+        self._audit_mode = False
+
+    def enable_audit_mode(self) -> None:
+        self._audit_mode = True
 
     @property
     def stats(self) -> dict[str, int]:
@@ -1133,6 +1137,8 @@ class LLMRelevanceEvidenceNode:
     async def process(self, item: AssessedJob) -> AssessedJob:
         if not isinstance(item, AssessedJob):
             raise TypeError("LLMRelevanceEvidenceNode requires AssessedJob")
+        if self._audit_mode:
+            return item
         record = await self._classifier.process(item.record)
         if record is None:
             return item.model_copy(

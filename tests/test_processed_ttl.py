@@ -13,13 +13,8 @@ class _FakeSettings:
 
 
 @pytest.mark.asyncio
-async def test_has_processed_respects_fresh_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
-    store = InMemoryStore()
-    monkeypatch.setattr(
-        "job_ftch.config.get_settings",
-        lambda: _FakeSettings(24),
-        raising=False,
-    )
+async def test_has_processed_respects_fresh_timestamp() -> None:
+    store = InMemoryStore(processed_item_ttl_hours=24)
 
     await store.mark_processed("item-1")
 
@@ -27,13 +22,8 @@ async def test_has_processed_respects_fresh_timestamp(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_has_processed_expires_stale_timestamp(monkeypatch: pytest.MonkeyPatch) -> None:
-    store = InMemoryStore()
-    monkeypatch.setattr(
-        "job_ftch.config.get_settings",
-        lambda: _FakeSettings(24),
-        raising=False,
-    )
+async def test_has_processed_expires_stale_timestamp() -> None:
+    store = InMemoryStore(processed_item_ttl_hours=24)
     await store.set_add("processed", "item-1")
     stale = datetime.now(UTC) - timedelta(hours=25)
     await store.set("processed_at:item-1", stale.isoformat())
@@ -45,12 +35,29 @@ async def test_has_processed_expires_stale_timestamp(monkeypatch: pytest.MonkeyP
 async def test_has_processed_falls_back_to_legacy_membership_when_timestamp_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    store = InMemoryStore()
+    store = InMemoryStore(processed_item_ttl_hours=24)
     monkeypatch.setattr(
         "job_ftch.config.get_settings",
-        lambda: _FakeSettings(24),
+        lambda: _FakeSettings(1),
         raising=False,
     )
     await store.set_add("processed", "item-legacy")
 
     assert await store.has_processed("item-legacy") is True
+
+
+@pytest.mark.asyncio
+async def test_has_processed_uses_injected_ttl_not_global_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = InMemoryStore(processed_item_ttl_hours=None)
+    monkeypatch.setattr(
+        "job_ftch.config.get_settings",
+        lambda: _FakeSettings(1),
+        raising=False,
+    )
+    await store.set_add("processed", "item-1")
+    stale = datetime.now(UTC) - timedelta(hours=25)
+    await store.set("processed_at:item-1", stale.isoformat())
+
+    assert await store.has_processed("item-1") is True

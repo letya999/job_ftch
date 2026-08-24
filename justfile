@@ -82,3 +82,29 @@ docker-prod-verify:
     docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml up -d --build
     docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml ps
     docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml down
+
+site-install:
+    bun --cwd job_ftch_site install
+
+site-dev:
+    bun --cwd job_ftch_site run dev
+
+site-build:
+    bun --cwd job_ftch_site run type-check
+    bun --cwd job_ftch_site run build
+
+site-docker-dev:
+    docker compose --env-file job_ftch_site/.env.dev -f job_ftch_site/docker-compose.dev.yml up --build
+
+site-docker-prod:
+    docker compose --env-file job_ftch_site/.env.prod -f job_ftch_site/docker-compose.prod.yml up --build -d
+
+bot-public-api-dev:
+    docker compose --env-file job_ftch/adapters/telegram_bot/.env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml --profile public-api up -d --build postgres qdrant public-api
+
+bot-public-api-prod:
+    docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml --profile public-api up -d --build postgres qdrant public-api
+
+site-stack-dev:
+    just bot-public-api-dev
+    just site-docker-dev

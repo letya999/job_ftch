@@ -168,6 +168,55 @@ def test_load_tenants_supports_directory_and_aggregate_file(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_run_all_propagates_operator_limits_to_each_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenants = [
+        TenantConfig(tenant_id="t1", display_name="Tenant 1", sources=[]),
+        TenantConfig(tenant_id="t2", display_name="Tenant 2", sources=[]),
+    ]
+    runner = TenantRunner.from_tenants(tenants, base_settings=_isolated_base_settings())
+    calls: list[dict[str, object]] = []
+
+    async def fake_run_tenant(
+        tenant_id: str,
+        *,
+        max_items: int | None = None,
+        user_id: str | None = None,
+        source_ids: list[str] | None = None,
+    ) -> RunSummary:
+        calls.append(
+            {
+                "tenant_id": tenant_id,
+                "max_items": max_items,
+                "user_id": user_id,
+                "source_ids": source_ids,
+            }
+        )
+        return RunSummary(tenant_id=tenant_id, source_run_id=f"run-{tenant_id}")
+
+    monkeypatch.setattr(runner, "run_tenant", fake_run_tenant)
+
+    summaries = await runner.run_all(concurrency=1, max_items=3, user_id="operator-1")
+
+    assert [summary.tenant_id for summary in summaries] == ["t1", "t2"]
+    assert calls == [
+        {
+            "tenant_id": "t1",
+            "max_items": 3,
+            "user_id": "operator-1",
+            "source_ids": None,
+        },
+        {
+            "tenant_id": "t2",
+            "max_items": 3,
+            "user_id": "operator-1",
+            "source_ids": None,
+        },
+    ]
+
+
+@pytest.mark.asyncio
 async def test_strategy_roundtrip_memory_backend() -> None:
     from job_ftch.application.tenant_runner import TenantStore
     from job_ftch.infrastructure.stores.in_memory import InMemoryStore
@@ -787,6 +836,94 @@ async def test_tenant_runner_persists_runtime_sources_and_disables_them(tmp_path
         assert tenants[0].source_count == 1
     finally:
         await reloaded.close()
+
+
+@pytest.mark.asyncio
+async def test_tenant_runner_remove_runtime_source_keeps_config_sources(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "ai_jobs",
+            "display_name": "AI Jobs",
+            "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+            "store_backend": "sqlite",
+            "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            "job_group_store_backend": "sqlite",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+        }
+    )
+    runtime_spec = CareerSiteSpec(
+        type="career_site",
+        url="https://example.com/jobs",
+        source_name="example_com_jobs",
+    )
+    source_id = source_spec_identifier(runtime_spec)
+    runner = TenantRunner.from_tenants([tenant], base_settings=_isolated_base_settings())
+    try:
+        await runner.add_source_spec("ai_jobs", runtime_spec, added_via="test")
+        removed = await runner.remove_source("ai_jobs", source_id)
+        listed = await runner.list_sources("ai_jobs")
+        config_id = next(item["source_id"] for item in listed if item.get("origin") == "config")
+        config_block = await runner.remove_source("ai_jobs", config_id)
+        assert removed["status"] == "removed"
+        assert all(item["source_id"] != source_id for item in listed)
+        assert config_block["status"] == "unsupported"
+        assert config_block["error"] == "config_source_not_deletable"
+        assert any(item["source_id"] == config_id for item in listed)
+    finally:
+        await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_tenant_runner_update_source_runtime_and_config_rules(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "ai_jobs",
+            "display_name": "AI Jobs",
+            "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+            "store_backend": "sqlite",
+            "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            "job_group_store_backend": "sqlite",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+        }
+    )
+    runtime_spec = CareerSiteSpec(
+        type="career_site",
+        url="https://example.com/jobs",
+        source_name="example_com_jobs",
+        limit=20,
+    )
+    source_id = source_spec_identifier(runtime_spec)
+    runner = TenantRunner.from_tenants([tenant], base_settings=_isolated_base_settings())
+    try:
+        await runner.add_source_spec("ai_jobs", runtime_spec, added_via="test")
+        patched = await runner.update_source(
+            "ai_jobs",
+            source_id,
+            {"enabled": False, "limit": 7},
+        )
+        assert patched.get("enabled") is False
+        assert patched["spec"]["limit"] == 7
+        unknown = await runner.update_source("ai_jobs", source_id, {"parser": "generic"})
+        assert unknown["error"] == "invalid_arguments"
+        listed = await runner.list_sources("ai_jobs")
+        config_id = next(item["source_id"] for item in listed if item.get("origin") == "config")
+        config_limit = await runner.update_source("ai_jobs", config_id, {"limit": 2})
+        assert config_limit["status"] == "unsupported"
+        assert config_limit["error"] == "config_limit_not_updatable"
+        config_disabled = await runner.update_source("ai_jobs", config_id, {"enabled": False})
+        assert config_disabled.get("enabled") is False
+        with pytest.raises(KeyError):
+            await runner.update_source("ai_jobs", "missing-source", {"enabled": True})
+    finally:
+        await runner.close()
 
 
 @pytest.mark.asyncio
@@ -1414,16 +1551,19 @@ def test_failure_streak_pauses_then_healthy_probe_resets_once() -> None:
     assert healthy.status == "healthy"
 
 
-def test_inconsistent_counters_do_not_silently_pass() -> None:
+def test_inconsistent_counters_do_not_silently_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     """failed > fetched violates the invariant: it is flagged, and still fails the run."""
-    import structlog
-
-    with structlog.testing.capture_logs() as logs:
-        health = _health_from(SourceRunStats(fetched=2, failed=5))
+    events: list[str] = []
+    monkeypatch.setattr(
+        tenant_runner_module,
+        "logger",
+        SimpleNamespace(warning=lambda event, **_: events.append(event)),
+    )
+    health = _health_from(SourceRunStats(fetched=2, failed=5))
 
     assert health.failure_streak == 1
     assert health.status == "failing"
-    assert any(entry["event"] == "source_health_counter_invariant_violated" for entry in logs)
+    assert "source_health_counter_invariant_violated" in events
 
 
 @pytest.mark.asyncio

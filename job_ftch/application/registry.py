@@ -724,6 +724,16 @@ def all_monitor_names() -> frozenset[str]:
     return frozenset(e.name for e in _MONITOR_REGISTRY)
 
 
+def all_scraper_names() -> frozenset[str]:
+    load_extensions()
+    return frozenset(_SCRAPER_REGISTRY)
+
+
+def all_site_parser_names() -> frozenset[str]:
+    load_extensions()
+    return frozenset(entry.name for entry in _site_parser_factories)
+
+
 def rich_monitor_names() -> frozenset[str]:
     load_extensions()
     return frozenset(e.name for e in _MONITOR_REGISTRY if e.rich)
@@ -1205,6 +1215,40 @@ def resolve_site_parser(url: str) -> Any | None:
     for entry in _sorted_site_parser_entries():
         if re.search(_effective_site_parser_pattern(entry), url, re.IGNORECASE):
             return _instantiate_site_parser(entry)
+    return None
+
+
+def resolve_site_parser_by_name(name: str) -> Any | None:
+    load_extensions()
+    needle = name.strip()
+    if not needle:
+        return None
+    for entry in _sorted_site_parser_entries():
+        if entry.name == needle:
+            return _instantiate_site_parser(entry)
+    return None
+
+
+def site_parser_domain_pattern(name: str) -> str | None:
+    load_extensions()
+    needle = name.strip()
+    if not needle:
+        return None
+    for entry in _sorted_site_parser_entries():
+        if entry.name == needle:
+            return _effective_site_parser_pattern(entry)
+    return None
+
+
+def resolve_site_parser_for_spec(spec: Any) -> Any | None:
+    pinned = getattr(spec, "site_parser", None)
+    if isinstance(pinned, str) and pinned.strip():
+        parser = resolve_site_parser_by_name(pinned)
+        if parser is not None:
+            return parser
+    url = getattr(spec, "url", None)
+    if isinstance(url, str) and url.strip():
+        return resolve_site_parser(url)
     return None
 
 

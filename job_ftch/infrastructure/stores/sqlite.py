@@ -107,7 +107,13 @@ class SQLiteStore(SQLStoreAdapter):
             updated_at=excluded.updated_at
     """
 
-    def __init__(self, path: str | Path = ":memory:") -> None:
+    def __init__(
+        self,
+        path: str | Path = ":memory:",
+        *,
+        processed_item_ttl_hours: int | None = 24,
+    ) -> None:
+        super().__init__(processed_item_ttl_hours=processed_item_ttl_hours)
         self._path = str(path)
         self._conn: Any = None
         self._init_lock = asyncio.Lock()
@@ -218,11 +224,20 @@ class SQLiteStore(SQLStoreAdapter):
                 "bot_publish:%",
                 "bot_scheduler:last_publish%",
                 "bot_scheduler:pending_publish_since",
+                "outcome:%",
+                "outcome_ids:%",
+                "outcome_run_order:%",
             )
         )
         set_patterns = tuple(
             f"{prefix}{suffix}"
-            for suffix in ("processed%", "dedup_keys%", "dup_records%", "source_health_ids")
+            for suffix in (
+                "processed%",
+                "dedup_keys%",
+                "dup_records%",
+                "source_health_ids",
+                "outcome_ids:%",
+            )
         )
         conn = await self._ensure_initialized()
 
@@ -254,6 +269,9 @@ class SQLiteStore(SQLStoreAdapter):
             "outbox": await _count(
                 "SELECT COUNT(*) FROM jf_outbox WHERE tenant_id = ?", (tenant_id,)
             ),
+            "source_assessments": await _count(
+                "SELECT COUNT(*) FROM jf_source_assessments WHERE tenant_id = ?", (tenant_id,)
+            ),
         }
         await conn.execute("DELETE FROM jf_kv WHERE " + kv_where, kv_patterns)  # nosec B608
         await conn.execute("DELETE FROM jf_set WHERE " + set_where, set_patterns)  # nosec B608
@@ -262,6 +280,7 @@ class SQLiteStore(SQLStoreAdapter):
         await conn.execute("DELETE FROM jf_source_ingest_state WHERE tenant_id = ?", (tenant_id,))
         await conn.execute("DELETE FROM jf_dedup_claims WHERE claim_key LIKE ?", (f"{prefix}%",))
         await conn.execute("DELETE FROM jf_outbox WHERE tenant_id = ?", (tenant_id,))
+        await conn.execute("DELETE FROM jf_source_assessments WHERE tenant_id = ?", (tenant_id,))
         await conn.commit()
         return counts
 
@@ -276,4 +295,7 @@ class SQLiteStore(SQLStoreAdapter):
 
 @register_store("sqlite")
 def _build_sqlite_store(settings: Settings) -> SQLiteStore:
-    return SQLiteStore(path=settings.store_path)
+    return SQLiteStore(
+        path=settings.store_path,
+        processed_item_ttl_hours=settings.processed_item_ttl_hours,
+    )

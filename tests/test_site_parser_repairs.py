@@ -180,6 +180,7 @@ async def test_sber_parser_uses_rich_http_api_without_browser() -> None:
                             "duties": "Разрабатывать продукты",
                             "requirements": "Опыт от года",
                             "city": "Москва",
+                            "salary": {"from": 300000, "to": 450000, "currency": "RUB"},
                         }
                     ]
                 }
@@ -206,6 +207,12 @@ async def test_sber_parser_uses_rich_http_api_without_browser() -> None:
     ]
     assert str(items[0].url).endswith("/mladshiy-treyder-global-markets-4545651/")
     assert items[0].metadata["detail_vacancy_confirmed"] is True
+    assert items[0].metadata["locations"] == ["Москва"]
+    assert items[0].metadata["base_salary"] == {
+        "currency": "RUB",
+        "min": 300000,
+        "max": 450000,
+    }
     assert items[0].created_at is not None
     assert _sber_slug("Python / AI и LLM") == "python-ai-i-llm"
 

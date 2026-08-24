@@ -38,6 +38,7 @@ class SourceFetchResult:
     rich_emitted: int = 0
     scraped: int = 0
     scrape_fallback_used: int = 0
+    browser_navigations_attempted: int = 0
     monitor_truncated: int = 0
     freshness_filtered: int = 0
     freshness_undated_passed: int = 0
@@ -48,6 +49,13 @@ class SourceFetchResult:
     hard_deadline_hit: bool = False
     limited: bool = False
     completion_state: str = "pending"
+    requested_parser: str | None = None
+    actual_parser: str | None = None
+    fallback_chain: list[str] | None = None
+    generic_monitor_used: bool = False
+    generic_scraper_used: bool = False
+    parser_urls_discovered: int = 0
+    detail_cards_extracted: int = 0
 
 
 _TECHNICAL_ZERO_REASONS = {
@@ -98,12 +106,20 @@ def _capture_source_stats(source: object, result: SourceFetchResult) -> None:
             "rich_emitted",
             "scraped",
             "scrape_fallback_used",
+            "browser_navigations_attempted",
             "monitor_truncated",
             "freshness_filtered",
             "freshness_undated_passed",
             "parser_duplicates_suppressed",
         ):
             setattr(result, name, int(getattr(stats, name, 0) or 0))
+        result.requested_parser = getattr(stats, "requested_parser", None)
+        result.actual_parser = getattr(stats, "actual_parser", None)
+        result.fallback_chain = list(getattr(stats, "fallback_chain", ()) or ())
+        result.generic_monitor_used = bool(getattr(stats, "monitor_attempts", ()))
+        result.generic_scraper_used = bool(getattr(stats, "scrape_fallback_used", 0))
+        result.parser_urls_discovered = int(getattr(stats, "parser_urls_discovered", 0) or 0)
+        result.detail_cards_extracted = int(getattr(stats, "detail_cards_extracted", 0) or 0)
         if result.yielded == 0 and result.zero_reason in _TECHNICAL_ZERO_REASONS:
             result.failed = True
             result.error = result.error or f"source_zero_yield:{result.zero_reason}"

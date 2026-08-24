@@ -35,7 +35,11 @@ def _install_instructor_and_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     # with a structured-output coroutine.
     instructor_mod = types.ModuleType("instructor")
     instructor_mod.from_provider = MagicMock()  # type: ignore[attr-defined]
-    instructor_mod.Mode = types.SimpleNamespace(TOOLS_STRICT="tools_strict")  # type: ignore[attr-defined]
+    # TOOLS (non-strict) is the production mode for OpenAI-compatible proxies.
+    instructor_mod.Mode = types.SimpleNamespace(  # type: ignore[attr-defined]
+        TOOLS="tools",
+        TOOLS_STRICT="tools_strict",
+    )
     monkeypatch.setitem(sys.modules, "instructor", instructor_mod)
 
     openai_mod = types.ModuleType("openai")
@@ -135,6 +139,46 @@ async def test_generate_text_handles_empty_content(
 
 
 # ---------------------------------------------------------------------------
+# Instructor mode: TOOLS (not TOOLS_STRICT) for gateway compatibility.
+# ---------------------------------------------------------------------------
+
+
+def test_provider_uses_tools_mode_not_tools_strict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CLIProxy/Codex reject strict tool schemas with optional fields.
+
+    OpenAIInstructorLLMProvider must construct instructor with Mode.TOOLS so
+    local subscription gateways accept RelevanceEvidenceClassification and
+    similar schemas (missing optional keys in ``required``).
+    """
+    _install_instructor_and_openai(monkeypatch)
+    from job_ftch.infrastructure.llm import openai_provider
+
+    instructor_client = MagicMock()
+    instructor_client.create_with_completion = AsyncMock(
+        return_value=(MagicMock(), MagicMock(usage=MagicMock(prompt_tokens=1, completion_tokens=1)))
+    )
+    openai_provider.instructor.from_provider = MagicMock(return_value=instructor_client)  # type: ignore[attr-defined]
+    openai_provider.AsyncOpenAI = MagicMock(return_value=MagicMock())  # type: ignore[assignment]
+
+    openai_provider.OpenAIInstructorLLMProvider(
+        api_key="sk-test",
+        model="gpt-5.4-mini",
+        base_url="http://127.0.0.1:8317/v1",
+        timeout_seconds=30.0,
+        max_retries=1,
+    )
+
+    openai_provider.instructor.from_provider.assert_called_once()  # type: ignore[attr-defined]
+    call_kwargs = openai_provider.instructor.from_provider.call_args.kwargs  # type: ignore[attr-defined]
+    assert call_kwargs["mode"] == openai_provider.instructor.Mode.TOOLS  # type: ignore[attr-defined]
+    assert call_kwargs["mode"] != getattr(
+        openai_provider.instructor.Mode, "TOOLS_STRICT", "tools_strict"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Structured methods go through the instructor client.
 # ---------------------------------------------------------------------------
 
@@ -176,6 +220,30 @@ async def test_classify_uses_instructor_client(
     )
     out = await provider.classify("prompt", _S)
     assert out.label == "ok"
+    raw_client.chat.completions.create.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_classify_forwards_compile_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic import BaseModel
+
+    class _S(BaseModel):
+        label: str
+
+    provider, instructor_client, raw_client = _build_provider(monkeypatch)
+    instructor_client.create_with_completion = AsyncMock(
+        return_value=(
+            _S(label="ok"),
+            MagicMock(usage=MagicMock(prompt_tokens=1, completion_tokens=1)),
+        )
+    )
+    out = await provider.classify("prompt", _S, timeout_seconds=120.0)
+    assert out.label == "ok"
+    kwargs = instructor_client.create_with_completion.await_args.kwargs
+    assert kwargs["timeout"] == 120.0
+    assert kwargs["max_retries"] == 0
     raw_client.chat.completions.create.assert_not_called()
 
 

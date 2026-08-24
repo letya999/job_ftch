@@ -1,8 +1,9 @@
-"""Tier-1 generic search-form detection for career sites without a dedicated parser.
+"""Tier-1 generic search-form detection for career sites without `supports_search`.
 
-Aggregators with a hand-written `SiteParser` (hh, habr, geekjob, hirify) build
-their search URLs authoritatively via `build_search_urls`. For every *other*
-career site we fall back to this best-effort path:
+Aggregators that advertise `supports_search` (hh, habr, geekjob, hirify, VK,
+Sber, …) build their search URLs authoritatively via `build_search_urls`. For
+every other career site — including ones with a SiteParser that does not
+implement search — we fall back to this best-effort path:
 
 1. fetch the listing page and look for an HTML `<form>` with a text/search input
    (`detect_search_form`);
