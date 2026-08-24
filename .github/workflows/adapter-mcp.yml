@@ -33,7 +33,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install deps (mcp test extras)
-        run: uv sync --extra mcp --extra sqlite --extra openai
+        run: uv sync --extra mcp --extra sqlite --extra openai --extra site-scrapers
         env:
           JOB_FTCH_LLM_BACKEND: heuristic
           JOB_FTCH_TRACING_ENABLED: "false"

@@ -22,8 +22,6 @@ services:
       JOB_FTCH_STORE_DSN: postgresql://${POSTGRES_USER:-job_user}:${POSTGRES_PASSWORD:-job_password}@postgres:5432/${POSTGRES_DB:-job_ftch}
       JOB_FTCH_QDRANT_URL: http://qdrant:6333
       JOB_FTCH_CONFIGS_DIR: /app/job_ftch/adapters/telegram_bot/config/tenants
-      JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN: ${JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN:?JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN must be set}
-      JOB_FTCH_AUTH_TELEGRAM_BOT_BRIDGE_API_KEY: ${JOB_FTCH_AUTH_TELEGRAM_BOT_BRIDGE_API_KEY:-}
     ports: ["127.0.0.1:8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }
