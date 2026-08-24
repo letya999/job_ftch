@@ -172,7 +172,11 @@ class FullExtractionNode:
         # Identity-shaped fields the delivery card actually renders. For title
         # and company the LLM wins: metadata often holds listing-page noise.
         title = extracted.title or job.title
-        company = extracted.company or job.company
+        company = (
+            job.metadata.get("company")
+            if job.metadata.get("company_authoritative") and job.metadata.get("company")
+            else extracted.company or job.company
+        )
 
         # Location: metadata is consulted only when the extracted value cannot
         # stand as a place. Neither source is reliably better - the LLM lifted
@@ -218,11 +222,28 @@ class FullExtractionNode:
         if extraction_status is JobExtractionStatus.PARTIAL:
             review_reasons.insert(0, JobReviewReason.PARTIAL_EXTRACTION.value)
 
+        compensation = extracted.compensation or job.compensation
+        if (
+            job.metadata.get("parser") == "sber-public-api"
+            and not job.metadata.get("base_salary")
+            and not job.metadata.get("salary_text")
+            and not job.metadata.get("base_salary_text")
+        ):
+            # Sber descriptions mention business effects and bonuses in the
+            # same conditions block; those are not a salary offer.
+            compensation = None
+
         return job.model_copy(
             update={
                 "title": title,
                 "company": company,
                 "location": location,
+                "country": job.country
+                or (
+                    job.metadata.get("country")
+                    if job.metadata.get("country_authoritative")
+                    else None
+                ),
                 "language": language,
                 "work_mode": work_mode,
                 "seniority": extracted.seniority
@@ -236,7 +257,7 @@ class FullExtractionNode:
                 "domain": extracted.domain or job.domain,
                 "industry": extracted.industry or job.industry,
                 "review_reasons": tuple(dict.fromkeys(review_reasons)),
-                "compensation": extracted.compensation or job.compensation,
+                "compensation": compensation,
                 "project_types": extracted.project_types or job.project_types,
                 "responsibilities": extracted.responsibilities or job.responsibilities,
                 "requirements_must": extracted.requirements_must or job.requirements_must,

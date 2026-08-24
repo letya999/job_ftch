@@ -2,6 +2,11 @@
 .env.*
 .git
 .github
+.codex-backups
+.work
+job_ftch_site
+node_modules
+.next
 .venv
 .venv-*
 .venv-test-core

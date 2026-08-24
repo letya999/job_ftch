@@ -89,7 +89,13 @@ from job_ftch.domain.ontology_graph import (
     ShotOntologyExtraction,
     ShotOntologyGraph,
 )
-from job_ftch.domain.outbox import OutboxRecord, OutboxState, delivery_idempotency_key
+from job_ftch.domain.outbox import (
+    DeliveryEnvelope,
+    OutboxRecord,
+    OutboxState,
+    delivery_envelope_from_record,
+    delivery_idempotency_key,
+)
 from job_ftch.domain.presentable import PresentableJob
 from job_ftch.domain.profile import (
     CompensationExpectation,
@@ -246,9 +252,11 @@ __all__ = [
     "ObservationLedgerEntry",
     "ObservationKind",
     "content_hash_for_raw_item",
+    "DeliveryEnvelope",
     "OutboxRecord",
     "OutboxState",
     "SourceOutcome",
+    "delivery_envelope_from_record",
     "delivery_idempotency_key",
     "processed_key_for_url",
     "job_to_draft",

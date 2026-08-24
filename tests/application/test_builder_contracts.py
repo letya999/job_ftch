@@ -133,7 +133,7 @@ async def test_openai_provider_forwards_timeout_retry_and_prompt(
         "base_url": "https://api.example.test",
         "timeout": 12.5,
         "max_retries": 3,
-        "mode": __import__("instructor").Mode.TOOLS_STRICT,
+        "mode": __import__("instructor").Mode.TOOLS,
     }
     create_kwargs = captured["create"]
     assert isinstance(create_kwargs, dict)

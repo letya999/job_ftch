@@ -23,7 +23,7 @@ updated: 2026-08-01
 | Граф | `config/pipelines/evidence_v2_compact_prefilter.yaml` |
 | Graph hash | `0d73de0663d220da62e37d9a41159542547d167f9f096088f7ae85ec587e44fb` |
 | Runtime base/prod | `config/runtime.yaml`, `config/runtime.prod.yaml` |
-| Модели | extraction `gpt-5.4-nano`, relevance `gpt-4.1-mini` |
+| Модели | extraction `gpt-5.4-nano`, relevance `gpt-4.1-mini`, ontology `gpt-4.1-mini` |
 | Profile shots | 40: 10 positive resume, 10 negative resume, 10 positive jobs, 10 negative jobs |
 | Prefilter | `fixtures/prefilter/tfidf_logreg_v1.json`, production threshold `0.20`, trained for `ai_jobs` / AI-engineering profile |
 

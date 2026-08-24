@@ -13,7 +13,10 @@ from job_ftch.infrastructure.sources.browser_utils import (
     _patchright_inner_send_cancellation_safe,
     _patchright_route_handle_cancellation_safe,
     _unroute_page_before_close,
+    attach_operator_page,
+    navigate,
     open_page,
+    reset_operator_page,
     scroll_to_bottom,
 )
 
@@ -277,6 +280,11 @@ async def test_open_page_applies_bypass_only_to_launch_kwargs(
     monkeypatch.setattr("job_ftch.infrastructure.sources.browser_utils.get_settings", fake_settings)
     fake_async_api = SimpleNamespace(async_playwright=lambda: _FakeAsyncPlaywrightContext(captured))
     monkeypatch.setitem(sys.modules, "patchright.async_api", fake_async_api)
+    monkeypatch.setitem(sys.modules, "playwright.async_api", fake_async_api)
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.browser_utils._load_async_playwright",
+        lambda **_kwargs: fake_async_api.async_playwright,
+    )
 
     async with open_page(
         {"headless": True, "locale": "ru-RU"},
@@ -332,6 +340,11 @@ async def test_open_page_reprojects_runtime_aligned_persona_ua(
     monkeypatch.setattr("job_ftch.infrastructure.sources.browser_utils.get_settings", fake_settings)
     fake_async_api = SimpleNamespace(async_playwright=lambda: _FakeAsyncPlaywrightContext(captured))
     monkeypatch.setitem(sys.modules, "patchright.async_api", fake_async_api)
+    monkeypatch.setitem(sys.modules, "playwright.async_api", fake_async_api)
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.browser_utils._load_async_playwright",
+        lambda **_kwargs: fake_async_api.async_playwright,
+    )
 
     async with open_page(
         {
@@ -429,3 +442,163 @@ async def test_open_page_caps_concurrent_browser_sessions(monkeypatch: pytest.Mo
     await asyncio.gather(*tasks)
 
     assert peak == 2
+
+
+class _DummyOperatorPage:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    async def close(self) -> None:
+        self.close_calls += 1
+
+
+@pytest.mark.asyncio
+async def test_open_page_yields_attached_operator_page() -> None:
+    dummy = _DummyOperatorPage()
+    token = attach_operator_page(dummy)
+    try:
+        async with open_page({}) as page:
+            assert page is dummy
+        assert dummy.close_calls == 0
+    finally:
+        reset_operator_page(token)
+
+
+@pytest.mark.asyncio
+async def test_attached_open_page_skips_browser_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_ftch.infrastructure.sources import browser_utils
+
+    @asynccontextmanager
+    async def _boom(_capacity: int):
+        raise AssertionError("browser_slot entered")
+        yield
+
+    monkeypatch.setattr(browser_utils, "browser_slot", _boom)
+    dummy = _DummyOperatorPage()
+    token = attach_operator_page(dummy)
+    try:
+        async with open_page({"headless": True}) as page:
+            assert page is dummy
+    finally:
+        reset_operator_page(token)
+
+
+def _stub_playwright_loader(
+    monkeypatch: pytest.MonkeyPatch, captured: dict[str, object]
+) -> list[bool]:
+    used: list[bool] = []
+
+    def fake_settings() -> SimpleNamespace:
+        return SimpleNamespace(
+            browser_default_timeout_ms=1234,
+            browser_context_timeout_ms=4321,
+            browser_channel="",
+            browser_headless=True,
+            career_site_browser_concurrency=4,
+        )
+
+    monkeypatch.setattr("job_ftch.config.get_settings", fake_settings)
+    monkeypatch.setattr("job_ftch.infrastructure.sources.browser_utils.get_settings", fake_settings)
+
+    def _load(*, prefer_patchright: bool):
+        used.append(prefer_patchright)
+        return lambda: _FakeAsyncPlaywrightContext(captured)
+
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.browser_utils._load_async_playwright",
+        _load,
+    )
+    return used
+
+
+@pytest.mark.asyncio
+async def test_open_page_uses_playwright_when_patchright_not_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    used = _stub_playwright_loader(monkeypatch, captured)
+    async with open_page({"headless": True}):
+        pass
+    assert used == [False]
+
+
+@pytest.mark.asyncio
+async def test_open_page_uses_patchright_when_process_identity_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    used = _stub_playwright_loader(monkeypatch, captured)
+
+    class _PatchrightBypass:
+        requires_process_identity = True
+
+        def apply_browser_args(self, kwargs: dict[str, object]) -> dict[str, object]:
+            return kwargs
+
+        async def apply_page(self, page: object) -> None:
+            del page
+
+    async with open_page({"headless": True}, bypass_strategy=_PatchrightBypass()):
+        pass
+    assert used == [True]
+
+
+@pytest.mark.asyncio
+async def test_open_page_omits_user_agent_when_identity_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _stub_playwright_loader(monkeypatch, captured)
+    async with open_page({"headless": True}):
+        pass
+    context_kwargs = captured["context_kwargs"]
+    assert isinstance(context_kwargs, dict)
+    assert "user_agent" not in context_kwargs
+
+
+@pytest.mark.asyncio
+async def test_attached_dummy_page_without_user_agent_or_title() -> None:
+    dummy = SimpleNamespace(title="", user_agent=None, close_calls=0)
+    token = attach_operator_page(dummy)
+    try:
+        async with open_page({}) as page:
+            assert page is dummy
+            assert getattr(page, "user_agent", None) is None
+    finally:
+        reset_operator_page(token)
+
+
+@pytest.mark.asyncio
+async def test_navigate_blocked_403_sets_observed_challenge() -> None:
+    html = (
+        "<html><head><title>Just a moment...</title></head>"
+        "<body>Checking your browser before accessing example.com. "
+        "Performance and security by Cloudflare</body></html>"
+    )
+
+    class _BlockedPage:
+        async def goto(self, url: str, wait_until: str | None = None, timeout: object = None):
+            del url, wait_until, timeout
+            return SimpleNamespace(status=403, headers={"content-type": "text/html"})
+
+        async def content(self) -> str:
+            return html
+
+    controller = SimpleNamespace(observed_challenge_type=None)
+
+    def _set(challenge_type: str | None) -> None:
+        controller.observed_challenge_type = challenge_type
+
+    controller.set_observed_challenge_type = _set  # type: ignore[attr-defined]
+
+    with pytest.raises(RuntimeError, match="Browser navigation blocked with status 403"):
+        await navigate(
+            _BlockedPage(),  # type: ignore[arg-type]
+            "https://example.com/jobs",
+            {
+                "challenge_retries": 0,
+                "_bypass_strategy": controller,
+                "_allow_private_selfcheck_fixture": True,
+            },
+        )
+    assert controller.observed_challenge_type == "cloudflare_challenge"

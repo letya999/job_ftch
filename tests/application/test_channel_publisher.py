@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -14,8 +15,9 @@ pytestmark = pytest.mark.anyio
 
 
 class _Job:
-    def __init__(self, group_id: str) -> None:
+    def __init__(self, group_id: str, canonical_url: str | None = None) -> None:
         self.group_id = group_id
+        self.canonical_url = canonical_url
 
 
 class _Sender:
@@ -83,6 +85,59 @@ async def test_ledger_skips_already_published() -> None:
     assert outcome.sent == 1
     assert outcome.skipped_already_published == 1
     assert [job_id for _, job_id in second.calls] == ["b"]
+
+
+async def test_url_ledger_skips_regrouped_vacancy() -> None:
+    store = _Store()
+    first = _Sender()
+    await publish_jobs(
+        [_Job("group-a", "HTTPS://Example.com/jobs/1#card")],
+        target="@chan",
+        sender=first,
+        store=store,
+        send_limit=5,
+        sleep=_no_sleep,
+    )
+
+    second = _Sender()
+    outcome = await publish_jobs(
+        [
+            _Job("group-b", "https://example.com/jobs/1"),
+            _Job("group-c", "https://example.com/jobs/2"),
+        ],
+        target="@chan",
+        sender=second,
+        store=store,
+        send_limit=5,
+        sleep=_no_sleep,
+    )
+
+    assert outcome.sent == 1
+    assert outcome.skipped_already_published == 1
+    assert [job_id for _, job_id in second.calls] == ["group-c"]
+    assert json.loads(store.state["bot_publish:sent_urls"]) == [
+        "https://example.com/jobs/1",
+        "https://example.com/jobs/2",
+    ]
+
+
+async def test_url_ledger_updates_only_after_successful_send() -> None:
+    store = _Store()
+    sender = _Sender(failures={1: ValueError("can't parse entities")})
+    outcome = await publish_jobs(
+        [
+            _Job("group-a", "https://example.com/jobs/bad"),
+            _Job("group-b", "https://example.com/jobs/good"),
+        ],
+        target="@chan",
+        sender=sender,
+        store=store,
+        send_limit=5,
+        sleep=_no_sleep,
+    )
+
+    assert outcome.sent == 1
+    assert json.loads(store.state["bot_publish:sent_urls"]) == ["https://example.com/jobs/good"]
 
 
 async def test_flood_wait_is_retried_then_gives_up() -> None:

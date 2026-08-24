@@ -10,6 +10,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [adr index](adr/index.md)
 - [entities index](entities/index.md)
 - [examples index](examples/index.md)
+- [legal index](legal/index.md)
 - [nodes index](nodes/index.md)
 - [ontology index](ontology/index.md)
 - [operations index](operations/index.md)
@@ -21,7 +22,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 
 ## Files On This Level
 
-- [Архитектура job_ftch](architecture.md) - Полное описание текущей архитектуры: слои, порты, pipeline, graph runtime, ingest stack, bypass и адаптеры. (Updated: 2026-08-03)
+- [Архитектура job_ftch](architecture.md) - Полное описание текущей архитектуры: слои, порты, pipeline, graph runtime, ingest stack, bypass и адаптеры. (Updated: 2026-08-19)
 - [Деплой Telegram bot production stack](deploy.md) - Production-shape деплой job_ftch: shared runtime image, Telegram bot compose, Postgres и Qdrant. (Updated: 2026-07-28)
 - [Примеры](examples.md) - Минимальные исполняемые примеры: tenant на fixture, validate, run и eval gate. (Updated: 2026-07-28)
 - [Быстрый старт](quickstart.md) - Быстрый локальный запуск job_ftch на fixture tenant без внешних сервисов. (Updated: 2026-07-28)
@@ -30,3 +31,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [Технологический стек](tech_stack.md) - Актуальный стек зависимостей job_ftch по pyproject.toml: core dependencies, extras и запрещённые инструменты. (Updated: 2026-08-03)
 - [Технический долг](techdebt.md) - Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-050. (Updated: 2026-08-05)
 - [Видение job_ftch](vision.md) - Назначение, границы и текущее состояние проекта job_ftch. (Updated: 2026-08-05)
+
+### Non-Markdown Files
+
+- [.pages](.pages)

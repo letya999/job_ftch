@@ -36,8 +36,10 @@ from job_ftch.domain import (
 
 if TYPE_CHECKING:
     import builtins
+    from collections.abc import Mapping
 
     from job_ftch.application.contracts import DedupReservation, Store, StoreConnector
+    from job_ftch.domain.search_session import SearchSession
     from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
 
 
@@ -66,6 +68,10 @@ def _source_disabled_key(source_id: str) -> str:
 
 def _candidate_profile_key(user_id: str, profile_id: str) -> str:
     return f"candidate_profile:{user_id}:{profile_id}"
+
+
+def _search_session_key(session_id: str) -> str:
+    return f"search_session:{session_id}"
 
 
 def _active_candidate_profile_key(user_id: str) -> str:
@@ -115,9 +121,16 @@ def _summary_from_payload(payload: dict[str, Any], *, tenant_id: str | None = No
 class TenantStore:
     """Store wrapper that prefixes every key space with a tenant slug."""
 
-    def __init__(self, tenant_id: str, store: Store) -> None:
+    def __init__(
+        self,
+        tenant_id: str,
+        store: Store,
+        *,
+        processed_item_ttl_hours: int | None = 24,
+    ) -> None:
         self._tenant_id = tenant_id
         self._store = store
+        self._processed_item_ttl_hours = processed_item_ttl_hours
 
     def _key(self, key: str) -> str:
         return f"{self._tenant_id}:{key}"
@@ -295,13 +308,13 @@ class TenantStore:
         await self._store.save_source_ingest_state(self._tenant_id, state)
 
     async def has_processed(self, item_id: str) -> bool:
-        from job_ftch.config import get_settings
-
         connector = cast("StoreConnector", self._store)
-        ttl_hours = get_settings().processed_item_ttl_hours
         timestamp = await connector.get(self._key(_processed_timestamp_key(item_id)))
         if timestamp is not None:
-            return _is_processed_timestamp_fresh(str(timestamp), ttl_hours)
+            return _is_processed_timestamp_fresh(
+                str(timestamp),
+                self._processed_item_ttl_hours,
+            )
         return bool(await connector.set_contains(self._key("processed"), item_id))
 
     async def record_observation(self, entry: ObservationLedgerEntry) -> ObservationLedgerEntry:
@@ -824,6 +837,123 @@ class TenantStore:
         summaries.sort(key=_summary_sort_key, reverse=True)
         return summaries[: max(limit, 0)]
 
+    async def record_operational_outcome(self, lane: str, payload: Mapping[str, Any]) -> None:
+        """Persist one compact REVIEW/REJECTED row (opt-in operational ledger)."""
+        from uuid import uuid4
+
+        connector = cast("StoreConnector", self._store)
+        normalized_lane = str(lane).strip().lower()
+        if normalized_lane not in {"review", "rejected"}:
+            msg = f"unsupported operational outcome lane: {lane}"
+            raise ValueError(msg)
+        body = dict(payload)
+        run_id = (
+            str(body.get("source_run_id") or body.get("run_id") or "unknown").strip() or "unknown"
+        )
+        body["source_run_id"] = run_id
+        body["tenant_id"] = self._tenant_id
+        body["lane"] = normalized_lane
+        entry_id = uuid4().hex[:16]
+        body["outcome_id"] = entry_id
+        entry_key = self._key(f"outcome:{normalized_lane}:{run_id}:{entry_id}")
+        ids_key = self._key(f"outcome_ids:{normalized_lane}:{run_id}")
+        order_key = self._key(f"outcome_run_order:{normalized_lane}")
+        await connector.set(
+            entry_key,
+            json.dumps(body, default=_json_default, ensure_ascii=False, sort_keys=True),
+        )
+        try:
+            await connector.set_add(ids_key, entry_id)
+        except Exception:
+            with suppress(Exception):
+                await connector.delete(entry_key)
+            raise
+        raw_order = await connector.get(order_key)
+        try:
+            order = json.loads(raw_order) if raw_order else []
+        except (json.JSONDecodeError, TypeError):
+            order = []
+        if not isinstance(order, list):
+            order = []
+        runs = [str(item) for item in order if str(item).strip()]
+        if run_id not in runs:
+            runs.append(run_id)
+        max_runs = 20
+        while len(runs) > max_runs:
+            old_run = runs.pop(0)
+            await self._purge_outcome_run(normalized_lane, old_run)
+        await connector.set(order_key, json.dumps(runs, ensure_ascii=False))
+
+    async def list_operational_outcomes(
+        self,
+        lane: str,
+        *,
+        run_id: str | None = None,
+        limit: int = 50,
+        outcome: str | None = None,
+        reason: str | None = None,
+        source_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List compact outcomes for a lane; default run is the latest stored."""
+        connector = cast("StoreConnector", self._store)
+        normalized_lane = str(lane).strip().lower()
+        if normalized_lane not in {"review", "rejected"}:
+            msg = f"unsupported operational outcome lane: {lane}"
+            raise ValueError(msg)
+        limit = min(max(limit, 0), 200)
+        selected_run = run_id
+        if not selected_run:
+            order_key = self._key(f"outcome_run_order:{normalized_lane}")
+            raw_order = await connector.get(order_key)
+            try:
+                order = json.loads(raw_order) if raw_order else []
+            except (json.JSONDecodeError, TypeError):
+                order = []
+            if isinstance(order, list) and order:
+                selected_run = str(order[-1])
+            else:
+                return []
+        ids_key = self._key(f"outcome_ids:{normalized_lane}:{selected_run}")
+        entry_ids = sorted(await connector.set_members(ids_key))
+        rows: list[dict[str, Any]] = []
+        reason_cf = reason.casefold() if reason else None
+        outcome_cf = outcome.casefold() if outcome else None
+        source_cf = source_name.casefold() if source_name else None
+        for entry_id in entry_ids:
+            raw = await connector.get(
+                self._key(f"outcome:{normalized_lane}:{selected_run}:{entry_id}")
+            )
+            if raw is None:
+                continue
+            try:
+                payload = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if (
+                outcome_cf is not None
+                and str(payload.get("outcome") or "").casefold() != outcome_cf
+            ):
+                continue
+            if reason_cf is not None and str(payload.get("reason") or "").casefold() != reason_cf:
+                continue
+            if (
+                source_cf is not None
+                and str(payload.get("source_name") or "").casefold() != source_cf
+            ):
+                continue
+            rows.append(payload)
+        rows.sort(key=lambda row: str(row.get("recorded_at") or row.get("outcome_id") or ""))
+        return rows[:limit] if limit else rows
+
+    async def _purge_outcome_run(self, lane: str, run_id: str) -> None:
+        connector = cast("StoreConnector", self._store)
+        ids_key = self._key(f"outcome_ids:{lane}:{run_id}")
+        for entry_id in await connector.set_members(ids_key):
+            await connector.delete(self._key(f"outcome:{lane}:{run_id}:{entry_id}"))
+        await connector.clear_set(ids_key)
+
     async def reset_namespace(self) -> None:
         reset = getattr(self._store, "reset_namespace", None)
         if not callable(reset):
@@ -840,6 +970,46 @@ class TenantStore:
         if not isinstance(result, dict):
             raise TypeError("Store clear_run_artifacts() must return a counter mapping.")
         return {str(key): int(value) for key, value in result.items()}
+
+    async def save_search_session(self, session: SearchSession) -> None:
+        """Persist a resume-driven search session under the tenant namespace."""
+        connector = cast("StoreConnector", self._store)
+        session_key = self._key(_search_session_key(session.session_id))
+        ids_key = self._key("search_session_ids")
+        await connector.set(session_key, session.model_dump_json())
+        try:
+            await connector.set_add(ids_key, session.session_id)
+        except Exception:
+            with suppress(Exception):
+                await connector.delete(session_key)
+            logger.warning(
+                "search_session_persist_rolled_back",
+                tenant_id=self._tenant_id,
+                session_id=session.session_id,
+            )
+            raise
+
+    async def get_search_session(self, session_id: str) -> SearchSession | None:
+        from job_ftch.domain.search_session import SearchSession
+
+        connector = cast("StoreConnector", self._store)
+        raw = await connector.get(self._key(_search_session_key(session_id)))
+        if raw is None:
+            return None
+        try:
+            return SearchSession.model_validate_json(raw)
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "search_session_decode_failed",
+                tenant_id=self._tenant_id,
+                session_id=session_id,
+                error=str(exc),
+            )
+            return None
+
+    async def list_search_session_ids(self) -> tuple[str, ...]:
+        connector = cast("StoreConnector", self._store)
+        return tuple(sorted(await connector.set_members(self._key("search_session_ids"))))
 
     async def close(self) -> None:
         close = getattr(self._store, "close", None)

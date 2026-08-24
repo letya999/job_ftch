@@ -1,7 +1,7 @@
 ---
 title: "MCP deployment"
 description: "Local, HTTP, Docker and systemd notes for the FastMCP tenant server."
-updated: 2026-07-28
+updated: 2026-08-12
 ---
 # MCP deployment
 
@@ -12,6 +12,11 @@ uv run job_ftch mcp-server \
   --configs-dir job_ftch/adapters/telegram_bot/config/tenants \
   --transport stdio
 ```
+
+`--configs-dir` is accepted on the `mcp-server` subcommand (and as a global
+flag). Prefer `JOB_FTCH_CONFIGS_DIR` in service environments. For offline smoke,
+use a temp tenant with `local_fixture` + heuristic LLM settings rather than live
+bot tenants.
 
 ## Local HTTP
 

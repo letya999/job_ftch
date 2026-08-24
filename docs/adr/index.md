@@ -85,8 +85,14 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [076 — Next-generation anti-bot evasion techniques](076-next-generation-evasion-techniques.md) - **Status:** ACCEPTED (Updated: 2026-07-24)
 - [077 — Evasion boundaries: protections we do not attempt to bypass](077-evasion-boundaries.md) - **Status:** ACCEPTED (Updated: 2026-07-24)
 - [ADR-078: Trainable TF-IDF + logistic regression prefilter over keyword rules and embeddings](078-trainable-tfidf-logreg-prefilter.md) - Decision record for the trainable relevance prefilter used before the LLM judge. (Updated: 2026-07-26)
+- [079 — MCP 2.0 tenant service and CLIProxyAPI LLM path](079-mcp-2-cliproxy-service.md) - **Status**: PROPOSED (rechecked 2026-08-07 against Claudex / multi-model MCP / z.ai patterns) (Updated: 2026-08-07)
 - [079 — Proxy provider pool primitives](079-proxy-provider-pool-primitives.md) - ADR for provider-neutral proxy routing primitives used by adaptive bypass. (Updated: 2026-08-02)
 - [080 - Durable Scheduler Slot Recovery](080-durable-scheduler-slot-recovery.md) - Планировщик Telegram восстанавливает пропущенные ingest-слоты и незавершённую публикацию после сбоя или перезапуска. (Updated: 2026-08-02)
+- [080 — Opt-in operational outcomes store (REVIEW / REJECTED)](080-opt-in-operational-outcomes-store.md) - **Status**: ACCEPTED (Updated: 2026-08-08)
+- [081 — Operator browser listing probe](081-operator-browser-listing-probe.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
+- [082 — Operator bypass pin and sweep](082-operator-bypass-pin-and-sweep.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
+- [083 — Operator sessions, challenge probes, captcha wait, parser pin](083-operator-sessions-challenge-parser-pin.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
+- [084 — Operator persistent/domain sessions, fingerprint probes, trace, extendable captcha, parser host override](084-operator-persistent-fingerprint-parser-override.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

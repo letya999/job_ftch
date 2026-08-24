@@ -52,6 +52,31 @@ def test_empty_roles_is_a_noop() -> None:
     assert expand_career_site_specs(specs, []) == specs
 
 
+def test_vk_and_sber_expand_to_combined_query() -> None:
+    specs = [
+        CareerSiteSpec(url="https://team.vk.company/vacancy/", source_name="vk_careers"),
+        CareerSiteSpec(url="https://rabota.sber.ru/search", source_name="rabota_sber_ru"),
+    ]
+    out = expand_career_site_specs(specs, ROLES)
+    assert len(out) == 2
+    vk_query = parse_qs(urlparse(out[0].url).query)
+    sber_query = parse_qs(urlparse(out[1].url).query)
+    assert vk_query["query"] == ["AI engineer OR LLM engineer"]
+    assert sber_query["query"] == ["AI engineer OR LLM engineer"]
+    assert out[0].source_name == "vk_careers"
+    assert out[1].source_name == "rabota_sber_ru"
+
+
+def test_superjob_keeps_url_and_gets_search_keywords() -> None:
+    specs = [
+        CareerSiteSpec(url="https://www.superjob.ru/vacancy/search/", source_name="superjob_ru")
+    ]
+    out = expand_career_site_specs(specs, ROLES)
+    assert len(out) == 1
+    assert out[0].url == "https://www.superjob.ru/vacancy/search/"
+    assert out[0].monitor_config["_search_keywords"] == ROLES
+
+
 def test_source_without_search_parser_gets_runtime_keywords() -> None:
     # An unknown career site (no site parser) keeps its URL but receives the
     # keywords in monitor_config for Tier-1 runtime form detection.

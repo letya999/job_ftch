@@ -1,0 +1,33 @@
+@import "tailwindcss";
+@import "../theme/tokens.css";
+@import "../../styles.css";
+
+@theme inline {
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+}
+
+button, input { font: inherit; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+
+.theme-toggle { display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: inherit; cursor: pointer; padding: .45rem; }
+.projection-dock { position: fixed; inset: auto auto 1.5rem 50%; z-index: 50; display: inline-flex; gap: .25rem; transform: translateX(-50%); padding: .3rem; border: 1px solid var(--line); background: var(--bg-elevated); color: var(--ink); box-shadow: 0 8px 24px #0006; }
+.projection-dock a { display: inline-flex; align-items: center; gap: .35rem; padding: .45rem .65rem; color: inherit; font: 11px var(--mono); text-decoration: none; text-transform: uppercase; }
+.projection-dock a i { width: 10px; height: 10px; border: 1px solid currentColor; border-radius: 50%; }
+.projection-dock a.active i { background: currentColor; }
+.projection-dock a.active { background: var(--accent); color: var(--color-graphite-950); }
+.consent-banner { position: fixed; inset: auto 16px 16px auto; z-index: 60; width: min(420px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--line); background: var(--bg-elevated); color: var(--ink); box-shadow: 0 12px 32px #0008; }
+.consent-banner h2 { margin: 0; font-size: .95rem; } .consent-banner p { margin: .3rem 0 .55rem; color: var(--muted); font-size: .75rem; line-height: 1.5; } .consent-banner a { color: inherit; text-decoration: underline; }
+.consent-banner label { font: 10px var(--mono); } .consent-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 12px; }
+.consent-actions .button { min-height: 40px; padding-inline: 10px; font-size: 9px; letter-spacing: .1em; }
+.consent-actions .button:last-child { grid-column: 1 / -1; }
+@media (max-width: 700px) { .consent-banner { inset: auto 8px 8px; width: auto; } .projection-dock { bottom: .75rem; } }
+.machine-page, .legal-page { padding: 8rem 0 12rem; max-width: 900px; }
+.machine-page h1, .legal-page h1 { font-size: clamp(3rem, 8vw, 7rem); line-height: .92; letter-spacing: -.07em; margin: 0 0 2rem; }
+.machine-kicker { font: 11px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+.machine-lede, .legal-page p { max-width: 70ch; color: var(--muted); font-size: 1.05rem; }
+.machine-page section { margin-top: 4rem; border-top: 1px solid var(--line); padding-top: 1.5rem; } .machine-page h2 { font: 12px var(--mono); text-transform: uppercase; }
+.machine-page pre { padding: 1.5rem; overflow-x: auto; background: var(--ink); color: var(--paper); font: 13px/1.8 var(--mono); }
+.machine-page li { margin: .7rem 0; color: var(--muted); } .machine-page a, .legal-page a { color: inherit; text-decoration: underline; text-underline-offset: .2em; }
+.legal-page p { margin: 1.5rem 0; line-height: 1.8; }

@@ -44,12 +44,14 @@ async def test_single_tenant_cli_uses_namespaced_keys(
         assert store._tenant_id == settings.tenant_id  # type: ignore[attr-defined]
         return object()
 
-    def fake_output_sinks(settings: Settings) -> tuple[object, None, None, None]:
-        del settings
+    def fake_output_sinks(
+        settings: Settings, store: object | None = None
+    ) -> tuple[object, None, None, None]:
+        del settings, store
         return object(), None, None, None
 
-    def fake_rejected_sink(settings: Settings) -> tuple[None, object]:
-        del settings
+    def fake_rejected_sink(settings: Settings, store: object | None = None) -> tuple[None, object]:
+        del settings, store
         return None, object()
 
     def fake_quarantine_sink(settings: Settings) -> object:

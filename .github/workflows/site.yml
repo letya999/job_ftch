@@ -1,0 +1,31 @@
+name: job-ftch-site
+
+on:
+  push:
+    paths:
+      - "job_ftch_site/**"
+      - ".github/workflows/site.yml"
+  pull_request:
+    paths:
+      - "job_ftch_site/**"
+      - ".github/workflows/site.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - run: bun install --frozen-lockfile
+        working-directory: job_ftch_site
+      - run: bun run type-check
+        working-directory: job_ftch_site
+      - run: bun run build
+        working-directory: job_ftch_site
+      - run: docker build -f Dockerfile -t job-ftch-site:ci .
+        working-directory: job_ftch_site

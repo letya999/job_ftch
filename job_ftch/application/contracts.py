@@ -451,6 +451,9 @@ class OntologyStore(Protocol):
     async def upsert_compiled_ontology(self, ontology: CompiledOntology) -> None:
         """Persist the profile-level compiled ontology source of truth."""
 
+    async def reset_live_projection(self) -> None:
+        """Drop live role/skill/anti/keyword/occurrence rows before a profile rebuild."""
+
 
 @dataclass(frozen=True)
 class ClassificationResult:
@@ -609,6 +612,75 @@ class BrowserSessionBypass(BypassStrategy, Protocol):
         use_proxy: bool = False,
     ) -> Any:
         """Open a browser page/session for bypasses that own the browser runtime."""
+
+
+@runtime_checkable
+class BrowserSessionProbe(Protocol):
+    async def probe_listing(
+        self,
+        *,
+        url: str,
+        engine: str,
+        headed: bool = False,
+        max_items: int = 5,
+        bypass_config: dict[str, Any] | None = None,
+        url_filter: Any = None,
+    ) -> dict[str, Any]:
+        """Open one ephemeral listing page and return bounded public previews."""
+
+    async def probe_detail(
+        self,
+        *,
+        url: str,
+        engine: str,
+        headed: bool = False,
+        max_items: int = 5,
+        bypass_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Open one ephemeral detail page and return a bounded public preview."""
+
+    async def probe_challenge(
+        self,
+        *,
+        url: str,
+        engine: str,
+        headed: bool = False,
+        max_items: int = 5,
+        bypass_config: dict[str, Any] | None = None,
+        solve: str = "none",
+    ) -> dict[str, Any]:
+        """Detect a challenge; optional browser_wait/provider solve under gates."""
+
+
+@runtime_checkable
+class OperatorBrowserSessionPort(Protocol):
+    async def open(
+        self,
+        *,
+        tenant_id: str,
+        url: str,
+        engine: str,
+        headed: bool = False,
+        bypass_config: dict[str, Any] | None = None,
+        manual_challenge: bool = False,
+    ) -> dict[str, Any]:
+        """Open one ephemeral operator session and return a public snapshot."""
+
+    async def get(self, session_id: str) -> dict[str, Any]:
+        """Return a public snapshot without driving the page."""
+
+    async def continue_session(
+        self,
+        session_id: str,
+        instruction: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one bounded command on an open session."""
+
+    async def capture(self, session_id: str, artifact_type: str) -> dict[str, Any]:
+        """Capture a public-safe artifact from an open session."""
+
+    async def close(self, session_id: str) -> dict[str, Any]:
+        """Close one session and release the browser."""
 
 
 @runtime_checkable

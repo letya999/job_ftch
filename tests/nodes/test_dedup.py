@@ -33,6 +33,15 @@ async def test_dedup_node_passes_new_item(dedup_node, store, make_raw_item):
 
 
 @pytest.mark.anyio
+async def test_personal_mode_does_not_drop_seen_item(make_raw_item):
+    node = DedupNode(InMemoryStore(), personal_mode=True)
+    first = make_raw_item(external_id="seen", url="https://example.com/seen")
+    second = make_raw_item(external_id="seen-again", url="https://example.com/seen")
+    assert await node.process(first) is first
+    assert await node.process(second) is second
+
+
+@pytest.mark.anyio
 async def test_dedup_node_drops_duplicate_url(dedup_node, store, make_raw_item):
     url = "https://example.com/job1"
     item1 = make_raw_item(external_id="1", url=url)

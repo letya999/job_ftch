@@ -3,6 +3,31 @@
 #   docker build -f docker/runtime/Dockerfile.dev -t job-ftch-runtime:dev ../../..
 #   docker compose -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml up -d --build
 services:
+  public-api:
+    profiles: ["public-api"]
+    image: job-ftch-telegram-bot:dev
+    build:
+      context: ../../..
+      dockerfile: job_ftch/adapters/telegram_bot/Dockerfile.dev
+      args:
+        BASE_IMAGE: job-ftch-runtime:dev
+    init: true
+    command: ["uvicorn", "job_ftch.adapters.telegram_bot.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]
+    env_file:
+      - ../../../.env.dev
+      - ./.env.dev
+    environment:
+      JOB_FTCH_ENV: dev
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.dev.yaml:job_ftch/adapters/telegram_bot/runtime.dev.yaml
+      JOB_FTCH_STORE_DSN: postgresql://${POSTGRES_USER:-job_user}:${POSTGRES_PASSWORD:-job_password}@postgres:5432/${POSTGRES_DB:-job_ftch}
+      JOB_FTCH_QDRANT_URL: http://qdrant:6333
+      JOB_FTCH_CONFIGS_DIR: /app/job_ftch/adapters/telegram_bot/config/tenants
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      qdrant: { condition: service_started }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
   bot:
     image: job-ftch-telegram-bot:dev
     build:

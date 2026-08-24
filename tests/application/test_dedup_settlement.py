@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -102,10 +103,19 @@ def test_settlement_commit_and_release() -> None:
     assert probe.released == ["defer-1"]
 
 
-def test_missing_participant_warns(capsys: pytest.CaptureFixture[str]) -> None:
+def test_missing_participant_warns(
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    caplog.set_level(logging.WARNING, logger="job_ftch.dedup_settlement")
     DedupSettlementCoordinator(())
     captured = capsys.readouterr()
-    assert "dedup_settlement_no_participants" in captured.out
+    log_message = "dedup_settlement_no_participants"
+    assert (
+        log_message in captured.out
+        or log_message in captured.err
+        or any(log_message in record.getMessage() for record in caplog.records)
+    )
 
 
 def test_duplicate_participants_are_deduplicated() -> None:

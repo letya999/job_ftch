@@ -8,6 +8,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 
 - [declarative index](declarative/index.md)
 - [euremotejobs index](euremotejobs/index.md)
+- [getmatch index](getmatch/index.md)
 - [google index](google/index.md)
 - [microsoft index](microsoft/index.md)
 - [payme index](payme/index.md)
