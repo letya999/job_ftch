@@ -54,8 +54,10 @@ telegram_flood_sleep_threshold_seconds: 60
 
 openai_model: gpt-5.4-nano
 relevance_llm_model: gpt-4.1-mini
+ontology_compiler_model: gpt-4.1-mini
 openai_timeout_seconds: 30.0
 openai_max_retries: 2
+ontology_compiler_timeout_seconds: 120.0
 
 career_site_timeout_seconds: 15.0
 career_site_connect_timeout_seconds: 30.0

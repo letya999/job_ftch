@@ -311,6 +311,53 @@ async def test_observation_version_concurrent_updates_retry_or_succeed(
 
 @pytest.mark.parametrize("factory", STORE_FACTORIES)
 @pytest.mark.integration
+async def test_sql_observation_same_content_unique_conflict_returns_existing(
+    factory: Callable[[], object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = factory()
+    from job_ftch.infrastructure.stores.sql_adapter import SQLStoreAdapter
+
+    if isinstance(store, SQLStoreAdapter):
+        original_execute = store._execute
+        call_count = [0]
+
+        async def mock_execute(self: Any, sql: str, params: tuple[Any, ...]) -> None:
+            if "INSERT INTO jf_observations" in sql and call_count[0] == 0:
+                call_count[0] += 1
+                await original_execute(sql, params)
+                raise OSError("simulated unique constraint failure")
+            return await original_execute(sql, params)
+
+        monkeypatch.setattr(store, "_execute", mock_execute.__get__(store))
+
+        raw = RawItem(
+            source_kind=SourceKind.DEBUG,
+            source_name="ledger",
+            external_id="same-content-race",
+            text="data",
+        )
+        entry = ObservationLedgerEntry(
+            observation_id="obs-same-content-race",
+            tenant_id="default",
+            stable_id=raw.stable_id,
+            content_hash=content_hash_for_raw_item(raw),
+            decision_version="policy-v1",
+            raw_item=raw,
+        )
+
+        recorded = await store.record_observation(entry)
+
+        assert recorded.content_version == 1
+        assert recorded == await store.get_observation(entry.stable_id, entry.content_hash)
+        assert call_count[0] == 1
+
+    close = getattr(store, "close", None)
+    if callable(close):
+        await close()
+
+
+@pytest.mark.parametrize("factory", STORE_FACTORIES)
+@pytest.mark.integration
 async def test_sql_outbox_duplicate_enqueue_after_delivered_returns_delivered(
     factory: Callable[[], object],
 ) -> None:

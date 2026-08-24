@@ -32,7 +32,7 @@ def _nested_name(row: dict[str, Any], key: str) -> str:
 class LamodaParser:
     """Use Lamoda's public HR API instead of the stale lamoda.ru careers page."""
 
-    domain_pattern = r"^https?://(?:(?:www\.)?lamoda\.ru/careers|job\.lamoda\.ru)(?:/|$)"
+    domain_pattern = r"^https?://(?:(?:www\.)?lamoda\.ru/careers?|job\.lamoda\.ru)(?:/|$)"
     has_custom_parse = True
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:

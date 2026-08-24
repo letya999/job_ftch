@@ -134,3 +134,57 @@ async def test_compensation_parsing_normalizes_reversed_text_range() -> None:
     assert processed.compensation is not None
     assert processed.compensation.min_amount == 12_500
     assert processed.compensation.max_amount == 25_000
+
+
+@pytest.mark.asyncio
+async def test_compensation_parsing_drops_llm_number_without_salary_evidence() -> None:
+    node = CompensationParsingNode()
+    record = JobRecord(
+        raw_item_id="llm-false-salary",
+        source_kind=SourceKind.DEBUG,
+        source_name="test",
+        title="ML Engineer",
+        description="Требования: опыт от 3 лет.",
+        compensation={"currency": "RUB", "min_amount": 3},
+    )
+
+    processed = await node.process(record)
+
+    assert processed.compensation is None
+
+
+@pytest.mark.asyncio
+async def test_compensation_parsing_uses_text_units_over_llm_number() -> None:
+    node = CompensationParsingNode()
+    record = JobRecord(
+        raw_item_id="llm-million-salary",
+        source_kind=SourceKind.DEBUG,
+        source_name="test",
+        description="Зарплата от 3 млн рублей.",
+        compensation={"currency": "RUB", "min_amount": 3},
+    )
+
+    processed = await node.process(record)
+
+    assert processed.compensation is not None
+    assert processed.compensation.min_amount == 3_000_000
+
+
+@pytest.mark.asyncio
+async def test_compensation_parsing_ignores_benefit_deposit() -> None:
+    node = CompensationParsingNode()
+    item = JobRecord(
+        raw_item_id="benefit-deposit",
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="cian",
+        description=(
+            "Кафетерий льгот: денежный депозит 25000 рублей на фитнес, обучение, "
+            "развлечения и консультации психолога."
+        ),
+        compensation={"currency": "RUB", "min_amount": 25_000},
+    )
+
+    processed = await node.process(item)
+
+    assert processed is not None
+    assert processed.compensation is None

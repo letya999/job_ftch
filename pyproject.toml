@@ -56,6 +56,7 @@ dagster = ["dagster>=1.8"]
 faststream = ["faststream>=0.5"]
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
 mcp = ["fastmcp>=2.4"]
+local_mcp = ["numpy>=1.26"]
 bot = [
     "aiogram>=3.7",
     "telethon>=1.36",
@@ -91,7 +92,7 @@ bgem3 = [
     "torch>=2.3",
     "dill>=0.3.8,<0.4",
     "accelerate>=1.10.1,<1.11",
-    "datasets>=3.6.0,<4",
+    "datasets>=5.0.1,<6",
     "huggingface-hub>=1.24,<2",
 ]
 tracing = ["opentelemetry-exporter-otlp-proto-http>=1.27"]
@@ -114,7 +115,7 @@ all = [
     "torch>=2.3",
     "dill>=0.3.8,<0.4",
     "accelerate>=1.10.1,<1.11",
-    "datasets>=3.6.0,<4",
+    "datasets>=5.0.1,<6",
     "huggingface-hub>=1.24,<2",
     "qdrant-client>=1.18.0",
     "pgvector>=0.3",
@@ -180,6 +181,7 @@ default = "job_ftch.adapters.mcp.server:create_server"
 
 [dependency-groups]
 dev = [
+    "pip>=26.2",
     "pre-commit>=3.7",
     # Pinned exactly: ruff is also the formatter, and two versions disagreed on the
     # formatting of the same files, so an unpinned floor let a local run "fix" code that
@@ -195,6 +197,7 @@ dev = [
     "pytest-benchmark>=4.0",
     "bandit[toml]>=1.7",
     "pip-audit>=2.10",
+    "aiogram>=3.7",
     "jsonschema>=4.0",
     "httpx",
     "hypothesis>=6.100",
@@ -213,6 +216,9 @@ packages = ["job_ftch"]
 target-version = "py312"
 line-length = 100
 extend-exclude = [
+    ".work/**",
+    ".codex-backups/**",
+    ".serena/**",
     "tools/bot_parity_lab/paritylab/**",
     "tools/bot_parity_lab/tests/**",
     "tools/bot_parity_lab/examples/project_hook.py",

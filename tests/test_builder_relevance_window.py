@@ -89,6 +89,23 @@ def test_build_nodes_keeps_presentable_text_out_of_terminal_pipeline() -> None:
     assert not any(type(node).__name__ == "PresentableTextNode" for node in nodes)
 
 
+def test_personal_mode_keeps_semantic_prefilter_out_of_extraction_path() -> None:
+    settings = Settings.model_validate({"llm_backend": "heuristic", "llm_relevance_max_per_run": 0})
+
+    _, _, nodes = build_nodes(
+        settings,
+        store=MagicMock(),
+        llm=cast("LLMProvider", HeuristicLLMProvider()),
+        job_group_store=MagicMock(),
+        catalog=ProfileCatalog(),
+        personal_mode=True,
+    )
+
+    assert not any(type(node).__name__ == "EmbeddingPrefilterNode" for node in nodes)
+    semantic = next(node for node in nodes if type(node).__name__ == "SemanticPrefilterNode")
+    assert semantic._audit_mode is True
+
+
 def test_build_nodes_keeps_capable_presenter_in_post_accept_lane() -> None:
     class _CapableLLM:
         async def extract(self, text: str, schema: type[Any]) -> Any:

@@ -13,6 +13,8 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
 )
 from job_ftch.infrastructure.sources.site_parsers.hh import HhParser
 from job_ftch.infrastructure.sources.site_parsers.hirify import HirifyParser
+from job_ftch.infrastructure.sources.site_parsers.sber import SberParser
+from job_ftch.infrastructure.sources.site_parsers.vk import VkTeamParser
 
 ROLES = ["AI engineer", "LLM engineer", "ИИ инженер"]
 
@@ -22,7 +24,7 @@ def _query(url: str) -> dict[str, list[str]]:
 
 
 def test_aggregators_declare_search_modes() -> None:
-    for parser in (HhParser(), HabrCareerParser(), HirifyParser()):
+    for parser in (HhParser(), HabrCareerParser(), HirifyParser(), VkTeamParser(), SberParser()):
         assert parser.supports_search is True
         assert parser.search_mode == "combined"
     # GeekJob's search box is all-terms and matches nothing for a combined
@@ -84,9 +86,28 @@ def test_hirify_query_for_spec_forwards_search() -> None:
 
 
 def test_empty_keywords_yield_no_urls() -> None:
-    for parser in (HhParser(), HabrCareerParser(), GeekJobParser(), HirifyParser()):
+    for parser in (
+        HhParser(),
+        HabrCareerParser(),
+        GeekJobParser(),
+        HirifyParser(),
+        VkTeamParser(),
+        SberParser(),
+    ):
         assert parser.build_search_urls("https://hh.ru/", []) == []
         assert parser.build_search_urls("https://hh.ru/", ["  ", ""]) == []
+
+
+def test_vk_builds_combined_query_param() -> None:
+    urls = VkTeamParser().build_search_urls("https://team.vk.company/vacancy/", ROLES)
+    assert len(urls) == 1
+    assert _query(urls[0])["query"] == ["AI engineer OR LLM engineer OR ИИ инженер"]
+
+
+def test_sber_builds_combined_query_param() -> None:
+    urls = SberParser().build_search_urls("https://rabota.sber.ru/search", ROLES)
+    assert len(urls) == 1
+    assert _query(urls[0])["query"] == ["AI engineer OR LLM engineer OR ИИ инженер"]
 
 
 def test_normalize_search_keywords_dedupes_and_caps() -> None:

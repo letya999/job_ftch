@@ -1,7 +1,7 @@
 ---
 title: "Архитектура job_ftch"
 description: "Полное описание текущей архитектуры: слои, порты, pipeline, graph runtime, ingest stack, bypass и адаптеры."
-updated: 2026-08-03
+updated: 2026-08-19
 ---
 # Архитектура job_ftch
 
@@ -68,7 +68,9 @@ Source of truth: `job_ftch/application/contracts.py`.
 - `BypassStrategy`;
 - `ManagedShotBackend`;
 - `OntologyStore`;
-- `SourceAssessmentAdapter`.
+- `SourceAssessmentAdapter`;
+- `BrowserSessionProbe` (operator listing/detail/challenge/fingerprint/custom_safe probe; ADR-081/083/084);
+- `OperatorBrowserSessionPort` (ephemeral/persistent/domain operator sessions; ADR-083/084).
 
 ## 4. Семья payload-типов
 

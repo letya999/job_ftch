@@ -65,7 +65,7 @@ class _JsonLdExtractor(HTMLParser):
 class AvitoCareerParser:
     """Parser for avito.ru career page."""
 
-    domain_pattern = r"^https?://(?:[a-z0-9-]+\.)?avito\.ru(?:/|$)"
+    domain_pattern = r"^https?://(?:(?:[a-z0-9-]+\.)?(?:avito\.ru|career\.avito\.com))(?:/|$)"
     has_custom_parse = True
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:

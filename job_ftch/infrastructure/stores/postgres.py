@@ -121,7 +121,10 @@ class PostgreSQLStore(SQLStoreAdapter):
         dsn: str,
         pool_min: int = 2,
         pool_max: int = 10,
+        *,
+        processed_item_ttl_hours: int | None = 24,
     ) -> None:
+        super().__init__(processed_item_ttl_hours=processed_item_ttl_hours)
         self._dsn = dsn
         self._pool_min = pool_min
         self._pool_max = pool_max
@@ -241,11 +244,20 @@ class PostgreSQLStore(SQLStoreAdapter):
                 "bot_publish:%",
                 "bot_scheduler:last_publish%",
                 "bot_scheduler:pending_publish_since",
+                "outcome:%",
+                "outcome_ids:%",
+                "outcome_run_order:%",
             )
         )
         set_patterns = tuple(
             f"{prefix}{suffix}"
-            for suffix in ("processed%", "dedup_keys%", "dup_records%", "source_health_ids")
+            for suffix in (
+                "processed%",
+                "dedup_keys%",
+                "dup_records%",
+                "source_health_ids",
+                "outcome_ids:%",
+            )
         )
         pool = await self._ensure_initialized()
         async with pool.acquire() as conn, conn.transaction():
@@ -296,6 +308,13 @@ class PostgreSQLStore(SQLStoreAdapter):
                     )
                     or 0
                 ),
+                "source_assessments": int(
+                    await conn.fetchval(
+                        "SELECT COUNT(*) FROM jf_source_assessments WHERE tenant_id = $1",
+                        tenant_id,
+                    )
+                    or 0
+                ),
             }
             await conn.execute("DELETE FROM jf_kv WHERE key LIKE ANY($1::text[])", kv_patterns)
             await conn.execute("DELETE FROM jf_set WHERE key LIKE ANY($1::text[])", set_patterns)
@@ -304,6 +323,7 @@ class PostgreSQLStore(SQLStoreAdapter):
             await conn.execute("DELETE FROM jf_source_ingest_state WHERE tenant_id = $1", tenant_id)
             await conn.execute("DELETE FROM jf_dedup_claims WHERE claim_key LIKE $1", f"{prefix}%")
             await conn.execute("DELETE FROM jf_outbox WHERE tenant_id = $1", tenant_id)
+            await conn.execute("DELETE FROM jf_source_assessments WHERE tenant_id = $1", tenant_id)
             return counts
 
     async def ping(self) -> bool:
@@ -328,4 +348,5 @@ def _build_postgres_store(settings: Settings) -> PostgreSQLStore:
         dsn=dsn,
         pool_min=settings.store_pool_min,
         pool_max=settings.store_pool_max,
+        processed_item_ttl_hours=settings.processed_item_ttl_hours,
     )

@@ -6,7 +6,7 @@ parsers:
     parser_kind: "arc"
     render: false
   - name: avito
-    domain_pattern: "^https?://(?:[a-z0-9-]+\\.)?avito\\.ru(?:/|$)"
+    domain_pattern: "^https?://(?:(?:[a-z0-9-]+\\.)?(?:avito\\.ru|career\\.avito\\.com))(?:/|$)"
     has_custom_parse: true
     supports_discover: false
     render: false
@@ -268,7 +268,7 @@ parsers:
     wait: "domcontentloaded"
     include_if_detail_page: false
   - name: lamoda
-    domain_pattern: "^https?://(?:(?:www\\.)?lamoda\\.ru/careers|job\\.lamoda\\.ru)(?:/|$)"
+    domain_pattern: "^https?://(?:(?:www\\.)?lamoda\\.ru/careers?|job\\.lamoda\\.ru)(?:/|$)"
     has_custom_parse: true
     supports_discover: false
     render: false

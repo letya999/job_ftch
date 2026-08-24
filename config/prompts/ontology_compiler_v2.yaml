@@ -1,5 +1,5 @@
 schema_version: 1
-chunk_size: 4
+chunk_size: 8
 coverage_chunk_size: 2
 critique_enabled: true
 candidate_system: |

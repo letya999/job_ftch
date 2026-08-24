@@ -10,11 +10,13 @@ LLM touchpoints (per ADR-019):
    relevance-prompt builder, which has no schema to constrain to).
 
 The structured methods go through the ``instructor.from_provider`` client
-(TOOLS_STRICT mode) which patches ``chat.completions.create`` and requires
-a ``response_model`` for every call. ``generate_text`` cannot use the
-same client because it has no schema — it would fail with
-``AsyncInstructor.create() missing 'response_model'``. We therefore
-hold a second, raw ``AsyncOpenAI`` client alongside the instructor
+(TOOLS mode) which patches ``chat.completions.create`` and requires a
+``response_model`` for every call. TOOLS (not TOOLS_STRICT) is required for
+OpenAI-compatible gateways such as CLIProxyAPI that reject strict function
+schemas when optional Pydantic fields are omitted from ``required``.
+``generate_text`` cannot use the same client because it has no schema — it
+would fail with ``AsyncInstructor.create() missing 'response_model'``. We
+therefore hold a second, raw ``AsyncOpenAI`` client alongside the instructor
 client and use it for free-form text. The two share HTTP settings.
 """
 
@@ -151,7 +153,9 @@ class OpenAIInstructorLLMProvider:
         if not _OPENAI_AVAILABLE:
             raise ImportError("openai is required. Install with: pip install 'job_ftch[openai]'")
         self._model = model
+        self.model_id = model
         self._max_retries = max_retries
+        self._timeout_seconds = timeout_seconds
         # The SDK timeout is per HTTP attempt. Instructor may retry parsing
         # internally, so retain an outer deadline for the whole operation.
         # Without it a stalled response can hold an eval run forever.
@@ -160,9 +164,14 @@ class OpenAIInstructorLLMProvider:
         # an AsyncInstructor that wraps the underlying AsyncOpenAI but
         # rewrites ``.create()`` to require ``response_model``. We use
         # this for extract / classify / present.
+        # TOOLS (not TOOLS_STRICT): CLIProxy/Codex gateways reject strict
+        # function schemas when optional Pydantic fields are omitted from
+        # ``required`` (HTTP 400 invalid_function_parameters). Non-strict
+        # tools still return structured args and work across OpenAI-compatible
+        # proxies used for local subscription routing.
         self._client = instructor.from_provider(
             f"openai/{model}",
-            mode=instructor.Mode.TOOLS_STRICT,
+            mode=instructor.Mode.TOOLS,
             async_client=True,
             api_key=api_key,
             base_url=base_url,
@@ -187,12 +196,20 @@ class OpenAIInstructorLLMProvider:
             max_tokens=_EXTRACT_MAX_TOKENS,
         )
 
-    async def classify(self, prompt: str, schema: type[Any]) -> Any:
+    async def classify(
+        self,
+        prompt: str,
+        schema: type[Any],
+        *,
+        timeout_seconds: float | None = None,
+        max_tokens: int | None = None,
+    ) -> Any:
         return await self._structured_create(
             text=prompt,
             schema=schema,
             system_prompt=_CLASSIFY_SYSTEM_PROMPT,
-            max_tokens=_CLASSIFY_MAX_TOKENS,
+            max_tokens=_CLASSIFY_MAX_TOKENS if max_tokens is None else max_tokens,
+            timeout_seconds=timeout_seconds,
         )
 
     async def present(self, job_payload: str, schema: type[Any]) -> Any:
@@ -210,22 +227,32 @@ class OpenAIInstructorLLMProvider:
         schema: type[Any],
         system_prompt: str,
         max_tokens: int,
+        timeout_seconds: float | None = None,
     ) -> Any:
         started = monotonic()
-        async with asyncio.timeout(self._operation_timeout_seconds):
-            attempts = self._max_retries + 1
+        per_attempt = timeout_seconds if timeout_seconds is not None else self._timeout_seconds
+        # An explicit per-call timeout (ontology compile) is the whole deadline.
+        # Multiplying by retries made CLIProxy classify wait 120s * (retries+1).
+        explicit_timeout = timeout_seconds is not None
+        operation_timeout = per_attempt if explicit_timeout else self._operation_timeout_seconds
+        instructor_retries = 0 if explicit_timeout else self._max_retries
+        request_kwargs: dict[str, Any] = _completion_token_limit_kwargs(self._model, max_tokens)
+        if timeout_seconds is not None:
+            request_kwargs["timeout"] = timeout_seconds
+        async with asyncio.timeout(operation_timeout):
+            attempts = 1 if explicit_timeout else self._max_retries + 1
             for attempt in range(attempts):
                 try:
                     response, completion = await self._client.create_with_completion(
                         model=self._model,
                         response_model=schema,
-                        max_retries=self._max_retries,
+                        max_retries=instructor_retries,
                         temperature=_STRUCTURED_TEMPERATURE,
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": text},
                         ],
-                        **_completion_token_limit_kwargs(self._model, max_tokens),
+                        **request_kwargs,
                     )
                     break
                 except Exception:

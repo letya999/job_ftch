@@ -5,6 +5,8 @@ updated: 2026-08-02
 ---
 # job_ftch
 
+<p align="center"><img src="job_ftch_site/public/brand/job-ftch-icon.png" alt="job_ftch project icon" width="160" /></p>
+
 ![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Status](https://img.shields.io/badge/status-MVP-orange.svg)

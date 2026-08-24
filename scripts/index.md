@@ -9,6 +9,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [dev index](dev/index.md)
 - [diagnostics index](diagnostics/index.md)
 - [eval index](eval/index.md)
+- [mcp index](mcp/index.md)
 - [publication index](publication/index.md)
 - [shots index](shots/index.md)
 
@@ -54,6 +55,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [find_apis.py](find_apis.py)
 - [fingerprint_selfcheck.py](fingerprint_selfcheck.py)
 - [fp_probe.py](fp_probe.py)
+- [generate_legal_pdfs.py](generate_legal_pdfs.py)
 - [import_sources.py](import_sources.py)
 - [lint_docs.py](lint_docs.py)
 - [live_probe.py](live_probe.py)

@@ -58,9 +58,11 @@ class InMemoryStore:
         *,
         max_keys: int = 50_000,
         max_set_members: int = 50_000,
+        processed_item_ttl_hours: int | None = 24,
     ) -> None:
         self._max_keys = max(max_keys, 1)
         self._max_set_members = max(max_set_members, 1)
+        self._processed_item_ttl_hours = processed_item_ttl_hours
         self._kv: OrderedDict[str, str] = OrderedDict()
         self._sets: dict[str, OrderedDict[str, None]] = {}
         self._source_assessments: dict[tuple[str, str], SourceAssessmentResult] = {}
@@ -145,6 +147,9 @@ class InMemoryStore:
             "bot_publish:",
             "bot_scheduler:last_publish",
             "bot_scheduler:pending_publish_since",
+            "outcome:",
+            "outcome_ids:",
+            "outcome_run_order:",
         )
         kv_keys = [
             key
@@ -156,7 +161,13 @@ class InMemoryStore:
             for key in self._sets
             if any(
                 key.startswith(f"{prefix}{suffix}")
-                for suffix in ("processed", "dedup_keys", "dup_records", "source_health_ids")
+                for suffix in (
+                    "processed",
+                    "dedup_keys",
+                    "dup_records",
+                    "source_health_ids",
+                    "outcome_ids:",
+                )
             )
         ]
         observation_prefix = f"observation:{tenant_id}:"
@@ -165,6 +176,7 @@ class InMemoryStore:
         ingest_keys = [key for key in self._source_ingest_states if key[0] == tenant_id]
         dedup_claims = [key for key in self._dedup_claims if key.startswith(prefix)]
         outbox_keys = [key for key, record in self._outbox.items() if record.tenant_id == tenant_id]
+        assessment_keys = [key for key in self._source_assessments if key[0] == tenant_id]
         counts = {
             "kv": len(kv_keys),
             "sets": len(set_keys),
@@ -173,6 +185,7 @@ class InMemoryStore:
             "source_ingest_states": len(ingest_keys),
             "dedup_claims": len(dedup_claims),
             "outbox": len(outbox_keys),
+            "source_assessments": len(assessment_keys),
         }
         for key in (*kv_keys, *observation_keys):
             self._kv.pop(key, None)
@@ -187,6 +200,8 @@ class InMemoryStore:
             self._dedup_claims.pop(claim_key, None)
         for outbox_key in outbox_keys:
             self._outbox.pop(outbox_key, None)
+        for assessment_key in assessment_keys:
+            self._source_assessments.pop(assessment_key, None)
         return counts
 
     # Store methods — built on top of StoreConnector primitives
@@ -264,12 +279,9 @@ class InMemoryStore:
         return ObservationLedgerEntry.model_validate_json(raw) if raw else None
 
     async def has_processed(self, item_id: str) -> bool:
-        from job_ftch.config import get_settings
-
-        ttl_hours = get_settings().processed_item_ttl_hours
         timestamp = await self.get(_processed_timestamp_key(item_id))
         if timestamp is not None:
-            return _is_processed_timestamp_fresh(timestamp, ttl_hours)
+            return _is_processed_timestamp_fresh(timestamp, self._processed_item_ttl_hours)
         return await self.set_contains("processed", item_id)
 
     async def mark_processed(self, item_id: str) -> None:
@@ -474,4 +486,5 @@ def _build_in_memory_store(settings: Settings) -> InMemoryStore:
     return InMemoryStore(
         max_keys=settings.memory_max_keys,
         max_set_members=settings.memory_max_set_members,
+        processed_item_ttl_hours=settings.processed_item_ttl_hours,
     )

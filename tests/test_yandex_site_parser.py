@@ -83,6 +83,29 @@ def test_item_from_api_resolves_slug_against_listing_origin() -> None:
     assert str(item.url) == "https://yandex.ru/jobs/vacancies/ml-engineer-456"
 
 
+def test_yandex_parser_rejects_career_consultation_as_vacancy() -> None:
+    assert (
+        _item_from_api(
+            {
+                "id": 999,
+                "title": "Карьерные консультации от рекрутеров Яндекса",
+                "publication_slug_url": "/jobs/vacancies/career-consultation-999",
+            },
+            "https://yandex.ru/jobs/vacancies",
+            "yandex_jobs_ru",
+        )
+        is None
+    )
+    assert (
+        _item_from_detail_html(
+            "https://yandex.ru/jobs/vacancies/career-consultation-999",
+            "<main><h1>Карьерные консультации от рекрутеров Яндекса</h1></main>",
+            "yandex_jobs_ru",
+        )
+        is None
+    )
+
+
 @pytest.mark.asyncio
 async def test_yandex_parser_prefers_ssr_listing_path() -> None:
     listing_html = """

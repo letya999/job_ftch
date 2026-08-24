@@ -379,6 +379,11 @@ class KnownSourceAssessmentAdapter:
     async def assess(
         self, spec: SourceSpec, context: SourceAssessmentContext
     ) -> SourceAssessmentResult:
+        if spec.type == "career_site":
+            parser_hint = resolve_site_parser_assessment_hint(str(getattr(spec, "url", "")))
+            if parser_hint is not None:
+                return _result_from_hint(spec, context, parser_hint)
+
         probe = await _assess_career_site_probe(spec) if spec.type == "career_site" else None
 
         if spec.type in self._KNOWN_API_TYPES or spec.type == "rest_api":
@@ -416,12 +421,6 @@ class KnownSourceAssessmentAdapter:
             hint = get_monitor_assessment_hint(monitor)
             if hint is not None:
                 result = _result_from_hint(spec, context, hint)
-                return _augment_with_probe(result, probe) if probe is not None else result
-
-        if spec.type == "career_site":
-            parser_hint = resolve_site_parser_assessment_hint(str(getattr(spec, "url", "")))
-            if parser_hint is not None:
-                result = _result_from_hint(spec, context, parser_hint)
                 return _augment_with_probe(result, probe) if probe is not None else result
 
         hint = resolve_monitor_assessment_hint(source_spec_locator(spec) or "")

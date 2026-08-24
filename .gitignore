@@ -161,6 +161,9 @@ claude_desktop_config.json
 
 # local scratch workspace
 scratch/
+.work/
+.codex-backups/
+job-ftch-mobile-before.png
 
 # OS / IDE
 .DS_Store

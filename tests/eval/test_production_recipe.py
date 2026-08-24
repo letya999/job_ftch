@@ -67,6 +67,7 @@ def test_recipe_models_and_runtime_flags_are_pinned() -> None:
 
     assert base_runtime["openai_model"] == runtime["openai_model"]
     assert base_runtime["relevance_llm_model"] == runtime["relevance_llm_model"]
+    assert base_runtime["ontology_compiler_model"] == runtime["ontology_compiler_model"]
     assert prod_runtime["openai_model"] == runtime["openai_model"]
     assert prod_runtime["relevance_llm_model"] == runtime["relevance_llm_model"]
     assert tenant["store_backend"] == runtime["store_backend"]
@@ -143,6 +144,7 @@ def test_oss_reproduction_fixture_contract_matches_recipe() -> None:
 
     assert base_runtime["openai_model"] == settings["openai_model"]
     assert base_runtime["relevance_llm_model"] == settings["relevance_llm_model"]
+    assert base_runtime["ontology_compiler_model"] == settings["ontology_compiler_model"]
     assert prod_runtime["pipeline_graph_path"] == settings["pipeline_graph_path"]
     assert prod_runtime["pipeline_graph_expected_hash"] == settings["pipeline_graph_expected_hash"]
     assert prod_runtime["embedding_enabled"] == settings["embedding_enabled"]

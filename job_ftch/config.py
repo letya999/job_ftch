@@ -133,10 +133,16 @@ class Settings(BaseSettings):
     review_output_path: Path = Path("artifacts/debug/review.jsonl")
     review_output_jsonl: bool = True
     review_output_schema_version: str | None = "job_ftch.review.v1"
+    # none | json_file | store | both. None inherits main sink_backend for file
+    # only (store stays off) so bot sink_backend=none keeps REVIEW silent.
+    review_output_backend: str | None = None
     derived_ontology_path: str = "fixtures/shots/derived_ontology.json"
     rejected_output_path: Path = Path("artifacts/debug/rejected.jsonl")
     rejected_output_jsonl: bool = True
     rejected_output_schema_version: str | None = "job_ftch.rejected.v1"
+    rejected_output_backend: str | None = None
+    # Max source_run_id buckets retained per lane when store-backed.
+    operational_outcome_max_runs: int = Field(default=20, ge=1, le=200)
     review_max_quality_score: float = Field(default=0.65, ge=0.0, le=1.0)
     posting_min_quality_score: float = Field(default=0.8, ge=0.0, le=1.0)
     routing_accept_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
@@ -376,7 +382,8 @@ class Settings(BaseSettings):
     llm_ontology_max_per_shot: int = Field(default=1, ge=0)
     ontology_compiler_prompt_path: str = "config/prompts/ontology_compiler_v2.yaml"
     ontology_compiler_mode: str = "llm_v2_apply"
-    ontology_compiler_model: str = "gpt-4.1-nano"
+    ontology_compiler_model: str = "gpt-4.1-mini"
+    ontology_compiler_timeout_seconds: float = Field(default=120.0, gt=0.0, le=300.0)
     embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int | None = None
@@ -635,17 +642,25 @@ class Settings(BaseSettings):
         )
 
     def review_settings(self) -> Settings:
+        file_backend, _store = resolve_outcome_lane_backend(
+            self.review_output_backend, self.sink_backend
+        )
         return self._variant_settings(
             output_path=self.review_output_path,
             output_jsonl=self.review_output_jsonl,
             output_schema_version=self.review_output_schema_version,
+            sink_backend=file_backend or "none",
         )
 
     def rejected_settings(self) -> Settings:
+        file_backend, _store = resolve_outcome_lane_backend(
+            self.rejected_output_backend, self.sink_backend
+        )
         return self._variant_settings(
             output_path=self.rejected_output_path,
             output_jsonl=self.rejected_output_jsonl,
             output_schema_version=self.rejected_output_schema_version,
+            sink_backend=file_backend or "none",
         )
 
     def posting_settings(self) -> Settings:
@@ -655,6 +670,35 @@ class Settings(BaseSettings):
             output_schema_version=self.output_schema_version,
             sink_backend=self.posting_backend,
         )
+
+
+def resolve_outcome_lane_backend(
+    lane_backend: str | None,
+    main_sink_backend: str | None,
+) -> tuple[str | None, bool]:
+    """Resolve operational-lane backends into (file_backend|None, write_store).
+
+    ``lane_backend`` values:
+    - ``None``: inherit main sink for file only; store stays off (legacy bot/MCP)
+    - ``store``: store only
+    - ``both`` / ``store+json_file``: compact file + store
+    - ``none``: neither
+    - any other sink name (e.g. ``json_file``): file only
+    """
+    if lane_backend is None:
+        raw = (main_sink_backend or "none").strip().lower()
+        if raw in {"", "none", "null"}:
+            return None, False
+        return raw, False
+
+    raw = lane_backend.strip().lower()
+    if raw in {"", "none", "null"}:
+        return None, False
+    if raw == "store":
+        return None, True
+    if raw in {"both", "store+json_file", "json_file+store", "store_and_json_file"}:
+        return "json_file", True
+    return raw, False
 
 
 @functools.lru_cache(maxsize=1)
