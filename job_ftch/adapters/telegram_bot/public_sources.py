@@ -50,9 +50,12 @@ class _PageMetaParser(HTMLParser):
         values = {key.lower(): value for key, value in attrs}
         if tag == "title":
             self._in_title = True
-        if tag == "meta" and values.get("name", "").lower() in {"description", "og:description"}:
+        if tag == "meta" and (values.get("name") or "").lower() in {
+            "description",
+            "og:description",
+        }:
             self.description = values.get("content") or self.description
-        if tag == "meta" and values.get("property", "").lower() == "og:description":
+        if tag == "meta" and (values.get("property") or "").lower() == "og:description":
             self.description = values.get("content") or self.description
 
     def handle_endtag(self, tag: str) -> None:
@@ -102,7 +105,10 @@ async def _source_meta(client: httpx.AsyncClient, url: str, kind: str) -> tuple[
         response.raise_for_status()
         parser = _PageMetaParser()
         parser.feed(response.text[:1_000_000])
-        result = (_clean_text(parser.title, 120) or fallback[0], _clean_text(parser.description, 240) or fallback[1])
+        result = (
+            _clean_text(parser.title, 120) or fallback[0],
+            _clean_text(parser.description, 240) or fallback[1],
+        )
     except Exception:  # Metadata is best-effort; DNS/test guards must not break the registry.
         result = fallback
     _SOURCE_META[url] = result
@@ -112,16 +118,22 @@ async def _source_meta(client: httpx.AsyncClient, url: str, kind: str) -> tuple[
 async def _enrich_sources(sources: list[dict[str, Any]]) -> None:
     semaphore = asyncio.Semaphore(12)
     async with httpx.AsyncClient(timeout=4.0, follow_redirects=False) as client:
+
         async def enrich(source: dict[str, Any]) -> None:
             url = str(source.get("public_url") or "")
             if not url:
-                source["display_name"] = str(source.get("public_name") or source.get("source_id") or "Source")
+                source["display_name"] = str(
+                    source.get("public_name") or source.get("source_id") or "Source"
+                )
                 source["description"] = "Configured vacancy source"
                 return
             async with semaphore:
-                name, description = await _source_meta(client, url, str(source.get("kind") or "source"))
+                name, description = await _source_meta(
+                    client, url, str(source.get("kind") or "source")
+                )
             source["display_name"] = name
             source["description"] = description
+
         await asyncio.gather(*(enrich(source) for source in sources))
 
 

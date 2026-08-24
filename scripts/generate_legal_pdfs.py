@@ -24,7 +24,9 @@ PUBLIC = SITE / "public" / "legal"
 
 def load_documents() -> dict[str, dict[str, dict[str, object]]]:
     code = "import {legalDocuments} from './src/lib/legal.ts'; console.log(JSON.stringify(legalDocuments))"
-    result = subprocess.run(["bun", "-e", code], cwd=SITE, check=True, capture_output=True, text=True, encoding="utf-8")
+    result = subprocess.run(
+        ["bun", "-e", code], cwd=SITE, check=True, capture_output=True, text=True, encoding="utf-8"
+    )
     return json.loads(result.stdout)
 
 
@@ -34,10 +36,30 @@ def build_pdf(path: Path, document: dict[str, object], locale: str) -> None:
     pdfmetrics.registerFont(TTFont("LegalSans", regular))
     pdfmetrics.registerFont(TTFont("LegalSansBold", bold))
     styles = getSampleStyleSheet()
-    body = ParagraphStyle("Body", parent=styles["BodyText"], fontName="LegalSans", fontSize=10.5, leading=16, textColor=HexColor("#222222"), spaceAfter=10)
-    title = ParagraphStyle("Title", parent=body, fontName="LegalSansBold", fontSize=20, leading=25, spaceAfter=16)
-    heading = ParagraphStyle("Heading", parent=body, fontName="LegalSansBold", fontSize=12.5, leading=17, spaceBefore=14, spaceAfter=7)
-    meta = ParagraphStyle("Meta", parent=body, fontSize=9, leading=14, textColor=HexColor("#666666"), spaceAfter=18)
+    body = ParagraphStyle(
+        "Body",
+        parent=styles["BodyText"],
+        fontName="LegalSans",
+        fontSize=10.5,
+        leading=16,
+        textColor=HexColor("#222222"),
+        spaceAfter=10,
+    )
+    title = ParagraphStyle(
+        "Title", parent=body, fontName="LegalSansBold", fontSize=20, leading=25, spaceAfter=16
+    )
+    heading = ParagraphStyle(
+        "Heading",
+        parent=body,
+        fontName="LegalSansBold",
+        fontSize=12.5,
+        leading=17,
+        spaceBefore=14,
+        spaceAfter=7,
+    )
+    meta = ParagraphStyle(
+        "Meta", parent=body, fontSize=9, leading=14, textColor=HexColor("#666666"), spaceAfter=18
+    )
     updated = "24 августа 2026 года" if locale == "ru" else "24 August 2026"
     version = "Версия: 1.0" if locale == "ru" else "Version: 1.0"
     changed = "Дата изменения" if locale == "ru" else "Last updated"
@@ -60,7 +82,16 @@ def build_pdf(path: Path, document: dict[str, object], locale: str) -> None:
         story.extend(Paragraph(escape(str(paragraph)), body) for paragraph in section["paragraphs"])
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    pdf = SimpleDocTemplate(str(path), pagesize=A4, rightMargin=24 * mm, leftMargin=24 * mm, topMargin=24 * mm, bottomMargin=22 * mm, title=str(document["title"]), author="job_ftch contributors")
+    pdf = SimpleDocTemplate(
+        str(path),
+        pagesize=A4,
+        rightMargin=24 * mm,
+        leftMargin=24 * mm,
+        topMargin=24 * mm,
+        bottomMargin=22 * mm,
+        title=str(document["title"]),
+        author="job_ftch contributors",
+    )
     pdf.build(story, onFirstPage=page_number, onLaterPages=page_number)
 
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 import hmac
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -176,8 +176,6 @@ def create_app(
     limiter = Limiter(key_func=get_remote_address)
     app = FastAPI(title="job_ftch telegram bridge")
     app.state.limiter = limiter
-    from typing import cast
-
     app.add_exception_handler(RateLimitExceeded, cast("Any", _rate_limit_exceeded_handler))
 
     # aiogram 3.x setup
@@ -190,15 +188,17 @@ def create_app(
     @app.post("/webhook/telegram", response_model=None)
     async def telegram_webhook(request: Request) -> Response | dict[str, Any]:
         supplied_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-        if not hmac.compare_digest(supplied_token, bot_config.secret_token):
+        if not bot_config.secret_token or not hmac.compare_digest(
+            supplied_token, bot_config.secret_token
+        ):
             raise HTTPException(status_code=403, detail="Invalid Telegram webhook token.")
         from aiogram.types import Update
 
         update = Update.model_validate(await request.json())
-        result = await dp.feed_webhook_update(bot, update)
+        result: Any = await dp.feed_webhook_update(bot, update)
         if result is None:
             return Response(status_code=200)
-        return result.model_dump(by_alias=True, exclude_none=True)
+        return cast("dict[str, Any]", result.model_dump(by_alias=True, exclude_none=True))
 
     @app.get("/health/live")
     async def health_live() -> dict[str, Any]:

@@ -10,6 +10,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [adr index](adr/index.md)
 - [entities index](entities/index.md)
 - [examples index](examples/index.md)
+- [legal index](legal/index.md)
 - [nodes index](nodes/index.md)
 - [ontology index](ontology/index.md)
 - [operations index](operations/index.md)

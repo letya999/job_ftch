@@ -1,23 +1,14 @@
----
-title: "Правовые документы сайта"
-description: "Индекс двуязычных документов для публичного сайта и API job_ftch."
-updated: 2026-08-24
----
-# Правовые документы / Legal documents
+# legal Index
 
-- [Политика обработки персональных данных / Privacy policy](privacy.md)
-- [Cookies и локальное хранение / Cookies and local storage](cookies.md)
-- [Лицензия / License](licensing.md)
-- [Отказ от ответственности / Disclaimer](disclaimer.md)
-- [Правила использования / Terms of use](terms.md)
-- [Fair use и приватная автоматизация](fair-use-private-automation.md)
+`docs/legal/`
 
-Оператор сайта указан как владелец репозитория `job_ftch` (GitHub `letya999`).
-До публичного production-запуска владелец должен подтвердить полное имя или
-наименование оператора, юридически значимый email, страну размещения и
-фактически включённых обработчиков аналитики.
+Generated index for navigation. Edit source documents, then rerun `uv run python scripts/build_index_docs.py`.
 
-The controller is identified as the owner of the `job_ftch` repository
-(GitHub `letya999`). Before public production launch, the owner must confirm
-the controller's full legal name, a legal-contact email, hosting country and
-the analytics processors actually enabled.
+## Files On This Level
+
+- [Cookies и локальное хранение / Cookies and local storage](cookies.md) - Настройки браузера и согласие на аналитику job_ftch. (Updated: 2026-08-24)
+- [Отказ от ответственности / Disclaimer](disclaimer.md) - Ограничения точности вакансий и автоматической обработки. (Updated: 2026-08-24)
+- [Fair use и приватная автоматизация](fair-use-private-automation.md) - Правила личных агентов, дайджестов и автоматизированного доступа. (Updated: 2026-08-24)
+- [Лицензия / License](licensing.md) - Лицензия кода и границы использования сторонних данных. (Updated: 2026-08-24)
+- [Политика обработки персональных данных / Privacy policy](privacy.md) - Двуязычная политика обработки данных публичного сайта job_ftch. (Updated: 2026-08-24)
+- [Правила использования / Terms of use](terms.md) - Допустимое использование сайта и публичного API job_ftch. (Updated: 2026-08-24)
