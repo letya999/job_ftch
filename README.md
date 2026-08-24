@@ -1,7 +1,7 @@
 ---
 title: "job_ftch"
 description: "![Python](https://img.shields.io/badge/python-3.12+-blue.svg)"
-updated: 2026-08-02
+updated: 2026-08-25
 ---
 # job_ftch
 
@@ -10,6 +10,8 @@ updated: 2026-08-02
 ![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Status](https://img.shields.io/badge/status-MVP-orange.svg)
+
+[Сайт документации](https://letya999.github.io/job_ftch/) · [Telegram-канал вакансий](https://t.me/ai_engineer_jobs) · [AI Engineers Guild](https://t.me/ai_engineers_guild) · [GitHub](https://github.com/letya999/job_ftch)
 
 **Async pipeline for collecting vacancies from Telegram, career sites, RSS,
 selected APIs, and runtime overlays into structured, deduplicated,
@@ -81,31 +83,16 @@ shots. Until then, use a no-prefilter or experimental run without publishing.
 
 ## Current pipeline
 
-The effective pipeline is assembled in `job_ftch/application/builder.py`.
+The project is split into small layers. Data enters through sources and runtime
+adapters, passes through the application pipeline, and leaves through sinks.
+The detailed processing order lives in
+[`docs/architecture.md`](docs/architecture.md).
 
-```mermaid
-graph LR
-    R["RawItem"] --> S["SanitizeNode"]
-    S --> SF["SnapshotFilterNode (optional, always 2nd when enabled)"]
-    SF --> SC["SourceContextNode"]
-    SC --> OPT1["OntologySnapshot / CandidateSegmentation (optional)"]
-    OPT1 --> GF["GarbageFilterNode"]
-    GF --> PT["PostTypeClassificationNode"]
-    PT --> HF["HardFilterNode"]
-    HF --> D["DedupNode"]
-    D --> PRE["BGE-M3 or EmbeddingPrefilterNode (optional)"]
-    PRE --> SP["SemanticPrefilterNode"]
-    SP --> OPT2["RawJobness / CompletenessGate (optional)"]
-    OPT2 --> E["ExtractionNode"]
-    E --> EV["ExtractionValidationNode"]
-    EV --> N["Normalization nodes"]
-    N --> JL["JobLifecycleNode"]
-    JL --> SCORE["Profile match + lexical/risk/quality/validation"]
-    SCORE --> LLM["LLMRelevanceClassificationNode (optional evidence)"]
-    LLM --> DEC["EvidenceDecisionNode"]
-    DEC --> AG["JobAggregationNode"]
-    AG --> OUT["Accept/review sinks + durable delivery outbox"]
-```
+![job_ftch architecture layers](docs/architecture.svg)
+
+The main data contract is:
+
+`Source -> RawItem -> JobDraft -> JobRecord -> JobGroup -> Sink`
 
 Important invariants:
 
