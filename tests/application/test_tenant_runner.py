@@ -1551,16 +1551,19 @@ def test_failure_streak_pauses_then_healthy_probe_resets_once() -> None:
     assert healthy.status == "healthy"
 
 
-def test_inconsistent_counters_do_not_silently_pass() -> None:
+def test_inconsistent_counters_do_not_silently_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     """failed > fetched violates the invariant: it is flagged, and still fails the run."""
-    import structlog
-
-    with structlog.testing.capture_logs() as logs:
-        health = _health_from(SourceRunStats(fetched=2, failed=5))
+    events: list[str] = []
+    monkeypatch.setattr(
+        tenant_runner_module,
+        "logger",
+        SimpleNamespace(warning=lambda event, **_: events.append(event)),
+    )
+    health = _health_from(SourceRunStats(fetched=2, failed=5))
 
     assert health.failure_streak == 1
     assert health.status == "failing"
-    assert any(entry["event"] == "source_health_counter_invariant_violated" for entry in logs)
+    assert "source_health_counter_invariant_violated" in events
 
 
 @pytest.mark.asyncio
