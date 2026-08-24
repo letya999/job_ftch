@@ -2173,6 +2173,12 @@ class TenantRunner:
         """
         from job_ftch.application.public_source_registry import list_public_sources_for_runner
 
+        if tenant_id in self._runtimes:
+            runtime = self.get_runtime(tenant_id)
+            await self._ensure_runtime_sources_loaded(runtime)
+            # Bot and public API are separate processes; refresh overlays written
+            # by the bot before serving the cached public projection.
+            await self._reload_runtime_sources(runtime)
         return await list_public_sources_for_runner(self, tenant_id, allowlist=allowlist)
 
     def _settings_for_inventory(self, tenant_id: str | None = None) -> Settings:

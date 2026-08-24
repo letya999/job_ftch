@@ -15,6 +15,7 @@ from slowapi.util import get_remote_address
 
 from job_ftch.adapters.telegram_bot.config import load_bot_config
 from job_ftch.adapters.telegram_bot.main import build_bot, build_dispatcher
+from job_ftch.adapters.telegram_bot.public_jobs import mount_public_job_routes
 from job_ftch.adapters.telegram_bot.public_sources import mount_public_source_routes
 from job_ftch.application.profile_inputs import build_candidate_profile_from_payload
 from job_ftch.application.source_inputs import build_source_spec_from_input
@@ -23,6 +24,12 @@ from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.config import Settings, get_settings
 from job_ftch.domain import ManagedCandidateProfile
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
+
+try:
+    from fastapi import Request, Response
+except ImportError:  # pragma: no cover - api extra optional at import time
+    Request = None  # type: ignore[misc, assignment]
+    Response = None  # type: ignore[misc, assignment]
 
 logger = structlog.get_logger(__name__)
 
@@ -147,12 +154,6 @@ def create_app(
         msg = "FastAPI bridge requires the 'api' extra: pip install job-ftch[api]"
         raise ImportError(msg) from exc
 
-    try:
-        from aiogram.webhook.fastapi import SimpleRequestHandler, setup_application
-    except ImportError as exc:
-        msg = "aiogram 3.x is required: pip install aiogram>=3.7"
-        raise ImportError(msg) from exc
-
     settings = base_settings or get_settings()
     resolved_configs_dir = Path(configs_dir or settings.configs_dir or "")
     if runner is None:
@@ -186,16 +187,18 @@ def create_app(
         config=bot_config,
     )
 
-    # Register webhook handler
-    webhook_handler = SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot,
-        secret_token=bot_config.secret_token,
-    )
-    webhook_handler.register(app, path="/webhook/telegram")
+    @app.post("/webhook/telegram", response_model=None)
+    async def telegram_webhook(request: Request) -> Response | dict[str, Any]:
+        supplied_token = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not hmac.compare_digest(supplied_token, bot_config.secret_token):
+            raise HTTPException(status_code=403, detail="Invalid Telegram webhook token.")
+        from aiogram.types import Update
 
-    # Setup aiogram with FastAPI (handles startup/shutdown events)
-    setup_application(app, dp, bot=bot)
+        update = Update.model_validate(await request.json())
+        result = await dp.feed_webhook_update(bot, update)
+        if result is None:
+            return Response(status_code=200)
+        return result.model_dump(by_alias=True, exclude_none=True)
 
     @app.get("/health/live")
     async def health_live() -> dict[str, Any]:
@@ -214,6 +217,7 @@ def create_app(
 
     # Public-safe runtime source registry (no API key; allowlisted tenants only).
     mount_public_source_routes(app, runner, limiter=limiter)
+    mount_public_job_routes(app, runner, limiter=limiter)
 
     @app.post("/pipeline/run")
     @limiter.limit("5/minute")

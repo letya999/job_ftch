@@ -1,0 +1,15 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    env_file: .env.dev
+    ports: ["3000:3000"]
+    volumes:
+      - .:/app
+      - job_ftch_site_node_modules:/app/node_modules
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: bun run dev
+volumes:
+  job_ftch_site_node_modules:

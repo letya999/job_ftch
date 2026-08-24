@@ -6,9 +6,15 @@ Does not require the bridge API key. Never falls back to fixtures.
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
+import re
 import time
+from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote, urlsplit
 
+import httpx
 import structlog
 
 from job_ftch.application.public_source_registry import (
@@ -30,6 +36,93 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 DEFAULT_PUBLIC_REGISTRY_CACHE_TTL_SECONDS = 30.0
+_SOURCE_META: dict[str, tuple[str, str]] = {}
+
+
+class _PageMetaParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.title = ""
+        self.description = ""
+        self._in_title = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = {key.lower(): value for key, value in attrs}
+        if tag == "title":
+            self._in_title = True
+        if tag == "meta" and values.get("name", "").lower() in {"description", "og:description"}:
+            self.description = values.get("content") or self.description
+        if tag == "meta" and values.get("property", "").lower() == "og:description":
+            self.description = values.get("content") or self.description
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "title":
+            self._in_title = False
+
+    def handle_data(self, data: str) -> None:
+        if self._in_title:
+            self.title += data
+
+
+def _clean_text(value: str, limit: int) -> str:
+    return re.sub(r"\s+", " ", value).strip()[:limit]
+
+
+def _fallback_source_meta(url: str, kind: str) -> tuple[str, str]:
+    parts = urlsplit(url)
+    host = (parts.hostname or "source").removeprefix("www.")
+    path = unquote(parts.path).strip("/")
+    if host == "t.me" and path:
+        handle = path.split("/")[-1]
+        label = "Telegram group" if kind == "telegram_group" else "Telegram channel"
+        return f"@{handle}", f"{label} @{handle}"
+    name = host.split(".")[0].replace("-", " ").replace("_", " ").title()
+    return name or host, f"Vacancy source at {host}{('/' + path) if path else ''}"
+
+
+def _safe_public_url(url: str) -> bool:
+    parts = urlsplit(url)
+    if parts.scheme not in {"http", "https"} or not parts.hostname or parts.hostname == "localhost":
+        return False
+    try:
+        return not ipaddress.ip_address(parts.hostname).is_private
+    except ValueError:
+        return True
+
+
+async def _source_meta(client: httpx.AsyncClient, url: str, kind: str) -> tuple[str, str]:
+    cached = _SOURCE_META.get(url)
+    if cached is not None:
+        return cached
+    fallback = _fallback_source_meta(url, kind)
+    if not _safe_public_url(url):
+        return fallback
+    try:
+        response = await client.get(url, headers={"User-Agent": "job_ftch-source-registry/1"})
+        response.raise_for_status()
+        parser = _PageMetaParser()
+        parser.feed(response.text[:1_000_000])
+        result = (_clean_text(parser.title, 120) or fallback[0], _clean_text(parser.description, 240) or fallback[1])
+    except Exception:  # Metadata is best-effort; DNS/test guards must not break the registry.
+        result = fallback
+    _SOURCE_META[url] = result
+    return result
+
+
+async def _enrich_sources(sources: list[dict[str, Any]]) -> None:
+    semaphore = asyncio.Semaphore(12)
+    async with httpx.AsyncClient(timeout=4.0, follow_redirects=False) as client:
+        async def enrich(source: dict[str, Any]) -> None:
+            url = str(source.get("public_url") or "")
+            if not url:
+                source["display_name"] = str(source.get("public_name") or source.get("source_id") or "Source")
+                source["description"] = "Configured vacancy source"
+                return
+            async with semaphore:
+                name, description = await _source_meta(client, url, str(source.get("kind") or "source"))
+            source["display_name"] = name
+            source["description"] = description
+        await asyncio.gather(*(enrich(source) for source in sources))
 
 
 class PublicRegistryCache:
@@ -66,6 +159,7 @@ async def build_public_sources_response(
     *,
     allowlist: frozenset[str] | None = None,
     cache: PublicRegistryCache | None = None,
+    enrich: bool = False,
 ) -> dict[str, Any]:
     """Resolve a public registry payload or raise HTTPException-compatible errors.
 
@@ -109,6 +203,8 @@ async def build_public_sources_response(
         raise LookupError("public source registry not available")
 
     payload = registry.model_dump(mode="json")
+    if enrich:
+        await _enrich_sources(payload.get("sources", []))
     if cache is not None and registry.status == "ok":
         cache.set(slug, payload)
     logger.info(
@@ -148,6 +244,7 @@ def mount_public_source_routes(
                 tenant_slug,
                 allowlist=resolved_allowlist,
                 cache=cache,
+                enrich=True,
             )
         except LookupError as exc:
             raise HTTPException(

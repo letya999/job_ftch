@@ -1,0 +1,2 @@
+import type { MetadataRoute } from "next";
+export default function sitemap(): MetadataRoute.Sitemap { const base = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000"; const pages = ["", "/jobs", "/sources", "/ai", "/ai/jobs", "/ai/sources", "/legal", "/legal/privacy", "/legal/cookies", "/legal/licensing", "/legal/disclaimer", "/legal/terms", "/legal/fair-use"]; return ["ru", "en"].flatMap((locale) => pages.map((path) => ({ url: `${base}/${locale}${path}`, lastModified: new Date("2026-08-24") }))); }

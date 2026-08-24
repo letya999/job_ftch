@@ -1,0 +1,7 @@
+import Link from "next/link";
+import { type Locale } from "@/lib/i18n";
+
+export function ProjectFooter({ locale }: { locale: Locale }) {
+  const ru = locale === "ru";
+  return <footer className="project-footer"><div className="footer-grid"><div><h2>JOB_FTCH</h2><p>{ru ? "Open-source pipeline для любых вакансий." : "Open-source pipeline for any vacancy."}<br />Python · async · library-first.</p></div><div><h3>{ru ? "ПРИМЕР" : "EXAMPLE"}</h3><Link href={`/${locale}/jobs`}>{ru ? "Вакансии" : "Vacancies"}</Link><Link href={`/${locale}/sources`}>{ru ? "Источники" : "Sources"}</Link><a href="https://t.me/ai_engineer_jobs" target="_blank" rel="noreferrer">Telegram</a></div><div><h3>{ru ? "ПРОЕКТ" : "PROJECT"}</h3><a href="https://github.com/letya999/job_ftch" target="_blank" rel="noreferrer">GitHub</a><a href="/docs">{ru ? "Документация" : "Documentation"}</a><a href="https://github.com/letya999/job_ftch/issues" target="_blank" rel="noreferrer">Issues</a></div><div><h3>{ru ? "ПРАВО" : "LEGAL"}</h3><Link href={`/${locale}/legal`}>{ru ? "Все документы" : "All documents"}</Link><Link href={`/${locale}/legal/privacy`}>{ru ? "Персональные данные" : "Privacy"}</Link><Link href={`/${locale}/legal/terms`}>{ru ? "Правила использования" : "Terms"}</Link><Link href={`/${locale}/legal/fair-use`}>Fair use</Link></div></div><div className="footer-bottom"><span>2026 · job_ftch contributors</span><span>OPEN SOURCE · SEE REPOSITORY LICENSE</span></div></footer>;
+}
