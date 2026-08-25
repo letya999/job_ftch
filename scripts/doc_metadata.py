@@ -8,7 +8,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET_DIRS = ("docs", "scripts", "tests", "fixtures")
-TARGET_FILES = ("README.md", "AGENTS.md")
+# README is rendered directly by GitHub and intentionally has no docs front matter.
+TARGET_FILES = ("AGENTS.md",)
 EXCLUDE_DIRS = {
     ".pytest_cache",
     ".mypy_cache",
