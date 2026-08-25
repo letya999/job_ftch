@@ -1,60 +1,122 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
-  <title id="title">job_ftch architecture layers</title>
-  <desc id="desc">Sources enter through adapters, pass through the application pipeline and nodes, and leave through sinks.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" role="img" aria-labelledby="title desc">
+  <title id="title">job_ftch ETL pipeline architecture</title>
+  <desc id="desc">A layered ETL pipeline from source observations through sanitization, extraction, evidence-based decisions, aggregation, and delivery, with an adaptive bypass side path.</desc>
   <defs>
-    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+    <linearGradient id="background" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0" stop-color="#f8fafc"/>
-      <stop offset="1" stop-color="#eef2ff"/>
+      <stop offset="1" stop-color="#e9efff"/>
     </linearGradient>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
       <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#0f172a" flood-opacity=".12"/>
     </filter>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
-      <path d="M0,0 L9,3 L0,6 Z" fill="#64748b"/>
+    <marker id="arrow" markerWidth="11" markerHeight="11" refX="9" refY="3.5" orient="auto">
+      <path d="M0,0 L10,3.5 L0,7 Z" fill="#64748b"/>
+    </marker>
+    <marker id="bypass-arrow" markerWidth="11" markerHeight="11" refX="9" refY="3.5" orient="auto">
+      <path d="M0,0 L10,3.5 L0,7 Z" fill="#c2410c"/>
     </marker>
     <style>
-      .title { font: 700 30px system-ui, sans-serif; fill: #0f172a; }
-      .subtitle { font: 400 16px system-ui, sans-serif; fill: #475569; }
-      .label { font: 700 13px system-ui, sans-serif; letter-spacing: 1.5px; fill: #475569; }
-      .name { font: 700 22px system-ui, sans-serif; fill: #0f172a; }
-      .body { font: 400 16px system-ui, sans-serif; fill: #334155; }
+      .title { font: 700 32px system-ui, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 17px system-ui, sans-serif; fill: #475569; }
+      .layer-label { font: 700 12px system-ui, sans-serif; letter-spacing: 1.5px; fill: #475569; }
+      .layer-name { font: 700 19px system-ui, sans-serif; fill: #0f172a; }
+      .layer-body { font: 400 14px system-ui, sans-serif; fill: #334155; }
+      .side-title { font: 700 19px system-ui, sans-serif; fill: #7c2d12; }
+      .side-label { font: 700 11px system-ui, sans-serif; letter-spacing: 1.2px; fill: #9a3412; }
+      .side-body { font: 400 14px system-ui, sans-serif; fill: #431407; }
+      .side-code { font: 600 13px ui-monospace, SFMono-Regular, Consolas, monospace; fill: #7c2d12; }
       .contract { font: 600 15px ui-monospace, SFMono-Regular, Consolas, monospace; fill: #4338ca; }
+      .small-note { font: 400 13px system-ui, sans-serif; fill: #64748b; }
     </style>
   </defs>
 
-  <rect width="1200" height="720" rx="28" fill="url(#bg)"/>
-  <text x="60" y="62" class="title">job_ftch · слоистая архитектура</text>
-  <text x="60" y="92" class="subtitle">Источники и runtime-входы → независимое ядро → проверенный результат</text>
+  <rect width="1600" height="1080" rx="30" fill="url(#background)"/>
+  <text x="60" y="62" class="title">job_ftch · ETL pipeline architecture</text>
+  <text x="60" y="92" class="subtitle">Collect → assess → sanitize → structure → decide → deliver</text>
+  <text x="1540" y="62" text-anchor="end" class="small-note">Evidence-first processing</text>
 
   <g filter="url(#shadow)">
-    <rect x="70" y="130" width="1060" height="92" rx="18" fill="#fff" stroke="#cbd5e1"/>
-    <text x="100" y="162" class="label">ВХОДНЫЕ ИСТОЧНИКИ</text>
-    <text x="100" y="197" class="name">Telegram · карьерные сайты · RSS/API · runtime overlays</text>
-
-    <rect x="70" y="260" width="1060" height="92" rx="18" fill="#eff6ff" stroke="#93c5fd"/>
-    <text x="100" y="292" class="label">АДАПТЕРЫ И ПОРТЫ</text>
-    <text x="100" y="327" class="name">Source · Telegram bot · MCP · FastAPI · TenantRunner</text>
-
-    <rect x="70" y="390" width="1060" height="112" rx="18" fill="#eef2ff" stroke="#a5b4fc"/>
-    <text x="100" y="422" class="label">НЕЗАВИСИМОЕ ЯДРО</text>
-    <text x="100" y="457" class="name">Domain + Application</text>
-    <text x="100" y="484" class="body">контракты · orchestration · registry · evidence-based decision</text>
-
-    <rect x="70" y="540" width="510" height="112" rx="18" fill="#f0fdf4" stroke="#86efac"/>
-    <text x="100" y="572" class="label">ОБРАБОТКА</text>
-    <text x="100" y="607" class="name">Nodes</text>
-    <text x="100" y="634" class="body">sanitize · extraction · normalize · dedup · decision</text>
-
-    <rect x="620" y="540" width="510" height="112" rx="18" fill="#fff7ed" stroke="#fdba74"/>
-    <text x="650" y="572" class="label">ВЫХОДЫ</text>
-    <text x="650" y="607" class="name">Sinks + storage</text>
-    <text x="650" y="634" class="body">accepted · review · quarantine · outbox</text>
+    <rect x="60" y="130" width="1060" height="90" rx="16" fill="#ffffff" stroke="#cbd5e1"/>
+    <rect x="60" y="240" width="1060" height="90" rx="16" fill="#eff6ff" stroke="#93c5fd"/>
+    <rect x="60" y="350" width="1060" height="90" rx="16" fill="#eef2ff" stroke="#a5b4fc"/>
+    <rect x="60" y="460" width="1060" height="90" rx="16" fill="#f0fdf4" stroke="#86efac"/>
+    <rect x="60" y="570" width="1060" height="90" rx="16" fill="#ecfeff" stroke="#67e8f9"/>
+    <rect x="60" y="680" width="1060" height="90" rx="16" fill="#f5f3ff" stroke="#c4b5fd"/>
+    <rect x="60" y="790" width="1060" height="90" rx="16" fill="#fff7ed" stroke="#fdba74"/>
+    <rect x="1160" y="130" width="380" height="750" rx="18" fill="#fff7ed" stroke="#fb923c" stroke-width="2"/>
   </g>
 
-  <path d="M600 222 V253" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
-  <path d="M600 352 V383" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
-  <path d="M600 502 V525" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
-  <path d="M580 596 H610" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <g>
+    <text x="90" y="158" class="layer-label">LAYER 1 · SOURCES &amp; OBSERVATIONS</text>
+    <text x="90" y="188" class="layer-name">Telegram · career sites · RSS/API · runtime overlays</text>
+    <text x="90" y="210" class="layer-body">Source.fetch() produces immutable RawItem snapshots.</text>
 
-  <text x="600" y="693" text-anchor="middle" class="contract">Source → RawItem → JobDraft → JobRecord → JobGroup</text>
+    <text x="90" y="268" class="layer-label">LAYER 2 · INGEST &amp; ACCESS</text>
+    <text x="90" y="298" class="layer-name">CareerSiteSource · monitors · scrapers · site parsers · adapters</text>
+    <text x="90" y="320" class="layer-body">Discovery, detail retrieval, payload capture, and source context.</text>
+
+    <text x="90" y="378" class="layer-label">LAYER 3 · SANITIZE &amp; TRIAGE</text>
+    <text x="90" y="408" class="layer-name">SanitizeNode → snapshot filter → garbage/type/hard filters</text>
+    <text x="90" y="430" class="layer-body">SanitizeNode is always first; rejected and quarantined items leave the main path.</text>
+
+    <text x="90" y="488" class="layer-label">LAYER 4 · PREFILTER &amp; IDENTITY</text>
+    <text x="90" y="518" class="layer-name">Segmentation · deduplication · lexical / TF-IDF / embedding prefilters</text>
+    <text x="90" y="540" class="layer-body">One RawItem may become CandidateSpan[] before relevance processing.</text>
+
+    <text x="90" y="598" class="layer-label">LAYER 5 · EXTRACTION &amp; NORMALIZATION</text>
+    <text x="90" y="628" class="layer-name">ExtractionNode: RawItem → JobDraft</text>
+    <text x="90" y="650" class="layer-body">Validation · title/company · skills · location/work mode · compensation · lifecycle.</text>
+
+    <text x="90" y="708" class="layer-label">LAYER 6 · EVIDENCE &amp; DECISION</text>
+    <text x="90" y="738" class="layer-name">Profile match · risk/quality scoring · optional LLM evidence</text>
+    <text x="90" y="760" class="layer-body">EvidenceDecisionNode is the terminal decision boundary: ACCEPT · REVIEW · REJECT.</text>
+
+    <text x="90" y="818" class="layer-label">LAYER 7 · AGGREGATION &amp; DELIVERY</text>
+    <text x="90" y="848" class="layer-name">JobRecord → JobGroup → sinks and outbox</text>
+    <text x="90" y="870" class="layer-body">Accepted records commit canonically; review, rejected, and quarantine stay separate.</text>
+  </g>
+
+  <g fill="none" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)">
+    <path d="M590 220 V235"/>
+    <path d="M590 330 V345"/>
+    <path d="M590 440 V455"/>
+    <path d="M590 550 V565"/>
+    <path d="M590 660 V675"/>
+    <path d="M590 770 V785"/>
+  </g>
+
+  <g>
+    <text x="1190" y="170" class="side-title">Adaptive bypass (optional)</text>
+    <text x="1190" y="197" class="side-body">Access recovery is a signal-driven route graph,</text>
+    <text x="1190" y="217" class="side-body">not a fixed browser-tier ladder.</text>
+
+    <text x="1190" y="260" class="side-label">SIGNALS</text>
+    <text x="1190" y="286" class="side-body">TLS / fingerprint · Chromium fingerprint</text>
+    <text x="1190" y="308" class="side-body">IP / ASN / rate limit · challenge / CAPTCHA</text>
+    <text x="1190" y="330" class="side-body">session state · legal/config gates</text>
+
+    <text x="1190" y="376" class="side-label">INDEPENDENT CAPABILITY AXES</text>
+    <rect x="1190" y="394" width="320" height="34" rx="8" fill="#ffedd5"/>
+    <text x="1206" y="416" class="side-code">transport · browser/runtime</text>
+    <rect x="1190" y="438" width="320" height="34" rx="8" fill="#ffedd5"/>
+    <text x="1206" y="460" class="side-code">network / proxy · session</text>
+    <rect x="1190" y="482" width="320" height="34" rx="8" fill="#ffedd5"/>
+    <text x="1206" y="504" class="side-code">challenge / CAPTCHA · policy</text>
+
+    <text x="1190" y="554" class="side-label">ROUTE EXAMPLES</text>
+    <text x="1190" y="580" class="side-code">curl stealth → TLS client</text>
+    <text x="1190" y="603" class="side-code">stealth browser → Camoufox</text>
+    <text x="1190" y="626" class="side-code">Nodriver → bounded challenge action</text>
+    <text x="1190" y="649" class="side-code">proxy → same transport/browser axis</text>
+
+    <path d="M1190 694 H1510" stroke="#fdba74" stroke-width="1"/>
+    <text x="1190" y="728" class="side-label">CONTROLLED HANDOFF</text>
+    <text x="1190" y="754" class="side-body">Signals select the smallest capable route,</text>
+    <text x="1190" y="776" class="side-body">then return to Layer 2 with source context.</text>
+    <text x="1190" y="822" class="side-code">bypass="auto"</text>
+    <path d="M1160 285 H1128 V285" fill="none" stroke="#c2410c" stroke-width="3" stroke-dasharray="8 7" marker-end="url(#bypass-arrow)"/>
+  </g>
+
+  <text x="800" y="935" text-anchor="middle" class="contract">Source → RawItem → CandidateSpan[] → JobDraft → JobRecord → JobGroup → Sink</text>
+  <text x="800" y="970" text-anchor="middle" class="small-note">Side channels: review · rejected · quarantine · outbox</text>
 </svg>
