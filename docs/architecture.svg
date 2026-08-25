@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">job_ftch architecture layers</title>
+  <desc id="desc">Sources enter through adapters, pass through the application pipeline and nodes, and leave through sinks.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="1" stop-color="#eef2ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#0f172a" flood-opacity=".12"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <style>
+      .title { font: 700 30px system-ui, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 16px system-ui, sans-serif; fill: #475569; }
+      .label { font: 700 13px system-ui, sans-serif; letter-spacing: 1.5px; fill: #475569; }
+      .name { font: 700 22px system-ui, sans-serif; fill: #0f172a; }
+      .body { font: 400 16px system-ui, sans-serif; fill: #334155; }
+      .contract { font: 600 15px ui-monospace, SFMono-Regular, Consolas, monospace; fill: #4338ca; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="720" rx="28" fill="url(#bg)"/>
+  <text x="60" y="62" class="title">job_ftch · слоистая архитектура</text>
+  <text x="60" y="92" class="subtitle">Источники и runtime-входы → независимое ядро → проверенный результат</text>
+
+  <g filter="url(#shadow)">
+    <rect x="70" y="130" width="1060" height="92" rx="18" fill="#fff" stroke="#cbd5e1"/>
+    <text x="100" y="162" class="label">ВХОДНЫЕ ИСТОЧНИКИ</text>
+    <text x="100" y="197" class="name">Telegram · карьерные сайты · RSS/API · runtime overlays</text>
+
+    <rect x="70" y="260" width="1060" height="92" rx="18" fill="#eff6ff" stroke="#93c5fd"/>
+    <text x="100" y="292" class="label">АДАПТЕРЫ И ПОРТЫ</text>
+    <text x="100" y="327" class="name">Source · Telegram bot · MCP · FastAPI · TenantRunner</text>
+
+    <rect x="70" y="390" width="1060" height="112" rx="18" fill="#eef2ff" stroke="#a5b4fc"/>
+    <text x="100" y="422" class="label">НЕЗАВИСИМОЕ ЯДРО</text>
+    <text x="100" y="457" class="name">Domain + Application</text>
+    <text x="100" y="484" class="body">контракты · orchestration · registry · evidence-based decision</text>
+
+    <rect x="70" y="540" width="510" height="112" rx="18" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="100" y="572" class="label">ОБРАБОТКА</text>
+    <text x="100" y="607" class="name">Nodes</text>
+    <text x="100" y="634" class="body">sanitize · extraction · normalize · dedup · decision</text>
+
+    <rect x="620" y="540" width="510" height="112" rx="18" fill="#fff7ed" stroke="#fdba74"/>
+    <text x="650" y="572" class="label">ВЫХОДЫ</text>
+    <text x="650" y="607" class="name">Sinks + storage</text>
+    <text x="650" y="634" class="body">accepted · review · quarantine · outbox</text>
+  </g>
+
+  <path d="M600 222 V253" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M600 352 V383" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M600 502 V525" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M580 596 H610" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <text x="600" y="693" text-anchor="middle" class="contract">Source → RawItem → JobDraft → JobRecord → JobGroup</text>
+</svg>

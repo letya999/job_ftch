@@ -35,3 +35,4 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 ### Non-Markdown Files
 
 - [.pages](.pages)
+- [architecture.svg](architecture.svg)
