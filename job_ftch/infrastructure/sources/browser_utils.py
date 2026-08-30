@@ -53,7 +53,7 @@ def resolve_identity_ua(config: dict[str, Any], persona_kw: dict[str, Any]) -> s
 
 
 DEFAULT_WAIT = "domcontentloaded"
-DEFAULT_WAIT_FALLBACK = "networkidle"
+DEFAULT_WAIT_FALLBACK = "commit"
 
 _CHALLENGE_DETECTOR_ATTR = "_job_ftch_challenge_response_detector"
 

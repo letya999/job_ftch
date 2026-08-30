@@ -624,3 +624,24 @@ async def test_navigate_blocked_403_sets_observed_challenge() -> None:
             },
         )
     assert controller.observed_challenge_type == "cloudflare_challenge"
+
+
+@pytest.mark.asyncio
+async def test_navigate_falls_back_to_less_strict_commit() -> None:
+    waits: list[str | None] = []
+
+    class _Page:
+        async def goto(self, url: str, wait_until: str | None = None, timeout: object = None):
+            del url, timeout
+            waits.append(wait_until)
+            if len(waits) == 1:
+                raise TimeoutError
+            return SimpleNamespace(status=200)
+
+    await navigate(
+        _Page(),  # type: ignore[arg-type]
+        "https://example.com/jobs",
+        {"_allow_private_selfcheck_fixture": True},
+    )
+
+    assert waits == ["domcontentloaded", "commit"]
