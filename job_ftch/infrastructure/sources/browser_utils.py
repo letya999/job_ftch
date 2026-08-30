@@ -620,13 +620,7 @@ def _prefer_patchright(config: dict[str, Any], bypass_strategy: Any) -> bool:
 
 
 def _load_async_playwright(*, prefer_patchright: bool) -> Any:
-    if not prefer_patchright:
-        try:
-            from playwright.async_api import async_playwright as playwright_async_playwright
-
-            return playwright_async_playwright
-        except ImportError:
-            pass
+    del prefer_patchright  # The production image installs Patchright's Chromium only.
     try:
         from patchright.async_api import async_playwright as patchright_async_playwright
     except ImportError as exc:

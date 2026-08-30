@@ -38,6 +38,23 @@ def _require_camoufox_can_launch() -> None:
         _fail(f"camoufox failed to launch: {exc}")
 
 
+def _require_patchright_can_launch() -> None:
+    """Launch the Chromium runtime used by ordinary browser-backed sources."""
+    import asyncio
+
+    from patchright.async_api import async_playwright
+
+    async def _launch() -> None:
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True)
+            await browser.close()
+
+    try:
+        asyncio.run(_launch())
+    except Exception as exc:  # noqa: BLE001 - expose the missing binary/library
+        _fail(f"patchright Chromium failed to launch: {exc}")
+
+
 def main() -> None:
     required_modules = ("patchright", "camoufox", "nodriver", "cloakbrowser")
     for module_name in required_modules:
@@ -70,6 +87,7 @@ def main() -> None:
     if not cloak_binary.exists():
         _fail(f"cloakbrowser ensure_binary() returned a missing path: {cloak_binary}")
 
+    _require_patchright_can_launch()
     _require_camoufox_can_launch()
 
     print("browser runtime ok")

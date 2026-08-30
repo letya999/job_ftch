@@ -10,6 +10,7 @@ import pytest
 
 from job_ftch.infrastructure.sources.browser_utils import (
     _launch_browser_with_recovery,
+    _load_async_playwright,
     _patchright_inner_send_cancellation_safe,
     _patchright_route_handle_cancellation_safe,
     _unroute_page_before_close,
@@ -512,7 +513,7 @@ def _stub_playwright_loader(
 
 
 @pytest.mark.asyncio
-async def test_open_page_uses_playwright_when_patchright_not_required(
+async def test_open_page_uses_default_browser_route_when_patchright_not_required(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -520,6 +521,12 @@ async def test_open_page_uses_playwright_when_patchright_not_required(
     async with open_page({"headless": True}):
         pass
     assert used == [False]
+
+
+def test_default_browser_loader_uses_patchright_runtime() -> None:
+    loader = _load_async_playwright(prefer_patchright=False)
+
+    assert loader.__module__.startswith("patchright.")
 
 
 @pytest.mark.asyncio
