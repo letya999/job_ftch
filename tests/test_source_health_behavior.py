@@ -27,7 +27,7 @@ def _write_fixture(path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_source_health_auto_pause_and_probe_lifecycle(tmp_path: Path) -> None:
+async def test_legacy_auto_paused_source_is_resumed_immediately(tmp_path: Path) -> None:
     fixture_path = tmp_path / "fixture.json"
     _write_fixture(fixture_path)
 
@@ -74,26 +74,13 @@ async def test_source_health_auto_pause_and_probe_lifecycle(tmp_path: Path) -> N
     )
     await runtime.store.save_source_health(sid, health)
 
-    # Run 1: Should be skipped
+    # Legacy paused state must not disable a source after its adapter is fixed.
     summary1 = await runner.run_tenant(tenant_id)
-    assert sid not in summary1.by_source_id
+    assert sid in summary1.by_source_id
     health_after1 = await runtime.store.get_source_health(sid)
-    assert health_after1.paused is True
-    assert health_after1.skipped_runs == 1
-
-    # Run 2: Should be skipped
-    summary2 = await runner.run_tenant(tenant_id)
-    assert sid not in summary2.by_source_id
-    health_after2 = await runtime.store.get_source_health(sid)
-    assert health_after2.skipped_runs == 2
-
-    # Run 3: Should PROBE (skipped_runs reaches 3)
-    summary3 = await runner.run_tenant(tenant_id)
-    assert sid in summary3.by_source_id
-    health_after3 = await runtime.store.get_source_health(sid)
-    assert health_after3.skipped_runs == 0
-    assert health_after3.paused is False
-    assert health_after3.failure_streak == 0
+    assert health_after1.paused is False
+    assert health_after1.skipped_runs == 0
+    assert health_after1.failure_streak == 0
 
     await runner.close()
 
@@ -149,15 +136,10 @@ async def test_source_rate_limiting(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_source_health_thresholds_from_settings() -> None:
-    # Test that changing settings.source_health_failure_streak_pause affects outcome
-    settings = Settings()
-    settings.source_health_failure_streak_pause = 5
-
+async def test_source_health_tracks_failure_streak_without_pausing() -> None:
     sid = "test:src"
     stats = SourceRunStats(fetched=0, emitted=0, failed=1)  # Failed run
 
-    # After 4 failures, it should NOT be paused yet with streak=5
     previous = SourceHealth(
         source_id=sid,
         source_kind="test",
@@ -184,12 +166,11 @@ async def test_source_health_thresholds_from_settings() -> None:
         source_name="src",
         stats=stats,
         finished_at=datetime.now(UTC),
-        failure_streak_pause=settings.source_health_failure_streak_pause,
     )
 
     assert new_health.failure_streak == 5
-    assert new_health.paused is True
-    assert new_health.status == "paused"
+    assert new_health.paused is False
+    assert new_health.status == "failing"
 
 
 @pytest.mark.asyncio
@@ -203,7 +184,6 @@ async def test_source_health_marks_transient_failures_as_failing() -> None:
         source_name="src",
         stats=stats,
         finished_at=datetime.now(UTC),
-        failure_streak_pause=3,
     )
 
     assert new_health.failure_streak == 1
@@ -242,7 +222,6 @@ async def test_source_health_clears_stale_error_on_non_source_fetch_failure() ->
         source_name="src",
         stats=stats,
         finished_at=datetime.now(UTC),
-        failure_streak_pause=3,
     )
 
     assert new_health.failure_streak == 1

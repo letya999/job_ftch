@@ -178,7 +178,6 @@ def _update_source_health_payload(
     finished_at: datetime,
     drift_ratio_threshold: float = 0.2,
     min_baseline_threshold: float = 3.0,
-    failure_streak_pause: int = 3,
     majority_failure_ratio: float = 0.5,
 ) -> SourceHealth:
     prev_baseline_emitted = previous.baseline_emitted if previous else 0.0
@@ -218,8 +217,6 @@ def _update_source_health_payload(
         last_started_at = previous.last_started_at if previous else None
         success_count = previous_success
         next_baseline = prev_baseline_emitted
-        if failure_streak >= failure_streak_pause and (not previous or not previous.paused):
-            logger.info("source_auto_paused", source_id=source_id, failure_streak=failure_streak)
     else:
         failure_streak = 0
         last_started_at = started_at.isoformat() if started_at is not None else None
@@ -251,13 +248,11 @@ def _update_source_health_payload(
             "degraded"
             if degraded
             else (
-                "paused"
-                if failure_streak >= failure_streak_pause
-                else ("failing" if had_failure else "healthy")
+                "failing" if had_failure else "healthy"
             )
         ),
-        paused=failure_streak >= failure_streak_pause,
-        skipped_runs=0 if not had_failure else (previous.skipped_runs if previous else 0),
+        paused=False,
+        skipped_runs=0,
         last_eviction_at=previous.last_eviction_at if previous else None,
         eviction_streak=previous.eviction_streak if previous else 0,
         last_eviction_kind=previous.last_eviction_kind if previous else None,
@@ -1707,16 +1702,13 @@ class TenantRunner:
                 except (ValueError, TypeError):
                     pass
 
-            # Task 5: Auto-pause with Half-open
+            # Sources stay enabled after failures. Clear legacy auto-pause rows
+            # so repaired adapters are exercised on the next scheduled run.
             if (not ignore_schedule_gates) and health and health.paused:
-                health.skipped_runs += 1
-                if health.skipped_runs >= runtime.settings.source_health_probe_every_n_runs:
-                    logger.info("source_probe", source_id=sid, skipped_runs=health.skipped_runs)
-                    health.skipped_runs = 0
-                else:
-                    await runtime.store.save_source_health(sid, health)
-                    continue
-                # Save the updated skipped_runs before probing
+                logger.info("source_auto_resumed", source_id=sid)
+                health.paused = False
+                health.skipped_runs = 0
+                health.status = "failing"
                 await runtime.store.save_source_health(sid, health)
 
             runnable_specs.append(spec)
@@ -1964,7 +1956,6 @@ class TenantRunner:
                 finished_at=finished_at,
                 drift_ratio_threshold=runtime.settings.source_health_drift_ratio,
                 min_baseline_threshold=runtime.settings.source_health_min_baseline,
-                failure_streak_pause=runtime.settings.source_health_failure_streak_pause,
             )
             failure_payload = failure_by_id.get(source_id)
             if failure_payload is not None:
