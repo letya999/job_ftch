@@ -101,10 +101,10 @@ async def test_sequential_ordering():
 async def test_source_fetch_binds_canonical_observability_context(concurrency: int) -> None:
     source = ContextSource()
 
-    assert (
-        len([item async for item in CompositeSource([source], concurrency=concurrency).fetch()])
-        == 1
-    )
+    items = [item async for item in CompositeSource([source], concurrency=concurrency).fetch()]
+    assert len(items) == 1
+    assert items[0].source_name == "example_jobs"
+    assert items[0].stable_id != build_item("context").stable_id
     assert source.context["source_id"] == "career_site:example_jobs"
     assert source.context["source_kind"] == "career_site"
 
