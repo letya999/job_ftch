@@ -6,6 +6,7 @@ import pytest
 
 from job_ftch.application.run_budget import AsyncCallBudget
 from job_ftch.domain import (
+    CompensationRange,
     EmploymentType,
     JobExtractionStatus,
     LanguageCode,
@@ -111,6 +112,39 @@ async def test_full_extraction_writes_back_card_fields(make_job_record) -> None:
 
 
 @pytest.mark.anyio
+async def test_authoritative_parser_identity_outranks_llm(make_job_record) -> None:
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        company=None,
+        country=None,
+        metadata={
+            "company": "Яндекс",
+            "company_authoritative": True,
+            "country": "Узбекистан",
+            "country_authoritative": True,
+        },
+    )
+
+    enriched = await FullExtractionNode(_FieldLLM(company="сомнительная компания")).process(job)
+
+    assert enriched.company == "Яндекс"
+    assert enriched.country == "Узбекистан"
+
+
+@pytest.mark.anyio
+async def test_detail_country_outranks_regional_default(make_job_record) -> None:
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        country="Казахстан",
+        metadata={"country": "Узбекистан", "country_authoritative": True},
+    )
+
+    enriched = await FullExtractionNode(_FieldLLM()).process(job)
+
+    assert enriched.country == "Казахстан"
+
+
+@pytest.mark.anyio
 async def test_full_extraction_recovers_location_and_language_from_metadata(
     make_job_record,
 ) -> None:
@@ -177,6 +211,19 @@ async def test_office_description_falls_back_to_metadata(make_job_record) -> Non
     enriched = await FullExtractionNode(llm).process(job)
 
     assert enriched.location == "г Москва"
+
+
+@pytest.mark.anyio
+async def test_sber_business_effect_is_not_salary(make_job_record) -> None:
+    llm = _FieldLLM(compensation=CompensationRange(currency="RUB", min_amount=2))
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        metadata={"parser": "sber-public-api"},
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.compensation is None
 
 
 @pytest.mark.anyio

@@ -21,20 +21,34 @@ from job_ftch.application.shot_sync import add_shot_async, remove_shot_async
 from job_ftch.application.source_inputs import build_source_spec_from_input
 from job_ftch.domain import ManagedCandidateProfile
 
-SurfaceName = Literal["core", "ops", "admin"]
+SurfaceName = Literal["all", "mass", "personal"]
 
 ShotKind = Literal["resume", "job"]
 ShotPolarity = Literal["positive", "negative"]
+ExampleKind = Literal["resume", "vacancy"]
+ExampleLabel = Literal["positive", "negative"]
 
 _DEFAULT_USER = "mcp"
 _DEFAULT_PROFILE = "mcp_default"
+_EXAMPLE_KINDS = frozenset({"resume", "vacancy"})
+_EXAMPLE_LABELS = frozenset({"positive", "negative"})
+_EXAMPLE_CLEAR_KINDS = frozenset({"all", "resume", "vacancy"})
+_REFRESH_POLICIES = frozenset({"auto", "defer", "sync"})
+_SURFACES = frozenset({"all", "mass", "personal"})
+_SHOT_ACTIONS = frozenset({"list", "add", "remove", "clear", "compile"})
+_PUBLIC_EXAMPLE_KEYS = {
+    "positive_resume": "positive_resume",
+    "negative_resume": "negative_resume",
+    "positive_job": "positive_vacancy",
+    "negative_job": "negative_vacancy",
+}
 
 
 def resolve_surface() -> SurfaceName:
-    raw = os.environ.get("JOB_FTCH_MCP_SURFACE", "core").strip().lower()
-    if raw in {"core", "ops", "admin"}:
+    raw = os.environ.get("JOB_FTCH_MCP_SURFACE", "all").strip().lower()
+    if raw in _SURFACES:
         return raw  # type: ignore[return-value]
-    return "core"
+    return "all"
 
 
 def example_kind(polarity: ShotPolarity, kind: ShotKind) -> str:
@@ -112,9 +126,8 @@ async def add_shots(
 ) -> dict[str, Any]:
     """Add one or many positive/negative resume/job shots (bot parity).
 
-    Same side-effects as Telegram bot handlers:
-    profile persist, ontology enrichment (LLM or heuristic), optional
-    embeddings, and shot-store mirror for scorers.
+    Persists examples first, then compiles ontology once from the full
+    profile (Telegram rebuild), not once per shot.
     """
     items: list[str] = []
     if text and text.strip():
@@ -136,22 +149,19 @@ async def add_shots(
     ontology_errors: list[str] = []
     runtime = runner.get_runtime(tenant_id)
 
-    from job_ftch.application.ontology_enrichment import (
-        add_example_to_profile_with_enrichment,
-    )
+    from job_ftch.application.ontology_enrichment import compile_profile_ontology
+    from job_ftch.application.resume_extraction import add_example_to_profile
 
+    ontology_store = getattr(runtime, "ontology_store", None)
+    llm = getattr(runtime, "llm_provider", None)
+    compile_model = str(
+        getattr(llm, "model_id", None)
+        or getattr(llm, "model", None)
+        or getattr(llm, "_model", None)
+        or ""
+    )
     for item in items:
-        try:
-            managed = await add_example_to_profile_with_enrichment(
-                managed,
-                item,
-                kind=ekind,
-                llm=getattr(runtime, "llm_provider", None),
-                ontology_store=getattr(runtime, "ontology_store", None),
-            )
-        except Exception as exc:  # noqa: BLE001 - still persist example text
-            ontology_errors.append(f"{type(exc).__name__}: {exc}")
-            managed = add_example_to_profile(managed, item, kind=ekind)
+        managed = add_example_to_profile(managed, item, kind=ekind)
         try:
             await remove_shot_async(text=item, role=role)
             await add_shot_async(
@@ -174,6 +184,33 @@ async def add_shots(
             sync_errors.append(f"embed:{type(exc).__name__}: {exc}")
 
     await runner.save_and_activate_candidate_profile(tenant_id, managed)
+    pos_added = 0
+    if ontology_store is not None:
+        try:
+            compiled = await compile_profile_ontology(
+                managed, llm=llm, ontology_store=ontology_store
+            )
+            compile_model = str(compiled.get("model") or compile_model)
+            raw_errors = compiled.get("ontology_errors")
+            if isinstance(raw_errors, list):
+                ontology_errors.extend(str(err) for err in raw_errors)
+            raw_pos = compiled.get("pos_added")
+            pos_added = raw_pos if isinstance(raw_pos, int) else 0
+            if pos_added == 0:
+                skills = await ontology_store.list_skills()
+                roles = await ontology_store.list_roles()
+                pos_added = len(skills) + len(roles)
+        except Exception as exc:  # noqa: BLE001
+            ontology_errors.append(f"{type(exc).__name__}: {exc}")
+            try:
+                skills = await ontology_store.list_skills()
+                roles = await ontology_store.list_roles()
+                pos_added = len(skills) + len(roles)
+            except Exception as list_exc:  # noqa: BLE001
+                ontology_errors.append(f"{type(list_exc).__name__}: {list_exc}")
+    from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
+
+    mark_prefilter_dirty(getattr(runtime, "settings", None))
 
     # Full profile mirror (same as bot document path) for scorer visibility.
     try:
@@ -198,6 +235,8 @@ async def add_shots(
         "counts": {k: len(v) for k, v in examples.items()},
         "shot_sync_errors": sync_errors,
         "ontology_errors": ontology_errors,
+        "pos_added": pos_added,
+        "model": compile_model,
         "ontology_store": runtime.ontology_store is not None,
         "embedding_provider": embedding_provider is not None,
     }
@@ -259,6 +298,9 @@ async def remove_shot(
     except Exception as exc:  # noqa: BLE001
         sync_error = f"{type(exc).__name__}: {exc}"
     await runner.save_and_activate_candidate_profile(tenant_id, managed)
+    from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
+
+    mark_prefilter_dirty(getattr(runner.get_runtime(tenant_id), "settings", None))
     examples = list_examples(managed)
     return {
         "tenant_id": tenant_id,
@@ -269,6 +311,441 @@ async def remove_shot(
         "counts": {k: len(v) for k, v in examples.items()},
         "shot_sync_error": sync_error,
     }
+
+
+def example_error(code: str, message: str, **extra: object) -> dict[str, Any]:
+    payload: dict[str, Any] = {"error": code, "message": message}
+    payload.update(extra)
+    return payload
+
+
+def _shot_kind(kind: str) -> ShotKind:
+    return "job" if kind == "vacancy" else "resume"
+
+
+def _public_counts(counts: dict[str, int]) -> dict[str, int]:
+    return {_PUBLIC_EXAMPLE_KEYS.get(key, key): value for key, value in counts.items()}
+
+
+def _bucket_keys(*, kind: str, label: str | None) -> list[str]:
+    keys: list[str]
+    if kind == "resume":
+        keys = ["positive_resume", "negative_resume"]
+    elif kind == "vacancy":
+        keys = ["positive_job", "negative_job"]
+    else:
+        keys = ["positive_resume", "negative_resume", "positive_job", "negative_job"]
+    if label == "positive":
+        return [key for key in keys if key.startswith("positive_")]
+    if label == "negative":
+        return [key for key in keys if key.startswith("negative_")]
+    return keys
+
+
+def _key_to_kind_label(key: str) -> tuple[ExampleKind, ExampleLabel]:
+    label: ExampleLabel = "negative" if key.startswith("negative_") else "positive"
+    kind: ExampleKind = "vacancy" if key.endswith("job") else "resume"
+    return kind, label
+
+
+async def get_examples_summary(
+    runner: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    profile_id: str | None = None,
+) -> dict[str, Any]:
+    listed = await list_shots(runner, tenant_id=tenant_id, user_id=user_id, profile_id=profile_id)
+    counts = _public_counts(listed["counts"])
+    return {
+        "tenant_id": listed["tenant_id"],
+        "user_id": listed["user_id"],
+        "profile_id": listed["profile_id"],
+        "counts": counts,
+        "total": sum(counts.values()),
+    }
+
+
+async def list_operator_examples(
+    runner: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    profile_id: str | None = None,
+    kind: str = "all",
+    label: str | None = None,
+) -> dict[str, Any]:
+    if kind not in _EXAMPLE_CLEAR_KINDS:
+        return example_error(
+            "invalid_arguments",
+            "kind must be one of all|resume|vacancy",
+            kind=kind,
+        )
+    if label is not None and label not in _EXAMPLE_LABELS:
+        return example_error(
+            "invalid_arguments",
+            "label must be one of positive|negative",
+            label=label,
+        )
+    listed = await list_shots(runner, tenant_id=tenant_id, user_id=user_id, profile_id=profile_id)
+    wanted = set(_bucket_keys(kind=kind, label=label))
+    examples = {
+        _PUBLIC_EXAMPLE_KEYS.get(key, key): list(values)
+        for key, values in listed["examples"].items()
+        if key in wanted
+    }
+    return {
+        "tenant_id": listed["tenant_id"],
+        "user_id": listed["user_id"],
+        "profile_id": listed["profile_id"],
+        "kind": kind,
+        "label": label,
+        "examples": examples,
+        "counts": {key: len(values) for key, values in examples.items()},
+    }
+
+
+async def add_operator_example(
+    runner: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    kind: str,
+    label: str,
+    text: str = "",
+    texts: list[str] | None = None,
+    profile_id: str | None = None,
+    refresh_policy: str = "auto",
+) -> dict[str, Any]:
+    if kind not in _EXAMPLE_KINDS:
+        return example_error(
+            "invalid_arguments",
+            "kind must be one of resume|vacancy",
+            kind=kind,
+        )
+    if label not in _EXAMPLE_LABELS:
+        return example_error(
+            "invalid_arguments",
+            "label must be one of positive|negative",
+            label=label,
+        )
+    if refresh_policy not in _REFRESH_POLICIES:
+        return example_error(
+            "invalid_arguments",
+            "refresh_policy must be one of auto|defer|sync",
+            refresh_policy=refresh_policy,
+        )
+    items: list[str] = []
+    if text and text.strip():
+        items.append(_strip_shell_noise(text))
+    if texts:
+        items.extend(_strip_shell_noise(item) for item in texts if item and item.strip())
+    items = [item for item in items if item]
+    if not items:
+        return example_error("invalid_arguments", "text or texts[] must be non-empty")
+
+    polarity = cast("ShotPolarity", label)
+    shot_kind = _shot_kind(kind)
+    if refresh_policy == "defer":
+        managed = await ensure_managed_profile(
+            runner, tenant_id=tenant_id, user_id=user_id, profile_id=profile_id
+        )
+        for cleaned in items:
+            managed = add_example_to_profile(
+                managed, cleaned, kind=example_kind(polarity, shot_kind)
+            )
+        await runner.save_and_activate_candidate_profile(tenant_id, managed)
+        from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
+
+        mark_prefilter_dirty(getattr(runner.get_runtime(tenant_id), "settings", None))
+        examples = list_examples(managed)
+        return {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "profile_id": managed.profile_id,
+            "kind": kind,
+            "label": label,
+            "added": len(items),
+            "counts": _public_counts({key: len(values) for key, values in examples.items()}),
+            "refresh_policy": refresh_policy,
+            "refresh_deferred": True,
+            "prefilter_dirty": True,
+            "shot_sync_errors": [],
+            "ontology_errors": [],
+        }
+
+    result = await add_shots(
+        runner,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        polarity=polarity,
+        kind=shot_kind,
+        texts=items,
+        profile_id=profile_id,
+    )
+    return {
+        "tenant_id": result["tenant_id"],
+        "user_id": result["user_id"],
+        "profile_id": result["profile_id"],
+        "kind": kind,
+        "label": label,
+        "added": result["added"],
+        "counts": _public_counts(result["counts"]),
+        "refresh_policy": refresh_policy,
+        "refresh_deferred": False,
+        "prefilter_dirty": True,
+        "shot_sync_errors": result["shot_sync_errors"],
+        "ontology_errors": result["ontology_errors"],
+        "pos_added": result.get("pos_added", 0),
+        "ontology_store": result["ontology_store"],
+        "embedding_provider": result["embedding_provider"],
+    }
+
+
+def public_job_group(group: Any) -> dict[str, Any]:
+    """Operator-readable JobGroup dump with a top-level title."""
+    payload = group.model_dump(mode="json") if hasattr(group, "model_dump") else dict(group)
+    job = getattr(group, "canonical_job", None)
+    title = None
+    company = None
+    if job is not None:
+        title = (
+            getattr(job, "title", None)
+            or getattr(job, "title_normalized", None)
+            or getattr(job, "title_raw", None)
+        )
+        company = getattr(job, "company", None) or getattr(job, "company_canonical", None)
+    canonical_raw = payload.get("canonical_job")
+    nested: dict[str, Any] = canonical_raw if isinstance(canonical_raw, dict) else {}
+    if not title:
+        title = nested.get("title") or nested.get("title_normalized") or nested.get("title_raw")
+    if not company:
+        company = nested.get("company") or nested.get("company_canonical")
+    payload["title"] = title or ""
+    payload["company"] = company
+    return payload
+
+
+async def remove_operator_example(
+    runner: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    kind: str,
+    label: str,
+    index: int,
+    profile_id: str | None = None,
+) -> dict[str, Any]:
+    if kind not in _EXAMPLE_KINDS:
+        return example_error(
+            "invalid_arguments",
+            "kind must be one of resume|vacancy",
+            kind=kind,
+        )
+    if label not in _EXAMPLE_LABELS:
+        return example_error(
+            "invalid_arguments",
+            "label must be one of positive|negative",
+            label=label,
+        )
+    try:
+        result = await remove_shot(
+            runner,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            polarity=cast("ShotPolarity", label),
+            kind=_shot_kind(kind),
+            index=index,
+            profile_id=profile_id,
+        )
+    except ValueError as exc:
+        return example_error("invalid_arguments", str(exc), kind=kind, label=label, index=index)
+    return {
+        "tenant_id": result["tenant_id"],
+        "user_id": result["user_id"],
+        "profile_id": result["profile_id"],
+        "kind": kind,
+        "label": label,
+        "removed_index": result["removed_index"],
+        "removed_preview": result["removed_preview"],
+        "counts": _public_counts(result["counts"]),
+        "prefilter_dirty": True,
+        "shot_sync_error": result["shot_sync_error"],
+    }
+
+
+async def clear_operator_examples(
+    runner: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    kind: str = "all",
+    profile_id: str | None = None,
+) -> dict[str, Any]:
+    if kind not in _EXAMPLE_CLEAR_KINDS:
+        return example_error(
+            "invalid_arguments",
+            "kind must be one of all|resume|vacancy",
+            kind=kind,
+        )
+    managed = await ensure_managed_profile(
+        runner, tenant_id=tenant_id, user_id=user_id, profile_id=profile_id
+    )
+    examples = list_examples(managed)
+    removed = 0
+    sync_errors: list[str] = []
+    for key in _bucket_keys(kind=kind, label=None):
+        example_kind_name, label = _key_to_kind_label(key)
+        role = shot_role(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            kind=_shot_kind(example_kind_name),
+            polarity=label,
+        )
+        texts = list(examples.get(key, []))
+        ekind = example_kind(label, _shot_kind(example_kind_name))
+        for text in texts:
+            try:
+                await remove_shot_async(text=text, role=role)
+            except Exception as exc:  # noqa: BLE001 - profile still cleared
+                sync_errors.append(f"{type(exc).__name__}: {exc}")
+            managed = remove_example_from_profile(managed, ekind, 0)
+            removed += 1
+    await runner.save_and_activate_candidate_profile(tenant_id, managed)
+    from job_ftch.application.prefilter_artifacts import mark_prefilter_dirty
+
+    mark_prefilter_dirty(getattr(runner.get_runtime(tenant_id), "settings", None))
+    remaining = list_examples(managed)
+    return {
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "profile_id": managed.profile_id,
+        "kind": kind,
+        "removed": removed,
+        "counts": _public_counts({key: len(values) for key, values in remaining.items()}),
+        "prefilter_dirty": True,
+        "shot_sync_errors": sync_errors,
+    }
+
+
+def _optional_shot_token(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip().lower()
+    return cleaned or None
+
+
+async def update_operator_shot(
+    runner: Any,
+    *,
+    tenant_id: str,
+    user_id: str,
+    action: str,
+    kind: str | None = None,
+    label: str | None = None,
+    text: str = "",
+    texts: list[str] | None = None,
+    index: int | None = None,
+    profile_id: str | None = None,
+    dry_run: bool = False,
+    refresh_policy: str = "auto",
+) -> dict[str, Any]:
+    """One-shot operator tool: list/add/remove/clear/compile examples."""
+    normalized = (action or "").strip().lower()
+    if normalized not in _SHOT_ACTIONS:
+        return example_error(
+            "invalid_arguments",
+            "action must be one of list|add|remove|clear|compile",
+            action=action,
+        )
+    kind_token = _optional_shot_token(kind)
+    label_token = _optional_shot_token(label)
+    if normalized == "list":
+        listed_kind = kind_token or "all"
+        if listed_kind not in _EXAMPLE_CLEAR_KINDS:
+            return example_error(
+                "invalid_arguments",
+                "kind must be one of all|resume|vacancy",
+                kind=kind,
+            )
+        if label_token is not None and label_token not in _EXAMPLE_LABELS:
+            return example_error(
+                "invalid_arguments",
+                "label must be one of positive|negative",
+                label=label,
+            )
+        payload = await list_operator_examples(
+            runner,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            profile_id=profile_id,
+            kind=listed_kind,
+            label=label_token,
+        )
+        payload["action"] = "list"
+        return payload
+    if normalized in {"add", "remove"} and (kind_token is None or label_token is None):
+        return example_error(
+            "invalid_arguments",
+            "kind and label are required for action=add|remove",
+            action=action,
+            kind=kind,
+            label=label,
+        )
+    if normalized == "add":
+        payload = await add_operator_example(
+            runner,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            kind=kind_token or "",
+            label=label_token or "",
+            text=text,
+            texts=texts,
+            profile_id=profile_id,
+            refresh_policy=refresh_policy,
+        )
+        payload["action"] = "add"
+        return payload
+    if normalized == "remove":
+        if index is None:
+            return example_error(
+                "invalid_arguments",
+                "index is required for action=remove",
+                action=action,
+            )
+        payload = await remove_operator_example(
+            runner,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            kind=kind_token or "",
+            label=label_token or "",
+            index=index,
+            profile_id=profile_id,
+        )
+        payload["action"] = "remove"
+        return payload
+    if normalized == "clear":
+        clear_kind = kind_token or "all"
+        payload = await clear_operator_examples(
+            runner,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            kind=clear_kind,
+            profile_id=profile_id,
+        )
+        payload["action"] = "clear"
+        return payload
+    from job_ftch.adapters.mcp.operator_surface import compile_examples_ontology
+
+    payload = await compile_examples_ontology(
+        runner,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        profile_id=profile_id,
+        dry_run=dry_run,
+    )
+    payload["action"] = "compile"
+    return payload
 
 
 async def upsert_source(

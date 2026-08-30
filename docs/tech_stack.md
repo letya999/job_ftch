@@ -42,6 +42,7 @@ updated: 2026-08-03
 | `[bot]` | `aiogram`, `telethon`, `fastapi`, document parsers | Telegram bot runtime |
 | `[api]` | `fastapi`, `uvicorn` | HTTP adapter |
 | `[mcp]` | `fastmcp` | MCP server |
+| `[local_mcp]` | `numpy` | Lightweight local MCP runtime required by builtin relevance extensions |
 | `[faststream]` | `faststream` | Message-worker adapter |
 | `[dagster]` | `dagster` | Dagster wrapper |
 | `[sqlite]` | `aiosqlite` | Local/dev store |

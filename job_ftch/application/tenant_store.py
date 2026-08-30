@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from job_ftch.application.contracts import DedupReservation, Store, StoreConnector
+    from job_ftch.domain.search_session import SearchSession
     from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
 
 
@@ -67,6 +68,10 @@ def _source_disabled_key(source_id: str) -> str:
 
 def _candidate_profile_key(user_id: str, profile_id: str) -> str:
     return f"candidate_profile:{user_id}:{profile_id}"
+
+
+def _search_session_key(session_id: str) -> str:
+    return f"search_session:{session_id}"
 
 
 def _active_candidate_profile_key(user_id: str) -> str:
@@ -842,9 +847,9 @@ class TenantStore:
             msg = f"unsupported operational outcome lane: {lane}"
             raise ValueError(msg)
         body = dict(payload)
-        run_id = str(
-            body.get("source_run_id") or body.get("run_id") or "unknown"
-        ).strip() or "unknown"
+        run_id = (
+            str(body.get("source_run_id") or body.get("run_id") or "unknown").strip() or "unknown"
+        )
         body["source_run_id"] = run_id
         body["tenant_id"] = self._tenant_id
         body["lane"] = normalized_lane
@@ -926,7 +931,10 @@ class TenantStore:
                 continue
             if not isinstance(payload, dict):
                 continue
-            if outcome_cf is not None and str(payload.get("outcome") or "").casefold() != outcome_cf:
+            if (
+                outcome_cf is not None
+                and str(payload.get("outcome") or "").casefold() != outcome_cf
+            ):
                 continue
             if reason_cf is not None and str(payload.get("reason") or "").casefold() != reason_cf:
                 continue
@@ -962,6 +970,46 @@ class TenantStore:
         if not isinstance(result, dict):
             raise TypeError("Store clear_run_artifacts() must return a counter mapping.")
         return {str(key): int(value) for key, value in result.items()}
+
+    async def save_search_session(self, session: SearchSession) -> None:
+        """Persist a resume-driven search session under the tenant namespace."""
+        connector = cast("StoreConnector", self._store)
+        session_key = self._key(_search_session_key(session.session_id))
+        ids_key = self._key("search_session_ids")
+        await connector.set(session_key, session.model_dump_json())
+        try:
+            await connector.set_add(ids_key, session.session_id)
+        except Exception:
+            with suppress(Exception):
+                await connector.delete(session_key)
+            logger.warning(
+                "search_session_persist_rolled_back",
+                tenant_id=self._tenant_id,
+                session_id=session.session_id,
+            )
+            raise
+
+    async def get_search_session(self, session_id: str) -> SearchSession | None:
+        from job_ftch.domain.search_session import SearchSession
+
+        connector = cast("StoreConnector", self._store)
+        raw = await connector.get(self._key(_search_session_key(session_id)))
+        if raw is None:
+            return None
+        try:
+            return SearchSession.model_validate_json(raw)
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "search_session_decode_failed",
+                tenant_id=self._tenant_id,
+                session_id=session_id,
+                error=str(exc),
+            )
+            return None
+
+    async def list_search_session_ids(self) -> tuple[str, ...]:
+        connector = cast("StoreConnector", self._store)
+        return tuple(sorted(await connector.set_members(self._key("search_session_ids"))))
 
     async def close(self) -> None:
         close = getattr(self._store, "close", None)

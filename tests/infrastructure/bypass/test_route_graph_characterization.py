@@ -82,6 +82,25 @@ async def test_career_site_http_path_applies_context_and_strategy() -> None:
     assert result == ("strategy", "context-client")
 
 
+@pytest.mark.asyncio
+async def test_career_site_http_path_supplies_domain_to_pinned_proxy() -> None:
+    class Client:
+        pass
+
+    class Strategy:
+        async def apply_http(self, client: Any) -> Any:
+            assert client._domain_hint == "career.example.com"
+            return client
+
+    source = object.__new__(CareerSiteSource)
+    source.spec = SimpleNamespace(url="https://career.example.com/jobs")
+    source.bypass_strategy = Strategy()
+    source._temporary_http_clients = []
+    client = Client()
+
+    assert await source._apply_bypass_http(client) is client
+
+
 @pytest.mark.parametrize("owns_session", [False, True])
 def test_all_browser_capable_retry_states_enable_render(owns_session: bool) -> None:
     strategy = SimpleNamespace(requires_browser=True, owns_session=owns_session)

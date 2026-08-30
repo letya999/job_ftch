@@ -176,6 +176,7 @@ class InMemoryStore:
         ingest_keys = [key for key in self._source_ingest_states if key[0] == tenant_id]
         dedup_claims = [key for key in self._dedup_claims if key.startswith(prefix)]
         outbox_keys = [key for key, record in self._outbox.items() if record.tenant_id == tenant_id]
+        assessment_keys = [key for key in self._source_assessments if key[0] == tenant_id]
         counts = {
             "kv": len(kv_keys),
             "sets": len(set_keys),
@@ -184,6 +185,7 @@ class InMemoryStore:
             "source_ingest_states": len(ingest_keys),
             "dedup_claims": len(dedup_claims),
             "outbox": len(outbox_keys),
+            "source_assessments": len(assessment_keys),
         }
         for key in (*kv_keys, *observation_keys):
             self._kv.pop(key, None)
@@ -198,6 +200,8 @@ class InMemoryStore:
             self._dedup_claims.pop(claim_key, None)
         for outbox_key in outbox_keys:
             self._outbox.pop(outbox_key, None)
+        for assessment_key in assessment_keys:
+            self._source_assessments.pop(assessment_key, None)
         return counts
 
     # Store methods — built on top of StoreConnector primitives

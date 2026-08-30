@@ -175,9 +175,7 @@ async def test_partial_delivery_retry_does_not_repeat_primary_sink() -> None:
     assert [envelope.sink_name for envelope in primary_sink.envelopes] == ["primary:sink"]
 
     retry_records = await pipeline._enqueue_outbox(raw, job)
-    assert {
-        record.sink_name: record.state for record in retry_records
-    } == {
+    assert {record.sink_name: record.state for record in retry_records} == {
         "primary:sink": OutboxState.DELIVERED,
         "delivery:test": OutboxState.OUTBOXED,
     }

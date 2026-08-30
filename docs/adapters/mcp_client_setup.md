@@ -1,79 +1,68 @@
 ---
 title: "MCP client setup"
 description: "How to point local MCP clients at the job_ftch tenant server."
-updated: 2026-08-07
+updated: 2026-08-21
 ---
 # MCP client setup
 
-## Codex CLI (HTTP)
-
-Preferred local product path: one container from `docker/local-mcp/`, MCP URL:
-
-```toml
-# ~/.codex/config.toml
-[mcp_servers.job_ftch]
-url = "http://127.0.0.1:8000/mcp"
-```
-
-See `docker/local-mcp/README.md` and `docker/local-mcp/codex.mcp.example.toml`.
-
-LLM for pipeline steps (not the Codex harness itself): set container env to
-CLIProxyAPI on the host (`JOB_FTCH_OPENAI_BASE_URL=http://host.docker.internal:8317/v1`).
-
-## stdio clients
+For local MCP clients, point the client command to the repository CLI:
 
 ```bash
 uv run job_ftch mcp-server \
-  --configs-dir docker/local-mcp/config/tenants \
+  --configs-dir job_ftch/adapters/telegram_bot/config/tenants \
   --transport stdio
 ```
 
-## Streamable HTTP
+`stdio` keeps JSON-RPC on stdout; logs are written to stderr. Host/port flags
+apply only to HTTP/SSE transports.
+
+For offline smoke or CI-style clients, use a temp tenant config with
+`local_fixture` sources, sqlite stores, and:
+
+```bash
+JOB_FTCH_LLM_BACKEND=heuristic
+JOB_FTCH_EMBEDDING_ENABLED=false
+JOB_FTCH_EMBEDDING_PREFILTER_ENABLED=false
+JOB_FTCH_RELEVANCE_BACKEND=keywords
+```
+
+Without those overrides, default OpenAI/embedding settings (or live tenant
+sources) can make `run_pipeline` hang waiting on the network.
+
+For remote/HTTP clients, run the server separately:
 
 ```bash
 uv run job_ftch mcp-server \
-  --configs-dir docker/local-mcp/config/tenants \
-  --transport streamable-http \
+  --configs-dir job_ftch/adapters/telegram_bot/config/tenants \
+  --transport http \
   --host 0.0.0.0 \
   --port 8000
 ```
 
-## Tools (product core, default)
+## Operator tools
 
-`JOB_FTCH_MCP_SURFACE=core` (default) mirrors the Telegram bot loop:
+`JOB_FTCH_MCP_SURFACE=all|mass|personal` (default `all`) selects 18 / 14 / 12
+tools. There are no second names for the same behavior.
 
-| Tool | Bot analog |
-|------|------------|
-| `list_tenants` | `/tenant` |
-| `get_status` | `/status` |
-| `list_sources` | `/sources` (health embedded) |
-| `upsert_source` | add URL; set `replace_source_id` to change |
-| `set_source_enabled` | source toggle |
-| `add_shot` | `/positive`, `/negative`, `/positive_job`, `/negative_job` |
-| `list_shots` / `remove_shot` | `/examples` delete |
-| `run_pipeline` | `/run` |
-| `search_jobs` | catalog search + filters (`company`, `location`, `work_mode`, `language`, `source_name`, `min_score`, `routing_decision`) |
-| `llm_backend_health` | gateway probe |
-| `clear_history` | `/clear` (destructive) |
+Shared: `list_tenants`, `get_status`, `get_runtime`, `doctor`, `get_sources`,
+`update_source`, `get_jobs`, `update_shot`.
 
-Aliases: `add_source`, `disable_source`.
+Mass: `run_pipeline` (`clear_first` replaces standalone `clear_run_data`),
+`get_prefilter_status`, `prepare_prefilter_dataset`, `train_prefilter`,
+`evaluate_prefilter`, `promote_prefilter` (`rollback=true` rolls back).
 
-### Surfaces
+Personal: `set_resume`, `probe_page`, `browser_session`, `run_source`.
 
-| `JOB_FTCH_MCP_SURFACE` | Extra tools |
-|------------------------|-------------|
-| `core` (default) | product loop only |
-| `ops` | + `list_runs`, `get_run`, `get_job`, `get_job_lineage`, `run_all_pipelines`, `list_source_health` |
-| `admin` | ops + `list/save/activate_profile`, `reset_tenant` |
+Removed names include the old 68-tool catalog (`get_tenant_status`,
+`add_source`, `add_example`, `run_browser_probe`, search-session tools,
+feedback tools, `jobs://` resources, and the rest of the forbidden list in
+tests). Use the names above.
 
 ## Resources
 
-- `jobs://{tenant_id}/latest`
-- `jobs://{tenant_id}/run_summary`
 - `config://{tenant_id}`
 
 ## Config directory
 
-The CLI requires `--configs-dir` or `JOB_FTCH_CONFIGS_DIR`. Local MCP defaults
-to `docker/local-mcp/config/tenants`. Production bot tenants live under
-`job_ftch/adapters/telegram_bot/config/tenants`.
+The CLI requires `--configs-dir` or `JOB_FTCH_CONFIGS_DIR`. The production bot
+tenant directory is `job_ftch/adapters/telegram_bot/config/tenants`.

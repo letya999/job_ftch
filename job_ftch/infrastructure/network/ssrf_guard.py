@@ -9,6 +9,8 @@ import socket
 import httpx
 
 _IpAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+# RFC 2606 documentation names: public, never resolved for SSRF classification.
+_RESERVED_PUBLIC_HOSTS = frozenset({"example.com", "example.net", "example.org"})
 _PRIVATE_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
@@ -30,14 +32,23 @@ def _is_private_ip(addr: _IpAddress) -> bool:
     return any((mapped or addr) in network for network in _PRIVATE_NETWORKS)
 
 
+def _is_reserved_public_host(host: str) -> bool:
+    lowered = host.strip(".").casefold()
+    return lowered in _RESERVED_PUBLIC_HOSTS or any(
+        lowered.endswith(f".{name}") for name in _RESERVED_PUBLIC_HOSTS
+    )
+
+
 def _host_is_private(host: str) -> bool:
+    if not host or _is_reserved_public_host(host):
+        return False
     try:
         return _is_private_ip(ipaddress.ip_address(host))
     except ValueError:
         pass
     try:
         infos = socket.getaddrinfo(host, None)
-    except (socket.gaierror, OSError, UnicodeError):
+    except (socket.gaierror, OSError, UnicodeError, RuntimeError):
         return False
     return any(_is_private_ip(ipaddress.ip_address(sockaddr[0])) for *_unused, sockaddr in infos)
 

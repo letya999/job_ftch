@@ -5,8 +5,8 @@ updated: 2026-08-08
 ---
 # 080 — Opt-in operational outcomes store (REVIEW / REJECTED)
 
-**Status**: ACCEPTED  
-**Date**: 2026-08-08  
+**Status**: ACCEPTED
+**Date**: 2026-08-08
 **Related**: ADR-009, ADR-018, ADR-052, ADR-079
 
 ## Context

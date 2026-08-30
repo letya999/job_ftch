@@ -1,0 +1,10 @@
+{
+  "name": "job-ftch-site",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": { "dev": "next dev --turbopack", "build": "next build", "start": "next start", "type-check": "tsc --noEmit" },
+  "dependencies": { "next": "^15.4.5", "react": "^19.1.1", "react-dom": "^19.1.1", "lucide-react": "^0.539.0", "tailwind-merge": "^3.3.1", "clsx": "^2.1.1" },
+  "devDependencies": { "@tailwindcss/postcss": "^4.1.11", "@types/node": "^24.2.0", "@types/react": "^19.1.9", "@types/react-dom": "^19.1.7", "tailwindcss": "^4.1.11", "typescript": "^5.9.2" },
+  "overrides": { "postcss": "^8.5.23", "sharp": "^0.35.0" }
+}

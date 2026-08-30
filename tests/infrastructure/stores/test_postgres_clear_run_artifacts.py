@@ -64,6 +64,7 @@ async def test_postgres_clear_run_artifacts_removes_processed_dedup_and_ledgers(
         "source_ingest_states": 1,
         "dedup_claims": 1,
         "outbox": 1,
+        "source_assessments": 1,
     }
     set_count_params = conn.fetchvals[1][1][0]
     assert "ai_jobs:processed%" in set_count_params
@@ -81,7 +82,13 @@ async def test_postgres_clear_run_artifacts_removes_processed_dedup_and_ledgers(
     assert "DELETE FROM jf_source_ingest_state WHERE tenant_id = $1" in executed_sql
     assert "DELETE FROM jf_dedup_claims WHERE claim_key LIKE $1" in executed_sql
     assert "DELETE FROM jf_outbox WHERE tenant_id = $1" in executed_sql
+    assert "DELETE FROM jf_source_assessments WHERE tenant_id = $1" in executed_sql
     assert any(
         sql == "SELECT COUNT(*) FROM jf_outbox WHERE tenant_id = $1" and params == ("ai_jobs",)
+        for sql, params in conn.fetchvals
+    )
+    assert any(
+        sql == "SELECT COUNT(*) FROM jf_source_assessments WHERE tenant_id = $1"
+        and params == ("ai_jobs",)
         for sql, params in conn.fetchvals
     )

@@ -143,6 +143,7 @@ async def test_adapter_health_marks_technical_zero_as_failure(concurrency: int):
         rich_emitted=0,
         scraped=0,
         scrape_fallback_used=0,
+        browser_navigations_attempted=3,
         monitor_truncated=0,
     )
     composite = CompositeSource([source], concurrency=concurrency)
@@ -152,6 +153,7 @@ async def test_adapter_health_marks_technical_zero_as_failure(concurrency: int):
     result = next(iter(composite.source_results.values()))
     assert result.failed is True
     assert result.error == "source_zero_yield:all_monitors_exhausted"
+    assert result.browser_navigations_attempted == 3
     assert composite.failed_sources == 1
 
 

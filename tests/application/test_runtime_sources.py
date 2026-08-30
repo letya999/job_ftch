@@ -51,6 +51,21 @@ async def test_build_source_spec_accepts_inline_rss_type_hint() -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_source_spec_keeps_explicit_and_fixture_source_name() -> None:
+    named = await build_source_spec_from_input(
+        "https://example.com/jobs",
+        source_name="habr_career",
+    )
+    assert named.source_name == "habr_career"
+
+    fixture = await build_source_spec_from_input("https://career.habr.com/vacancies")
+    assert fixture.source_name == "habr_career"
+
+    geekjob = await build_source_spec_from_input("https://geekjob.ru/vacancies")
+    assert geekjob.source_name == "geekjob_ru"
+
+
+@pytest.mark.asyncio
 async def test_build_source_spec_accepts_inline_telegram_group_hint() -> None:
     spec = await build_source_spec_from_input("telegram_group:https://t.me/ml_jobs")
 

@@ -1,0 +1,50 @@
+:root {
+  --color-graphite-950: #101010;
+  --color-graphite-900: #181818;
+  --color-graphite-800: #242424;
+  --color-graphite-700: #343434;
+  --color-neutral-50: #f7f5f1;
+  --color-neutral-400: #a5a29c;
+  --color-neutral-600: #706e69;
+  --color-signal-500: #c77850;
+  --color-signal-400: #d58b66;
+  --color-success-500: #70b86b;
+  --color-danger-500: #df6b5f;
+  --font-family-body: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+  --font-family-code: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+  --radius-control: 4px;
+  --space-grid: 96px;
+
+  --bg: var(--color-graphite-950);
+  --bg-elevated: var(--color-graphite-900);
+  --surface: var(--color-graphite-800);
+  --surface-2: var(--color-graphite-700);
+  --line: var(--color-graphite-700);
+  --ink: var(--color-neutral-50);
+  --muted: var(--color-neutral-400);
+  --subtle: var(--color-neutral-600);
+  --accent: var(--color-signal-500);
+  --accent-hover: var(--color-signal-400);
+  --success: var(--color-success-500);
+  --danger: var(--color-danger-500);
+  --paper: var(--bg);
+  --mono: var(--font-family-code);
+  --sans: var(--font-family-body);
+  --grid: rgb(255 255 255 / .035);
+}
+
+:root[data-theme="light"] {
+  --bg: #f7f5f1;
+  --bg-elevated: #eeebe5;
+  --surface: #e4e0d8;
+  --surface-2: #d5d0c7;
+  --line: #c5c0b7;
+  --ink: #181818;
+  --muted: #55524d;
+  --subtle: #77736c;
+  --accent: #a85d39;
+  --accent-hover: #8f4d2f;
+  --success: #39763b;
+  --danger: #a84036;
+  --grid: rgb(16 16 16 / .05);
+}

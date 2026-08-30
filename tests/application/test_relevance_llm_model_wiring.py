@@ -23,9 +23,7 @@ def test_relevance_llm_settings_override_openai_model() -> None:
         tracing_enabled=False,
         openobserve_enabled=False,
     )
-    relevance_settings = settings.model_copy(
-        update={"openai_model": settings.relevance_llm_model}
-    )
+    relevance_settings = settings.model_copy(update={"openai_model": settings.relevance_llm_model})
     assert settings.openai_model == "gpt-5.4-mini"
     assert relevance_settings.openai_model == "gpt-4.1-mini"
     assert relevance_settings.openai_base_url == settings.openai_base_url
@@ -43,7 +41,5 @@ def test_cliproxy_local_profile_should_align_relevance_and_openai_models() -> No
         tracing_enabled=False,
         openobserve_enabled=False,
     )
-    relevance_settings = settings.model_copy(
-        update={"openai_model": settings.relevance_llm_model}
-    )
+    relevance_settings = settings.model_copy(update={"openai_model": settings.relevance_llm_model})
     assert relevance_settings.openai_model == settings.openai_model

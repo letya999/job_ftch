@@ -1,7 +1,7 @@
 ---
 title: "Как поддерживать документацию"
 description: "Как обновлять Markdown-документацию, ADR и generated docs в этом репозитории."
-updated: 2026-08-02
+updated: 2026-08-11
 ---
 # Как поддерживать документацию
 
@@ -128,7 +128,10 @@ just docs-verify
 ## Что уже проверяет CI
 
 - `.github/workflows/docs.yml` выполняет тот же полный набор, что и
-  `just docs-verify`.
+  `just docs-verify`. Deploy в Pages из этого workflow не выполняется.
+- `.github/workflows/docs-pages.yml` на push в `main` собирает сайт
+  (`mkdocs build --strict -f docs_scripts/mkdocs.yml`) и публикует
+  GitHub Pages; на PR не срабатывает.
 - `uv run python scripts/run_ci_checks.py lint` также включает
   `scripts/lint_docs.py`, но не заменяет docs gate: в нём нет
   `check_docs_generated.py` и строгой MkDocs-сборки.

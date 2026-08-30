@@ -12,12 +12,64 @@ from typing import Any
 import pytest
 
 from job_ftch.adapters.mcp.server import (
+    _first_residential_proxy_url,
     _json_default,
+    _probe_residential_proxy,
     _tool_annotations,
     create_server,
     probe_llm_backend,
 )
 from job_ftch.config import Settings
+
+
+def test_residential_runtime_probe_uses_provider_gateway_format() -> None:
+    configured, url = _first_residential_proxy_url(
+        _minimal_settings(
+            proxy_provider="dataimpulse",
+            proxy_gateway="http://gw.dataimpulse.com:823",
+            proxy_user="user",
+            proxy_pass="pass",
+            proxy_country_default="RU",
+        )
+    )
+
+    assert configured is True
+    assert url is not None
+    assert "cr.ru" in url
+    assert ";sessttl." in url
+
+
+@pytest.mark.asyncio
+async def test_residential_runtime_probe_retries_transient_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    class _Client:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def get(self, url: str, **kwargs: Any) -> SimpleNamespace:
+            nonlocal attempts
+            del url, kwargs
+            attempts += 1
+            if attempts == 1:
+                raise TimeoutError
+            return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr("httpx.AsyncClient", _Client)
+
+    reachable, error = await _probe_residential_proxy("http://proxy.invalid")
+
+    assert reachable is True
+    assert error is None
+    assert attempts == 2
 
 
 def _fake_mcp_module() -> type:
@@ -120,21 +172,11 @@ def test_create_server_requires_fastmcp(monkeypatch: pytest.MonkeyPatch, tmp_pat
         create_server(configs_dir=tmp_path, base_settings=_minimal_settings())
 
 
-@pytest.mark.asyncio
-async def test_require_runner_lazy_starts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_require_runner_before_startup(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setitem(sys.modules, "fastmcp", SimpleNamespace(FastMCP=_fake_mcp_module()))
-    settings = _minimal_settings()
-    for target in (
-        "job_ftch.config.get_settings",
-        "job_ftch.application.builder.get_settings",
-        "job_ftch.application.pipeline.get_settings",
-    ):
-        monkeypatch.setattr(target, lambda s=settings: s)
-
-    server = create_server(configs_dir=_tenant_configs(tmp_path), base_settings=settings)
-    runner = await server._require_runner()
-    assert runner is server.runner
-    await server.shutdown()
+    server = create_server(configs_dir=tmp_path, base_settings=_minimal_settings())
+    with pytest.raises(RuntimeError, match="startup"):
+        server._require_runner()
 
 
 @pytest.mark.asyncio
@@ -171,17 +213,16 @@ def test_run_delegates_to_fastmcp(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
         "transport": "streamable-http",
         "host": "0.0.0.0",
         "port": 9001,
-        "show_banner": False,
     }
     server.run(transport="stdio")
-    assert server.app.run_kwargs == {"transport": "stdio", "show_banner": False}
+    assert server.app.run_kwargs == {"transport": "stdio"}
 
 
 @pytest.mark.asyncio
 async def test_probe_llm_backend_non_openai() -> None:
     result = await probe_llm_backend(_minimal_settings(llm_backend="heuristic"))
     assert result["ok"] is True
-    assert "does not use OpenAI" in (result["error"] or "")
+    assert result["error"] == "backend_not_openai_compatible"
 
 
 @pytest.mark.asyncio
@@ -194,7 +235,7 @@ async def test_probe_llm_backend_missing_base_url() -> None:
     )
     result = await probe_llm_backend(settings)
     assert result["ok"] is False
-    assert "empty" in (result["error"] or "")
+    assert result["error"] == "base_url_missing"
 
 
 @pytest.mark.asyncio
@@ -261,7 +302,53 @@ async def test_probe_llm_backend_model_warning(monkeypatch: pytest.MonkeyPatch) 
     result = await probe_llm_backend(settings)
     assert result["ok"] is True
     assert result["reachable"] is True
-    assert "missing-model" in (result["error"] or "")
+    assert result["configured_models_available"] is False
+    assert result["error"] == "configured_model_missing"
+
+
+@pytest.mark.asyncio
+async def test_probe_llm_backend_checks_models_beyond_public_sample(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Resp:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "data": [
+                    *({"id": f"other-model-{index}"} for index in range(20)),
+                    {"id": "configured-model"},
+                ]
+            }
+
+    class _Client:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            return None
+
+        async def get(self, url: str, headers: dict[str, str] | None = None) -> _Resp:
+            del url, headers
+            return _Resp()
+
+    monkeypatch.setattr("httpx.AsyncClient", _Client)
+    settings = _minimal_settings(
+        llm_backend="openai",
+        openai_api_key="k",  # type: ignore[arg-type]
+        openai_base_url="http://127.0.0.1:8317/v1",
+        openai_model="configured-model",
+        relevance_llm_model="configured-model",
+    )
+
+    result = await probe_llm_backend(settings)
+
+    assert result["configured_models_available"] is True
+    assert result["error"] is None
+    assert "configured-model" not in result["models_sample"]
 
 
 @pytest.mark.asyncio
@@ -291,43 +378,18 @@ async def test_probe_llm_backend_transport_error(monkeypatch: pytest.MonkeyPatch
     assert "ConnectionError" in (result["error"] or "")
 
 
-@pytest.mark.asyncio
-async def test_deprecated_adapter_shim(
+def test_create_server_constructs_without_shim(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setitem(sys.modules, "fastmcp", SimpleNamespace(FastMCP=_fake_mcp_module()))
-    settings = _minimal_settings()
-    monkeypatch.setattr(
-        "job_ftch.adapters.mcp.server.get_settings",
-        lambda: settings,
-    )
-    from job_ftch.adapters.mcp.adapter import create_mcp_server
-
-    with pytest.warns(DeprecationWarning, match="create_mcp_server"):
-        server = create_mcp_server(SimpleNamespace())
-    assert server.name == "job_ftch"
-
-
-@pytest.mark.asyncio
-async def test_lifespan_keeps_initialize_fast_and_stops_started_runner(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setitem(sys.modules, "fastmcp", SimpleNamespace(FastMCP=_fake_mcp_module()))
-    settings = _minimal_settings()
-    for target in (
-        "job_ftch.config.get_settings",
-        "job_ftch.application.builder.get_settings",
-    ):
-        monkeypatch.setattr(target, lambda s=settings: s)
-
     configs = _tenant_configs(tmp_path)
-    server = create_server(configs_dir=configs, base_settings=settings)
-    lifespan = server.app.kwargs.get("lifespan")
-    assert lifespan is not None
-    async with lifespan(server.app):
-        assert server.runner is None
-        await server._require_runner()
-        assert server.runner is not None
-    assert server.runner is None
+    server = create_server(configs_dir=configs, base_settings=_minimal_settings())
+    assert server.name == "job_ftch"
+    assert "run_pipeline" in server.app.tools
+    assert "update_source" in server.app.tools
+    assert set(server.app.resources) == {"config://{tenant_id}"}
+    assert "get_status" in server.app.tools
+    assert "get_runtime" in server.app.tools
+    assert "doctor" in server.app.tools
+    assert "update_shot" in server.app.tools

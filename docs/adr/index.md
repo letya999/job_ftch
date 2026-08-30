@@ -89,6 +89,10 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [079 — Proxy provider pool primitives](079-proxy-provider-pool-primitives.md) - ADR for provider-neutral proxy routing primitives used by adaptive bypass. (Updated: 2026-08-02)
 - [080 - Durable Scheduler Slot Recovery](080-durable-scheduler-slot-recovery.md) - Планировщик Telegram восстанавливает пропущенные ingest-слоты и незавершённую публикацию после сбоя или перезапуска. (Updated: 2026-08-02)
 - [080 — Opt-in operational outcomes store (REVIEW / REJECTED)](080-opt-in-operational-outcomes-store.md) - **Status**: ACCEPTED (Updated: 2026-08-08)
+- [081 — Operator browser listing probe](081-operator-browser-listing-probe.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
+- [082 — Operator bypass pin and sweep](082-operator-bypass-pin-and-sweep.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
+- [083 — Operator sessions, challenge probes, captcha wait, parser pin](083-operator-sessions-challenge-parser-pin.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
+- [084 — Operator persistent/domain sessions, fingerprint probes, trace, extendable captcha, parser host override](084-operator-persistent-fingerprint-parser-override.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

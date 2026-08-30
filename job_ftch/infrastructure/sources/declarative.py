@@ -80,9 +80,9 @@ class CareerSiteConfig(BaseModel):
 
         # "auto" consults the site_parser registry (per ADR-033) for a hint.
         if spec.parser_kind == "auto":
-            from job_ftch.application.registry import resolve_site_parser
+            from job_ftch.application.registry import resolve_site_parser_for_spec
 
-            parser = resolve_site_parser(spec.url)
+            parser = resolve_site_parser_for_spec(spec)
             if parser is not None:
                 hint = parser.parser_kind(spec.url) if hasattr(parser, "parser_kind") else None
                 if hint == "greenhouse":

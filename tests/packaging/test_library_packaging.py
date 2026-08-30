@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import sys
 from types import SimpleNamespace
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from job_ftch import PipelineBuilder
 from job_ftch.adapters.dagster.adapter import create_definitions
 from job_ftch.adapters.fastapi.adapter import create_app
 from job_ftch.adapters.faststream.adapter import register_faststream_handlers
-from job_ftch.adapters.mcp.adapter import create_mcp_server
+from job_ftch.adapters.mcp.server import create_server
 from job_ftch.domain.source_spec import LocalFixtureSpec
 from job_ftch.nodes import SanitizeNode
 from job_ftch.nodes.triage import HeuristicTriageNode
@@ -139,23 +142,19 @@ def test_fastapi_adapter_registers_routes(monkeypatch: pytest.MonkeyPatch) -> No
     assert ("GET", "/jobs/search") in routes
 
 
-def test_mcp_adapter_registers_tool_and_resource(monkeypatch: pytest.MonkeyPatch) -> None:
-    # create_mcp_server is a deprecated shim over TenantMCPServer.
-    # Core surface: 14 tools (+ aliases) and 3 resources.
+def test_mcp_adapter_registers_tool_and_resource(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     registered: dict[str, object] = {"tools": 0, "resources": 0, "uris": []}
 
     class FakeMCP:
-        def __init__(self, name, **kwargs):  # type: ignore[no-untyped-def]
+        def __init__(self, name):  # type: ignore[no-untyped-def]
             self.name = name
 
-        def tool(self, func=None, **kwargs):  # type: ignore[no-untyped-def]
-            def decorator(fn):  # type: ignore[no-untyped-def]
-                registered["tools"] = int(registered["tools"]) + 1  # type: ignore[arg-type]
-                return fn
-
-            if func is not None and callable(func):
-                return decorator(func)
-            return decorator
+        def tool(self, func):  # type: ignore[no-untyped-def]
+            registered["tools"] = int(registered["tools"]) + 1  # type: ignore[arg-type]
+            return func
 
         def resource(self, uri):  # type: ignore[no-untyped-def]
             def decorator(func):  # type: ignore[no-untyped-def]
@@ -166,28 +165,19 @@ def test_mcp_adapter_registers_tool_and_resource(monkeypatch: pytest.MonkeyPatch
             return decorator
 
     monkeypatch.setitem(sys.modules, "fastmcp", SimpleNamespace(FastMCP=FakeMCP))
+    monkeypatch.delenv("JOB_FTCH_MCP_SURFACE", raising=False)
 
-    import warnings
-
-    from job_ftch.config import Settings
-
-    safe_settings = Settings(llm_backend="heuristic", store_backend="memory")
-    monkeypatch.setattr(
-        "job_ftch.adapters.mcp.server.get_settings",
-        lambda: safe_settings,
-    )
-
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        server = create_mcp_server(_DummyBuilder())
-        assert any(issubclass(warning.category, DeprecationWarning) for warning in w)
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir()
+    server = create_server(configs_dir=configs_dir)
 
     assert server.name == "job_ftch"
-    # Core surface: 14 tools, 3 resources (default JOB_FTCH_MCP_SURFACE=core)
-    assert registered["tools"] == 14
-    assert registered["resources"] == 3
+    # TenantMCPServer surface: 18 operator tools, 1 resource
+    assert registered["tools"] == 18
+    assert registered["resources"] == 1
     uris = cast("list[str]", registered["uris"])
-    assert any("jobs://" in uri for uri in uris)
+    assert uris == ["config://{tenant_id}"]
+    assert not any("jobs://" in uri for uri in uris)
 
 
 def test_faststream_adapter_registers_handler() -> None:

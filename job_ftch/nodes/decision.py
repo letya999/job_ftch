@@ -45,8 +45,15 @@ class DecisionNode:
 
     def __init__(self, policy: DecisionPolicy | None = None) -> None:
         self._policy = policy or DecisionPolicy()
+        self._audit_mode = False
+
+    def enable_audit_mode(self) -> None:
+        """Keep personal MCP cards reviewable until full extraction completes."""
+        self._audit_mode = True
 
     async def process(self, item: AssessedJob) -> DecisionResult:
+        if self._audit_mode:
+            return self._accept(item, [], "personal_audit_full_extraction")
         assessments = item.assessments
         reasons: list[str] = []
         if item.degradation_reasons:

@@ -470,6 +470,24 @@ class PostgresOntologyStore:
                     json.dumps(stat.related_terms, ensure_ascii=False),
                 )
 
+    async def reset_live_projection(self) -> None:
+        pool = await self._ensure_initialized()
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("DELETE FROM jf_ontology_skill")
+            await conn.execute("DELETE FROM jf_ontology_role")
+            await conn.execute("DELETE FROM jf_ontology_seniority")
+            await conn.execute("DELETE FROM jf_ontology_anti")
+            await conn.execute("DELETE FROM jf_ontology_positive_keyword")
+            await conn.execute("DELETE FROM jf_ontology_negative_keyword")
+            await conn.execute("DELETE FROM jf_ontology_occurrence")
+            await conn.execute("DELETE FROM jf_ontology_term_stat")
+            await conn.execute("DELETE FROM jf_ontology_compiled_term")
+            await conn.execute("DELETE FROM jf_ontology_compiled_relation")
+            await conn.execute("DELETE FROM jf_ontology_graph_version")
+            await conn.execute("DELETE FROM jf_ontology_node")
+            await conn.execute("DELETE FROM jf_ontology_edge")
+            await conn.execute("DELETE FROM jf_ontology_evidence")
+
     async def upsert_compiled_ontology(self, ontology: CompiledOntology) -> None:
         pool = await self._ensure_initialized()
         async with pool.acquire() as conn, conn.transaction():

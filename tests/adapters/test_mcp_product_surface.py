@@ -9,20 +9,33 @@ if TYPE_CHECKING:
     import pytest
 
 from job_ftch.adapters.mcp.product_surface import (
+    add_operator_example,
+    clear_operator_examples,
     example_kind,
     filter_job_groups,
+    get_examples_summary,
+    list_operator_examples,
+    public_job_group,
+    remove_operator_example,
     resolve_surface,
     shot_role,
+    update_operator_shot,
 )
 
 
-def test_resolve_surface_defaults_core(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_surface_defaults_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("JOB_FTCH_MCP_SURFACE", raising=False)
-    assert resolve_surface() == "core"
+    assert resolve_surface() == "all"
+    monkeypatch.setenv("JOB_FTCH_MCP_SURFACE", "mass")
+    assert resolve_surface() == "mass"
+    monkeypatch.setenv("JOB_FTCH_MCP_SURFACE", "personal")
+    assert resolve_surface() == "personal"
+    monkeypatch.setenv("JOB_FTCH_MCP_SURFACE", "core")
+    assert resolve_surface() == "all"
     monkeypatch.setenv("JOB_FTCH_MCP_SURFACE", "admin")
-    assert resolve_surface() == "admin"
+    assert resolve_surface() == "all"
     monkeypatch.setenv("JOB_FTCH_MCP_SURFACE", "nope")
-    assert resolve_surface() == "core"
+    assert resolve_surface() == "all"
 
 
 def test_example_kind_and_role() -> None:
@@ -69,3 +82,179 @@ def test_filter_job_groups_by_company_and_score() -> None:
     out2 = filter_job_groups(groups, limit=10, location="moscow")
     assert len(out2) == 1
     assert out2[0]["canonical_job"]["company"] == "Yandex"
+
+
+def test_public_job_group_exposes_title() -> None:
+    job = SimpleNamespace(
+        title="Senior LLM Engineer",
+        title_normalized="senior llm engineer",
+        title_raw="Senior LLM Engineer",
+        company="Aston",
+        company_canonical=None,
+    )
+    group = SimpleNamespace(
+        canonical_job=job,
+        model_dump=lambda mode="json": {
+            "group_id": "abc",
+            "canonical_job": {"title": "Senior LLM Engineer", "company": "Aston"},
+        },
+    )
+    payload = public_job_group(group)
+    assert payload["title"] == "Senior LLM Engineer"
+    assert payload["company"] == "Aston"
+    assert payload["group_id"] == "abc"
+
+
+class _MemoryRunner:
+    def __init__(self) -> None:
+        self._profiles: dict[tuple[str, str, str], object] = {}
+        self._runtime = SimpleNamespace(
+            llm_provider=None,
+            ontology_store=None,
+            embedding_provider=None,
+        )
+
+    def get_runtime(self, tenant_id: str) -> SimpleNamespace:
+        del tenant_id
+        return self._runtime
+
+    async def list_candidate_profiles(
+        self, tenant_id: str, user_id: str
+    ) -> list[dict[str, object]]:
+        del tenant_id
+        out: list[dict[str, object]] = []
+        for (_tid, uid, pid), managed in self._profiles.items():
+            if uid != user_id:
+                continue
+            out.append({"profile_id": pid, "user_id": uid, "active": True, "managed": managed})
+        return out
+
+    async def get_candidate_profile(
+        self, tenant_id: str, user_id: str, profile_id: str
+    ) -> object | None:
+        return self._profiles.get((tenant_id, user_id, profile_id))
+
+    async def save_and_activate_candidate_profile(self, tenant_id: str, managed: object) -> None:
+        self._profiles[(tenant_id, managed.user_id, managed.profile_id)] = managed  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_operator_examples_map_resume_and_vacancy() -> None:
+    runner = _MemoryRunner()
+    cases = (
+        ("resume", "positive", "Senior ML engineer resume"),
+        ("resume", "negative", "Accountant resume"),
+        ("vacancy", "positive", "Hiring LLM engineer"),
+        ("vacancy", "negative", "Hiring salesperson"),
+    )
+    for kind, label, text in cases:
+        result = await add_operator_example(
+            runner,
+            tenant_id="t1",
+            user_id="u1",
+            kind=kind,
+            label=label,
+            text=text,
+            refresh_policy="defer",
+        )
+        assert "error" not in result
+        assert result["kind"] == kind
+        assert result["label"] == label
+        assert result["prefilter_dirty"] is True
+        assert result["refresh_deferred"] is True
+
+    listed = await list_operator_examples(runner, tenant_id="t1", user_id="u1")
+    assert listed["counts"] == {
+        "positive_resume": 1,
+        "negative_resume": 1,
+        "positive_vacancy": 1,
+        "negative_vacancy": 1,
+    }
+    assert "positive_job" not in listed["examples"]
+    assert listed["examples"]["positive_vacancy"] == ["Hiring LLM engineer"]
+
+    vacancies = await list_operator_examples(
+        runner, tenant_id="t1", user_id="u1", kind="vacancy", label="negative"
+    )
+    assert set(vacancies["examples"]) == {"negative_vacancy"}
+    assert vacancies["counts"]["negative_vacancy"] == 1
+
+    summary = await get_examples_summary(runner, tenant_id="t1", user_id="u1")
+    assert summary["total"] == 4
+    assert summary["counts"]["positive_resume"] == 1
+
+    removed = await remove_operator_example(
+        runner,
+        tenant_id="t1",
+        user_id="u1",
+        kind="vacancy",
+        label="negative",
+        index=0,
+    )
+    assert removed["counts"]["negative_vacancy"] == 0
+    assert removed["prefilter_dirty"] is True
+
+    cleared = await clear_operator_examples(runner, tenant_id="t1", user_id="u1", kind="resume")
+    assert cleared["removed"] == 2
+    assert cleared["counts"]["positive_resume"] == 0
+    assert cleared["counts"]["negative_resume"] == 0
+    assert cleared["counts"]["positive_vacancy"] == 1
+
+
+@pytest.mark.asyncio
+async def test_operator_examples_reject_invalid_kind() -> None:
+    runner = _MemoryRunner()
+    result = await add_operator_example(
+        runner,
+        tenant_id="t1",
+        user_id="u1",
+        kind="job",
+        label="positive",
+        text="should not store",
+    )
+    assert result["error"] == "invalid_arguments"
+    listed = await list_operator_examples(runner, tenant_id="t1", user_id="u1", kind="shots")
+    assert listed["error"] == "invalid_arguments"
+
+
+@pytest.mark.asyncio
+async def test_update_operator_shot_rejects_unknown_action() -> None:
+    runner = _MemoryRunner()
+    result = await update_operator_shot(
+        runner,
+        tenant_id="t1",
+        user_id="u1",
+        action="sync",
+    )
+    assert result["error"] == "invalid_arguments"
+
+
+@pytest.mark.asyncio
+async def test_update_operator_shot_list_defaults_and_requires_kind_label() -> None:
+    runner = _MemoryRunner()
+    missing = await update_operator_shot(
+        runner,
+        tenant_id="t1",
+        user_id="u1",
+        action="add",
+        text="needs kind and label",
+    )
+    assert missing["error"] == "invalid_arguments"
+    added = await update_operator_shot(
+        runner,
+        tenant_id="t1",
+        user_id="u1",
+        action="add",
+        kind="vacancy",
+        label="positive",
+        text="Hiring senior LLM engineer",
+        refresh_policy="defer",
+    )
+    assert added["added"] == 1
+    listed = await update_operator_shot(
+        runner,
+        tenant_id="t1",
+        user_id="u1",
+        action="list",
+    )
+    assert listed["examples"]["positive_vacancy"] == ["Hiring senior LLM engineer"]

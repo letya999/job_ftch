@@ -231,3 +231,41 @@ def test_score_job_url_rejects_legal_policy_pages() -> None:
         )
         < 0
     )
+
+
+def test_score_job_url_rejects_cian_blogs_and_forum_slugs() -> None:
+    board = "https://career.cian.ru/"
+    blogs = "https://www.cian.ru/blogs-kak-snyat-kvartiru-345215/"
+    forum = "https://www.cian.ru/forum-rieltorov-12345/"
+    assert score_job_url(blogs, board_url=board) < 8
+    assert score_job_url(blogs, board_url=board) < 0
+    assert score_job_url(forum, board_url=board) < 8
+    assert score_job_url(forum, board_url=board) < 0
+
+
+def test_score_job_url_keeps_kadrof_and_aijobs_details() -> None:
+    assert (
+        score_job_url(
+            "https://www.kadrof.ru/work/110953",
+            board_url="https://www.kadrof.ru/work",
+        )
+        >= 8
+    )
+    assert (
+        score_job_url(
+            "https://aijobs.net/job/senior-ml-engineer-123",
+            board_url="https://aijobs.net/jobs",
+        )
+        >= 8
+    )
+
+
+def test_extract_static_job_links_still_prefers_hirify_numbered_job() -> None:
+    html = """
+    <html><body>
+      <a href="/blogs-office-news-345215">Office blog</a>
+      <a href="/jobs/1234-senior-python-engineer">Senior Python Engineer</a>
+    </body></html>
+    """
+    links = extract_static_job_links(html, "https://hirify.me", limit=3)
+    assert links == ["https://hirify.me/jobs/1234-senior-python-engineer"]

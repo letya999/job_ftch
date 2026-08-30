@@ -137,9 +137,7 @@ async def test_url_ledger_updates_only_after_successful_send() -> None:
     )
 
     assert outcome.sent == 1
-    assert json.loads(store.state["bot_publish:sent_urls"]) == [
-        "https://example.com/jobs/good"
-    ]
+    assert json.loads(store.state["bot_publish:sent_urls"]) == ["https://example.com/jobs/good"]
 
 
 async def test_flood_wait_is_retried_then_gives_up() -> None:

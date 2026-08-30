@@ -26,7 +26,7 @@ RUN mkdir -p job_ftch scripts && touch job_ftch/__init__.py
 
 # Core local stack: MCP + SQLite + OpenAI-compatible LLM + scrapers + browser.
 RUN pip install --no-cache-dir \
-    ".[mcp,sqlite,openai,feeds,site_scrapers,browser,stealth,extraction,language]"
+    ".[mcp,local_mcp,sqlite,openai,feeds,site_scrapers,browser,stealth,extraction,language]"
 
 # Chromium for career-site adaptive path (no camoufox/nodriver/torch in this image).
 RUN patchright install --with-deps chromium

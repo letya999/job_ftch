@@ -22,6 +22,7 @@ from job_ftch.adapters.telegram_bot.handlers import (
     examples,
     feedback,
     pipeline,
+    published,
     schedule,
     sources,
 )
@@ -354,6 +355,7 @@ def _build_bot_commands() -> list[BotCommand]:
         BotCommand(command="vacancies", description="Список моих вакансий"),
         BotCommand(command="tenant", description="Выбрать tenant"),
         BotCommand(command="sources", description="Список источников (URL)"),
+        BotCommand(command="published", description="Опубликованные вакансии"),
         BotCommand(command="run", description="Запустить поиск сейчас"),
         BotCommand(
             command="clear", description="Очистить историю — следующий запуск увидит всё заново"
@@ -439,6 +441,7 @@ def build_dispatcher(
         base.router,
         examples.router,
         sources.router,
+        published.router,
         pipeline.router,
         schedule.router,
         channel.router,

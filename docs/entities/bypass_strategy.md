@@ -76,6 +76,9 @@ headless-браузеров:
 работает через `BrowserSessionBypass.open_page(...)`, а остальная scraping
 логика остаётся общей.
 
+Операторский listing probe (`BrowserSessionProbe` / ADR-081) тоже ходит только
+через `open_page` и не импортирует browser-клиенты из MCP.
+
 ## Реализации по возрастанию сложности/стоимости
 
 1. `noop` (No Operation)

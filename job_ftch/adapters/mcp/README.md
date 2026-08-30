@@ -1,44 +1,34 @@
 # MCP server adapter
 
-A FastMCP server that exposes `job_ftch` tools (`search_jobs`, `run_pipeline`, …)
-and `jobs://` resources to MCP clients (Codex CLI, Claude Code, Cursor).
+A FastMCP server that exposes an 18-tool operator catalog
+(`list_tenants`, `get_status`, `get_runtime`, `doctor`, `get_sources`, `update_source`,
+`get_jobs`, `update_shot`, plus mass/personal extras) and `config://{tenant_id}`
+to MCP clients (Claude Code, Cursor, Claude Desktop).
+Gate with `JOB_FTCH_MCP_SURFACE=all|mass|personal` (default `all`).
+See `docs/adapters/mcp_adapter.md`.
 
-## Recommended: one container + CLIProxy (Codex subscription for LLM only)
-
-```bash
-# Host: CLIProxyAPI on :8317 with Codex OAuth
-cp docker/local-mcp/env.example docker/local-mcp/.env
-docker compose -f docker/local-mcp/docker-compose.yml up --build
-```
-
-Codex `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.job_ftch]
-url = "http://127.0.0.1:8000/mcp"
-```
-
-Details: `docker/local-mcp/README.md`.
-
-## Run locally (no Docker)
+## Run locally
 
 ```bash
 uv sync --extra mcp --extra sqlite --extra openai
-export JOB_FTCH_OPENAI_BASE_URL=http://127.0.0.1:8317/v1
-export JOB_FTCH_OPENAI_API_KEY=cliproxy-local-key
-export JOB_FTCH_OPENAI_MODEL=gpt-5.4-mini
-export JOB_FTCH_RELEVANCE_LLM_MODEL=gpt-5.4-mini
-uv run job_ftch mcp-server \
-  --configs-dir docker/local-mcp/config/tenants \
-  --transport streamable-http \
-  --host 0.0.0.0 \
-  --port 8000
+uv run job_ftch mcp-server --configs-dir config/tenants --transport http --host 0.0.0.0 --port 8000
 ```
 
-`--transport stdio` is also supported for direct client integration.
+`--transport stdio` is also supported for direct client integration. Do not pass
+`--host` / `--port` with stdio (HTTP-only). Logs go to stderr so JSON-RPC on
+stdout stays parseable.
+
+For offline smoke, point `--configs-dir` at a temp tenant with `local_fixture`
+sources and set `JOB_FTCH_LLM_BACKEND=heuristic` with embeddings disabled.
+
+## Run with Docker
+
+```bash
+docker build -f adapters/mcp/Dockerfile -t job-ftch-mcp .
+docker run -p 8000:8000 --env-file .env -v "$PWD/config:/app/config" job-ftch-mcp
+```
 
 ## Entry point
 
 The server factory is published under the `job_ftch.mcp_servers` entry-point group
-(`adapters.mcp.server:create_server`). `adapters/mcp/adapter.py` keeps a thin
-deprecated `create_mcp_server()` shim for newer callers.
+(`adapters.mcp.server:create_server`).

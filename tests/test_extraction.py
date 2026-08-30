@@ -9,7 +9,7 @@ import pytest
 
 from job_ftch.domain import JobDraft, JobExtractionStatus, PostType, RawItem, SourceKind, WorkMode
 from job_ftch.infrastructure.llm.heuristic import HeuristicLLMProvider
-from job_ftch.nodes.extraction import ExtractionNode
+from job_ftch.nodes.extraction import ExtractionNode, _fallback_title
 
 ExtractedItem = TypeVar("ExtractedItem")
 
@@ -126,6 +126,55 @@ def test_extraction_node_rejects_unknown_graph_mode() -> None:
 
     with pytest.raises(ValueError, match="unsupported extraction_mode"):
         node.configure_graph_params({"extraction_mode": "magic"})
+
+
+def test_audit_mode_keeps_llm_extraction_when_graph_requests_heuristic() -> None:
+    node = ExtractionNode(ExplodingLLMProvider())
+    node.enable_audit_mode()
+    node.configure_graph_params({"extraction_mode": "structured_or_heuristic"})
+
+    assert node._extraction_mode == "llm_or_structured"
+
+
+def test_fallback_title_skips_published_time_prefix() -> None:
+    item = RawItem(
+        source_kind=SourceKind.TELEGRAM_CHANNEL,
+        source_name="remote_ai_jobs",
+        external_id="1",
+        text="Published time: 2026-08-01\nML Engineer\nRemote ranking role",
+    )
+    assert _fallback_title(item) == "ML Engineer"
+    assert item.text.startswith("Published time: 2026-08-01")
+
+
+def test_fallback_title_skips_opisanie_section_heading() -> None:
+    item = RawItem(
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="tbank_it",
+        external_id="1",
+        url="https://www.tbank.ru/career/vacancies/it/1/",
+        text="Описание\nML Engineer\nTrain models",
+    )
+    assert _fallback_title(item) == "ML Engineer"
+
+
+@pytest.mark.asyncio
+async def test_extraction_falls_back_when_llm_title_is_unusable() -> None:
+    item = RawItem(
+        source_kind=SourceKind.TELEGRAM_CHANNEL,
+        source_name="remote_ai_jobs",
+        external_id="9",
+        text="Published time: 2026-08-01\nML Engineer\nRemote ranking role",
+    )
+
+    class _UnusableTitleLLM:
+        async def extract(self, text: str, schema: type[ExtractedItem]) -> ExtractedItem:
+            del text
+            return schema(title="Published time: 2026-08-01", description="Remote ranking role")
+
+    draft = await ExtractionNode(_UnusableTitleLLM()).process(item)
+    assert draft is not None
+    assert draft.title_raw == "ML Engineer"
 
 
 @pytest.mark.asyncio

@@ -5,8 +5,8 @@ updated: 2026-08-07
 ---
 # 079 — MCP 2.0 tenant service and local LLM gateway path
 
-**Status**: ACCEPTED (local MCP + CLIProxy profile implemented on branch)  
-**Date**: 2026-08-07  
+**Status**: ACCEPTED (local MCP + CLIProxy profile implemented on branch)
+**Date**: 2026-08-07
 **Branch**: `feature/mcp-2-cliproxy-service`
 
 ## Context
@@ -107,8 +107,8 @@ z.ai does **not** require CLIProxyAPI. CLIProxy is for **OAuth CLI subscriptions
 | Agent → second model opinion | **out of scope** companion MCP | MCP → CLIProxy | multi-model-companion |
 | Agent harness model | harness env | Anthropic/OpenAI via CLIProxy or z.ai | Claudex alias |
 
-CLIProxyAPI sits on the **LLM HTTP** path.  
-job_ftch MCP sits on the **product tools** path.  
+CLIProxyAPI sits on the **LLM HTTP** path.
+job_ftch MCP sits on the **product tools** path.
 They meet only at the local machine, not by nesting MCP inside LLMProvider.
 
 ### Current gaps (as of this ADR)

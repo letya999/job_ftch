@@ -1171,12 +1171,13 @@ wheels = [
 
 [[package]]
 name = "datasets"
-version = "3.6.0"
+version = "5.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dill" },
     { name = "filelock" },
     { name = "fsspec", extra = ["http"] },
+    { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "multiprocess" },
     { name = "numpy" },
@@ -1188,9 +1189,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "xxhash" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1a/89/d3d6fef58a488f8569c82fd293ab7cbd4250244d67f425dcae64c63800ea/datasets-3.6.0.tar.gz", hash = "sha256:1b2bf43b19776e2787e181cfd329cb0ca1a358ea014780c3581e0f276375e041", size = 569336, upload-time = "2025-05-07T15:15:02.659Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0a/5b/836516269d4f618efe621661cfb6f9acc57e6f95265db3efaee48a5ffe04/datasets-5.0.1.tar.gz", hash = "sha256:ce22bb851efd7494f08aad33b940803784434f6e77763d00679a0dc45fcf686a", size = 641498, upload-time = "2026-07-28T11:09:12.016Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/34/a08b0ee99715eaba118cbe19a71f7b5e2425c2718ef96007c325944a1152/datasets-3.6.0-py3-none-any.whl", hash = "sha256:25000c4a2c0873a710df127d08a202a06eab7bf42441a6bc278b499c2f72cd1b", size = 491546, upload-time = "2025-05-07T15:14:59.742Z" },
+    { url = "https://files.pythonhosted.org/packages/44/0b/98fc6eb83333508ca5f44c52b3e287ea8137a0ad582714e2cbc67a02154b/datasets-5.0.1-py3-none-any.whl", hash = "sha256:9fbf73688f8c18f7529b4fe592abd04015f81d1e58001e4bac73ffb2b39d7cc4", size = 559079, upload-time = "2026-07-28T11:09:10.266Z" },
 ]
 
 [[package]]
@@ -2319,6 +2320,9 @@ langfuse = [
 language = [
     { name = "lingua-language-detector" },
 ]
+local-mcp = [
+    { name = "numpy" },
+]
 mcp = [
     { name = "fastmcp" },
 ]
@@ -2393,6 +2397,7 @@ translation = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "aiogram" },
     { name = "aiosqlite" },
     { name = "bandit" },
     { name = "httpx" },
@@ -2401,6 +2406,7 @@ dev = [
     { name = "jsonschema" },
     { name = "mypy" },
     { name = "openai" },
+    { name = "pip" },
     { name = "pip-audit" },
     { name = "pre-commit" },
     { name = "pytest" },
@@ -2438,8 +2444,8 @@ requires-dist = [
     { name = "curl-cffi", marker = "extra == 'stealth'", specifier = "==0.15.0" },
     { name = "dagster", marker = "extra == 'all'", specifier = ">=1.8" },
     { name = "dagster", marker = "extra == 'dagster'", specifier = ">=1.8" },
-    { name = "datasets", marker = "extra == 'all'", specifier = ">=3.6.0,<4" },
-    { name = "datasets", marker = "extra == 'bgem3'", specifier = ">=3.6.0,<4" },
+    { name = "datasets", marker = "extra == 'all'", specifier = ">=5.0.1,<6" },
+    { name = "datasets", marker = "extra == 'bgem3'", specifier = ">=5.0.1,<6" },
     { name = "dateparser", specifier = ">=1.2,<2" },
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "dill", marker = "extra == 'all'", specifier = ">=0.3.8,<0.4" },
@@ -2481,6 +2487,7 @@ requires-dist = [
     { name = "maxminddb", marker = "extra == 'parity-lab'", specifier = "==3.1.1" },
     { name = "nodriver", marker = "extra == 'all'", specifier = ">=0.50.2" },
     { name = "nodriver", marker = "extra == 'nodriver'", specifier = ">=0.50.2" },
+    { name = "numpy", marker = "extra == 'local-mcp'", specifier = ">=1.26" },
     { name = "openai", marker = "extra == 'all'", specifier = ">=1.30" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.30" },
     { name = "opentelemetry-api", specifier = ">=1.25" },
@@ -2539,10 +2546,11 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'all'", specifier = ">=12.0" },
     { name = "websockets", marker = "extra == 'realtime'", specifier = ">=12.0" },
 ]
-provides-extras = ["browser", "camoufox", "nodriver", "parity-lab", "stealth", "tls-client", "openai", "telegram", "dagster", "faststream", "api", "mcp", "bot", "fastembed", "sqlite", "postgres", "embeddings", "qdrant", "pgvector", "ollama", "feeds", "site-scrapers", "resilience", "extraction", "realtime", "resume", "language", "translation", "reranker", "bgem3", "tracing", "langfuse", "all"]
+provides-extras = ["browser", "camoufox", "nodriver", "parity-lab", "stealth", "tls-client", "openai", "telegram", "dagster", "faststream", "api", "mcp", "local-mcp", "bot", "fastembed", "sqlite", "postgres", "embeddings", "qdrant", "pgvector", "ollama", "feeds", "site-scrapers", "resilience", "extraction", "realtime", "resume", "language", "translation", "reranker", "bgem3", "tracing", "langfuse", "all"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "aiogram", specifier = ">=3.7" },
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "bandit", extras = ["toml"], specifier = ">=1.7" },
     { name = "httpx" },
@@ -2551,6 +2559,7 @@ dev = [
     { name = "jsonschema", specifier = ">=4.0" },
     { name = "mypy", specifier = ">=2.1,<3" },
     { name = "openai", specifier = ">=1.30" },
+    { name = "pip", specifier = ">=26.2" },
     { name = "pip-audit", specifier = ">=2.10" },
     { name = "pre-commit", specifier = ">=3.7" },
     { name = "pytest", specifier = ">=9.0,<10" },
@@ -4195,11 +4204,11 @@ wheels = [
 
 [[package]]
 name = "pip"
-version = "26.1.2"
+version = "26.2.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/01/91/47e7d486260f618783899587af63ccf7980fb60245c3e63dd4571c6b57ad/pip-26.1.2.tar.gz", hash = "sha256:f49cd134c61cf2fd75e0ce2676db03e4054504a5a4986d00f8299ae632dc4605", size = 1840799, upload-time = "2026-05-31T17:33:58.56Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/15/4500e320e6b101ec3b719ae85b697d9940b6cda672bc555bd6016fc60c6f/pip-26.2.1.tar.gz", hash = "sha256:f6ad667e89a1fe78046c8f13232b247200f5258d7828f3f7883d660878e0813f", size = 1848877, upload-time = "2026-08-04T22:51:14.148Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/95/6b5cb3461ea5673ba0995989746db58eb18b91b54dbf331e72f569540946/pip-26.1.2-py3-none-any.whl", hash = "sha256:382ff9f685ee3bc25864f820aa50505825f10f5458ffff07e30a6d96e5715cab", size = 1813144, upload-time = "2026-05-31T17:33:56.772Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/pip-26.2.1-py3-none-any.whl", hash = "sha256:71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e", size = 1816632, upload-time = "2026-08-04T22:51:12.472Z" },
 ]
 
 [[package]]

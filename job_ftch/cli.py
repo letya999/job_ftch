@@ -130,11 +130,17 @@ def _build_parser() -> argparse.ArgumentParser:
     tenants_reset.add_argument("tenant_id", type=str)
 
     mcp_parser = sub.add_parser("mcp-server", help="Start the FastMCP tenant server")
+    # SUPPRESS keeps a parent-level --configs-dir value when the flag is only
+    # provided before the subcommand (argparse otherwise overwrites with None).
+    mcp_parser.add_argument(
+        "--configs-dir",
+        default=argparse.SUPPRESS,
+        help="Tenant config directory (or set JOB_FTCH_CONFIGS_DIR). Also accepted as a global flag.",
+    )
     mcp_parser.add_argument(
         "--transport",
         choices=("stdio", "http", "sse", "streamable-http"),
         default="stdio",
-        help="stdio for desktop agents; streamable-http/http for Codex/remote MCP.",
     )
     mcp_parser.add_argument("--host", default="127.0.0.1")
     mcp_parser.add_argument("--port", type=int, default=8000)
@@ -556,14 +562,22 @@ def _run_mcp_server(settings: Settings, args: argparse.Namespace) -> None:
     if settings.configs_dir is None:
         msg = "--configs-dir or JOB_FTCH_CONFIGS_DIR is required for mcp-server."
         raise ValueError(msg)
-    # stdio MCP must not emit logs on stdout (JSON-RPC). Route structlog to stderr.
-    from job_ftch.adapters.mcp.server import create_server
+    from job_ftch.adapters.mcp.server import create_server, prepare_stdio_logging
     from job_ftch.application.logging import configure_logging
 
-    configure_logging(settings.log_level)
+    # Configure logging before tenant load. For stdio, keep stdout protocol-clean
+    # (JSON-RPC) by forcing application logs onto stderr.
+    if args.transport == "stdio":
+        prepare_stdio_logging(settings.log_level)
+    else:
+        configure_logging(settings.log_level)
+
     server = create_server(configs_dir=settings.configs_dir, base_settings=settings)
-    # FastMCP lifespan owns TenantRunner startup/shutdown for the process.
-    server.run(transport=args.transport, host=args.host, port=args.port)
+    asyncio.run(server.startup())
+    try:
+        server.run(transport=args.transport, host=args.host, port=args.port)
+    finally:
+        asyncio.run(server.shutdown())
 
 
 # ---------------------------------------------------------------------------

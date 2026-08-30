@@ -26,6 +26,12 @@ Codex CLI ──MCP HTTP──► job_ftch container :8000/mcp
 CLIProxy stays on the **host** so OAuth logins and quota stay with your normal
 desktop CLIProxy setup. The container does not embed CLIProxyAPI.
 
+The normal tenant directory contains exactly the 17 `ai_jobs` sources. A
+separate MCP-only browser probe lives under `config/browser-probe`; start the
+server with that directory and call `run_pipeline` for tenant `browser_probe`
+to verify a real Patchright navigation without changing production source
+policy.
+
 ## 1. Host: CLIProxyAPI + Codex login
 
 Install and run [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) on the

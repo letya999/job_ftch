@@ -36,6 +36,7 @@ class DedupNode:
         defer_commit: bool = False,
         claim_ttl_seconds: int = 300,
         cache_max_entries: int = 10_000,
+        personal_mode: bool = False,
     ) -> None:
         self._store = store
         self._near_duplicate_score_cutoff = near_duplicate_score_cutoff
@@ -46,6 +47,7 @@ class DedupNode:
         self._claims: dict[str, tuple[RememberedDedupKey, ...]] = {}
         self._dedup_cache: OrderedDict[str, RememberedDedupKey] = OrderedDict()
         self._cache_max_entries = max(100, cache_max_entries)
+        self._personal_mode = personal_mode
         self._lock = asyncio.Lock()
         self._cache_hits = 0
         self._cache_misses = 0
@@ -59,6 +61,8 @@ class DedupNode:
         }
 
     async def process(self, item: RawItem) -> RawItem | None:
+        if self._personal_mode:
+            return item
         duplicate = await self._find_duplicate(item)
         if duplicate is None:
             records = self._records_for_item(item)

@@ -23,10 +23,45 @@ import structlog
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import OntologyStore
-    from job_ftch.domain import ManagedCandidateProfile
+    from job_ftch.config import Settings
+    from job_ftch.domain import ManagedCandidateProfile, MaterializedOntologyTerms
 
 
 logger = structlog.get_logger(__name__)
+
+
+def ontology_compiler_runtime_settings(settings: Settings) -> Settings:
+    """Same model/timeout Telegram `rebuild-ontology` already applies."""
+    return settings.model_copy(
+        update={
+            "llm_backend": "openai",
+            "openai_model": settings.ontology_compiler_model,
+            "openai_timeout_seconds": settings.ontology_compiler_timeout_seconds,
+        }
+    )
+
+
+def _llm_for_ontology_compile(passed: object | None) -> object | None:
+    """Use the ontology compiler provider, not the extraction `openai_model`."""
+    classify = getattr(passed, "classify", None) if passed is not None else None
+    if not callable(classify) or type(passed).__name__ == "HeuristicLLMProvider":
+        return passed
+    current = str(
+        getattr(passed, "model_id", None)
+        or getattr(passed, "model", None)
+        or getattr(passed, "_model", None)
+        or ""
+    ).strip()
+    from job_ftch.config import get_settings
+
+    settings = get_settings()
+    wanted = str(getattr(settings, "ontology_compiler_model", "") or "").strip()
+    if not wanted or current in {"", wanted}:
+        return passed
+    from job_ftch.application.registry import create_llm
+
+    return create_llm(ontology_compiler_runtime_settings(settings))
+
 
 _SHOT_KIND_LABEL: dict[str, str] = {
     "positive_resume": "good-resume example",
@@ -98,6 +133,23 @@ async def _write_materialized_terms(
     compiled_writer = getattr(ontology_store, "upsert_compiled_ontology", None)
     if ontology is not None and callable(compiled_writer):
         await write("upsert_compiled_ontology", source_shot_id, compiled_writer(ontology))
+    graph_writer = getattr(ontology_store, "upsert_shot_graph", None)
+    if ontology is not None and callable(graph_writer):
+        from job_ftch.application.ontology_graph_builder import build_ontology_graph_from_compiled
+        from job_ftch.domain import CompiledOntology, MaterializedOntologyTerms
+
+        compiled = ontology if isinstance(ontology, CompiledOntology) else None
+        if compiled is not None:
+            terms = materialized if isinstance(materialized, MaterializedOntologyTerms) else None
+            graph = build_ontology_graph_from_compiled(
+                ontology=compiled,
+                graph_id="compiled:profile",
+                shot_id=source_shot_id,
+                model=model,
+                prompt_hash=prompt_hash,
+                materialized=terms,
+            )
+            await write("upsert_shot_graph", graph.graph_id, graph_writer(graph))
     stat_writer = getattr(ontology_store, "upsert_term_stats", None)
     if term_stats is not None and callable(stat_writer):
         await write("upsert_term_stats", source_shot_id, stat_writer(term_stats))
@@ -276,6 +328,30 @@ def _match_seniority(text: str) -> str | None:
     return None
 
 
+def _explicit_refusal_terms(text: str) -> tuple[str, ...]:
+    """Surface explicit refusals from a negative shot, not every mentioned skill."""
+    import re
+
+    patterns = (
+        r"\bno\s+([a-zA-Z][\w+.#/&-]{1,39})",
+        r"\bwithout\s+([a-zA-Z][\w+.#/&-]{1,39})",
+        r"\bdidn'?t\s+use\s+([a-zA-Z][\w+.#/&-]{1,39})",
+        r"\bdoes not\s+use\s+([a-zA-Z][\w+.#/&-]{1,39})",
+        r"не использовал(?:а|и|о)?(?:сь)?\s+([^\s,.;:]{2,40})",
+        r"не использу(?:ю|ет|ем|ют)\s+([^\s,.;:]{2,40})",
+        r"([A-Za-zА-Яа-я0-9+.#/]{2,40})\s+не использовал",
+        r"нет опыта(?:\s+работы)?(?:\s+с|\s+в)?\s+([^\s,.;:]{2,40})",
+    )
+    skip = {"the", "a", "an", "опыт", "работы", "use", "using"}
+    found: list[str] = []
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            term = " ".join(match.group(1).strip().casefold().replace("_", " ").split())
+            if term and term not in skip and term not in found:
+                found.append(term)
+    return tuple(found[:8])
+
+
 def _heuristic_materialized_from_shot(text: str, kind: str) -> object:
     """Deterministic ontology projection when LLM compile is unavailable."""
     from job_ftch.domain import MaterializedOntologyTerms
@@ -286,15 +362,17 @@ def _heuristic_materialized_from_shot(text: str, kind: str) -> object:
     seniority = _match_seniority(text)
     seniority_vals = (seniority,) if seniority else ()
     is_negative = kind.startswith("negative")
-    keywords = tuple((skill, 3) for skill in skills[:6])
     if is_negative:
+        refusals = _explicit_refusal_terms(text)
+        keywords = tuple((term, 3) for term in refusals[:6])
         return MaterializedOntologyTerms(
-            negative_skills=skills,
+            negative_skills=refusals,
             negative_roles=roles,
-            anti_patterns=skills[:6],
+            anti_patterns=refusals[:6],
             negative_keywords=keywords,
             seniority=seniority_vals,
         )
+    keywords = tuple((skill, 3) for skill in skills[:6])
     return MaterializedOntologyTerms(
         positive_skills=skills,
         positive_roles=roles,
@@ -356,6 +434,7 @@ async def _enrich_ontology_from_shot(
     )
     from job_ftch.config import get_settings
 
+    llm = _llm_for_ontology_compile(llm)
     classify = getattr(llm, "classify", None) if llm is not None else None
     # HeuristicLLMProvider.classify is for job relevance, not ontology compiler schemas.
     llm_name = type(llm).__name__ if llm is not None else ""
@@ -367,6 +446,7 @@ async def _enrich_ontology_from_shot(
                 shots=((kind, text),),
                 llm=llm,
                 prompt_path=settings.ontology_compiler_prompt_path,
+                compile_timeout_seconds=settings.ontology_compiler_timeout_seconds,
             )
             await _write_materialized_terms(
                 kind=kind,
@@ -393,6 +473,221 @@ async def _enrich_ontology_from_shot(
     return None
 
 
+def _shots_from_profile(managed: ManagedCandidateProfile) -> list[tuple[str, str]]:
+    from job_ftch.application.profile_inputs import list_examples
+
+    examples = list_examples(managed)
+    shots: list[tuple[str, str]] = []
+    for kind in ("positive_resume", "negative_resume", "positive_job", "negative_job"):
+        for text in examples.get(kind, []):
+            cleaned = str(text or "").strip()
+            if cleaned:
+                shots.append((kind, cleaned))
+    return shots
+
+
+def _materialized_positive_count(materialized: object) -> int:
+    keywords = getattr(materialized, "positive_keywords", ()) or ()
+    skills = getattr(materialized, "positive_skills", ()) or ()
+    roles = getattr(materialized, "positive_roles", ()) or ()
+    return len(keywords) + len(skills) + len(roles)
+
+
+def _compiled_has_signal(ontology: object | None) -> bool:
+    if ontology is None:
+        return False
+    return bool(getattr(ontology, "terms", None) or getattr(ontology, "relations", None))
+
+
+def _merge_heuristic_materialized(shots: list[tuple[str, str]]) -> MaterializedOntologyTerms:
+    from job_ftch.domain import MaterializedOntologyTerms
+
+    pos_skills: list[str] = []
+    pos_roles: list[str] = []
+    pos_keywords: list[tuple[str, int]] = []
+    neg_skills: list[str] = []
+    neg_roles: list[str] = []
+    neg_keywords: list[tuple[str, int]] = []
+    anti: list[str] = []
+    seniority: list[str] = []
+
+    def _extend(bucket: list[str], values: object) -> None:
+        if not isinstance(values, (list, tuple)):
+            return
+        for item in values:
+            text = str(item).strip()
+            if text and text not in bucket:
+                bucket.append(text)
+
+    def _extend_kw(bucket: list[tuple[str, int]], values: object) -> None:
+        if not isinstance(values, (list, tuple)):
+            return
+        seen = {term for term, _weight in bucket}
+        for item in values:
+            if not isinstance(item, (tuple, list)) or not item:
+                continue
+            term = str(item[0]).strip()
+            weight = int(item[1]) if len(item) > 1 else 3
+            if term and term not in seen:
+                bucket.append((term, weight))
+                seen.add(term)
+
+    for kind, text in shots:
+        part = _heuristic_materialized_from_shot(text, kind)
+        _extend(pos_skills, getattr(part, "positive_skills", ()))
+        _extend(pos_roles, getattr(part, "positive_roles", ()))
+        _extend_kw(pos_keywords, getattr(part, "positive_keywords", ()))
+        _extend(neg_skills, getattr(part, "negative_skills", ()))
+        _extend(neg_roles, getattr(part, "negative_roles", ()))
+        _extend_kw(neg_keywords, getattr(part, "negative_keywords", ()))
+        _extend(anti, getattr(part, "anti_patterns", ()))
+        _extend(seniority, getattr(part, "seniority", ()))
+    return MaterializedOntologyTerms(
+        positive_skills=tuple(pos_skills[:24]),
+        positive_roles=tuple(pos_roles[:12]),
+        positive_keywords=tuple(pos_keywords[:24]),
+        negative_skills=tuple(neg_skills[:24]),
+        negative_roles=tuple(neg_roles[:12]),
+        negative_keywords=tuple(neg_keywords[:24]),
+        anti_patterns=tuple(anti[:12]),
+        seniority=tuple(seniority[:6]),
+    )
+
+
+async def compile_profile_ontology(
+    managed: ManagedCandidateProfile,
+    *,
+    llm: object | None,
+    ontology_store: OntologyStore | None,
+    persist: bool = True,
+) -> dict[str, object]:
+    """Compile/project ontology from every labeled shot on the profile.
+
+    Single-shot LLM compile can succeed with an empty projection and skip the
+    heuristic fallback. Refresh therefore always compiles the full shot set,
+    then heuristically fills any empty positive projection.
+    """
+    if ontology_store is None:
+        return {
+            "pos_added": 0,
+            "ontology_errors": ["ontology_store_missing"],
+            "persisted": False,
+        }
+    shots = _shots_from_profile(managed)
+    if not shots:
+        return {"pos_added": 0, "ontology_errors": [], "persisted": False}
+
+    errors: list[str] = []
+    ontology = None
+    materialized: MaterializedOntologyTerms | None = None
+    term_stats = None
+    model = "heuristic"
+    prompt_hash = hashlib.sha256(
+        "\n".join(f"{kind}:{text}" for kind, text in shots).encode("utf-8")
+    ).hexdigest()
+
+    compiler_llm = _llm_for_ontology_compile(llm)
+    classify = getattr(compiler_llm, "classify", None) if compiler_llm is not None else None
+    llm_name = type(compiler_llm).__name__ if compiler_llm is not None else ""
+    use_llm_compiler = callable(classify) and llm_name != "HeuristicLLMProvider"
+    if use_llm_compiler:
+        try:
+            from job_ftch.application.ontology_compiler import compile_ontology_from_shots
+            from job_ftch.config import get_settings
+
+            settings = get_settings()
+            result = await compile_ontology_from_shots(
+                shots=shots,
+                llm=compiler_llm,
+                prompt_path=settings.ontology_compiler_prompt_path,
+                compile_timeout_seconds=settings.ontology_compiler_timeout_seconds,
+            )
+            ontology = result.ontology
+            materialized = result.materialized
+            term_stats = result.term_stats
+            model = result.model
+            prompt_hash = result.prompt_hash
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{type(exc).__name__}: {exc}")
+            logger.warning("profile_ontology_compile_failed", error=str(exc))
+
+    if materialized is None or (
+        _materialized_positive_count(materialized) == 0 and not _compiled_has_signal(ontology)
+    ):
+        heuristic = _merge_heuristic_materialized(shots)
+        if _materialized_positive_count(heuristic) > 0:
+            materialized = heuristic
+            model = "heuristic"
+        elif materialized is None:
+            materialized = heuristic
+
+    if materialized is None:
+        return {
+            "pos_added": 0,
+            "ontology_errors": errors or ["empty_projection"],
+            "persisted": False,
+        }
+
+    if not persist:
+        return {
+            "pos_added": _materialized_positive_count(materialized),
+            "ontology_errors": errors,
+            "model": model,
+            "persisted": False,
+        }
+
+    reset = getattr(ontology_store, "reset_live_projection", None)
+    if callable(reset):
+        try:
+            await reset()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{type(exc).__name__}: {exc}")
+            return {"pos_added": 0, "ontology_errors": errors, "persisted": False}
+
+    has_negative_shots = any(kind.startswith("negative") for kind, _text in shots)
+    has_anti = bool(
+        getattr(materialized, "anti_patterns", ())
+        or getattr(materialized, "negative_skills", ())
+        or getattr(materialized, "negative_roles", ())
+        or getattr(materialized, "negative_keywords", ())
+    )
+    if has_negative_shots and not has_anti:
+        heuristic = _merge_heuristic_materialized(shots)
+        copier = getattr(materialized, "model_copy", None)
+        if callable(copier):
+            materialized = copier(
+                update={
+                    "anti_patterns": heuristic.anti_patterns,
+                    "negative_skills": heuristic.negative_skills,
+                    "negative_roles": heuristic.negative_roles,
+                    "negative_keywords": heuristic.negative_keywords,
+                }
+            )
+
+    sample_kind, sample_text = shots[0]
+    try:
+        await _write_materialized_terms(
+            kind=sample_kind,
+            text=sample_text,
+            ontology_store=ontology_store,
+            materialized=materialized,
+            model=model,
+            prompt_hash=prompt_hash,
+            ontology=ontology,
+            term_stats=term_stats,
+        )
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"{type(exc).__name__}: {exc}")
+        return {"pos_added": 0, "ontology_errors": errors, "persisted": False}
+
+    return {
+        "pos_added": _materialized_positive_count(materialized),
+        "ontology_errors": errors,
+        "model": model,
+        "persisted": True,
+    }
+
+
 async def add_example_to_profile_with_enrichment(
     managed: ManagedCandidateProfile,
     text: str,
@@ -410,9 +705,7 @@ async def add_example_to_profile_with_enrichment(
 
     managed = add_example_to_profile(managed, text, kind=kind)
     if ontology_store is not None:
-        await _enrich_ontology_from_shot(
-            text, kind=kind, llm=llm, ontology_store=ontology_store
-        )
+        await _enrich_ontology_from_shot(text, kind=kind, llm=llm, ontology_store=ontology_store)
     return managed
 
 

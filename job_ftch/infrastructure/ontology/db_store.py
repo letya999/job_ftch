@@ -489,6 +489,29 @@ class DBOntologyStore:
             await conn.rollback()
             raise
 
+    async def reset_live_projection(self) -> None:
+        conn = await self._ensure_initialized()
+        await conn.execute("BEGIN")
+        try:
+            await conn.execute("DELETE FROM jf_ontology_skill")
+            await conn.execute("DELETE FROM jf_ontology_role")
+            await conn.execute("DELETE FROM jf_ontology_seniority")
+            await conn.execute("DELETE FROM jf_ontology_anti")
+            await conn.execute("DELETE FROM jf_ontology_positive_keyword")
+            await conn.execute("DELETE FROM jf_ontology_negative_keyword")
+            await conn.execute("DELETE FROM jf_ontology_occurrence")
+            await conn.execute("DELETE FROM jf_ontology_term_stat")
+            await conn.execute("DELETE FROM jf_ontology_compiled_term")
+            await conn.execute("DELETE FROM jf_ontology_compiled_relation")
+            await conn.execute("DELETE FROM jf_ontology_graph_version")
+            await conn.execute("DELETE FROM jf_ontology_node")
+            await conn.execute("DELETE FROM jf_ontology_edge")
+            await conn.execute("DELETE FROM jf_ontology_evidence")
+            await conn.commit()
+        except Exception:
+            await conn.rollback()
+            raise
+
     async def upsert_compiled_ontology(self, ontology: CompiledOntology) -> None:
         conn = await self._ensure_initialized()
         await conn.execute("BEGIN")

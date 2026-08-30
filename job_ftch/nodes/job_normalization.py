@@ -20,17 +20,30 @@ if TYPE_CHECKING:
 
 _PREFIX_RE = re.compile(r"^(hiring|vacancy|opening|role|ищем|вакансия)\s*[:\-]\s*", re.IGNORECASE)
 _COMP_SPLIT_RE = re.compile(r"\s+(?:at|@|-)\s+", re.IGNORECASE)
-_CURRENCY_PATTERN = r"USD|EUR|GBP|RUB|RUR|KZT|\$|€|£|₽"
-_AMOUNT_PATTERN = r"\d(?:[\d\s.,]*\d)?\s*[kк]?"
+_CURRENCY_PATTERN = r"USD|EUR|GBP|RUB|RUR|KZT|руб(?:лей|ля|\.)?|р\.|\$|€|£|₽"
+_AMOUNT_PATTERN = r"\d(?:[\d\s.,]*\d)?\s*(?:k|к|тыс(?:яч)?\.?|млн\.?)?"
 _SALARY_PREFIX_RE = re.compile(
-    rf"(?P<currency>{_CURRENCY_PATTERN})\s*(?:от\s*)?"
-    rf"(?P<min>{_AMOUNT_PATTERN})(?:\s*(?:-|to|–|—)\s*(?P<max>{_AMOUNT_PATTERN}))?",
+    rf"(?P<currency>{_CURRENCY_PATTERN})\s*(?P<direction>от|до|from|up\s+to)?\s*"
+    rf"(?P<min>{_AMOUNT_PATTERN})(?:\s*(?:-|to|до|–|—)\s*(?P<max>{_AMOUNT_PATTERN}))?",
     re.IGNORECASE,
 )
 _SALARY_SUFFIX_RE = re.compile(
-    rf"(?:от\s*)?(?P<min>{_AMOUNT_PATTERN})"
-    rf"(?:\s*(?:-|to|–|—)\s*(?P<max>{_AMOUNT_PATTERN}))?"
+    rf"(?P<direction>от|до|from|up\s+to)?\s*(?P<min>{_AMOUNT_PATTERN})"
+    rf"(?:\s*(?:-|to|до|–|—)\s*(?P<max>{_AMOUNT_PATTERN}))?"
     rf"\s*(?P<currency>{_CURRENCY_PATTERN})",
+    re.IGNORECASE,
+)
+_BARE_SALARY_RE = re.compile(
+    rf"(?P<direction>от|до|from|up\s+to)?\s*(?P<min>{_AMOUNT_PATTERN})"
+    rf"(?:\s*(?:-|to|до|–|—)\s*(?P<max>{_AMOUNT_PATTERN}))?",
+    re.IGNORECASE,
+)
+_SALARY_CONTEXT_RE = re.compile(
+    r"зарплат|оклад|компенсац|доход|вознагражд|вилка|salary|income|pay\b",
+    re.IGNORECASE,
+)
+_NON_SALARY_CONTEXT_RE = re.compile(
+    r"кафетер|льгот|депозит|больнич|ипотек|кредит|страхов|дмс|отпуск|day\s+off",
     re.IGNORECASE,
 )
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -81,9 +94,12 @@ def _normalize_amount(value: str | None) -> int | None:
     if value is None:
         return None
     normalized = value.strip().casefold()
-    multiplier = 1000 if normalized.endswith(("k", "к")) else 1
-    if multiplier > 1:
-        normalized = normalized[:-1].strip().replace(",", ".")
+    unit_match = re.search(r"(k|к|тыс(?:яч)?\.?|млн\.?)$", normalized)
+    multiplier = 1
+    if unit_match:
+        unit = unit_match.group(1)
+        multiplier = 1_000_000 if unit.startswith("млн") else 1_000
+        normalized = normalized[: unit_match.start()].strip().replace(",", ".")
         normalized = normalized.replace(" ", "")
         try:
             return round(float(normalized) * multiplier)
@@ -94,26 +110,69 @@ def _normalize_amount(value: str | None) -> int | None:
 
 
 def _normalize_currency(value: str) -> str:
-    return {"$": "USD", "€": "EUR", "£": "GBP", "₽": "RUB", "RUR": "RUB"}.get(
-        value.upper(), value.upper()
-    )
+    normalized = value.strip().casefold()
+    return {
+        "$": "USD",
+        "€": "EUR",
+        "£": "GBP",
+        "₽": "RUB",
+        "rur": "RUB",
+        "руб": "RUB",
+        "руб.": "RUB",
+        "рублей": "RUB",
+        "рубля": "RUB",
+        "р.": "RUB",
+    }.get(normalized, value.upper())
 
 
-def _parse_compensation_text(value: str) -> tuple[str, int, int | None] | None:
-    match = _SALARY_PREFIX_RE.search(value) or _SALARY_SUFFIX_RE.search(value)
-    if match is None:
+def _compensation_bounds(match: re.Match[str]) -> tuple[int | None, int | None] | None:
+    first = _normalize_amount(match.group("min"))
+    second = _normalize_amount(match.group("max"))
+    direction = (match.group("direction") or "").casefold()
+    if first is None:
         return None
-    minimum = _normalize_amount(match.group("min"))
-    if minimum is None:
-        return None
-    maximum = _normalize_amount(match.group("max"))
+    if direction in {"до", "up to"} and second is None:
+        return None, first
+    minimum, maximum = first, second
     if maximum is not None and minimum > maximum:
         minimum, maximum = maximum, minimum
-    return (
-        _normalize_currency(match.group("currency")),
-        minimum,
-        maximum,
-    )
+    return minimum, maximum
+
+
+def _bare_salary_is_plausible(value: str, match: re.Match[str]) -> bool:
+    amount = match.group("min") or ""
+    has_compact_unit = bool(re.search(r"(?:k|к|тыс(?:яч)?\.?|млн\.?)$", amount.strip(), re.I))
+    remainder = value[match.end("min") :].lstrip().casefold()
+    if re.match(r"(?:tokens?|токен(?:ов|а)?|requests?)\b", remainder):
+        return False
+    context = value[max(0, match.start() - 80) : match.end() + 80]
+    return bool(has_compact_unit or _SALARY_CONTEXT_RE.search(context))
+
+
+def _currency_amount_is_salary(value: str, match: re.Match[str]) -> bool:
+    context = value[max(0, match.start() - 100) : match.end() + 100]
+    return not (_NON_SALARY_CONTEXT_RE.search(context) and not _SALARY_CONTEXT_RE.search(context))
+
+
+def _parse_compensation_text(value: str) -> tuple[str, int | None, int | None] | None:
+    for match in (_SALARY_PREFIX_RE.search(value), _SALARY_SUFFIX_RE.search(value)):
+        if match is None:
+            continue
+        if not _currency_amount_is_salary(value, match):
+            continue
+        bounds = _compensation_bounds(match)
+        if bounds is not None:
+            minimum, maximum = bounds
+            return _normalize_currency(match.group("currency")), minimum, maximum
+
+    match = _BARE_SALARY_RE.search(value)
+    if match is None or not _bare_salary_is_plausible(value, match):
+        return None
+    bounds = _compensation_bounds(match)
+    if bounds is None:
+        return None
+    minimum, maximum = bounds
+    return "RUB", minimum, maximum
 
 
 class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
@@ -238,9 +297,6 @@ class LocationWorkModeNormalizationNode:
 
 class CompensationParsingNode:
     async def process(self, item: JobRecord) -> JobRecord | None:
-        if item.compensation is not None:
-            return item
-
         base_salary = item.metadata.get("base_salary")
         if isinstance(base_salary, dict):
             try:
@@ -252,10 +308,10 @@ class CompensationParsingNode:
                 minimum = base_salary.get("min")
                 maximum = base_salary.get("max")
 
-                if isinstance(minimum, str) and minimum.isdigit():
-                    minimum = int(minimum)
-                if isinstance(maximum, str) and maximum.isdigit():
-                    maximum = int(maximum)
+                if isinstance(minimum, str):
+                    minimum = _normalize_amount(minimum)
+                if isinstance(maximum, str):
+                    maximum = _normalize_amount(maximum)
 
                 minimum = int(minimum) if isinstance(minimum, (int, float)) else None
                 maximum = int(maximum) if isinstance(maximum, (int, float)) else None
@@ -279,6 +335,9 @@ class CompensationParsingNode:
                         max_amount=maximum,
                         period=period,
                     )
+
+                    if item.compensation is not None:
+                        return item
                     return item.model_copy(
                         update={
                             "compensation": compensation,
@@ -295,8 +354,17 @@ class CompensationParsingNode:
             except (ValueError, TypeError, KeyError):
                 pass
 
-        parsed = _parse_compensation_text(item.description or "")
+        metadata_salary = item.metadata.get("salary_text") or item.metadata.get("base_salary_text")
+        salary_source = "\n".join(
+            part for part in (item.title, item.description, str(metadata_salary or "")) if part
+        )
+        parsed = _parse_compensation_text(salary_source)
         if parsed is None:
+            if item.compensation is not None and not metadata_salary:
+                # LLMs sometimes turn unrelated numbers such as "от 3 лет"
+                # into a salary. Keep compensation only when the posting or
+                # parser metadata provides salary evidence.
+                return item.model_copy(update={"compensation": None})
             return item
         currency, minimum, maximum = parsed
 
