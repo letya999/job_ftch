@@ -27,11 +27,10 @@ def test_aggregators_declare_search_modes() -> None:
     for parser in (HhParser(), HabrCareerParser(), HirifyParser(), VkTeamParser(), SberParser()):
         assert parser.supports_search is True
         assert parser.search_mode == "combined"
-    # GeekJob's search box is all-terms and matches nothing for a combined
-    # multi-role query (verified live), so it fans out one URL per keyword.
+    # GeekJob uses one listing crawl; the shared relevance pipeline filters it.
     geekjob = GeekJobParser()
     assert geekjob.supports_search is True
-    assert geekjob.search_mode == "per_keyword"
+    assert geekjob.search_mode == "listing"
 
 
 def test_hh_builds_single_or_query_preserving_area() -> None:
@@ -59,11 +58,9 @@ def test_habr_uses_q_and_type_all() -> None:
     assert query["type"] == ["all"]
 
 
-def test_geekjob_fans_out_one_url_per_keyword() -> None:
+def test_geekjob_builds_one_listing_url() -> None:
     urls = GeekJobParser().build_search_urls("https://geekjob.ru/vacancies", ROLES)
-    assert len(urls) == len(ROLES)
-    qs_values = [_query(url)["qs"][0] for url in urls]
-    assert qs_values == ROLES  # one search URL per role, in order
+    assert urls == ["https://geekjob.ru/vacancies"]
 
 
 def test_hirify_sets_search_with_or_operator_and_title_company() -> None:
