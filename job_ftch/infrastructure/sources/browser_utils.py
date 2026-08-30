@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import time
@@ -259,16 +260,24 @@ async def _patchright_route_handle_cancellation_safe(route_handler: Any, route: 
         route_handler._active_invocations.discard(invocation)
 
 
+def _patchright_needs_legacy_cancellation_fix(send: Any) -> bool:
+    return "timeout" not in inspect.signature(send).parameters
+
+
 def _install_patchright_cancellation_fix() -> None:
     """Install the narrow Patchright cancellation workaround once per process."""
     try:
-        from patchright._impl._connection import Channel
+        from patchright._impl._connection import Channel, Connection
         from patchright._impl._helper import RouteHandler
     except ImportError:
         return
     if getattr(Channel, _PATCHRIGHT_CANCELLATION_FIX_ATTR, False):
         return
-    Channel._inner_send = _patchright_inner_send_cancellation_safe
+    # New Patchright versions pass an explicit timeout and already abort the
+    # protocol callback on cancellation. Replacing that implementation with
+    # the legacy workaround breaks its call signature and browser startup.
+    if _patchright_needs_legacy_cancellation_fix(Connection._send_message_to_server):
+        Channel._inner_send = _patchright_inner_send_cancellation_safe
     setattr(Channel, _PATCHRIGHT_CANCELLATION_FIX_ATTR, True)
     if not getattr(RouteHandler, _PATCHRIGHT_ROUTE_FIX_ATTR, False):
         RouteHandler.handle = _patchright_route_handle_cancellation_safe

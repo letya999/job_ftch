@@ -12,6 +12,7 @@ from job_ftch.infrastructure.sources.browser_utils import (
     _launch_browser_with_recovery,
     _load_async_playwright,
     _patchright_inner_send_cancellation_safe,
+    _patchright_needs_legacy_cancellation_fix,
     _patchright_route_handle_cancellation_safe,
     _unroute_page_before_close,
     attach_operator_page,
@@ -527,6 +528,20 @@ def test_default_browser_loader_uses_patchright_runtime() -> None:
     loader = _load_async_playwright(prefer_patchright=False)
 
     assert loader.__module__.startswith("patchright.")
+
+
+def test_new_patchright_does_not_need_legacy_cancellation_fix() -> None:
+    def new_sender(
+        self: object,
+        target: object,
+        method: str,
+        params: dict[str, object],
+        timeout: float,
+        no_reply: bool = False,
+    ) -> None:
+        del self, target, method, params, timeout, no_reply
+
+    assert _patchright_needs_legacy_cancellation_fix(new_sender) is False
 
 
 @pytest.mark.asyncio
