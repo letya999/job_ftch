@@ -11,6 +11,7 @@ from selectolax.lexbor import LexborHTMLParser
 from job_ftch.application.registry import register_site_parser
 from job_ftch.domain import SourceKind
 from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
+from job_ftch.infrastructure.sources.career_site import client_for_config
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
@@ -416,6 +417,36 @@ class BeelineKazakhstanCareerParser(_EmployerBoardParser):
     company = "Beeline Kazakhstan"
 
 
+class TochkaCareerParser(_EmployerBoardParser):
+    domain_pattern = r"^https?://hr\.tochka\.com/vacancies(?:/|$)"
+    parser_name = "tochka_career"
+    company = "Точка Банк"
+    detail_pattern = re.compile(r"/vacancies/catalog/([^/?#]+)(?:/)?$")
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        async with client_for_config(client, {"skip_ssl": True}) as insecure_client:
+            return await _discover_detail_board(
+                spec,
+                insecure_client,
+                href_pattern=self.detail_pattern,
+            )
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        async with client_for_config(client, {"skip_ssl": True}) as insecure_client:
+            async for item in _parse_detail_board(
+                spec,
+                insecure_client,
+                href_pattern=self.detail_pattern,
+                parser_name=self.parser_name,
+                company=self.company,
+            ):
+                yield item
+
+
 class YandexUzbekistanParser(_EmployerBoardParser):
     domain_pattern = r"^https?://yandex\.ru/jobs/vacancies/city_tashkent(?:/|$)"
     parser_name = "yandex_uz_jobs"
@@ -478,6 +509,7 @@ for _parser_class in (
     FreedomCareerParser,
     ForteCareerParser,
     BeelineKazakhstanCareerParser,
+    TochkaCareerParser,
     YandexUzbekistanParser,
     UzumCareerParser,
     ClickCareerParser,
