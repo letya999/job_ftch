@@ -693,7 +693,7 @@ async def test_scheduler_loop_drains_pending_publish_window_on_zero_emit_run(
 
 
 @pytest.mark.asyncio
-async def test_publish_ledger_prunes_to_last_500_ids() -> None:
+async def test_publish_ledger_prunes_to_last_10_000_ids() -> None:
     from job_ftch.application.publish_ledger import load_publish_ledger, persist_publish_ledger
 
     store_state: dict[str, str] = {}
@@ -708,13 +708,13 @@ async def test_publish_ledger_prunes_to_last_500_ids() -> None:
     store.get_run_state = MagicMock(side_effect=_get_state)
     store.set_run_state = MagicMock(side_effect=_set_state)
 
-    ledger = [f"group-{index}" for index in range(501)]
+    ledger = [f"group-{index}" for index in range(10_001)]
     await persist_publish_ledger(store, ledger)
 
     persisted = await load_publish_ledger(store)
-    assert len(persisted) == 500
+    assert len(persisted) == 10_000
     assert persisted[0] == "group-1"
-    assert persisted[-1] == "group-500"
+    assert persisted[-1] == "group-10000"
 
 
 def test_polling_readiness_marker_roundtrip(

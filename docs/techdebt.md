@@ -1,7 +1,7 @@
 ---
 title: "Технический долг"
-description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-050."
-updated: 2026-08-05
+description: "Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-051."
+updated: 2026-08-25
 ---
 # Технический долг
 
@@ -1187,3 +1187,42 @@ Exit criterion:
   публичном экспорте;
 - docs описывают, как добавить новый источник/стартап и как он попадёт в
   публичный реестр.
+
+## 52. TD-051: Production VPS access и hardening
+
+Status: open. Priority: high.
+
+Внешний аудит 2026-08-25 подтвердил, что сайт и OpenObserve доступны, а
+Postgres, Qdrant, bot/API и OpenObserve backend ports не опубликованы наружу.
+Внутренний аудит VPS невозможен: DNS указывает на новый IP
+`167.172.47.34`, старый доступ `artem` отклоняется, поэтому нельзя проверить
+контейнеры, логи, host firewall, диски, обновления и фактические SSH/sudo
+настройки.
+
+Нужно закрыть:
+
+- восстановить подтверждённый SSH/recovery-доступ и зафиксировать inventory
+  сервера, Docker-контейнеров, volumes, reverse proxy, firewall и backup;
+- отключить или безопасно настроить default nginx virtual host: прямой IP
+  сейчас отдаёт стандартную страницу nginx;
+- добавить для публичного сайта HSTS, CSP, `X-Frame-Options` или эквивалент,
+  `Referrer-Policy` и убрать лишнее раскрытие версий nginx/Next.js;
+- устранить drift production env: compose использует
+  `JOB_FTCH_OPENOBSERVE_USERNAME/PASSWORD`, а
+  `deploy/observability/.env.prod.example` документирует другие имена;
+- пересмотреть риск `autoheal` с host Docker socket и `SYS_PTRACE` в bot,
+  изолировать observability/public network и pin image references по digest,
+  если это совместимо с browser runtime;
+- заменить короткие production-пароли из локальных env-файлов, если они были
+  загружены на VPS, и проверить ACL/хранение секретов.
+
+Exit criterion:
+
+- SSH/recovery-доступ подтверждён новым ключом, host key и минимальными
+  правами; снят read-only inventory сервера;
+- внешний perimeter повторно проверен: только необходимые порты, default
+  vhost закрыт, HTTPS/security headers настроены;
+- env examples и compose проходят production config validation без ручного
+  переименования переменных;
+- Docker socket/SYS_PTRACE/network exposure имеют зафиксированное
+  обоснование или минимизированы, а production secrets ротированы и проверены.

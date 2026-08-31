@@ -4,15 +4,23 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file: .env.prod
-    ports: ["3000:3000"]
+    ports: ["127.0.0.1:3000:3000"]
     restart: unless-stopped
     read_only: true
     tmpfs: [/tmp]
     security_opt: [no-new-privileges:true]
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - public_api
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+networks:
+  public_api:
+    name: job_ftch_public
+    external: true
