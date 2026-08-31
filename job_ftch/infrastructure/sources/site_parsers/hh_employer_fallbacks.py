@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 class _HhEmployerFallback:
     has_custom_parse = True
+    supports_search = True
     supports_discover = False
     employer_url: str
 

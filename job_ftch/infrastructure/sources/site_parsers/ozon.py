@@ -64,6 +64,7 @@ register_site_parser(
 class OzonCareerParser:
     domain_pattern = _OZON_JOB_PATTERN
     has_custom_parse = True
+    supports_search = True
     employer_url = "https://hh.ru/employer/2180?dpt=ozonru-2180-inttech"
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
