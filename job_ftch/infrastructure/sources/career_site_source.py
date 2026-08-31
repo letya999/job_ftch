@@ -805,9 +805,10 @@ class CareerSiteSource(Source["RawItem"]):
 
         initial_bypass = self.spec.bypass or "auto"
         bypass_config = dict(self.spec.bypass_config)
-        parser_proxy_domains = self.spec.monitor_config.get("proxy_rescue_allow_domains")
-        if parser_proxy_domains:
-            bypass_config["proxy_rescue_allow_domains"] = parser_proxy_domains
+        for config_key in ("proxy_rescue_allow_domains", "captcha_authorized_domains"):
+            parser_domains = self.spec.monitor_config.get(config_key)
+            if parser_domains:
+                bypass_config[config_key] = parser_domains
         self.bypass_strategy = resolve_bypass(initial_bypass, bypass_config)
         cached_bypass = cached_strategy.get("bypass") if cached_strategy else None
         if (

@@ -121,6 +121,29 @@ async def test_generic_source_defaults_exclude_geekjob_and_superjob_listing_page
     assert superjob.url_filter == r"superjob\.ru/vakansii/[a-z0-9-]+-\d+\.html$"
 
 
+def test_protected_parser_defaults_declare_only_authorized_domains() -> None:
+    from job_ftch.infrastructure.sources.site_defaults import apply_runtime_defaults
+
+    for url in (
+        "https://jobs.ashbyhq.com/example",
+        "https://careers.higgsfield.kz/",
+        "https://job.beeline.ru/vacancies",
+    ):
+        config = apply_runtime_defaults(CareerSiteSpec(url=url)).monitor_config
+        assert config["captcha_authorized_domains"] == [
+            "jobs.ashbyhq.com",
+            "careers.higgsfield.kz",
+            "job.beeline.ru",
+        ]
+        assert config["proxy_rescue_allow_domains"] == config["captcha_authorized_domains"]
+
+    superjob = apply_runtime_defaults(CareerSiteSpec(url="https://www.superjob.ru/vakansii/"))
+    assert superjob.monitor_config["captcha_authorized_domains"] == [
+        "www.superjob.ru",
+        "superjob.ru",
+    ]
+
+
 @pytest.mark.asyncio
 async def test_career_site_source_uses_tbank_root_defaults_for_one_level_expansion(
     monkeypatch: pytest.MonkeyPatch,

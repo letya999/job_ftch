@@ -575,6 +575,44 @@ async def test_solver_attempt_budget_is_enforced() -> None:
 
 
 @pytest.mark.asyncio
+async def test_solver_budget_allows_independent_detail_challenge() -> None:
+    solver = CaptchaSolverBypass(
+        provider="capsolver",
+        api_key="offline-key",  # pragma: allowlist secret
+        max_attempts=1,
+        max_paid_attempts=1,
+        min_provider_seconds=0,
+        enabled_providers=frozenset({"capsolver"}),
+    )
+    calls = 0
+
+    async def fake_external(*args: object, **kwargs: object) -> CaptchaSolveResult:
+        nonlocal calls
+        del args, kwargs
+        calls += 1
+        return CaptchaSolveResult(
+            solved=False,
+            method="capsolver",
+            failure_reason=CaptchaFailureReason.PROVIDER_REJECTED,
+        )
+
+    solver._solve_external_api = fake_external  # type: ignore[method-assign]
+
+    first = await solver.solve(
+        SimpleNamespace(url="https://example.test/jobs/one"),
+        challenge_type="hcaptcha",
+    )
+    second = await solver.solve(
+        SimpleNamespace(url="https://example.test/jobs/two"),
+        challenge_type="hcaptcha",
+    )
+
+    assert first.failure_reason is CaptchaFailureReason.PROVIDER_REJECTED
+    assert second.failure_reason is CaptchaFailureReason.PROVIDER_REJECTED
+    assert calls == 2
+
+
+@pytest.mark.asyncio
 async def test_paid_provider_is_rejected_when_deadline_is_too_short() -> None:
     solver = CaptchaSolverBypass(
         provider="capsolver",
