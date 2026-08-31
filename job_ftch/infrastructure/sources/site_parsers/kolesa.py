@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse
@@ -50,10 +51,33 @@ def _extract_detail_urls(
     return urls
 
 
+def _nuxt_vacancies_are_explicitly_empty(html: str) -> bool:
+    tree = HTMLParser(html)
+    node = tree.css_first("#__NUXT_DATA__")
+    if node is None:
+        return False
+    try:
+        payload = json.loads(node.text())
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(payload, list):
+        return False
+    values: list[object] = []
+    for item in payload:
+        if not isinstance(item, dict) or "vacancy-list" not in item:
+            continue
+        value = item["vacancy-list"]
+        if isinstance(value, int) and 0 <= value < len(payload):
+            value = payload[value]
+        values.append(value)
+    return bool(values) and all(value in (None, [], {}) for value in values)
+
+
 class KolesaCareerParser:
     domain_pattern = r"^https?://kolesa\.group/career/job(?:[/?#]|$)"
     has_custom_parse = True
     supports_discover = True
+    confirmed_empty_on_empty = True
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
@@ -86,6 +110,8 @@ class KolesaCareerParser:
             )
             if urls:
                 return urls
+            if _nuxt_vacancies_are_explicitly_empty(str(response.text)):
+                return []
         except Exception as exc:
             logger.debug(
                 "kolesa.http_discover_failed_escalating_to_browser", url=spec.url, error=str(exc)
@@ -99,7 +125,7 @@ class KolesaCareerParser:
             if detail_re.fullmatch(urlparse(current_url).path):
                 return [current_url.split("?", 1)[0]]
             browser = getattr(getattr(self, "_manifest_entry", None), "browser", None)
-            return await browser_scroll_collect_urls(
+            urls = await browser_scroll_collect_urls(
                 page,
                 current_url,
                 detail_re,
@@ -107,6 +133,9 @@ class KolesaCareerParser:
                 scroll_loops=getattr(browser, "scroll_loops", None) or 5,
                 pause_sec=(getattr(browser, "scroll_pause_ms", None) or 500) / 1000.0,
             )
+            if not urls:
+                raise RuntimeError("kolesa listing did not expose vacancy state")
+            return urls
 
     @property
     def __name__(self) -> str:

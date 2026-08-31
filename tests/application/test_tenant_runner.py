@@ -907,10 +907,13 @@ async def test_tenant_runner_update_source_runtime_and_config_rules(tmp_path: Pa
         patched = await runner.update_source(
             "ai_jobs",
             source_id,
-            {"enabled": False, "limit": 7},
+            {"enabled": False, "limit": 7, "url": "https://example.org/vacancies"},
         )
         assert patched.get("enabled") is False
         assert patched["spec"]["limit"] == 7
+        assert patched["spec"]["url"] == "https://example.org/vacancies"
+        invalid_url = await runner.update_source("ai_jobs", source_id, {"url": ""})
+        assert invalid_url["error"] == "invalid_arguments"
         unknown = await runner.update_source("ai_jobs", source_id, {"parser": "generic"})
         assert unknown["error"] == "invalid_arguments"
         listed = await runner.list_sources("ai_jobs")

@@ -1342,11 +1342,11 @@ class TenantRunner:
         source_id: str,
         patch: dict[str, Any],
     ) -> dict[str, Any]:
-        unknown = [key for key in patch if key not in {"enabled", "limit"}]
+        unknown = [key for key in patch if key not in {"enabled", "limit", "url"}]
         if unknown:
             return {
                 "error": "invalid_arguments",
-                "message": "patch may only include enabled and/or limit",
+                "message": "patch may only include enabled, limit, and/or url",
                 "unknown_keys": unknown,
                 "source_id": source_id,
             }
@@ -1360,6 +1360,12 @@ class TenantRunner:
             return {
                 "error": "invalid_arguments",
                 "message": "limit must be an int or null",
+                "source_id": source_id,
+            }
+        if "url" in patch and not isinstance(patch["url"], str):
+            return {
+                "error": "invalid_arguments",
+                "message": "url must be a string",
                 "source_id": source_id,
             }
 
@@ -1382,6 +1388,13 @@ class TenantRunner:
                 "error": "config_limit_not_updatable",
                 "source_id": source_id,
                 "hint": "do not rewrite YAML; add a runtime source to change limit",
+            }
+        if is_config and "url" in patch:
+            return {
+                "status": "unsupported",
+                "error": "config_url_not_updatable",
+                "source_id": source_id,
+                "hint": "update the tenant config instead",
             }
         if is_config:
             target_id = _canonical_base_source_id(runtime, source_id, listed_item) or source_id
@@ -1424,6 +1437,25 @@ class TenantRunner:
                     "hint": "this source spec has no limit field",
                 }
             new_spec = new_spec.model_copy(update={"limit": patch["limit"]})
+        if "url" in patch:
+            fields = getattr(type(new_spec), "model_fields", {})
+            if "url" not in fields:
+                return {
+                    "status": "unsupported",
+                    "error": "url_not_supported",
+                    "source_id": source_id,
+                    "hint": "this source spec has no url field",
+                }
+            try:
+                new_spec = type(new_spec).model_validate(
+                    {**new_spec.model_dump(mode="python"), "url": patch["url"]}
+                )
+            except ValueError as exc:
+                return {
+                    "error": "invalid_arguments",
+                    "message": str(exc),
+                    "source_id": source_id,
+                }
         enabled = runtime_record.enabled if "enabled" not in patch else bool(patch["enabled"])
         updated = runtime_record.model_copy(update={"spec": new_spec, "enabled": enabled})
         previous = runtime_record
