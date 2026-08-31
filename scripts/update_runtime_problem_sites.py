@@ -63,7 +63,7 @@ PATCHES = {
             "url_filter": r"www\.rabota\.ru/vacancy/[^/?#]+/?$",
         },
     },
-    "career_site:ru_superjob": {
+    "career_site:superjob_ru": {
         "bypass": "cloak",
         "monitor": "dom",
         "monitor_config": {
