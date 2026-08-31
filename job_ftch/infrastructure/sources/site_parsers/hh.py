@@ -58,9 +58,7 @@ _VACANCY_LINK_RE = re.compile(
 _URL_FILTER = (
     r"(?:[a-z0-9-]+\.)?(?:hh\.(?:ru|kz|uz|by)|hh1\.az|headhunter\.kg|rabota\.by)/vacancy/\d+"
 )
-_LISTING_TIMESTAMP_RE = re.compile(
-    r'"publicationTime"\s*:\s*\{[^}]*"@timestamp"\s*:\s*(\d+)'
-)
+_LISTING_TIMESTAMP_RE = re.compile(r'"publicationTime"\s*:\s*\{[^}]*"@timestamp"\s*:\s*(\d+)')
 _MAX_DETAIL_REQUESTS = 10
 
 
@@ -434,9 +432,7 @@ class HhParser:
                     20,
                 ),
             )
-            listing_snapshots.update(
-                _extract_listing_snapshots(response.text, str(response.url))
-            )
+            listing_snapshots.update(_extract_listing_snapshots(response.text, str(response.url)))
             new_urls = [
                 url
                 for url in page_urls

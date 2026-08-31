@@ -91,11 +91,11 @@ class FakeTelegramClient:
         min_id: int = 0,
     ) -> list[FakeMessage]:
         call: dict[str, object] = {
-                "entity": entity,
-                "limit": limit,
-                "reply_to": reply_to,
-                "offset_id": offset_id,
-            }
+            "entity": entity,
+            "limit": limit,
+            "reply_to": reply_to,
+            "offset_id": offset_id,
+        }
         if min_id:
             call["min_id"] = min_id
         self.calls.append(call)

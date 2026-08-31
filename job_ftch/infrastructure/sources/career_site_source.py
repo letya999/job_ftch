@@ -822,9 +822,7 @@ class CareerSiteSource(Source["RawItem"]):
         try:
             from job_ftch.infrastructure.bypass.context import BypassContext
 
-            self._bypass_ctx = await BypassContext.for_url(
-                self.spec.url, config=bypass_config
-            )
+            self._bypass_ctx = await BypassContext.for_url(self.spec.url, config=bypass_config)
             bind_context = getattr(self.bypass_strategy, "bind_context", None)
             if callable(bind_context):
                 bind_context(self._bypass_ctx)

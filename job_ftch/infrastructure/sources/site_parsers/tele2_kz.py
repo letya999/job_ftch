@@ -37,6 +37,7 @@ class Tele2KazakhstanParser:
     ) -> list[str]:
         del base_url, keywords, limit
         return []
+
     supports_discover = False
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:

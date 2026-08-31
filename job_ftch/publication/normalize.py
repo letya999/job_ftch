@@ -58,6 +58,7 @@ WORK_MODE_LABELS: dict[str, str] = {
     "onsite": "офис",
 }
 
+
 def _fmt_amount(amount: int) -> str:
     return f"{amount:,}".replace(",", " ")
 

@@ -244,13 +244,7 @@ def _update_source_health_payload(
         baseline_emitted=next_baseline,
         drift_ratio=drift_ratio,
         degraded=degraded,
-        status=(
-            "degraded"
-            if degraded
-            else (
-                "failing" if had_failure else "healthy"
-            )
-        ),
+        status=("degraded" if degraded else ("failing" if had_failure else "healthy")),
         paused=False,
         skipped_runs=0,
         last_eviction_at=previous.last_eviction_at if previous else None,

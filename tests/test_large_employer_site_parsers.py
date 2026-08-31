@@ -127,12 +127,14 @@ async def test_alfa_parser_uses_company_api() -> None:
         async def get(self, url: str, **_: object) -> _Response:
             response = _Response()
             response.json = lambda: {
-                "items": [{
-                    "id": "105584",
-                    "name": "System analyst",
-                    "slug": "/moskva/system-analyst_105584",
-                    "descriptionText": "Design banking APIs.",
-                }]
+                "items": [
+                    {
+                        "id": "105584",
+                        "name": "System analyst",
+                        "slug": "/moskva/system-analyst_105584",
+                        "descriptionText": "Design banking APIs.",
+                    }
+                ]
             }
             return response
 

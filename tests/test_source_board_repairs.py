@@ -15,11 +15,7 @@ from job_ftch.infrastructure.sources.site_parsers.tele2_kz import _extract_hh_em
 
 
 def test_kolesa_recognizes_authoritative_empty_nuxt_listing() -> None:
-    html = (
-        '<script id="__NUXT_DATA__">'
-        '[["Reactive",1],{"data":2},{"vacancy-list":3},{}]'
-        "</script>"
-    )
+    html = '<script id="__NUXT_DATA__">[["Reactive",1],{"data":2},{"vacancy-list":3},{}]</script>'
 
     assert _nuxt_vacancies_are_explicitly_empty(html) is True
 
@@ -41,8 +37,7 @@ def test_tele2_extracts_linked_hh_employer_board() -> None:
     )
 
     assert _extract_hh_employer_url(page) == (
-        "https://almaty.hh.kz/employer/111304?dpt=111304-business"
-        "&hhtmFrom=vacancy_search_list"
+        "https://almaty.hh.kz/employer/111304?dpt=111304-business&hhtmFrom=vacancy_search_list"
     )
 
 

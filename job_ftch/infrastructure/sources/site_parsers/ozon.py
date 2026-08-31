@@ -72,6 +72,7 @@ class OzonCareerParser:
     ) -> list[str]:
         del base_url, keywords, limit
         return []
+
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
         return SiteRuntimeDefaults(

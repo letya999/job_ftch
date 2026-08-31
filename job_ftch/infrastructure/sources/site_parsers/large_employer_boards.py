@@ -416,9 +416,7 @@ class CasibCareerParser(_EmployerBoardParser):
 
 
 class HalykCareerParser(_EmployerBoardParser):
-    domain_pattern = (
-        r"^https?://(?:www\.)?halykbank\.kz/(?:[a-z]{2}/)?(?:index\.php/)?about/career/vacancies(?:/|$)"
-    )
+    domain_pattern = r"^https?://(?:www\.)?halykbank\.kz/(?:[a-z]{2}/)?(?:index\.php/)?about/career/vacancies(?:/|$)"
     parser_name = "halyk_career"
     company = "Halyk Bank"
     detail_pattern = re.compile(r"/(?:[a-z]{2}/)?about/career/vacancies-inner/(\d+)(?:/)?$")
@@ -452,6 +450,7 @@ class TochkaCareerParser(_EmployerBoardParser):
     ) -> list[str]:
         del base_url, keywords, limit
         return []
+
     parser_name = "tochka_career"
     company = "Точка Банк"
     detail_pattern = re.compile(r"/vacancies/catalog/([^/?#]+)(?:/)?$")

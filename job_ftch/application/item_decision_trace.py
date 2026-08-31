@@ -155,7 +155,11 @@ def _set_metadata(span: Any, metadata: Mapping[str, Any]) -> None:
     _set(span, "job_ftch.geo.normalized_location", metadata.get("geo_normalized_location") or "")
     _set(span, "job_ftch.geo.normalized_city", metadata.get("geo_normalized_city") or "")
     _set(span, "job_ftch.geo.normalized_country", metadata.get("geo_normalized_country") or "")
-    _set(span, "job_ftch.geo.normalization_steps", _json_list(metadata.get("geo_normalization_steps")))
+    _set(
+        span,
+        "job_ftch.geo.normalization_steps",
+        _json_list(metadata.get("geo_normalization_steps")),
+    )
 
     snapshots = metadata.get("ontology_snapshots")
     if isinstance(snapshots, Mapping):

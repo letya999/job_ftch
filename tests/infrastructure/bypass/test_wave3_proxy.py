@@ -359,9 +359,7 @@ class TestResidentialProxyRescueRouting:
         job_ftch.config.get_settings.cache_clear()
         from job_ftch.infrastructure.bypass.proxy_bypass import ResidentialProxyBypass
 
-        bypass = ResidentialProxyBypass(
-            {"proxy_rescue_allow_domains": ["job.2gis.ru"]}
-        )
+        bypass = ResidentialProxyBypass({"proxy_rescue_allow_domains": ["job.2gis.ru"]})
 
         assert bypass._domain_allowed("career.habr.com")
         assert bypass._domain_allowed("job.2gis.ru")
