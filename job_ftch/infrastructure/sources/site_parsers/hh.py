@@ -58,6 +58,9 @@ _VACANCY_LINK_RE = re.compile(
 _URL_FILTER = (
     r"(?:[a-z0-9-]+\.)?(?:hh\.(?:ru|kz|uz|by)|hh1\.az|headhunter\.kg|rabota\.by)/vacancy/\d+"
 )
+_LISTING_TIMESTAMP_RE = re.compile(
+    r'"publicationTime"\s*:\s*\{[^}]*"@timestamp"\s*:\s*(\d+)'
+)
 
 
 def _is_allowed_detail_host(detail_url: str, board_url: str) -> bool:
@@ -115,9 +118,12 @@ def _extract_vacancy_urls(html_text: str, base_url: str, *, limit: int) -> list[
     return urls
 
 
-def _extract_listing_titles(html_text: str, base_url: str) -> dict[str, str]:
-    tree = HTMLParser(html.unescape(html_text))
-    titles: dict[str, str] = {}
+def _extract_listing_snapshots(
+    html_text: str, base_url: str
+) -> dict[str, tuple[str, datetime | None]]:
+    raw_html = html.unescape(html_text)
+    tree = HTMLParser(raw_html)
+    snapshots: dict[str, tuple[str, datetime | None]] = {}
     for anchor in tree.css("a[href]"):
         url = urljoin(base_url, str(anchor.attributes.get("href", "") or "")).split("?")[0]
         identity = _detail_identity(url)
@@ -125,8 +131,19 @@ def _extract_listing_titles(html_text: str, base_url: str) -> dict[str, str]:
             continue
         title = " ".join(anchor.text(separator=" ", strip=True).split())
         if title:
-            titles.setdefault(identity, title)
-    return titles
+            card_start = raw_html.find(f'id="{identity}"')
+            timestamp_match = (
+                _LISTING_TIMESTAMP_RE.search(raw_html, card_start, card_start + 20_000)
+                if card_start >= 0
+                else None
+            )
+            published_at = (
+                datetime.fromtimestamp(int(timestamp_match.group(1)), tz=UTC)
+                if timestamp_match
+                else None
+            )
+            snapshots.setdefault(identity, (title, published_at))
+    return snapshots
 
 
 def _listing_page_url(url: str, page: int) -> str:
@@ -256,6 +273,7 @@ def _item_from_detail_html(
 def _item_from_listing(
     detail_url: str,
     title: str,
+    published_at: datetime | None,
     source_name: str,
     board_url: str,
 ) -> RawItem:
@@ -266,6 +284,7 @@ def _item_from_listing(
         external_id=external_id,
         url=detail_url,
         text=title,
+        created_at=published_at,
         metadata={
             "board_url": board_url,
             "job_url": detail_url,
@@ -385,7 +404,7 @@ class HhParser:
                 effective_client = client
 
         collected_urls: list[str] = []
-        listing_titles: dict[str, str] = {}
+        listing_snapshots: dict[str, tuple[str, datetime | None]] = {}
         seen_detail_ids: set[str] = set()
         page_count = self._page_count(limit)
         captcha_detected = False
@@ -414,7 +433,9 @@ class HhParser:
                     20,
                 ),
             )
-            listing_titles.update(_extract_listing_titles(response.text, str(response.url)))
+            listing_snapshots.update(
+                _extract_listing_snapshots(response.text, str(response.url))
+            )
             new_urls = [
                 url
                 for url in page_urls
@@ -447,9 +468,9 @@ class HhParser:
             response.raise_for_status()
             if is_challenge_response(response.text):
                 logger.warning("hh.captcha_detected_detail", url=detail_url)
-                title = listing_titles.get(_detail_identity(detail_url))
-                if title:
-                    yield _item_from_listing(detail_url, title, source_name, spec.url)
+                snapshot = listing_snapshots.get(_detail_identity(detail_url))
+                if snapshot:
+                    yield _item_from_listing(detail_url, *snapshot, source_name, spec.url)
                 continue
             final_url = str(response.url)
             final_id = _detail_identity(final_url)
@@ -465,9 +486,9 @@ class HhParser:
             if item is not None:
                 yield item
             else:
-                title = listing_titles.get(final_id)
-                if title:
-                    yield _item_from_listing(final_url, title, source_name, spec.url)
+                snapshot = listing_snapshots.get(final_id)
+                if snapshot:
+                    yield _item_from_listing(final_url, *snapshot, source_name, spec.url)
 
     @property
     def __name__(self) -> str:

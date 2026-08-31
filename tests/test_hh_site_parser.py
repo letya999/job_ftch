@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import pytest
 
@@ -173,7 +174,10 @@ async def test_hh_parser_uses_listing_title_when_detail_is_captcha() -> None:
     client = _FakeClient(
         {
             listing_url: _FakeResponse(
-                f'<a data-qa="serp-item__title" href="{detail_url}">Python developer</a>',
+                '<div id="123" data-state="{&quot;publicationTime&quot;:'
+                '{&quot;@timestamp&quot;:1787558822}}">'
+                f'<a data-qa="serp-item__title" href="{detail_url}">Python developer</a>'
+                "</div>",
                 listing_url,
             ),
             detail_url: _FakeResponse("<html>captcha recaptcha</html>", detail_url),
@@ -190,6 +194,7 @@ async def test_hh_parser_uses_listing_title_when_detail_is_captcha() -> None:
 
     assert len(items) == 1
     assert items[0].text == "Python developer"
+    assert items[0].created_at == datetime.fromtimestamp(1787558822, tz=UTC)
     assert items[0].metadata["parser"] == "site_hh_listing"
 
 
