@@ -9,7 +9,9 @@ pipeline_graph_expected_hash: 0d73de0663d220da62e37d9a41159542547d167f9f096088f7
 pipeline_max_llm_calls_per_run: 125
 source_preparation_concurrency: 1
 source_preparation_concurrency_adaptive: false
-source_fetch_concurrency: 4
+# Browser-heavy sources share loop-local global limits; four concurrent source
+# sessions starve detail work and turn healthy sources into deadline failures.
+source_fetch_concurrency: 2
 source_fetch_concurrency_adaptive: false
 pipeline_item_concurrency: 3
 pipeline_item_concurrency_adaptive: false
