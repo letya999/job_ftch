@@ -53,6 +53,13 @@ sources:
     url: https://www.superjob.ru/vacancy/search/
     source_name: superjob_ru
     limit: 50
+    bypass: cloak
+    monitor: dom
+    monitor_config:
+      render: true
+      wait: domcontentloaded
+      settle_seconds: 1
+      url_filter: "www\\.superjob\\.ru/vakansii/[^/?#]+-\\d+\\.html$"
   - type: career_site
     url: https://rabota.sber.ru/search
     source_name: rabota_sber_ru
