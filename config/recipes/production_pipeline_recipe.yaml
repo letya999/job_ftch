@@ -113,7 +113,7 @@ live_run:
     --report-path artifacts/release/prod_run_live_17_clean_YYYYMMDD.json
   local_postgres_note: source preparation is intentionally serialized in prod/dev runtime to avoid host-to-docker asyncpg connect timeouts on local Postgres.
   sources_fixture: fixtures/sources/ai_jobs.json
-  sources_fixture_sha256: 4102fcb84e9cf40855a1879eb002f22912710db796b95dd0be4615e07e2e0ec2  # pragma: allowlist secret -- sources fixture content hash
+  sources_fixture_sha256: ca4fe8fed1ea7c8568690d3010116f3e804e7d0356e18ca6bd0dde4e507cd07f  # pragma: allowlist secret -- sources fixture content hash
   source_count: 17
   source_ids:
     - career_site:avito_careers
