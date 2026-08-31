@@ -23,6 +23,10 @@ class SuperJobRuParser:
         return SiteRuntimeDefaults(
             url_filter=r"superjob\.ru/vakansii/[a-z0-9-]+-\d+\.html$",
             include_if_detail_page=False,
+            extra={
+                "captcha_authorized_domains": ["www.superjob.ru", "superjob.ru"],
+                "proxy_rescue_allow_domains": ["www.superjob.ru", "superjob.ru"],
+            },
         )
 
     def parser_kind(self, url: str) -> None:

@@ -149,14 +149,16 @@ class CaptchaSolverBypass:
         self._cookie_cache: dict[str, _CookieCache] = {}
         self._max_attempts = max(1, max_attempts)
         self._max_paid_attempts = max(0, max_paid_attempts)
-        self._attempts = 0
-        self._paid_attempts = 0
+        # ponytail: per-detail budget keeps one blocked card from poisoning
+        # sibling cards; a source-wide quota remains runtime policy.
+        self._attempts: dict[tuple[str, str, str], int] = {}
+        self._paid_attempts: dict[tuple[str, str, str], int] = {}
         self._min_provider_seconds = max(0.0, min_provider_seconds)
         self._paid_lock = asyncio.Lock()
         self._proxy_url = proxy_url
         self._provider_routes = provider_routes or {}
         self._backoff_seconds = max(0.0, backoff_seconds)
-        self._failure_backoff: dict[tuple[str, str], float] = {}
+        self._failure_backoff: dict[tuple[str, str, str], float] = {}
 
     async def apply_http(self, client: Any) -> Any:
         return client
@@ -207,7 +209,9 @@ class CaptchaSolverBypass:
             parsed_page_url = urlparse(str(page.url))
             domain = (parsed_page_url.hostname or parsed_page_url.netloc).lower()
         normalized_type = normalize_challenge_type(challenge_type)
-        backoff_key = (domain, normalized_type)
+        request_url = url or str(getattr(page, "url", ""))
+        attempt_key = self._attempt_key(domain, normalized_type, request_url)
+        backoff_key = attempt_key
         backoff_until = self._failure_backoff.get(backoff_key)
         if domain and backoff_until and backoff_until > time.monotonic():
             return CaptchaSolveResult(
@@ -230,7 +234,7 @@ class CaptchaSolverBypass:
                 result_kind=CaptchaResultKind.SESSION,
             )
 
-        if self._attempts >= self._max_attempts:
+        if self._attempts.get(attempt_key, 0) >= self._max_attempts:
             return CaptchaSolveResult(
                 solved=False,
                 method=self._provider,
@@ -238,7 +242,7 @@ class CaptchaSolverBypass:
                 failure_reason=CaptchaFailureReason.BUDGET_EXHAUSTED,
                 challenge_type=normalized_type,
             )
-        self._attempts += 1
+        self._attempts[attempt_key] = self._attempts.get(attempt_key, 0) + 1
 
         provider_authorized = self._domain_authorized(domain)
         provider_chain = self._provider_chain_for(challenge_type)
@@ -254,7 +258,9 @@ class CaptchaSolverBypass:
                 )
             provider_chain = filtered
         if provider_chain:
-            result = await self._solve_provider_chain(page, challenge_type, url, provider_chain)
+            result = await self._solve_provider_chain(
+                page, challenge_type, url, provider_chain, attempt_key
+            )
         elif self._provider == "browser_wait":
             result = await self._solve_browser_wait(page, challenge_type)
         elif not provider_authorized:
@@ -290,18 +296,21 @@ class CaptchaSolverBypass:
                     failure_reason=CaptchaFailureReason.DEADLINE_INSUFFICIENT,
                     challenge_type=normalized_type,
                 )
-            elif self._paid_attempts >= self._max_paid_attempts:
-                result = CaptchaSolveResult(
-                    solved=False,
-                    method=self._provider,
-                    error="paid solver budget exhausted",
-                    failure_reason=CaptchaFailureReason.BUDGET_EXHAUSTED,
-                    challenge_type=normalized_type,
-                )
             else:
                 async with self._paid_lock:
-                    self._paid_attempts += 1
-                    result = await self._solve_external_api(page, challenge_type, url)
+                    if self._paid_attempts.get(attempt_key, 0) >= self._max_paid_attempts:
+                        result = CaptchaSolveResult(
+                            solved=False,
+                            method=self._provider,
+                            error="paid solver budget exhausted",
+                            failure_reason=CaptchaFailureReason.BUDGET_EXHAUSTED,
+                            challenge_type=normalized_type,
+                        )
+                    else:
+                        self._paid_attempts[attempt_key] = (
+                            self._paid_attempts.get(attempt_key, 0) + 1
+                        )
+                        result = await self._solve_external_api(page, challenge_type, url)
         if result.solved and result.tokens:
             token = result.tokens.get("captcha_token", "")
             if token and not await self._inject_token(page, challenge_type, token):
@@ -382,12 +391,23 @@ class CaptchaSolverBypass:
         providers = self._provider_routes.get(normalized) or self._provider_routes.get("unknown")
         return tuple(providers or ())
 
+    @staticmethod
+    def _attempt_key(
+        domain: str,
+        challenge_type: str,
+        url: str,
+    ) -> tuple[str, str, str]:
+        from urllib.parse import urlparse
+
+        return domain, challenge_type, urlparse(url).path or "/"
+
     async def _solve_provider_chain(
         self,
         page: Any,
         challenge_type: str,
         url: str,
         provider_chain: tuple[str, ...],
+        attempt_key: tuple[str, str, str],
     ) -> CaptchaSolveResult:
         failures: list[str] = []
         for provider_name in provider_chain:
@@ -430,22 +450,25 @@ class CaptchaSolverBypass:
                             failure_reason=CaptchaFailureReason.DEADLINE_INSUFFICIENT,
                             challenge_type=normalize_challenge_type(challenge_type),
                         )
-                    elif self._paid_attempts >= self._max_paid_attempts:
-                        result = CaptchaSolveResult(
-                            solved=False,
-                            method=provider_name,
-                            error="paid solver budget exhausted",
-                            failure_reason=CaptchaFailureReason.BUDGET_EXHAUSTED,
-                            challenge_type=normalize_challenge_type(challenge_type),
-                        )
                     else:
                         async with self._paid_lock:
-                            self._paid_attempts += 1
-                            result = await self._solve_external_api(
-                                page,
-                                challenge_type,
-                                url,
-                            )
+                            if self._paid_attempts.get(attempt_key, 0) >= self._max_paid_attempts:
+                                result = CaptchaSolveResult(
+                                    solved=False,
+                                    method=provider_name,
+                                    error="paid solver budget exhausted",
+                                    failure_reason=CaptchaFailureReason.BUDGET_EXHAUSTED,
+                                    challenge_type=normalize_challenge_type(challenge_type),
+                                )
+                            else:
+                                self._paid_attempts[attempt_key] = (
+                                    self._paid_attempts.get(attempt_key, 0) + 1
+                                )
+                                result = await self._solve_external_api(
+                                    page,
+                                    challenge_type,
+                                    url,
+                                )
             finally:
                 self._provider = previous_provider
                 self._api_key = previous_api_key

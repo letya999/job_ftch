@@ -92,6 +92,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_mts_site_parser.py](test_mts_site_parser.py)
 - [test_nine99_md_site_parser.py](test_nine99_md_site_parser.py)
 - [test_nokia_site_parser.py](test_nokia_site_parser.py)
+- [test_official_career_site_parsers.py](test_official_career_site_parsers.py)
 - [test_ontology_and_llm.py](test_ontology_and_llm.py)
 - [test_ontology_correctness.py](test_ontology_correctness.py)
 - [test_orange_md_site_parser.py](test_orange_md_site_parser.py)
