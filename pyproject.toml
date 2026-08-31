@@ -1,6 +1,6 @@
 [project]
 name = "job-ftch"
-version = "0.0.9"
+version = "0.0.10"
 description = "Open-source async pipeline for ingesting AI/tech job vacancies from Telegram and career sites"
 readme = "README.md"
 license = { text = "MIT" }

@@ -1536,8 +1536,8 @@ def test_source_level_failure_when_nothing_fetched() -> None:
     assert health.status == "failing"
 
 
-def test_failure_streak_pauses_then_healthy_probe_resets_once() -> None:
-    """Three consecutive majority failures pause; one healthy probe fully resets."""
+def test_failure_streak_keeps_source_enabled_then_healthy_run_resets_once() -> None:
+    """Repeated failures stay visible without disabling the source; health resets once."""
     failing = SourceRunStats(fetched=10, failed=8)
     health = _health_from(failing)
     assert health.failure_streak == 1 and not health.paused
@@ -1546,7 +1546,7 @@ def test_failure_streak_pauses_then_healthy_probe_resets_once() -> None:
     assert health.failure_streak == 2 and not health.paused
 
     health = _health_from(failing, previous=health)
-    assert health.failure_streak == 3 and health.paused and health.status == "paused"
+    assert health.failure_streak == 3 and not health.paused and health.status == "failing"
 
     healthy = _health_from(SourceRunStats(fetched=10, failed=1, emitted=9), previous=health)
     assert healthy.failure_streak == 0
