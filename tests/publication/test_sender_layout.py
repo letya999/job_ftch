@@ -52,13 +52,14 @@ def test_reply_card_sender_defaults_to_yaml_layout() -> None:
     assert "Открыть вакансию" not in text
 
 
-def test_incomplete_job_is_marked_but_stays_in_yaml_card_format() -> None:
+def test_incomplete_public_job_is_rejected_before_send() -> None:
     text = TelegramCardSender(bot=object())._render(_incomplete_job())
+
+    assert text is None
+
+
+def test_incomplete_control_bot_job_is_marked_for_review() -> None:
+    text = ReplyCardSender(message=object())._render(_incomplete_job())
 
     assert text.startswith("⚠️ <i>Требует проверки</i>")
     assert "<b>Специалист по нейросетям</b>" in text
-    assert "Компания: не указана" in text
-    assert "Формат: не указан" in text
-    assert "🔵" not in text
-    assert "#" not in text
-    assert "Открыть вакансию" not in text

@@ -14,7 +14,7 @@ import pytest
 pytest.importorskip("telethon", reason="telethon not installed")
 
 from job_ftch.domain import RawItem, SourceKind
-from job_ftch.domain.source_spec import CareerSiteSpec
+from job_ftch.domain.source_spec import CareerSiteSpec, TelegramChannelSpec
 from job_ftch.infrastructure.sources import CareerSiteSource
 from job_ftch.infrastructure.sources.career_site_source import (
     _is_filtered_listing_url,
@@ -88,16 +88,20 @@ class FakeTelegramClient:
         limit: int = 100,
         offset_id: int = 0,
         reply_to: int | None = None,
+        min_id: int = 0,
     ) -> list[FakeMessage]:
-        self.calls.append(
-            {
-                "entity": entity,
-                "limit": limit,
-                "reply_to": reply_to,
-                "offset_id": offset_id,
-            }
-        )
+        call: dict[str, object] = {
+            "entity": entity,
+            "limit": limit,
+            "reply_to": reply_to,
+            "offset_id": offset_id,
+        }
+        if min_id:
+            call["min_id"] = min_id
+        self.calls.append(call)
         items = self._messages if reply_to is None else self._comments_by_post_id.get(reply_to, [])
+        if min_id:
+            items = [message for message in items if message.id > min_id]
         if offset_id:
             try:
                 idx = next(i for i, msg in enumerate(items) if msg.id == offset_id)
@@ -303,6 +307,36 @@ async def test_telegram_channel_source_uses_entity_handle_when_chat_has_no_usern
     assert items[0].source_name == "TelegramTips"
     assert str(items[0].url) == "https://t.me/TelegramTips/209"
     assert items[0].metadata["chat_username"] == "TelegramTips"
+
+
+@pytest.mark.asyncio
+async def test_telegram_channel_persists_high_water_mark_after_complete_fetch() -> None:
+    class Cursor:
+        value: str | None = None
+
+        async def get(self, source_id: str) -> str | None:
+            del source_id
+            return self.value
+
+        async def set(self, source_id: str, value: str) -> None:
+            del source_id
+            self.value = value
+
+    cursor = Cursor()
+    store = SimpleNamespace(incremental_cursor=lambda: cursor)
+    chat = FakeChat(id=1, title="Jobs", username="jobs")
+    messages = [
+        FakeMessage(id=2, message="second", date=datetime.now(UTC)),
+        FakeMessage(id=1, message="first", date=datetime.now(UTC)),
+    ]
+    client = FakeTelegramClient(chat, messages)
+    source = TelegramChannelSource(client, "jobs", limit=10, store=store)
+    source.spec = TelegramChannelSpec(entity="jobs", source_name="jobs")
+
+    assert len(await _collect(source)) == 2
+    assert cursor.value == "2"
+    assert await _collect(source) == []
+    assert client.calls[-1]["min_id"] == 2
 
 
 @pytest.mark.asyncio

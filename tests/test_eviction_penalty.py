@@ -27,7 +27,7 @@ def _write_fixture(path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_eviction_streak_pauses_source_and_probe_reenables_it(tmp_path: Path) -> None:
+async def test_eviction_streak_keeps_source_enabled_and_success_resets_it(tmp_path: Path) -> None:
     fixture_path = tmp_path / "fixture.json"
     _write_fixture(fixture_path)
 
@@ -66,15 +66,12 @@ async def test_eviction_streak_pauses_source_and_probe_reenables_it(tmp_path: Pa
 
     health = await runtime.store.get_source_health(sid)
     assert health is not None
-    assert health.paused is True
+    assert health.paused is False
     assert health.eviction_streak == 2
     assert health.last_eviction_kind == "hard_deadline"
 
-    skipped = await runner.run_tenant(tenant_id)
-    assert sid not in skipped.by_source_id
-
-    probed = await runner.run_tenant(tenant_id)
-    assert sid in probed.by_source_id
+    completed = await runner.run_tenant(tenant_id)
+    assert sid in completed.by_source_id
 
     health_after_probe = await runtime.store.get_source_health(sid)
     assert health_after_probe is not None

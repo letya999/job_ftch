@@ -1,0 +1,967 @@
+message_id,date,source_url,title
+195,2026-07-30T07:24:26+00:00,https://career.habr.com/vacancies/1000167955,🔵 Data Scientist (LLM / AI Agents)
+196,2026-07-30T07:24:30+00:00,https://career.habr.com/vacancies/1000167965,🔵 Java Developer (LLM)
+197,2026-07-30T07:24:34+00:00,https://career.habr.com/vacancies/1000167946,🔵 Python AI Engineer
+198,2026-07-30T07:24:39+00:00,https://yandex.ru/jobs/vacancies/rukovoditel-aikomandi-v-lavku-47326,🔵 AI team lead
+199,2026-07-30T07:24:42+00:00,https://hirify.me/jobs/782599-middle-project-manager-ai,🔵 Middle Project Manager (AI)
+200,2026-07-30T07:24:46+00:00,https://yandex.ru/jobs/vacancies/rukovoditel-gruppi-skoringa-spetsproektov-genaillm-v-sluzhbu-ml-finteha-35312,🔵 Group Lead for Scoring Special Projects (GenAI/LLM)
+201,2026-07-30T07:24:50+00:00,https://yandex.ru/jobs/vacancies/razrabotchik-bekenda-v-yandeks-obrazovanie-47381,🔵 Backend Developer (AI agents)
+202,2026-07-30T07:24:54+00:00,https://yandex.ru/jobs/vacancies/starshiy-dlrazrabotchik-v-komandu-razrabotki-agentov-i-funktsiy-alice-ai-llm-40746,🔵 Senior DL Engineer (agents and functions for Alice AI LLM)
+203,2026-07-30T07:24:57+00:00,https://yandex.ru/jobs/vacancies/mlrazrabotchik-v-komandu-alice-ai-vlm-agents-46805,🔵 ML-разработчик в команду Alice AI VLM Agents
+204,2026-07-30T07:25:01+00:00,https://hirify.me/jobs/785623-junior-python-developer-ai,🔵 Junior Python Developer (AI)
+205,2026-07-30T07:25:05+00:00,https://hirify.me/jobs/668118-product-owner-ai-platform,🔵 Product Owner (AI)
+206,2026-07-30T07:25:09+00:00,https://hirify.me/jobs/782293-senior-fullstack-developer-python-react,"🔵 Senior Fullstack Developer (Python, Django, React, LLM)"
+207,2026-07-30T07:25:12+00:00,https://career.habr.com/vacancies/1000167929,🔵 AI developer intern (full-stack)
+208,2026-07-30T07:25:16+00:00,https://hirify.me/jobs/783641-juniormiddle-ml-engineerpython-developer-ai,🔵 Junior/Middle ML Engineer / Python Developer (AI)
+209,2026-07-30T07:25:20+00:00,https://hirify.me/jobs/783303-senior-python-developer-llm,🔵 Senior Python Developer (LLM)
+210,2026-07-30T07:25:23+00:00,https://hirify.me/jobs/770984-senior-ai-product-manager-rd,🔵 Senior AI Product Manager (R&D)
+211,2026-07-30T07:25:27+00:00,https://career.habr.com/vacancies/1000164602,🔵 Lead AI/ML Engineer
+212,2026-07-30T07:25:31+00:00,https://rabota.sber.ru/search/senior-ml-engineer-agentic-ai-4539507/,🔵 Senior ML Engineer (Agentic AI)
+213,2026-07-30T07:25:35+00:00,https://rabota.sber.ru/search/razrabotchik-ai-resheniy-4554068/,🔵 AI solutions developer
+214,2026-07-30T07:25:38+00:00,https://hh.ru/vacancy/135520626,🔵 AI Engineer / Специалист по искусственному интеллекту
+215,2026-07-30T07:25:42+00:00,https://hh.ru/vacancy/135525825,🔵 ML/AI Engineer
+216,2026-07-30T07:25:46+00:00,https://hh.ru/vacancy/135660272,🔵 Full Stack AI Engineer
+217,2026-07-30T07:25:49+00:00,https://hh.ru/vacancy/135716924,🔵 Intern - AI engineer
+218,2026-07-30T07:25:53+00:00,https://hh.ru/vacancy/129967402,🔵 Senior LLM Inference Backend Engineer
+219,2026-07-30T07:25:57+00:00,https://hh.ru/vacancy/135495496,🔵 AI-разработчик / LLM Engineer
+220,2026-07-30T07:26:01+00:00,https://hh.ru/vacancy/135688774,🔵 Senior AI engineer
+221,2026-07-30T07:26:04+00:00,https://hh.ru/vacancy/135635353,🔵 Senior ML Engineer / AI Engineer (LLM & Agentic Systems)
+222,2026-07-30T07:26:08+00:00,https://hh.ru/vacancy/135671193,"🔵 Middle+ AI Engineer (GenAI, LLM, RAG, Agents)"
+223,2026-07-30T07:26:12+00:00,https://hh.ru/vacancy/135723823,🔵 AI Security Researcher & Engineer
+224,2026-07-30T07:26:15+00:00,https://hh.ru/vacancy/134969707,🔵 Senior LLM Engineer / AI Engineer
+225,2026-07-30T07:26:19+00:00,https://hh.ru/vacancy/134370335,🔵 Senior Machine Learning Engineer (AI)
+226,2026-07-30T07:26:23+00:00,https://t.me/ml_jobs_kz/972,🔵 Senior Backend Engineer (Python / AI Platform)
+227,2026-07-30T07:26:27+00:00,https://t.me/remote_ai_jobs/367,🔵 AI Engineer — AWS Bedrock AgentCore & Production Agentic Systems
+228,2026-07-30T07:26:30+00:00,https://team.vk.company/vacancy/52146/,🔵 Presale AI platform architect
+229,2026-07-30T07:26:34+00:00,https://yandex.ru/jobs/vacancies/llminzhener-v-finteh-34764,🔵 LLM-инженер
+230,2026-07-30T07:26:38+00:00,https://hirify.me/jobs/781756-ai-product-engineer-e-commerce,🔵 AI Product Engineer (e-commerce)
+231,2026-07-30T07:26:42+00:00,https://hh.ru/vacancy/135597368,🔵 Founding AI Engineer (Python / LLM / AI Agents)
+232,2026-07-30T07:26:45+00:00,https://hh.ru/vacancy/135624749,🔵 Prompt Engineer (Agentic AI)
+233,2026-07-30T07:26:49+00:00,https://hh.ru/vacancy/135721610,🔵 AI/ML Engineer
+234,2026-07-30T07:26:53+00:00,https://hh.ru/vacancy/135632177,🔵 Software Prototyping Engineer (AI / R&D Engineer)
+235,2026-07-30T07:26:56+00:00,https://hh.ru/vacancy/135538233,🔵 AI analyst / AI engineer
+236,2026-07-30T07:27:00+00:00,https://hh.ru/vacancy/135194889,🔵 NLP Data Scientist / NLP/LLM преподаватель
+237,2026-07-30T07:27:04+00:00,https://hh.ru/vacancy/134985566,"🔵 Data Scientist (NLP, LLM)"
+238,2026-07-30T07:27:08+00:00,https://hh.ru/vacancy/135722151,🔵 AI Engineer (GPC)
+239,2026-07-30T07:27:11+00:00,https://hh.ru/vacancy/135683576,🔵 AI Product Engineer
+240,2026-07-30T07:27:15+00:00,https://hh.ru/vacancy/135008725,🔵 ML/LLM Engineer
+241,2026-07-30T07:27:19+00:00,https://yandex.ru/jobs/vacancies/rukovoditel-poiskovoy-platformi-nova-core-agentic-search-47331,🔵 Head of Search Platform Nova (Core & Agentic Search)
+242,2026-07-30T07:27:22+00:00,https://yandex.ru/jobs/vacancies/nlp-razrabotchik-funktsiy-v-alisu-44447,🔵 NLP developer (functions for Alice)
+243,2026-07-30T07:27:26+00:00,https://career.habr.com/vacancies/1000165251,🔵 Python developer
+244,2026-07-30T07:27:30+00:00,https://rabota.sber.ru/search/ml-inzhener-4546674/,🔵 ML Engineer
+245,2026-07-30T07:27:34+00:00,https://hh.ru/vacancy/135712015,🔵 ML Engineer
+246,2026-07-30T07:27:38+00:00,https://t.me/remote_ai_jobs/366,🔵 Senior machine learning engineer
+247,2026-07-30T07:53:18+00:00,https://team.vk.company/vacancy/52299/,🔵 Head of Client AI Solutions
+248,2026-07-30T07:53:21+00:00,https://www.superjob.ru/vakansii/stazher-napravleniya-generativnyj-ii-51919034.html,"🔵 Intern, Generative AI"
+249,2026-07-30T07:53:25+00:00,https://hirify.me/jobs/785847-ai-developer-netllm,🔵 AI Developer (.NET + LLM)
+250,2026-07-30T07:53:29+00:00,https://www.tbank.ru/career/it/vacancy/moscow/starshij-menedzher-po-lokalizacii-ai-i-avtomatizaciya/d9bb975f-271e-4b88-85ed-eebfa3569d35/,🔵 LLM engineer (localization)
+251,2026-07-30T07:53:33+00:00,https://hh.ru/vacancy/135736054,"🔵 Senior Data Engineer (Data & AI Platform, Crypto)"
+252,2026-07-30T09:55:25+00:00,https://hirify.me/jobs/786204-senior-ai-developer-net,🔵 Senior AI Developer (.NET)
+253,2026-07-30T09:55:29+00:00,https://hh.ru/vacancy/135600818,🔵 Product Manager / Project Manager / AI Product Engineer / Аналитик
+254,2026-07-30T11:57:30+00:00,https://hh.ru/vacancy/134785074,🔵 Product Engineer
+258,2026-07-30T15:55:11+00:00,https://hirify.me/jobs/787488-middlesenior-java-developer-ai,🔵 Middle/Senior Java Developer (AI)
+259,2026-07-30T15:55:15+00:00,https://hirify.me/jobs/787303-senior-frontend-developer-ai,🔵 Senior Frontend Developer (AI)
+260,2026-07-30T15:55:19+00:00,https://hh.ru/vacancy/135757741,🔵 Senior AI Engineer (Multi-Agent Systems & RAG)
+261,2026-07-30T15:55:23+00:00,https://hh.ru/vacancy/135757190,🔵 AI application security engineer
+262,2026-07-30T15:55:27+00:00,https://rabota.sber.ru/search/senior-product-lead-gigachat-4517248/,🔵 Senior Product Lead (GigaChat)
+263,2026-07-30T15:55:30+00:00,https://rabota.sber.ru/search/techlead-ml-agentnogo-poiska-4555591/,🔵 Tech Lead ML agentic search
+264,2026-07-30T15:55:34+00:00,https://hh.ru/vacancy/134905001,🔵 ML Engineer (Data Scientist)
+268,2026-07-30T19:57:10+00:00,https://hh.ru/vacancy/135247927,🔵 Head of LLM Development
+269,2026-07-30T19:57:14+00:00,https://hh.ru/vacancy/134908155,🔵 AI Lead
+270,2026-07-30T23:57:20+00:00,https://rabota.sber.ru/search/razrabotchik-ai-agentov-python-4546865/,🔵 AI agents developer (Python)
+271,2026-07-30T23:57:23+00:00,https://rabota.sber.ru/search/product-owner-ai-4555588/,🔵 Product Owner (AI)
+272,2026-07-31T03:56:35+00:00,https://yandex.ru/jobs/vacancies/rukovoditel-komandi-v-gruppu-llm-46287,"🔵 Team Lead, LLM group"
+273,2026-07-31T07:55:28+00:00,https://hirify.me/jobs/778254-python-developer-llm,🔵 Python Developer (LLM)
+274,2026-07-31T07:55:32+00:00,https://hh.ru/vacancy/135769425,🔵 AI Lead Engineer (playing tech lead)
+275,2026-07-31T07:55:35+00:00,https://t.me/ml_jobs_kz/975,🔵 Head of AI / Lead AI Engineer
+276,2026-07-31T07:55:39+00:00,https://t.me/remote_ai_jobs/369,"🔵 Staff Backend Engineer, AI Systems"
+277,2026-07-31T07:55:43+00:00,https://hh.ru/vacancy/134842066,🔵 AI Engineer
+278,2026-07-31T07:55:47+00:00,https://hh.ru/vacancy/135768175,🔵 ML Engineer (LLM/NLP)
+279,2026-07-31T07:55:50+00:00,https://t.me/forproducts/10225,🔵 AI Product Engineer
+281,2026-07-31T12:00:03+00:00,https://hirify.me/jobs/789823-senior-fullstack-developer-python-react,"🔵 Senior Fullstack Developer (Python, React, AI)"
+282,2026-07-31T12:00:07+00:00,https://hirify.me/jobs/772104-intern-ai-developer-fullstack,🔵 Intern AI Developer (Fullstack)
+283,2026-07-31T12:00:11+00:00,https://rabota.sber.ru/search/python-razrabotchik-ai-agent-operacionnyy-direktor-4554630/,"🔵 Python developer (AI agent, Operations Director)"
+284,2026-07-31T12:00:15+00:00,https://hh.ru/vacancy/135783896,🔵 Lead AI Engineer
+285,2026-07-31T12:00:19+00:00,https://rabota.sber.ru/search/typescript-node-js-developer-v-gigacode-ai-developer-platform-4550285/,🔵 TypeScript/Node.js Developer (AI Developer Platform)
+286,2026-07-31T12:00:22+00:00,https://hh.ru/vacancy/133722627,🔵 AI agent engineer
+287,2026-07-31T12:00:26+00:00,https://hh.ru/vacancy/135780356,🔵 AI Solutions Engineer / AI Solutions Sales Manager / Vibe Coder
+288,2026-07-31T12:00:30+00:00,https://hh.ru/vacancy/135567280,🔵 AI-инженер
+289,2026-07-31T15:59:12+00:00,https://hirify.me/jobs/790961-glavnyi-razrabotcik-python-gen-ai,🔵 Главный разработчик Python (Gen AI)
+290,2026-07-31T15:59:16+00:00,https://hirify.me/jobs/421455-nlp-developer-ai,🔵 NLP Developer (AI) (Intern)
+291,2026-07-31T15:59:19+00:00,https://hirify.me/jobs/790350-product-manager-ai,🔵 Product Manager (AI)
+292,2026-07-31T19:59:45+00:00,https://hh.ru/vacancy/135795786,🔵 Vibe-coder / AI specialist / IT / ИИ-инженер
+293,2026-08-01T00:08:35+00:00,https://almaty.hh.kz/vacancy/135661340,🔵 Lead Backend Developer / AI Engineer
+294,2026-08-01T00:08:38+00:00,https://almaty.hh.kz/vacancy/135752017,🔵 Senior AI Engineer / AI Architect (Multi-Agent Systems)
+295,2026-08-01T00:08:42+00:00,https://hirehi.ru/development/ai-engineer-70575,🔵 ai engineer
+296,2026-08-01T00:08:46+00:00,https://career.habr.com/vacancies/1000168013,🔵 Инженер по созданию агентов ИИ/AI Agent Engineer
+297,2026-08-01T00:08:50+00:00,https://career.habr.com/vacancies/1000168006,🔵 Full Stack Team Lead (AI PDLC)
+298,2026-08-01T00:08:53+00:00,https://job.alfabank.ru/vacancies/digital/,🔵 Промпт-инженер
+299,2026-08-01T00:08:57+00:00,https://hh.ru/vacancy/135278980,🔵 AI Engineer / AI Automation Specialist
+300,2026-08-01T00:09:01+00:00,https://hh.ru/vacancy/135084322,🔵 AI Product Manager
+301,2026-08-01T00:09:05+00:00,https://yandex.ru/jobs/vacancies/mlrazrabotchik-v-gruppu-spetsproektov-kachestva-poiska-core-agentic-search-47510,🔵 ML-разработчик в группу спецпроектов качества Поиска (Core & Agentic Search)
+302,2026-08-01T00:09:08+00:00,https://jobs.ashbyhq.com/higgsfieldai/300fa007-df6a-48cf-b776-9e1f1de1e5c5,🔵 Product Manager
+303,2026-08-01T00:09:12+00:00,https://yandex.ru/jobs/vacancies/veduschiy-razrabotchik-tehlid-agentskoy-platformi-v-alisu-46683,🔵 Ведущий разработчик (Техлид) агентской платформы в Алису
+304,2026-08-01T00:09:16+00:00,https://hirehi.ru/devops/platform-engineer-70544,🔵 platform engineer
+305,2026-08-01T00:09:20+00:00,https://hirehi.ru/development/java-razrabotchik-70548,🔵 Java разработчик
+306,2026-08-01T00:09:23+00:00,https://career.habr.com/vacancies/1000167987,🔵 AI-разработчик
+307,2026-08-01T08:08:29+00:00,https://hirify.me/jobs/792512-corporate-architect-ai,Корпоративный Архитектор по Работе с ДЗО (AI)
+309,2026-08-01T08:08:36+00:00,https://hirehi.ru/devops/appsec-engineer-70618,appsec engineer
+310,2026-08-01T08:08:40+00:00,https://hirehi.ru/development/data-scientist-70659,data scientist
+311,2026-08-01T08:08:44+00:00,https://hh.ru/vacancy/135295878,AI-разработчик / вайбкодер
+312,2026-08-01T10:03:53+00:00,https://t.me/neurodromo/4126,Middle AI/ML-инженер 💜
+313,2026-08-01T10:03:57+00:00,https://t.me/neurodromo/4145,AI Engineer (Multi-Agent Systems & RAG)
+314,2026-08-01T10:04:01+00:00,https://t.me/n8njobs_ru/42,Lead-Архитектор AI-систем (n8n + Docker + Битрикс24)
+315,2026-08-01T10:04:05+00:00,https://t.me/aivacancychannel/4636,Ищу Python-разработчика (Middle/Senior) с опытом в AI для партнерства
+316,2026-08-01T10:04:08+00:00,https://t.me/neurodromo/4149,AI Automation / n8n-разработчик
+317,2026-08-01T10:04:12+00:00,https://t.me/aivacancychannel/4718,Ищу эксперта для создания практического курса по вайбкодингу (AI Coding)
+318,2026-08-01T10:04:16+00:00,https://t.me/aivacancychannel/4726,Ищем разработчика Telegram ERP / AI Project Management (n8n + Airtable + AI)
+319,2026-08-01T10:04:20+00:00,https://t.me/aivacancychannel/4728,Ищу AI Automation / n8n-разработчика
+320,2026-08-01T10:04:23+00:00,https://t.me/AI_vacancy/1562,Инженер голосовых AI-агентов (Voice Conversation Designer)
+321,2026-08-01T10:04:27+00:00,https://t.me/vakansii_ai/1647,Python-разработчик в команду запуска внутренних AI-сервисов
+322,2026-08-01T10:04:31+00:00,https://t.me/aivacancychannel/4612,Ищем разработчика AI-агентов
+323,2026-08-01T12:04:30+00:00,https://hh.ru/vacancy/135705209,Product Owner / Lead Product Manager (AI Platform)
+324,2026-08-01T12:04:34+00:00,https://hh.ru/vacancy/133774077,AI/AI-agent developer (Python)
+325,2026-08-01T12:04:37+00:00,https://hh.ru/vacancy/135192036,Технический продакт-менеджер (AI-платформа)
+326,2026-08-01T20:05:35+00:00,https://t.me/ITjobsFeed/14396,Lead Python Developer (AI)
+327,2026-08-01T20:05:39+00:00,https://t.me/ITjobsFeed/14435,AI Tech Lead (AI-инициативы / Big Data / Production)
+328,2026-08-01T20:05:43+00:00,https://t.me/ITjobsFeed/14443,AI Python Engineer (LLM / RAG / Agentic-сценарии) 🤖🐍
+329,2026-08-01T20:05:46+00:00,https://t.me/ITjobsFeed/14490,Разработчик (стажёр) в команду AI‐автоматизаций
+330,2026-08-01T20:05:50+00:00,https://t.me/ITjobsFeed/14509,Fullstack AI инженер (Генерация презентаций / RAG / Агенты)
+331,2026-08-01T20:05:54+00:00,https://t.me/ITjobsFeed/14517,AI Developer (Node.js/TS)
+332,2026-08-01T20:05:57+00:00,https://t.me/ITjobsFeed/14563,Full Stack AI Engineer (TypeScript / React / Temporal / LLM)
+333,2026-08-01T20:06:01+00:00,https://t.me/ITjobsFeed/14657,Senior Python-разработчик (LLM / RAG / Agentic-сценарии) 🐍🤖
+334,2026-08-01T20:06:05+00:00,https://t.me/ITjobsFeed/14669,AI-разработчик (.NET + LLM)
+335,2026-08-01T20:06:09+00:00,https://t.me/ITjobsFeed/14697,Python-разработчик (FastAPI / LLM Agent Workflow / Event-Driven) 🐍⚡️
+336,2026-08-01T20:06:13+00:00,https://t.me/ITjobsFeed/14779,AI Automation Engineer
+337,2026-08-01T20:06:16+00:00,https://t.me/ITjobsFeed/14399,AI Developers / Vibe Coders
+338,2026-08-01T20:06:20+00:00,https://t.me/ITjobsFeed/14466,Backend Software Engineer — Applied ML & LLM Systems
+339,2026-08-01T20:06:24+00:00,https://t.me/ITjobsFeed/14514,Agentic AI / LLM Engineer — разработчик AI-агентов
+340,2026-08-01T20:06:28+00:00,https://t.me/ITjobsFeed/14598,AI-product engineer
+341,2026-08-01T20:06:31+00:00,https://t.me/ITjobsFeed/14698,AI Product Engineer в Ryze AI
+342,2026-08-01T20:06:35+00:00,https://t.me/ITjobsFeed/14419,Senior Backend Engineer (Python)
+343,2026-08-01T20:06:39+00:00,https://t.me/ITjobsFeed/14587,Senior Full Stack разработчик (Python/Django + React/TypeScript / LLM-агенты) 🎵🤖
+344,2026-08-01T20:06:43+00:00,https://t.me/ITjobsFeed/14727,Frontend developer (Disrupt)
+345,2026-08-01T20:06:46+00:00,https://t.me/ITjobsFeed/14783,Principal Engineering Lead (Customer Experience)
+346,2026-08-01T20:06:50+00:00,https://t.me/ITjobsFeed/14841,Junior Python-разработчик (стажировка)
+347,2026-08-01T20:06:54+00:00,https://t.me/ITjobsFeed/14464,MLOps (банк)
+348,2026-08-02T08:06:15+00:00,https://hirify.me/jobs/766658-senior-backend-developer-ai,Senior Backend Developer (AI)
+349,2026-08-02T08:06:19+00:00,https://hh.ru/vacancy/135011789,Senior Software Architect (AI Agent Systems)
+350,2026-08-02T08:06:23+00:00,https://t.me/remote_ai_jobs/371,AI Engineer
+351,2026-08-02T08:06:27+00:00,https://t.me/vakansii_ai/1663,Junior/Middle ML-инженер/Python разработчик [SmartDocs]
+352,2026-08-02T08:06:31+00:00,https://hirehi.ru/development/python-razrabotchik-70884,python разработчик
+353,2026-08-02T08:06:34+00:00,https://hirehi.ru/development/low-code-developer-70886,low-code developer
+355,2026-08-02T12:06:32+00:00,https://t.me/ml_jobs_kz/977,Senior AI Engineer
+356,2026-08-02T12:06:36+00:00,https://rabota.sber.ru/search/middle-python-razrabotchik-nedvizhimost-i-ekspluataciya-4543726/,Middle Python - разработчик (Недвижимость и эксплуатация)
+357,2026-08-02T21:30:16+00:00,https://t.me/ITjobsFeed/14443,AI Python Engineer (LLM / RAG / Agentic-сценарии) 🤖🐍
+358,2026-08-02T21:30:20+00:00,https://t.me/ITjobsFeed/14466,Backend Software Engineer — Applied ML & LLM Systems
+359,2026-08-02T21:30:24+00:00,https://www.tbank.ru/career/it/vacancy/moscow/ml-prodakt-menedzher-computer-use-agent-dlya-podderzhki/dd009701-6066-4f3b-9b34-a46656030fb5/,ML/AI product manager (AI agent for customer service)
+360,2026-08-02T21:30:27+00:00,https://t.me/ITjobsFeed/14419,Senior Backend Engineer (Python)
+361,2026-08-02T21:30:32+00:00,https://t.me/ITjobsFeed/14445,Senior Fullstack Developer (Python & Angular)
+362,2026-08-02T21:31:36+00:00,https://t.me/ITjobsFeed/14435,AI Tech Lead (AI-инициативы / Big Data / Production)
+364,2026-08-03T00:15:40+00:00,https://yandex.ru/jobs/vacancies/veduschiy-razrabotchik-tehlid-agentskoy-platformi-v-alisu-46683,Ведущий разработчик (Техлид) агентской платформы в Алису
+365,2026-08-03T08:10:34+00:00,https://t.me/vakansii_ai/1665,AI-разработчик
+366,2026-08-03T08:10:38+00:00,https://hirehi.ru/development/ai-engineer-71119,ai engineer
+367,2026-08-03T08:10:42+00:00,https://rabota.sber.ru/search/nlp-llm-researcher-4546944/,NLP/LLM Researcher
+368,2026-08-03T08:10:45+00:00,https://hh.ru/vacancy/134953093,AI Creative Developer / Vibe Coder (AI Software)
+369,2026-08-03T08:10:49+00:00,https://career.habr.com/vacancies/1000167987,AI-разработчик
+370,2026-08-03T08:10:53+00:00,https://job.alfabank.ru/vacancies/digital/,Tech Lead Python/ Технический лидер разработки
+371,2026-08-03T08:10:57+00:00,https://hirehi.ru/development/python-razrabotchik-71095,python разработчик
+372,2026-08-03T12:13:08+00:00,https://t.me/ITjobsFeed/14882,"Founding Engineer (Full-Stack / Backend, AI)"
+373,2026-08-03T12:13:12+00:00,https://hirify.me/jobs/772104-intern-ai-developer-fullstack,Intern AI Developer (Fullstack)
+374,2026-08-03T12:13:15+00:00,https://hirify.me/jobs/796007-backend-developer-ai,Backend Developer (AI)
+375,2026-08-03T12:13:19+00:00,https://hirify.me/jobs/796012-backend-developer-python-ai,Backend Developer (AI)
+376,2026-08-03T12:13:23+00:00,https://t.me/careerstation_pm/1275,Vibe Product Owner (AI-продукты)
+377,2026-08-03T12:13:27+00:00,https://hirehi.ru/development/python-developer-71272,Python Developer
+378,2026-08-03T12:13:30+00:00,https://hirehi.ru/analytics/analitik-dannykh-71250,Аналитик данных
+379,2026-08-03T16:11:01+00:00,https://hirify.me/jobs/796482-ai-product-lead,AI Product Lead
+380,2026-08-03T16:11:05+00:00,https://hirify.me/jobs/776255-python-ai-engineer,Python AI Engineer
+381,2026-08-03T16:11:09+00:00,https://hh.ru/vacancy/135661340,Lead Backend Developer / AI Engineer
+382,2026-08-03T16:11:12+00:00,https://hh.ru/vacancy/135850021,Руководитель по искусственному интеллекту (Head of AI)
+383,2026-08-03T16:11:16+00:00,https://hh.ru/vacancy/131960105,Senior Python Engineer (AI & Automation)
+384,2026-08-03T16:11:20+00:00,https://hh.ru/vacancy/135852978,Senior AI Agent Engineer
+385,2026-08-03T16:11:24+00:00,https://hh.ru/vacancy/135854121,AI Builder (AI Developer / Vibe Coder)
+386,2026-08-03T16:11:27+00:00,https://hh.ru/vacancy/135278980,AI Engineer / AI Automation Specialist
+387,2026-08-03T16:11:31+00:00,https://hh.ru/vacancy/135084322,AI Product Manager
+388,2026-08-03T16:11:35+00:00,https://hh.ru/vacancy/135857263,Product Engineer (AI-first)
+389,2026-08-03T16:11:39+00:00,https://rabota.sber.ru/search/product-manager-rnd-ml-4531936/,Product manager (RnD ML)
+390,2026-08-03T16:11:42+00:00,https://geekjob.ru/vacancy/6a70b64044b8a09479073066,Junior/Middle Full-Stack Developer (AI-First)
+391,2026-08-03T20:15:56+00:00,https://hirify.me/jobs/421455-nlp-developer-ai,NLP Developer (AI)
+392,2026-08-03T20:15:59+00:00,https://hirehi.ru/management/prodakt-menedzher-71446,продакт-менеджер
+393,2026-08-03T20:16:03+00:00,https://hh.ru/vacancy/135857318,"Руководитель проектов внедрения AI-решений (1С, Битрикс24)"
+394,2026-08-03T20:16:07+00:00,https://hh.ru/vacancy/135289963,Продуктовый инженер (AI-агенты для переписок)
+395,2026-08-03T20:16:10+00:00,https://hh.ru/vacancy/135857977,Technical Lead / Agent Engineer (AI-платформа) — Senior
+396,2026-08-04T00:11:50+00:00,https://career.habr.com/vacancies/1000168022,"Backend-разработчик/Инженер автоматизации IT-операций (Python, AI/LLM)"
+397,2026-08-04T10:31:14+00:00,https://t.me/careerstation_pm/1278,AI Продакт менеджер
+398,2026-08-04T10:31:18+00:00,https://t.me/AI_vacancy/1571,Автор/эксперт курса «AI-инженер»
+399,2026-08-04T10:31:22+00:00,https://t.me/aivacancychannel/4779,AI MOP ищет продуктового инженера (AI-агенты)
+401,2026-08-04T10:31:29+00:00,https://hirehi.ru/development/ml-engineer-71746,ML Engineer
+402,2026-08-04T10:31:33+00:00,https://t.me/aivacancychannel/4772,Ищу специалиста по комплексной AI-автоматизации бизнеса
+403,2026-08-04T10:31:37+00:00,https://t.me/AI_vacancy/1570,AI-инженер / специалист по автоматизации бизнес-процессов
+404,2026-08-04T10:52:58+00:00,https://rabota.sber.ru/search/techlead-agentic-ai-4542614/,TechLead Agentic AI
+405,2026-08-04T10:53:02+00:00,https://rabota.sber.ru/search/menedzher-proektov-po-sozdaniyu-ii-agentov-4537645/,Менеджер проектов по созданию ИИ-агентов
+406,2026-08-04T12:36:57+00:00,https://hirify.me/jobs/782293-senior-fullstack-developer-python-react,"Senior Fullstack Developer (Python, Django, React, LLM)"
+407,2026-08-04T12:37:01+00:00,https://hh.ru/vacancy/135890546,Middle Agentic Engineer (Перспективный AI)
+408,2026-08-04T12:37:04+00:00,https://rabota.sber.ru/search/agentic-ai-developer-4542611/,Agentic AI Developer
+410,2026-08-04T12:37:12+00:00,https://hh.ru/vacancy/135192036,Технический продакт-менеджер (AI-платформа)
+411,2026-08-04T12:37:15+00:00,https://hirehi.ru/analytics/sistemnyi-analitik-71858,Системный аналитик
+412,2026-08-04T16:21:33+00:00,https://hirify.me/jobs/802006-fullstack-ai-engineer,Fullstack AI Engineer
+413,2026-08-04T16:21:36+00:00,https://t.me/aivacancychannel/4789,Middle AI Software Engineer (C++/Python)
+414,2026-08-04T16:21:40+00:00,https://hirify.me/jobs/766658-senior-backend-developer-ai,Senior Backend Developer (AI)
+415,2026-08-04T16:21:44+00:00,https://hirify.me/jobs/710431-lead-backend-developer-c-ai,"Lead Backend Developer (C++, AI)"
+416,2026-08-04T16:21:47+00:00,https://hirify.me/jobs/468122-ml-developer-llm-agents,ML-разработчик (LLM)
+417,2026-08-04T16:21:51+00:00,https://hh.ru/vacancy/135903144,ИИ-разработчик (AI Developer / AI-driven Developer)
+418,2026-08-04T16:21:55+00:00,https://t.me/ITjobsFeed/15015,Backend Software Engineer (Applied ML & LLM Systems)
+419,2026-08-04T16:21:59+00:00,https://t.me/aivacancychannel/4790,AI-специалист по внедрению нейросетей
+420,2026-08-04T16:22:02+00:00,https://hirify.me/jobs/697070-ai-assistant-developer-python,AI Assistant Developer (AI)
+421,2026-08-04T16:22:06+00:00,https://hirify.me/jobs/449633-ml-developer-ai-python-java,ML Developer (AI)
+422,2026-08-04T16:22:10+00:00,https://hirehi.ru/development/ml-razrabotchik-71985,ML разработчик
+423,2026-08-04T16:22:14+00:00,https://hirehi.ru/development/c-razrabotchik-71984,C++ разработчик
+424,2026-08-04T16:22:17+00:00,https://hh.ru/vacancy/135897887,Python Developer (AI-агенты)
+425,2026-08-04T16:22:21+00:00,https://rabota.sber.ru/search/middle-data-scientist-golos-klienta-4552711/,Middle Data Scientist (Голос клиента)
+426,2026-08-04T16:22:25+00:00,https://hirify.me/jobs/742042-ml-services-developer-ai,Разработчик ML-сервисов (Java/Go/Python)
+427,2026-08-04T21:33:24+00:00,https://hirify.me/jobs/804535-senior-ai-agent-developer,Старший Разработчик Агентов Для Бизнеса В Лавку (AI)
+428,2026-08-04T21:33:27+00:00,https://hirify.me/jobs/804281-developer-intern-ai-automation,Developer Intern (AI Automation)
+429,2026-08-04T21:33:31+00:00,https://hirehi.ru/management/starshii-menedzher-produkta-72105,старший менеджер продукта
+430,2026-08-04T21:33:35+00:00,https://hh.ru/vacancy/135327464,AI-инженер (автоматизация бизнеса)
+431,2026-08-05T04:15:37+00:00,https://hirify.me/jobs/806331-senior-ai-developer-python-langchain,Senior AI Developer (AI)
+432,2026-08-05T04:15:41+00:00,https://hirify.me/jobs/805864-backend-platform-developer-llm,Backend/Platform Developer (LLM)
+433,2026-08-05T08:10:28+00:00,https://careers.epam.com/en/vacancy/blt0b716349b1cb6058_en,Generative AI Systems Architect
+434,2026-08-05T08:10:32+00:00,https://hirify.me/jobs/648275-educational-program-developer-ai,Методолог/Разработчик Образовательных Программ [Senior] (AI)
+435,2026-08-05T08:10:36+00:00,https://hirify.me/jobs/807117-python-lead-ai,Python Lead (AI)
+436,2026-08-05T08:10:39+00:00,https://hirify.me/jobs/806934-llm-developer-java,LLM-разработчик в Яндекс Плюс (AI)
+437,2026-08-05T08:10:43+00:00,https://hirify.me/jobs/790961-glavnyi-razrabotcik-python-gen-ai,Главный разработчик Python (Gen AI)
+438,2026-08-05T08:10:47+00:00,https://hh.ru/vacancy/135103341,Senior Python AI Agentic Platform Developer / Senior Python-разработчик AI Agentic...
+439,2026-08-05T08:10:51+00:00,https://hh.ru/vacancy/135082113,Руководитель проекта (AI)
+440,2026-08-05T08:10:54+00:00,https://hh.ru/vacancy/135011789,Senior Software Architect (AI Agent Systems)
+441,2026-08-05T08:10:58+00:00,https://getmatch.ru/vacancies/35627-llm-razrabotchik-v-iandeks-plius-ai,LLM-разработчик в Яндекс Плюс (AI)
+442,2026-08-05T12:09:42+00:00,https://hh.ru/vacancy/135930773,"ML-инженер — RAG, LLM / VLM"
+444,2026-08-05T12:09:49+00:00,https://hh.ru/vacancy/135931908,"Инженер внедрения (LLM, MLOps)"
+445,2026-08-05T12:09:53+00:00,https://hh.ru/vacancy/135932511,Full Stack TypeScript Developer / AI Integration
+446,2026-08-05T12:09:57+00:00,https://rabota.sber.ru/search/rukovoditel-proektov-platform-v-sbertech-4557294/,Руководитель проектов Platform V
+447,2026-08-05T12:10:01+00:00,https://t.me/ITjobsFeed/15034,Старший бэкенд-разработчик в команду Quality
+448,2026-08-05T12:10:04+00:00,https://rabota.sber.ru/search/python-razrabotchik-ai-agentov-likvidnost-i-obyazatelstva-4557404/,Python-разработчик AI-агентов (Ликвидность и обязательства)
+449,2026-08-05T12:10:08+00:00,https://hh.ru/vacancy/135600818,Product Manager / Project Manager / AI Product Engineer / Аналитик
+450,2026-08-05T16:12:57+00:00,https://astanahub.com/en/vacancy/5688,Head of AI / Lead AI Engineer
+451,2026-08-05T16:13:00+00:00,https://rabota.sber.ru/search/team-lead-llm-engineer-genai-4556407/,Team Lead LLM engineer GenAI
+452,2026-08-05T16:13:04+00:00,https://hh.ru/vacancy/135943516,Продакт менеджер (Ecom/AI)
+453,2026-08-05T16:13:08+00:00,https://hh.ru/vacancy/135947348,AI Product manager
+454,2026-08-05T16:13:11+00:00,https://hirify.me/jobs/809172-ai-test-automation-engineer,Инженер По Автоматизации Тестирования (AI)
+455,2026-08-05T16:13:15+00:00,https://rabota.sber.ru/search/ai-engineer-python-4555195/,AI Engineer (Python)
+456,2026-08-05T16:13:19+00:00,https://hh.ru/vacancy/135942968,Лидер IT-инфраструктуры и внутренних систем / Head of IT (AI-native)
+457,2026-08-05T16:13:23+00:00,https://t.me/AI_vacancy/1573,🔵 Специалист по нейросетям
+458,2026-08-05T20:18:09+00:00,https://t.me/ITjobsFeed/14657,Senior Python-разработчик (LLM / RAG / Agentic-сценарии) 🐍🤖
+459,2026-08-05T20:18:13+00:00,https://t.me/ITjobsFeed/14669,AI-разработчик (.NET + LLM)
+460,2026-08-05T20:18:17+00:00,https://t.me/ITjobsFeed/14697,Python-разработчик (FastAPI / LLM Agent Workflow / Event-Driven)
+461,2026-08-05T20:18:20+00:00,https://t.me/ITjobsFeed/14758,AI Inference Engineer
+462,2026-08-05T20:18:24+00:00,https://t.me/ITjobsFeed/14779,AI Automation Engineer
+463,2026-08-05T20:18:28+00:00,https://t.me/ITjobsFeed/14772,Senior AI Engineer
+464,2026-08-05T20:18:32+00:00,https://t.me/ITjobsFeed/14789,Руководитель команды в группу LLM
+465,2026-08-05T20:18:36+00:00,https://t.me/ITjobsFeed/14882,"Founding Engineer (Full-Stack / Backend, AI)"
+466,2026-08-05T20:18:40+00:00,https://hirify.me/jobs/808183-fullstack-ai-engineer,Fullstack AI Engineer
+467,2026-08-05T20:18:43+00:00,https://t.me/neurodromo/4145,AI Engineer (Multi-Agent Systems & RAG)
+468,2026-08-05T20:18:47+00:00,https://t.me/neurodromo/4158,Senior AI Engineer
+469,2026-08-05T20:18:51+00:00,https://t.me/aivacancychannel/4789,Middle AI Software Engineer (C++/Python)
+470,2026-08-05T20:18:55+00:00,https://t.me/AI_vacancy/1571,Автор/эксперт курса «AI-инженер»
+471,2026-08-05T20:18:59+00:00,https://careers.epam.com/en/vacancy/blt0b716349b1cb6058_en,Generative AI Systems Architect
+472,2026-08-05T20:19:03+00:00,https://careers.epam.com/en/vacancy/blt054c2e5206176805_en,AI Solution Architect
+473,2026-08-05T20:19:06+00:00,https://careers.epam.com/en/vacancy/blt02zqzuos443sm9ki_en,AI Native Engineer
+474,2026-08-05T20:19:10+00:00,https://careers.epam.com/en/vacancy/blt0268766b10518644_en,"Lead Python Developer (AI, LLM)"
+475,2026-08-05T20:19:14+00:00,https://careers.epam.com/en/vacancy/blt017bc6dfb686cca0_en,Senior Python Engineer with AI
+476,2026-08-05T20:19:18+00:00,https://career.habr.com/vacancies/1000168057,AI application security engineer
+477,2026-08-05T20:19:22+00:00,https://career.habr.com/vacancies/1000168013,Инженер по созданию агентов ИИ/AI Agent Engineer
+478,2026-08-05T20:19:26+00:00,https://astanahub.com/en/vacancy/5688,Head of AI / Lead AI Engineer
+479,2026-08-05T20:19:29+00:00,https://t.me/ITjobsFeed/14698,AI Product Engineer в Ryze AI
+480,2026-08-05T20:19:33+00:00,https://t.me/neurodromo/4149,AI Automation / n8n-разработчик
+481,2026-08-05T20:19:37+00:00,https://t.me/workitkz/7688,AI Engineer/Data Scientist
+483,2026-08-05T20:19:44+00:00,https://t.me/aivacancychannel/4718,Ищу эксперта для создания практического курса по вайбкодингу (AI Coding)
+484,2026-08-05T20:19:48+00:00,https://t.me/aivacancychannel/4728,Ищу AI Automation / n8n-разработчика
+485,2026-08-05T20:19:52+00:00,https://t.me/careerstation_pm/1278,AI Продакт менеджер
+486,2026-08-05T20:19:56+00:00,https://t.me/aivacancychannel/4779,AI MOP ищет продуктового инженера (AI-агенты)
+487,2026-08-05T20:20:00+00:00,https://t.me/AI_vacancy/1562,Инженер голосовых AI-агентов (Voice Conversation Designer)
+488,2026-08-05T20:20:03+00:00,https://team.vk.company/vacancy/52146/,Presale-архитектор ИИ-платформы
+489,2026-08-05T20:20:07+00:00,https://team.vk.company/vacancy/45711/,Технический менеджер продукта в AI VK
+490,2026-08-05T20:20:11+00:00,https://careers.just-ai.com/vacancy/product-manager,Product Manager
+491,2026-08-05T20:20:15+00:00,https://t.me/careerstation_pm/1275,Vibe Product Owner (AI-продукты)
+492,2026-08-05T20:20:19+00:00,https://t.me/ITjobsFeed/14720,Senior Fullstack-разработчик (Python/Django + React / Сберзвук / AI-интеграции) 🎵🤖
+493,2026-08-05T20:20:23+00:00,https://t.me/ITjobsFeed/14727,Frontend developer (Disrupt)
+494,2026-08-05T20:20:26+00:00,https://career.habr.com/vacancies/1000167987,AI-разработчик
+495,2026-08-05T20:20:30+00:00,https://t.me/ITjobsFeed/15034,Старший бэкенд-разработчик в команду Quality
+496,2026-08-05T20:20:34+00:00,https://t.me/vakansii_ai/1663,Junior/Middle ML-инженер/Python разработчик [SmartDocs]
+497,2026-08-05T20:20:38+00:00,https://t.me/vakansii_ai/1665,AI-разработчик
+498,2026-08-05T20:20:41+00:00,https://careers.epam.com/en/vacancy/blt04wgl4ad6zwcqrsu_en,Python Developer
+499,2026-08-05T20:20:45+00:00,https://careers.epam.com/en/vacancy/blt023b745cbef2ffa1_en,Senior Python/GenAI Engineer
+500,2026-08-05T20:20:49+00:00,https://career.habr.com/vacancies/1000168084,ML-инженер
+501,2026-08-05T20:20:53+00:00,https://t.me/aivacancychannel/4772,Ищу специалиста по комплексной AI-автоматизации бизнеса
+502,2026-08-05T20:20:57+00:00,https://t.me/AI_vacancy/1570,AI-инженер / специалист по автоматизации бизнес-процессов
+504,2026-08-06T04:17:01+00:00,https://geekjob.ru/vacancy/6a70b64044b8a09479073066,Junior/Middle Full-Stack Developer (AI-First)
+505,2026-08-06T08:12:24+00:00,https://hirehi.ru/development/ai-developer-72659,AI Developer
+506,2026-08-06T08:12:28+00:00,https://hh.ru/vacancy/135968850,Архитектор AI
+507,2026-08-06T08:12:32+00:00,https://hh.ru/vacancy/135968228,Senior AI developer (Python)
+508,2026-08-06T08:12:35+00:00,https://rabota.sber.ru/search/senior-ai-developer-python-4555923/,Senior AI developer (Python)
+509,2026-08-06T08:12:39+00:00,https://t.me/aivacancychannel/4818,Fullstack AI Engineer
+510,2026-08-06T08:12:43+00:00,https://t.me/aivacancychannel/4822,AI Governance Specialist – Platforms & Controls
+511,2026-08-06T08:12:46+00:00,https://hh.ru/vacancy/135966370,AI Developer
+512,2026-08-06T08:12:50+00:00,https://rabota.sber.ru/search/ai-developer-4543221/,AI Developer
+513,2026-08-06T08:12:54+00:00,https://rabota.sber.ru/search/rukovoditel-produkta-sberai-4555257/,Руководитель продукта (SberAI)
+514,2026-08-06T08:12:58+00:00,https://t.me/remote_ai_jobs/373,Machine Learning Engineer
+515,2026-08-06T12:19:37+00:00,https://t.me/ITjobsFeed/15147,Архитектор AI-платформы (LLM-агенты / Multi-agent / MCP) 🤖🏗
+516,2026-08-06T12:19:40+00:00,https://t.me/ITjobsFeed/15141,Старший AI/ML-инженер в Центр экспертизы enterprise-продаж
+517,2026-08-06T12:19:44+00:00,https://hirify.me/jobs/812387-vedushhii-fullstack-razrabotcik-c-angular-ai,Ведущий Full Stack разработчик C# + Angular + AI
+518,2026-08-06T12:19:48+00:00,https://hirify.me/jobs/812716-ai-solutions-architect-llm,AI Solutions Architect (LLM)
+519,2026-08-06T12:19:52+00:00,https://t.me/aivacancychannel/4829,AI-промптер в мебельный бренд
+520,2026-08-06T12:19:55+00:00,https://hh.ru/vacancy/135986918,Technical Project Manager (IT/AI)
+521,2026-08-06T12:19:59+00:00,https://hh.ru/vacancy/135979434,LLM Engineer (Центр Практического ИИ)
+522,2026-08-06T12:20:03+00:00,https://hh.ru/vacancy/135052573,AI-Product Manager в команду голосового ассистента
+523,2026-08-06T12:20:06+00:00,https://hirehi.ru/development/ml-razrabotchik-72935,ML разработчик
+524,2026-08-06T12:20:10+00:00,https://hirehi.ru/development/backend-python-razrabotchik-72923,backend python разработчик
+525,2026-08-06T12:20:14+00:00,https://rabota.sber.ru/search/rukovoditel-portfelya-programm-proektov-sberai-4551819/,Руководитель портфеля программ/проектов (SberAI)
+526,2026-08-06T12:20:18+00:00,https://t.me/AI_vacancy/1576,специалист по нейросетям
+528,2026-08-06T12:20:25+00:00,https://getmatch.ru/vacancies/33789-glavnyi-inzhener-po-soprovozhdeniiu-ai-agentov,Главный инженер по сопровождению AI-агентов
+529,2026-08-06T16:14:00+00:00,https://t.me/ITjobsFeed/15179,Lead Python Engineer (AI/ML / LLM-пайплайны / RAG / Agent Flows) 🤖🚀
+530,2026-08-06T16:14:04+00:00,https://hh.ru/vacancy/135994287,Senior Product Manager (AI Support Platform)
+531,2026-08-06T16:14:08+00:00,https://hh.ru/vacancy/135994313,Senior AI/ML Engineer (LLM / GenAI / NLP)
+532,2026-08-06T16:14:11+00:00,https://t.me/betterdatacommunity/77683,AI Researcher / NLP-инженер (LLM-приложения)
+533,2026-08-06T16:14:15+00:00,https://hh.ru/vacancy/135996678,Agent SRE (Site Reliability Engineer for AI Agents) (Blockchain)
+534,2026-08-06T16:14:19+00:00,https://hh.ru/vacancy/135996033,AI / LLM Inference Engineer
+535,2026-08-06T16:14:23+00:00,https://hirify.me/jobs/813608-project-manager-ai,Project Manager (AI)
+536,2026-08-06T16:14:26+00:00,https://hirify.me/jobs/813759-fullstack-developer-ai-python-react,Fullstack Developer (AI)
+537,2026-08-06T16:14:30+00:00,https://hh.ru/vacancy/135993629,Инженер по ИИ/AI Agent Engineer (LLM & Agentic Systems)
+538,2026-08-06T16:14:34+00:00,https://rabota.sber.ru/search/ai-product-analyst-4538447/,AI Product Analyst
+539,2026-08-06T16:14:38+00:00,https://rabota.sber.ru/search/agent-sre-site-reliability-engineer-for-ai-agents-blockchain-4553211/,Agent SRE (Site Reliability Engineer for AI Agents) (Blockchain)
+540,2026-08-06T16:14:42+00:00,https://rabota.sber.ru/search/technical-project-manager-4555335/,Technical Project Manager
+541,2026-08-06T16:14:45+00:00,https://t.me/ITjobsFeed/15165,ML-разработчик в команду автоматизаций в клиентском сервисе Yandex Crowd
+543,2026-08-06T16:14:53+00:00,https://rabota.sber.ru/search/senior-ml-engineer-ii-agenty-dlya-biznesa-4549367/,Senior ML Engineer (ИИ-агенты для бизнеса)
+545,2026-08-06T16:15:00+00:00,https://rabota.sber.ru/search/python-develeper-4525525/,Python Develeper
+547,2026-08-06T20:17:32+00:00,https://hirify.me/jobs/718409-solution-architect-ai,Solution Architect (AI)
+548,2026-08-06T20:17:36+00:00,https://career.habr.com/vacancies/1000167631,Архитектор решений (AI)
+549,2026-08-06T20:17:39+00:00,https://hh.ru/vacancy/135289972,Prompt-инженер / LLM Behavior Engineer (голосовые AI-агенты)
+550,2026-08-06T20:17:43+00:00,https://rabota.sber.ru/search/senior-data-scientist-r-d-nlp-4554592/,Senior Data Scientist (R&D NLP)
+551,2026-08-07T08:11:33+00:00,https://t.me/neurodromo/4187,Ведущий Full Stack разработчик (C# + Angular + AI)
+552,2026-08-07T08:11:36+00:00,https://hirify.me/jobs/816070-senior-net-developer-ai,Senior .NET Developer (AI)
+553,2026-08-07T08:11:40+00:00,https://hh.ru/vacancy/136011346,Fullstack Engineer / AI Developer
+554,2026-08-07T08:11:44+00:00,https://hh.ru/vacancy/136003015,"Product Manager / Product Owner в LegalTech (AI, Marketplace)"
+555,2026-08-07T08:11:48+00:00,https://t.me/remote_ai_jobs/374,Senior Machine Learning Engineer – Agentic AI
+556,2026-08-07T08:11:52+00:00,https://t.me/opento_data/841,AI Engineer / Sumsub
+557,2026-08-07T08:11:55+00:00,https://rabota.sber.ru/search/middle-python-razrabotchika-ai-engineer-4549416/,Middle Python-разработчика/ AI-Engineer
+558,2026-08-07T12:14:03+00:00,https://t.me/aivacancychannel/4851,Senior AI Software Engineer (C++ / Python)
+559,2026-08-07T12:14:07+00:00,https://hh.ru/vacancy/136026387,Менеджер проектов / Project Manager (IT|AI|Digital)
+560,2026-08-07T12:14:10+00:00,https://rabota.sber.ru/search/ds-ai-lead-tehnicheskiy-direktor-4526776/,DS/ AI Lead (технический директор)
+561,2026-08-07T12:14:14+00:00,https://hh.ru/vacancy/135890078,AI Product manager
+562,2026-08-07T12:14:18+00:00,https://rabota.sber.ru/search/prompt-inzhener-gigachat-4492624/,Prompt-инженер GigaChat
+563,2026-08-07T12:14:22+00:00,https://t.me/ITjobsFeed/15208,Senior Python Developer
+564,2026-08-07T12:14:25+00:00,https://hirehi.ru/development/nlp-engineer-73642,nlp engineer
+565,2026-08-07T12:14:29+00:00,https://rabota.sber.ru/search/llm-engineer-rekomendatelnye-sistemy-4534626/,LLM-Engineer (рекомендательные системы)
+566,2026-08-07T16:56:11+00:00,https://t.me/workitkz/7698,SENIOR AI ENGINEER
+567,2026-08-07T16:56:15+00:00,https://t.me/ITjobsFeed/15268,Middle AI Software Engineer (C++/Python)
+568,2026-08-07T16:56:19+00:00,https://t.me/vakansii_ai/1680,AI Engineer
+569,2026-08-07T16:56:23+00:00,https://hirify.me/jobs/817450-software-architect-ai,Архитектор программного обеспечения (AI)
+570,2026-08-07T16:56:27+00:00,https://rabota.sber.ru/search/ai-architect-enterprise-architect-v-komandu-arhitektorov-b2b-4545803/,AI Architect/Enterprise Architect
+571,2026-08-07T16:56:30+00:00,https://hh.ru/vacancy/136036718,AI Architect/Enterprise Architect
+572,2026-08-07T16:56:34+00:00,https://rabota.sber.ru/search/hochu-v-komandu-rnd-ml-4518767/,PM в команду RnD ML
+573,2026-08-07T16:56:38+00:00,https://hirehi.ru/qa/qa-engineer-auto-dlia-agentnoi-platformy-73828,qa engineer (auto) для агентной платформы
+574,2026-08-07T16:56:42+00:00,https://rabota.sber.ru/search/senior-ml-engineer-genai-data-governanace-4556403/,Senior ML Engineer (GenAI Data Governanace)
+575,2026-08-07T16:56:45+00:00,https://rabota.sber.ru/search/python-razrabotchik-v-komandu-kiberbezopasnosti-ai-agentov-4554247/,Python-разработчик в команду кибербезопасности AI-агентов
+576,2026-08-07T16:56:49+00:00,https://rabota.sber.ru/search/lm-backend-engineer-middle-middle-4556349/,LM-Backend Engineer Middle / Middle+
+577,2026-08-07T16:56:53+00:00,https://rabota.sber.ru/search/python-backend-engineer-genai-data-governance-4556398/,Python Backend Engineer (GenAI Data Governance)
+578,2026-08-07T21:31:34+00:00,https://hirehi.ru/development/ai-razrabotchik-dlia-digital-marketinga-73843,ai разработчик для digital-маркетинга
+579,2026-08-07T21:31:38+00:00,https://hirify.me/jobs/775002-senior-ml-engineer-llm,Старший ML-инженер (LLM)
+580,2026-08-07T21:31:41+00:00,https://hirify.me/jobs/776264-python-ai-engineer-llm,Python AI Engineer (LLM)
+581,2026-08-07T21:31:45+00:00,https://hirify.me/jobs/774027-lead-python-developer-ai,Lead Python Developer (AI)
+582,2026-08-07T21:31:49+00:00,https://hirify.me/jobs/772484-rukovoditel-gruppy-ml-signalov-ai,Руководитель группы ML-сигналов (AI)
+583,2026-08-07T21:31:53+00:00,https://hirify.me/jobs/772358-team-lead-php-vue-ai,"Team Lead (PHP, Vue 3, AI)"
+584,2026-08-07T21:31:56+00:00,https://hirify.me/jobs/771177-netc-developer-middlesenior-ai,.NET / C# Developer (Middle+/Senior) (AI)
+585,2026-08-07T21:32:00+00:00,https://hirify.me/jobs/771169-pythonai-developer-ai,Python/AI Developer (AI)
+586,2026-08-07T21:32:04+00:00,https://hirify.me/jobs/770146-head-of-ai-services,Начальник управления ИИ-сервисов
+587,2026-08-07T21:32:07+00:00,https://hirify.me/jobs/770920-python-developer-ai,Python Developer (AI)
+588,2026-08-07T21:32:11+00:00,https://hirify.me/jobs/770544-genai-product-ai,GenAI Product (AI)
+589,2026-08-07T21:32:15+00:00,https://hirehi.ru/vacancies/ml-ai,senior ml инженер прогнозирования спроса
+590,2026-08-08T05:40:42+00:00,https://hirify.me/jobs/752674-middle-ai-engineer,Middle+ AI Engineer
+591,2026-08-08T05:40:46+00:00,https://hirify.me/jobs/750571-junior-python-developer-ai,Junior Python Developer (AI)
+592,2026-08-08T05:40:49+00:00,https://hirify.me/jobs/748999-senior-python-backend-developer-ai,Senior Python Backend Developer (AI)
+593,2026-08-08T05:40:53+00:00,https://hirify.me/jobs/747265-ai-engineer-llm,AI Engineer (LLM)
+594,2026-08-08T05:40:57+00:00,https://hirify.me/jobs/748616-python-developer-llm,Python Developer (LLM)
+595,2026-08-08T05:49:38+00:00,https://hirehi.ru/management/project-manager-for-ai-adoption-73942,project manager for AI adoption
+597,2026-08-08T08:12:30+00:00,https://hh.ru/vacancy/135915109,Менеджер по внедрению ИИ / AI Product Manager
+598,2026-08-08T08:12:34+00:00,https://hirehi.ru/development/backend-razrabotchik-vnutrennei-avtomatizatsii-73959,backend разработчик внутренней автоматизации
+599,2026-08-08T12:14:00+00:00,https://t.me/aivacancychannel/4864,AI-интегратор
+601,2026-08-08T16:11:26+00:00,https://hirehi.ru/development/ai-engineer-for-enterprise-ai-solutions-74071,ai engineer for enterprise AI solutions
+602,2026-08-08T20:11:02+00:00,https://hirehi.ru/development/ai-engineer-for-enabling-functions-74085,ai engineer for enabling functions
+604,2026-08-09T04:30:20+00:00,https://hirehi.ru/development/ai-engineer-in-pharmaceutical-manufacturing-74139,ai engineer in pharmaceutical manufacturing
+605,2026-08-09T04:30:24+00:00,https://hirehi.ru/development/ai-engineer-for-internal-ai-applications-74133,ai engineer for internal AI applications
+606,2026-08-09T04:30:28+00:00,https://hirehi.ru/development/python-razrabotchik-ai-platformy-74149,python разработчик AI-платформы
+608,2026-08-09T12:11:44+00:00,https://t.me/ITjobsFeed/15328,Lead AI Engineer / AI Platform Engineer
+609,2026-08-09T12:11:48+00:00,https://hh.ru/vacancy/136050443,Ведущий инженер по AI/LLM-платформе
+610,2026-08-09T16:12:40+00:00,https://hirehi.ru/devops/sistemnyi-inzhener-ai-platform-74255,системный инженер AI-платформ
+611,2026-08-09T20:15:23+00:00,https://hirehi.ru/management/project-manager-for-artificial-intelligence-projects-74321,project manager for artificial intelligence projects
+612,2026-08-10T00:12:34+00:00,https://hh.ru/vacancy/136054098,AI-разработчик / ИИ-предприниматель
+613,2026-08-10T04:20:23+00:00,https://hirehi.ru/devops/platform-engineer-for-ai-infrastructure-74372,platform engineer for AI infrastructure
+614,2026-08-10T04:20:27+00:00,https://hirehi.ru/development/ai-engineer-for-banking-products-74385,ai engineer for banking products
+615,2026-08-10T04:20:31+00:00,https://hirehi.ru/development/ai-razrabotchik-dlia-ai-produktov-74346,ai разработчик для AI-продуктов
+616,2026-08-10T04:20:34+00:00,https://hirehi.ru/development/backend-developer-for-an-ai-platform-74358,backend developer for an AI platform
+617,2026-08-10T04:20:38+00:00,https://hirehi.ru/management/product-manager-for-visual-collaboration-74339,product manager for visual collaboration
+618,2026-08-10T08:10:39+00:00,https://t.me/vakansii_ai/1686,Специалист по AI-автоматизации бизнес-процессов
+619,2026-08-10T08:10:43+00:00,https://hirehi.ru/development/ai-razrabotchik-v-igaming-74449,ai разработчик в iGaming
+620,2026-08-10T08:10:47+00:00,https://t.me/AI_vacancy/1584,AI-инженер
+621,2026-08-10T08:10:50+00:00,https://hh.ru/vacancy/135163688,AI Engineer (LLM)
+622,2026-08-10T08:10:54+00:00,https://hh.ru/vacancy/136068188,AI Product Engineer / Business analyst / System analyst
+623,2026-08-10T08:10:59+00:00,https://hirehi.ru/management/rukovoditel-proekta-sistemy-kontrolia-kachestva-74438,руководитель проекта системы контроля качества
+624,2026-08-10T08:11:03+00:00,https://rabota.sber.ru/search/rukovoditel-proekta-sistema-kontrolya-kachestva-4539608/,Руководитель проекта (система контроля качества)
+625,2026-08-10T08:11:07+00:00,https://t.me/opento_data/843,ML Lead Engineer
+626,2026-08-10T08:11:10+00:00,https://hirehi.ru/development/python-razrabotchik-bankovskikh-produktov-74417,python разработчик банковских продуктов
+627,2026-08-10T08:11:14+00:00,https://hirehi.ru/development/python-razrabotchik-dlia-ai-agentov-74453,python разработчик для AI-агентов
+628,2026-08-10T08:11:18+00:00,https://hirehi.ru/development/ml-inzhener-dlia-llm-servisov-74443,ml инженер для LLM-сервисов
+629,2026-08-10T08:11:22+00:00,https://hh.ru/vacancy/136067120,Вайб-кодер / AI-assisted Developer — Middle
+630,2026-08-10T08:11:25+00:00,https://rabota.sber.ru/search/middle-senior-python-razrabotchik-4557342/,Middle/Senior Python разработчик
+631,2026-08-10T08:11:29+00:00,https://rabota.sber.ru/search/senior-python-razrabotchik-4553760/,Senior Python-разработчик
+632,2026-08-10T12:14:49+00:00,https://t.me/llm_jobs/36,AI Tech Lead (LLM)
+633,2026-08-10T12:14:53+00:00,https://hirehi.ru/development/ai-razrabotchik-dlia-torgovogo-finansirovaniia-74588,ai разработчик для торгового финансирования
+634,2026-08-10T12:14:57+00:00,https://hh.ru/vacancy/136082624,Руководитель проекта по внедрению AI‐бота
+635,2026-08-10T12:15:00+00:00,https://hh.ru/vacancy/136083797,Product Manager / Product Owner (AI Products)
+636,2026-08-10T12:15:04+00:00,https://t.me/aivacancychannel/4885,AI Engineer / AI-разработчика
+637,2026-08-10T12:15:08+00:00,https://hh.ru/vacancy/136081397,LLM Platform Engineer
+638,2026-08-10T12:15:11+00:00,https://hh.ru/vacancy/136072543,AI-инженер / AI Automation Engineer
+639,2026-08-10T12:15:15+00:00,https://hirehi.ru/management/rukovoditel-it-proektov-ai-platformy-74594,руководитель it-проектов AI-платформы
+640,2026-08-10T12:15:19+00:00,https://t.me/ITjobsFeed/15379,Senior Python Developer
+641,2026-08-10T12:15:23+00:00,https://hirehi.ru/development/ml-inzhener-v-fintekh-74629,ml инженер в финтех
+642,2026-08-10T12:15:26+00:00,https://hh.ru/vacancy/136075575,Middle Python Developer (AI-Driven ERP/BPM)
+643,2026-08-10T12:15:30+00:00,https://rabota.sber.ru/search/senior-data-scientist-torgovoe-finansirovanie-4558397/,Senior Data Scientist (Торговое финансирование)
+644,2026-08-10T12:15:34+00:00,https://rabota.sber.ru/search/junior-middle-data-scientist-nlp-agenty-4546303/,Junior/Middle Data Scientist (NLP / агенты)
+645,2026-08-10T12:15:38+00:00,https://geekjob.ru/vacancy/6a79b301b8be30ead2028ae8,Full-Stack разработчик
+646,2026-08-10T12:15:42+00:00,https://t.me/ITjobsFeed/15380,UGC Program Manager
+647,2026-08-10T12:15:46+00:00,https://rabota.sber.ru/search/ml-engineer-ii-agenty-4548115/,ML Engineer (ИИ-агенты)
+648,2026-08-10T16:10:59+00:00,https://hh.ru/vacancy/136092653,"Senior AI Engineer (LLM/RAG, Python)"
+649,2026-08-10T16:11:03+00:00,https://hh.ru/vacancy/136094090,Senior AI/ML Engineer / LLM Engineer
+650,2026-08-10T16:11:06+00:00,https://hh.ru/vacancy/136092977,AI product manager
+651,2026-08-10T16:11:10+00:00,https://hh.ru/vacancy/136090641,LLM-инженер
+652,2026-08-10T16:11:14+00:00,https://geekjob.ru/vacancy/6a79c7157db8c993a203e470,Head of product
+653,2026-08-10T16:11:17+00:00,https://rabota.sber.ru/search/backend-razrabotchik-python-4537209/,Backend разработчик (Python)
+654,2026-08-10T20:12:49+00:00,https://hirehi.ru/development/ai-razrabotchik-korporativnoi-ai-platformy-74827,ai разработчик корпоративной AI-платформы
+655,2026-08-10T20:12:52+00:00,https://rabota.sber.ru/search/ispolnitelnyy-direktor-konsultant-ai-b2g-4556085/,Исполнительный директор/ Консультант (AI B2G)
+656,2026-08-10T20:12:56+00:00,https://hh.ru/vacancy/136038929,AI Automation Engineer (Инженер по AI-автоматизации)
+657,2026-08-11T00:20:44+00:00,https://geekjob.ru/vacancy/6a7a35727ef41e02b8006b8c,AI Product Manager в RUFP
+658,2026-08-11T12:11:44+00:00,https://hirehi.ru/development/ml-inzhener-mul-tiagentnykh-sistem-75170,ml инженер мультиагентных систем
+659,2026-08-11T12:11:48+00:00,https://career.habr.com/vacancies/1000168143,AI Junior+ Full-stack Developer
+660,2026-08-11T12:11:52+00:00,https://hirify.me/jobs/665186-senior-ai-product-manager-ml,Старший менеджер ИИ и аналитических продуктов (AI/ML)
+661,2026-08-11T12:11:56+00:00,https://hirify.me/jobs/742624-senior-ai-backend-developer,Senior AI Backend Developer (Go/Python)
+662,2026-08-11T12:11:59+00:00,https://hh.ru/vacancy/136121966,NLP/LLM инженер
+663,2026-08-11T12:12:03+00:00,https://geekjob.ru/vacancy/6a7af7879319f6a4ef049fba,AI Engineer — LLM Systems
+664,2026-08-11T12:12:07+00:00,https://t.me/aivacancychannel/4901,Ищем разработчика Voice AI
+665,2026-08-11T12:12:10+00:00,https://t.me/aivacancychannel/4909,AI Engineer / Инженер по внедрению AI
+666,2026-08-11T12:12:14+00:00,https://hirify.me/jobs/728714-ai-product-owner-llm,AI Product Owner (AI)
+667,2026-08-11T12:12:18+00:00,https://hh.ru/vacancy/136125696,Архитектор по ИИ (ML/AI/LLM)
+668,2026-08-11T12:12:22+00:00,https://t.me/workitkz/7706,Product Engineer / Full-Stack Developer
+669,2026-08-11T12:12:25+00:00,https://hirehi.ru/development/ml-inzhener-dlia-tekstovoi-analitiki-75173,ml инженер для текстовой аналитики
+670,2026-08-11T12:12:29+00:00,https://hh.ru/vacancy/136133546,Python AI-разработчик
+671,2026-08-11T12:12:33+00:00,https://rabota.sber.ru/search/senior-ml-engineer-4556490/,Senior ML engineer
+673,2026-08-11T12:12:40+00:00,https://hh.ru/vacancy/136122861,AI-программист
+674,2026-08-11T16:14:01+00:00,https://t.me/aivacancychannel/4914,Senior LLM Engineer / AI Engineer
+675,2026-08-11T16:14:05+00:00,https://hirehi.ru/development/ai-razrabotchik-dlia-obrabotki-dokumentov-75312,ai разработчик для обработки документов
+676,2026-08-11T16:14:09+00:00,https://hh.ru/vacancy/136134777,ML Engineer / AI Engineer (LLM)
+677,2026-08-11T16:14:13+00:00,https://rabota.sber.ru/search/vladelec-produkta-navigator-4557850/,Владелец продукта «Навигатор»
+678,2026-08-11T16:14:16+00:00,https://hirehi.ru/devops/platform-engineer-for-financial-decision-intelligence-75306,platform engineer for financial decision intelligence
+679,2026-08-11T16:14:20+00:00,https://hirehi.ru/development/python-razrabotchik-dlia-ai-agenta-75311,python разработчик для AI-агента
+680,2026-08-11T16:14:24+00:00,https://rabota.sber.ru/search/starshiy-razrabotchik-vladelec-proekta-multiagentnoy-sistemy-dka-4528829/,Старший разработчик / Владелец проекта мультиагентной системы (ДКА)
+681,2026-08-11T16:14:27+00:00,https://t.me/AI_vacancy/1590,AI-инженер
+682,2026-08-11T20:16:03+00:00,https://t.me/ITjobsFeed/15489,Middle / Senior AI Engineer — LLM Systems
+683,2026-08-11T20:16:07+00:00,https://hirehi.ru/development/ai-razrabotchik-dlia-ai-agentov-75444,ai разработчик для AI-агентов
+684,2026-08-11T20:16:10+00:00,https://hirehi.ru/development/ai-razrabotchik-ai-agentov-75401,ai разработчик AI-агентов
+685,2026-08-11T20:16:15+00:00,https://hh.ru/vacancy/136147564,Разработчик AI/ Разработчик LLM
+686,2026-08-11T20:16:19+00:00,https://hirify.me/jobs/779510-java-developer-llm-spring-kafka,Java Developer (LLM)
+687,2026-08-11T20:16:22+00:00,https://hirehi.ru/devops/devops-inzhener-dlia-agentnykh-sistem-75409,devops инженер для агентных систем
+689,2026-08-12T00:10:11+00:00,https://hirify.me/jobs/745478-senior-product-manager-ai,Старший Менеджер Продукта В AI-Направление Яндекс Образования (AI)
+690,2026-08-12T00:10:15+00:00,https://hh.ru/vacancy/136148013,Senior Applied ML Engineer (LLM Agents &amp; Agentic Systems)
+691,2026-08-12T00:10:18+00:00,https://rabota.sber.ru/search/senior-applied-ml-engineer-llm-agents-agentic-systems-4558626/,Senior Applied ML Engineer (LLM Agents & Agentic Systems)
+692,2026-08-12T00:10:22+00:00,https://hirify.me/jobs/701167-go-developer-ai,Go Developer (AI)
+693,2026-08-12T00:10:26+00:00,https://hh.ru/vacancy/136147961,Applied ML Engineer (LLM Agents & Agentic Systems)
+694,2026-08-12T00:10:29+00:00,https://rabota.sber.ru/search/applied-ml-engineer-llm-agents-agentic-systems-4558638/,Applied ML Engineer (LLM Agents & Agentic Systems)
+695,2026-08-12T00:10:33+00:00,https://hirehi.ru/development/python-razrabotchik-ai-produkta-75465,python разработчик AI-продукта
+696,2026-08-12T00:10:37+00:00,https://hirehi.ru/development/ml-inzhener-vysokonagruzhennykh-mikroservisov-75457,ml инженер высоконагруженных микросервисов
+697,2026-08-12T13:20:01+00:00,https://hh.ru/vacancy/136178742,Solution architect (AI transformation)
+698,2026-08-12T13:20:05+00:00,https://hh.ru/vacancy/136181391,Head of AI Cluster Coordination Department
+699,2026-08-12T13:20:08+00:00,https://hh.ru/vacancy/136166111,AI Project Manager
+700,2026-08-12T13:20:12+00:00,https://hh.ru/vacancy/136179259,Senior+ Data / AI Engineer | LLM / Multi-Agent / RAG
+701,2026-08-12T13:20:16+00:00,https://t.me/aivacancychannel/4921,AI Product Manager
+702,2026-08-12T13:20:20+00:00,https://t.me/ITjobsFeed/15544,"Middle Software Engineer, Agentic Developer Platform"
+703,2026-08-12T13:20:23+00:00,https://hirehi.ru/development/fullstack-razrabotchik-ai-produktov-75885,fullstack разработчик AI-продуктов
+704,2026-08-12T13:20:27+00:00,https://hh.ru/vacancy/136164440,Middle ML developer [AI-агенты HR MWS]
+705,2026-08-12T13:20:31+00:00,https://rabota.sber.ru/search/teh-lider-komandy-razrabotki-ii-agentov-4557231/,Тех.лидер команды разработки ИИ-агентов
+706,2026-08-12T13:29:34+00:00,https://hirehi.ru/development/ml-inzhener-dlia-bankovskikh-produktov-75930,ml инженер для банковских продуктов
+707,2026-08-12T13:47:38+00:00,https://rabota.sber.ru/search/analitik-dannyh-riski-korporativno-investicionnogo-biznesa-4496019/,Аналитик данных (Риски корпоративно-инвестиционного бизнеса)
+708,2026-08-12T16:10:48+00:00,https://t.me/ITjobsFeed/15570,Старший разработчик агентов для бизнеса в Лавку
+709,2026-08-12T16:10:52+00:00,https://hirehi.ru/development/arkhitektor-ai-reshenii-75979,Архитектор AI-решений
+710,2026-08-12T16:10:55+00:00,https://hirehi.ru/development/ai-engineer-for-drug-development-75983,ai engineer for drug development
+711,2026-08-12T16:10:59+00:00,https://hh.ru/vacancy/136186795,Senior NLP/LLM Engineer (Copilot)
+712,2026-08-12T16:11:03+00:00,https://hh.ru/vacancy/136186364,Senior AI Product Manager (Agentic AI)
+713,2026-08-12T16:11:07+00:00,https://rabota.sber.ru/search/senior-nlp-llm-engineer-copilot-4557657/,Senior NLP/LLM Engineer (Copilot)
+714,2026-08-12T16:11:10+00:00,https://hh.ru/vacancy/136187078,AI Agent Engineer / Инженер по внедрению ИИ-агентов
+715,2026-08-12T16:11:14+00:00,https://hh.ru/vacancy/136186853,AI Agent Reliability Engineer / Harness Engineer Agentic AI
+716,2026-08-12T16:11:18+00:00,https://hirehi.ru/development/ml-razrabotchik-dlia-hrtech-75996,ml разработчик для HRTech
+717,2026-08-12T16:11:22+00:00,https://rabota.sber.ru/search/ml-engineer-nlp-backend-4556114/,ML Engineer (NLP & Backend)
+718,2026-08-12T16:11:25+00:00,https://hh.ru/vacancy/136186855,Python Developer (AI-агенты )
+719,2026-08-12T20:12:37+00:00,https://hirehi.ru/management/product-lead-for-ai-products-76040,product lead for AI products
+720,2026-08-12T20:12:41+00:00,https://hirehi.ru/development/ai-engineer-for-agentic-applications-76020,ai engineer for agentic applications
+721,2026-08-12T20:12:45+00:00,https://hirehi.ru/development/ai-engineer-for-enterprise-ai-76052,ai engineer for enterprise AI
+722,2026-08-12T20:12:49+00:00,https://geekjob.ru/vacancy/6a7c9eb1b43c167d6b03a748,Product Lead - AI Solutions (SaaS B2B / eCcommerce)
+723,2026-08-12T20:12:53+00:00,https://hh.ru/vacancy/136188903,Senior AI Engineer (LLM / AI-продукты)
+724,2026-08-12T20:12:56+00:00,https://hh.ru/vacancy/136189562,ML/AI Developer
+726,2026-08-13T00:17:26+00:00,https://t.me/ITjobsFeed/15141,Старший AI/ML-инженер в Центр экспертизы enterprise-продаж
+727,2026-08-13T00:17:30+00:00,https://t.me/ITjobsFeed/15179,Lead Python Engineer (AI/ML / LLM-пайплайны / RAG / Agent Flows) 🤖🚀
+728,2026-08-13T00:17:33+00:00,https://t.me/datasciencejobs/3325,Middle AI Software Engineer (C++/Python)
+729,2026-08-13T00:17:37+00:00,https://t.me/ITjobsFeed/15295,"Founding Engineer (Full-Stack / Backend, AI)"
+730,2026-08-13T00:17:41+00:00,https://t.me/ITjobsFeed/15328,Lead AI Engineer / AI Platform Engineer
+731,2026-08-13T00:17:44+00:00,https://t.me/llm_jobs/36,AI Tech Lead (LLM)
+732,2026-08-13T00:17:48+00:00,https://t.me/ITjobsFeed/15489,Middle / Senior AI Engineer — LLM Systems
+733,2026-08-13T00:17:52+00:00,https://t.me/neurodromo/4187,Ведущий Full Stack разработчик (C# + Angular + AI)
+734,2026-08-13T00:17:55+00:00,https://t.me/vakansii_ai/1678,Стажер (AI Product / LLM)
+735,2026-08-13T00:17:59+00:00,https://t.me/vakansii_ai/1684,⭐️Lead AI Engineer / AI Platform Engineer
+736,2026-08-13T00:18:03+00:00,https://t.me/workitkz/7698,SENIOR AI ENGINEER
+737,2026-08-13T00:18:06+00:00,https://t.me/vakansii_ai/1697,Middle+ Prompt/AI инженер
+738,2026-08-13T00:18:10+00:00,https://t.me/datasciencejobs/3329,"Senior AI Software Engineer (C++, Python)"
+739,2026-08-13T00:18:14+00:00,https://t.me/aivacancychannel/4914,Senior LLM Engineer / AI Engineer
+740,2026-08-13T00:18:18+00:00,https://careers.epam.com/en/vacancy/blt0b716349b1cb6058_en,Generative AI Systems Architect
+741,2026-08-13T00:18:21+00:00,https://careers.epam.com/en/vacancy/blt054c2e5206176805_en,AI Solution Architect
+742,2026-08-13T00:18:25+00:00,https://careers.epam.com/en/vacancy/blt0268766b10518644_en,"Lead Python Developer (AI, LLM)"
+743,2026-08-13T00:18:29+00:00,https://careers.epam.com/en/vacancy/blt017bc6dfb686cca0_en,Senior Python Engineer with AI
+744,2026-08-13T00:18:32+00:00,https://job.alfabank.ru/vacancies/digital/,"Senior python разработчик (LLM, мультиагентные системы)"
+745,2026-08-13T00:18:36+00:00,https://hirehi.ru/management/product-lead-for-ai-products-76040,product lead for AI products
+748,2026-08-13T00:18:47+00:00,https://career.habr.com/vacancies/1000168143,AI Junior+ Full-stack Developer
+749,2026-08-13T00:18:51+00:00,https://t.me/betterdatacommunity/77683,AI Researcher / NLP-инженер (LLM-приложения)
+750,2026-08-13T00:18:55+00:00,https://t.me/aivacancychannel/4818,Fullstack AI Engineer
+751,2026-08-13T00:18:58+00:00,https://t.me/vakansii_ai/1680,AI Engineer
+752,2026-08-13T00:19:02+00:00,https://t.me/opento_data/841,AI Engineer / Sumsub
+753,2026-08-13T00:19:06+00:00,https://t.me/aivacancychannel/4885,AI Engineer / AI-разработчика
+754,2026-08-13T00:19:09+00:00,https://t.me/aivacancychannel/4901,Voice AI developer
+755,2026-08-13T00:19:13+00:00,https://t.me/aivacancychannel/4909,AI Engineer / Инженер по внедрению AI
+756,2026-08-13T00:19:17+00:00,https://t.me/aivacancychannel/4921,AI Product Manager
+757,2026-08-13T00:19:20+00:00,https://t.me/AI_vacancy/1576,специалист по нейросетям
+758,2026-08-13T00:19:24+00:00,https://t.me/AI_vacancy/1590,AI-инженер
+759,2026-08-13T00:19:28+00:00,https://t.me/ITjobsFeed/15544,"Middle Software Engineer, Agentic Developer Platform"
+760,2026-08-13T00:19:31+00:00,https://t.me/workitkz/7706,Product Engineer / Full-Stack Developer
+761,2026-08-13T00:19:35+00:00,https://t.me/ITjobsFeed/15147,Архитектор AI-платформы (LLM-агенты / Multi-agent / MCP) 🤖🏗
+762,2026-08-13T00:19:39+00:00,https://t.me/ITjobsFeed/15165,ML-разработчик в команду автоматизаций в клиентском сервисе Yandex Crowd
+763,2026-08-13T00:19:43+00:00,https://t.me/ITjobsFeed/15208,Senior Python Developer
+764,2026-08-13T00:19:46+00:00,https://t.me/ITjobsFeed/15204,Founding Engineer (Full-stack JS / Backend)
+765,2026-08-13T00:19:50+00:00,https://t.me/ITjobsFeed/15264,Senior Software Engineer (Python)
+766,2026-08-13T00:19:54+00:00,https://t.me/ITjobsFeed/15379,Senior Python Developer
+767,2026-08-13T00:19:57+00:00,https://t.me/vakansii_ai/1686,Специалист по AI-автоматизации бизнес-процессов
+768,2026-08-13T00:20:01+00:00,https://t.me/vakansii_ai/1696,⭐️Tech Lead / AI-Архитектор (ML)
+769,2026-08-13T00:20:05+00:00,https://t.me/ITjobsFeed/15570,Старший разработчик агентов для бизнеса в Лавку
+770,2026-08-13T00:20:08+00:00,https://t.me/opento_data/843,ML Lead Engineer
+771,2026-08-13T00:20:12+00:00,https://careers.epam.com/en/vacancy/blt023b745cbef2ffa1_en,Senior Python/GenAI Engineer
+772,2026-08-13T00:20:16+00:00,https://t.me/aivacancychannel/4829,AI-промптер в мебельный бренд
+776,2026-08-13T00:20:30+00:00,https://t.me/AI_vacancy/1584,AI-инженер
+777,2026-08-13T00:20:34+00:00,https://hirehi.ru/vacancies/ml-ai,ML/AI-инженеры (подборка вакансий)
+778,2026-08-13T00:20:38+00:00,https://team.vk.company/vacancy/52146/,Presale-архитектор ИИ-платформы
+779,2026-08-13T04:15:11+00:00,https://t.me/aivacancychannel/4941,AI TECH LEAD (LLM)
+780,2026-08-13T04:15:15+00:00,https://www.tbank.ru/career/it/vacancy/moscow/it-timlid-v-komandu-razrabotki-ai-servisov/bb6dcdd3-b4b7-4a98-beb7-db868fc8ca69/,IT Team Lead
+781,2026-08-13T04:15:18+00:00,https://career.habr.com/vacancies/1000168185,AI-native Software Engineer
+782,2026-08-13T08:50:08+00:00,https://hirehi.ru/development/ai-engineer-in-igaming-76176,ai engineer in iGaming
+783,2026-08-13T08:50:12+00:00,https://hh.ru/vacancy/135295878,AI-разработчик / вайбкодер
+784,2026-08-13T08:50:16+00:00,https://rabota.sber.ru/search/middle-data-scientist-safehub-4548885/,Middle Data Scientist (SafeHub)
+785,2026-08-13T08:51:21+00:00,https://hirehi.ru/management/product-manager-for-ai-integrations-76172,product manager for AI integrations
+786,2026-08-13T08:51:24+00:00,https://hirify.me/jobs/836730-ai-native-software-engineer-llm,AI-native Software Engineer (LLM)
+787,2026-08-13T08:51:28+00:00,https://hh.ru/vacancy/135495496,"AI-разработчик / LLM Engineer (разработка автономных AI-агентов для маркетинга, бизнеса и..."
+788,2026-08-13T08:51:32+00:00,https://hh.ru/vacancy/136201367,Старший менеджер по ИИ/AI / GPT Product Manager
+789,2026-08-13T12:13:19+00:00,https://getmatch.ru/vacancies/35236-rukovoditel-napravleniia-ai-transformatsii-global-markets-head,Руководитель направления AI-трансформации Global Markets (Head of AI / AI Transformation...
+790,2026-08-13T12:13:23+00:00,https://hirify.me/jobs/737038-genai-developer-business-analyst-ai,GenAI Developer / Business Analyst (AI)
+791,2026-08-13T12:13:27+00:00,https://hh.ru/vacancy/136220395,Senior LLM Backend Engineer
+792,2026-08-13T12:13:30+00:00,https://hh.ru/vacancy/136216730,AI Platform Architect / Tech Lead
+793,2026-08-13T12:13:34+00:00,https://hh.ru/vacancy/135705209,Product Owner / Lead Product Manager (AI Platform)
+794,2026-08-13T12:13:38+00:00,https://hh.ru/vacancy/136204819,Senior AI Agent Engineer
+795,2026-08-13T12:13:42+00:00,https://rabota.sber.ru/search/senior-ai-agent-engineer-4556319/,Senior AI Agent Engineer
+796,2026-08-13T12:13:45+00:00,https://hh.ru/vacancy/136072543,AI-инженер / AI Automation Engineer
+797,2026-08-13T12:13:49+00:00,https://hh.ru/vacancy/136220483,AI Product Engineer (R&D)
+798,2026-08-13T12:13:53+00:00,https://hirehi.ru/management/product-manager-for-erp-automation-76311,product manager for ERP automation
+799,2026-08-13T12:13:57+00:00,https://t.me/ITjobsFeed/15587,Ведущий AI-инженер (ИИ-решения / RAG / AI-агенты / Агрохолдинг) 🤖🌾
+800,2026-08-13T12:14:01+00:00,https://t.me/ITjobsFeed/15592,Senior Backend Engineer (Python)
+801,2026-08-13T12:14:05+00:00,https://t.me/aivacancychannel/4949,ML-инженер
+802,2026-08-13T12:14:09+00:00,https://hirehi.ru/devops/sistemnyi-inzhener-dlia-ai-platformy-76306,системный инженер для AI-платформы
+803,2026-08-13T12:14:12+00:00,https://hirehi.ru/development/ml-razrabotchik-dlia-semanticheskikh-neirotekhnologii-76320,ml разработчик для семантических нейротехнологий
+804,2026-08-13T12:14:16+00:00,https://hirehi.ru/development/python-razrabotchik-vysokonagruzhennykh-ai-servisov-76314,python разработчик высоконагруженных AI-сервисов
+805,2026-08-13T12:14:20+00:00,https://rabota.sber.ru/search/middle-java-developer-pult-navyki-ii-pomoschnikov-4535886/,Middle Java Developer (Пульт. Навыки ИИ-помощников)
+806,2026-08-13T12:14:24+00:00,https://rabota.sber.ru/search/python-developer-vyvod-v-prom-ii-agentov-4524849/,Python developer (Вывод в пром ИИ-агентов)
+807,2026-08-13T21:05:44+00:00,https://hirehi.ru/development/python-developer-for-agentic-ai-systems-76501,python developer for agentic AI systems
+808,2026-08-13T21:05:47+00:00,https://hirehi.ru/development/python-developer-for-ai-platforms-76514,python developer for AI platforms
+809,2026-08-13T21:05:51+00:00,https://hh.ru/vacancy/136223143,Middle+ AI-архитектор
+810,2026-08-13T21:05:55+00:00,https://rabota.sber.ru/search/senior-ds-llm-engineer-ii-agenty-dlya-biznesa-4551853/,Senior DS/LLM Engineer (ИИ‐агенты для бизнеса)
+811,2026-08-13T21:05:58+00:00,https://geekjob.ru/vacancy/6a7c9eb1b43c167d6b03a748,Product Lead - AI Solutions
+812,2026-08-13T21:06:02+00:00,https://t.me/AI_vacancy/1592,AI-инженер / AI Automation Engineer
+813,2026-08-13T21:06:06+00:00,https://hh.ru/vacancy/136038929,AI Automation Engineer (Инженер по AI-автоматизации)
+814,2026-08-13T21:06:09+00:00,https://rabota.sber.ru/search/middle-senior-mle-4546307/,Middle-Senior MLE
+815,2026-08-13T21:06:13+00:00,https://rabota.sber.ru/search/senior-python-razrabotchik-4555549/,Senior Python разработчик
+816,2026-08-13T21:06:17+00:00,https://hh.ru/vacancy/135327464,AI-инженер (автоматизация бизнеса)
+817,2026-08-13T21:06:21+00:00,https://rabota.sber.ru/search/sistemnyy-analitik-4559740/,Системный аналитик
+819,2026-08-14T00:10:51+00:00,https://hirehi.ru/development/ml-engineer-for-ai-coding-agents-76533,ml engineer for AI coding agents
+821,2026-08-14T04:11:22+00:00,https://hirify.me/jobs/766658-senior-backend-developer-ai,Senior Backend Developer (AI)
+822,2026-08-14T08:15:01+00:00,https://t.me/ITjobsFeed/15662,Стажер (AI Product / LLM)
+823,2026-08-14T08:15:05+00:00,https://t.me/aivacancychannel/4974,Senior AI Software Engineer
+824,2026-08-14T08:15:09+00:00,https://hirehi.ru/development/python-developer-for-generative-ai-76730,python developer for generative AI
+825,2026-08-14T08:15:12+00:00,https://hh.ru/vacancy/136244658,Lead AI/LLM Engineer (Руководитель направления AI)
+826,2026-08-14T08:15:16+00:00,https://t.me/aivacancychannel/4977,AI Engineer / LLM Engineer
+827,2026-08-14T08:15:20+00:00,https://hh.ru/vacancy/135915109,Менеджер по внедрению ИИ / AI Product Manager
+828,2026-08-14T08:15:24+00:00,https://rabota.sber.ru/search/applied-ml-engineer-llm-agents-agentic-systems-4558639/,Applied ML Engineer (LLM Agents & Agentic Systems)
+829,2026-08-14T08:15:28+00:00,https://hirehi.ru/development/fullstack-razrabotchik-dlia-veb-proektov-76755,fullstack разработчик для веб-проектов
+830,2026-08-15T03:39:20+00:00,https://t.me/ITjobsFeed/15674,Senior Backend & AI Engineer (Python)
+831,2026-08-15T03:39:23+00:00,https://hh.ru/vacancy/136262342,Системный архитектор AI
+832,2026-08-15T03:39:27+00:00,https://geekjob.ru/vacancy/6a7f21ae2c644e385100571f,Tech Lead NLP / LLM
+833,2026-08-15T03:39:31+00:00,https://t.me/ITjobsFeed/15677,Fullstack TypeScript Developer / AI Integrations Engineer
+834,2026-08-15T03:39:34+00:00,https://hh.ru/vacancy/136253217,ML-инженер (LLM)
+835,2026-08-15T03:39:38+00:00,https://hh.ru/vacancy/136134777,ML Engineer / AI Engineer (LLM)
+836,2026-08-15T03:39:42+00:00,https://hh.ru/vacancy/136245423,Product Manager в AI-продукты
+837,2026-08-15T03:39:46+00:00,https://t.me/ITjobsFeed/15687,AI-Native Engineer — торговая платформа для активных трейдеров
+838,2026-08-15T03:39:49+00:00,https://hh.ru/vacancy/135600818,Product Manager / Project Manager / AI Product Engineer / Аналитик
+839,2026-08-15T03:57:18+00:00,https://hirify.me/jobs/806934-llm-developer-java,LLM-разработчик в Яндекс Плюс (AI)
+840,2026-08-15T03:57:21+00:00,https://hirify.me/jobs/817450-software-architect-ai,Архитектор программного обеспечения (AI)
+841,2026-08-15T08:11:25+00:00,https://t.me/aivacancychannel/4991,Senior AI Engineer
+842,2026-08-15T08:11:28+00:00,https://hirehi.ru/development/ai-engineer-for-enterprise-ai-solutions-77088,ai engineer for enterprise AI solutions
+843,2026-08-15T08:11:32+00:00,https://hh.ru/vacancy/136152968,AI Automation Specialist / Специалист по AI-автоматизации процессов / AI Engineer
+844,2026-08-15T08:11:36+00:00,https://yandex.ru/jobs/vacancies/razrabotchik-bekenda-aiagentov-alisi-44474,Разработчик бэкенда AI-агентов Алисы
+845,2026-08-15T08:11:39+00:00,https://yandex.ru/jobs/vacancies/mlrazrabotchik-v-gruppu-semanticheskih-neyrotehnologiy-47888,ML-разработчик в группу семантических нейротехнологий
+846,2026-08-15T08:11:43+00:00,https://t.me/vakansii_ai/1704,LLM-инженер
+847,2026-08-15T12:16:36+00:00,https://geekjob.ru/vacancy/6a804122611bdb18d80f7d38,Python-разработчик в AI-продукт
+849,2026-08-15T12:16:43+00:00,https://almaty.hh.kz/vacancy/134215543,MLOps (Инженер LLM-инфраструктуры)
+850,2026-08-15T16:13:31+00:00,https://hh.ru/vacancy/135661340,Lead Backend Developer / AI Engineer
+851,2026-08-15T16:13:34+00:00,https://hh.ru/vacancy/134231905,Руководитель проектов внедрения AI
+853,2026-08-15T16:13:42+00:00,https://hh.ru/vacancy/135854121,AI Builder (AI Developer / Vibe Coder)
+854,2026-08-15T16:13:46+00:00,https://t.me/neurodromo/4238,Разработчик 1С-Битрикс
+855,2026-08-15T20:19:53+00:00,https://hirehi.ru/development/ai-razrabotchik-dlia-avtomatizatsii-biznes-protsessov-77204,ai разработчик для автоматизации бизнес-процессов
+856,2026-08-15T20:19:57+00:00,https://hirehi.ru/development/ai-engineer-in-fintech-77212,ai engineer in fintech
+857,2026-08-15T20:20:01+00:00,https://hirehi.ru/development/ai-engineer-for-frontier-ai-systems-77207,ai engineer for frontier AI systems
+858,2026-08-15T20:20:05+00:00,https://hirehi.ru/development/ml-inzhener-bankovskikh-produktov-77200,ml инженер банковских продуктов
+859,2026-08-16T00:13:43+00:00,https://hirify.me/jobs/371310-lead-ai-ml-engineer,Lead AI/ML Engineer (AI)
+860,2026-08-16T08:10:26+00:00,https://hirehi.ru/development/ai-engineer-for-commercial-real-estate-77253,ai engineer for commercial real estate
+861,2026-08-16T12:11:33+00:00,https://almaty.hh.kz/vacancy/133612736,AI продакт-менеджер
+862,2026-08-16T12:11:37+00:00,https://hirehi.ru/development/fullstack-razrabotchik-dlia-platformy-upravleniia-zadachami-77288,fullstack разработчик для платформы управления задачами
+863,2026-08-16T16:20:30+00:00,https://almaty.hh.kz/vacancy/136030486,"Вайбкодер / AI-разработчик (Claude Code, Codex)"
+864,2026-08-17T04:09:53+00:00,https://hirehi.ru/development/ai-engineer-in-healthcare-77368,ai engineer in healthcare
+865,2026-08-17T04:09:57+00:00,https://hirehi.ru/development/ai-engineer-for-generative-ai-systems-77365,ai engineer for generative AI systems
+866,2026-08-17T04:10:01+00:00,https://hh.ru/vacancy/136283357,"Product Engineer (PHP/Python + Vue, AI-first разработка)"
+867,2026-08-17T08:11:44+00:00,https://t.me/aivacancychannel/5019,AI Product Manager / AI Lead
+868,2026-08-17T08:11:48+00:00,https://hh.ru/vacancy/136293998,Senior AI developer (Python)
+869,2026-08-17T08:11:51+00:00,https://hh.ru/vacancy/136294626,Инженер по внедрению LLM/Ведущий системный аналитик
+870,2026-08-17T08:11:55+00:00,https://career.habr.com/vacancies/1000168230,"Product Engineer (PHP/Python + Vue, AI-first разработка)"
+871,2026-08-17T08:11:59+00:00,https://t.me/ITjobsFeed/15776,Senior Software Engineer (AI-native)
+872,2026-08-17T08:12:02+00:00,https://hh.ru/vacancy/136290057,AI-разработчик / Специалист по автоматизации
+873,2026-08-17T12:11:54+00:00,https://hirify.me/jobs/851234-senior-python-ai-developer,Python разработчик (AI)
+874,2026-08-17T12:11:58+00:00,https://hh.ru/vacancy/136306039,Team Lead LLM engineer GenAI
+875,2026-08-17T12:12:02+00:00,https://rabota.sber.ru/search/team-lead-llm-engineer-genai-4558159/,Team Lead LLM engineer GenAI
+876,2026-08-17T12:12:06+00:00,https://rabota.sber.ru/search/tech-lead-gigachat-4551337/,Tech Lead (Gigachat)
+877,2026-08-17T12:12:09+00:00,https://hh.ru/vacancy/136306258,Вайбкодер / AI-Developer / Vibe-Coder
+878,2026-08-17T16:14:40+00:00,https://hirify.me/jobs/852768-ai-developer-backend-tools,AI-разработчик (AI)
+879,2026-08-17T16:14:44+00:00,https://hh.ru/vacancy/136327554,AI Product Manager (Product Builder)
+880,2026-08-17T16:14:48+00:00,https://hh.ru/vacancy/136319824,AI-разработчик автоматизаций
+881,2026-08-17T20:11:51+00:00,https://hh.ru/vacancy/136330975,Senior ML-инженер (AI-агенты)
+882,2026-08-18T08:12:09+00:00,https://t.me/opento_data/848,Senior AI Engineer / TaxDome ⚡️
+883,2026-08-18T08:12:13+00:00,https://hh.ru/vacancy/136346941,Инженер по созданию агентов ИИ/AI Agent Engineer
+884,2026-08-18T08:12:16+00:00,https://hh.ru/vacancy/136342762,ML Engineer (AI Agents / Python)
+885,2026-08-18T08:12:20+00:00,https://rabota.sber.ru/search/ml-engineer-ai-agents-python-4560627/,ML Engineer (AI Agents / Python)
+886,2026-08-18T08:12:24+00:00,https://t.me/remote_ai_jobs/378,AI/ML Engineer for an AI-Driven E-Commerce Platform
+887,2026-08-18T08:12:28+00:00,https://yandex.ru/jobs/vacancies/mlrazrabotchik-v-komandu-avtomatizatsiy-v-klientskom-servise-yandex-crowd-46396,ML-разработчик в команду автоматизаций в клиентском сервисе Yandex Crowd
+888,2026-08-18T08:12:31+00:00,https://hh.ru/vacancy/136340635,Вайбкодер / AI-разработчик (Full-cycle)
+890,2026-08-18T12:16:18+00:00,https://hh.ru/vacancy/136050443,Ведущий инженер по AI/LLM-платформе
+891,2026-08-18T12:16:22+00:00,https://hh.ru/vacancy/136356300,Руководитель проектов ИИ (AI Project Manager)
+892,2026-08-18T12:16:25+00:00,https://hh.ru/vacancy/133309853,Middle/Senior AI Agent Developer
+893,2026-08-18T12:16:29+00:00,https://t.me/ITjobsFeed/15856,AI Engineer/(Backend / Python)
+894,2026-08-18T12:16:33+00:00,https://astanahub.com/en/vacancy/5816,AI Architect
+895,2026-08-18T12:16:37+00:00,https://rabota.sber.ru/search/ai-engineer-ii-scenarii-4541691/,AI Engineer (ИИ-сценарии)
+896,2026-08-18T12:16:40+00:00,https://hirehi.ru/development/python-razrabotchik-dlia-ai-agentov-77965,python разработчик для AI-агентов
+897,2026-08-18T12:16:44+00:00,https://rabota.sber.ru/search/python-razrabotchik-4560253/,Python-разработчик
+898,2026-08-18T12:16:48+00:00,https://rabota.sber.ru/search/middle-ml-engineer-retrieval-agent-rnd-4533948/,Middle ML Engineer (Retrieval Agent / RnD)
+899,2026-08-18T12:16:52+00:00,https://rabota.sber.ru/search/python-razrabotchik-agent-execution-framework-4547335/,Python-разработчик (Agent Execution Framework)
+900,2026-08-18T16:19:34+00:00,https://hirify.me/jobs/858422-nlp-engineer-llm-agents,NLP Engineer в Алису (AI)
+901,2026-08-18T16:19:38+00:00,https://hh.ru/vacancy/136371575,AI/AI-agent developer (Недвижимость и эксплуатация)
+902,2026-08-18T16:19:41+00:00,https://hh.ru/vacancy/136376035,AI Harness Engineer / AI Automation Lead
+903,2026-08-18T16:19:45+00:00,https://rabota.sber.ru/search/ai-engineer-ai-marketing-4558793/,AI Engineer (AI Marketing)
+904,2026-08-18T16:19:49+00:00,https://geekjob.ru/vacancy/6a847853ae81f3e6e7089cdd,Senior Fullstack Engineer (Python / React / LLM)
+905,2026-08-18T16:19:52+00:00,https://rabota.sber.ru/search/ai-engineer-4561429/,AI Engineer
+906,2026-08-18T16:19:56+00:00,https://rabota.sber.ru/search/sistemnyy-analitik-4561343/,Системный аналитик
+908,2026-08-18T16:20:03+00:00,https://rabota.sber.ru/search/python-backend-engineer-genai-data-governance-4556395/,Python Backend Engineer (GenAI Data Governance)
+909,2026-08-18T16:20:07+00:00,https://rabota.sber.ru/search/inzhener-po-soprovozhdeniyu-ai-agenty-4561572/,Инженер по сопровождению (AI-агенты)
+910,2026-08-18T20:11:19+00:00,https://hirify.me/jobs/859129-senior-fullstack-engineer-python-react-llm,Senior Fullstack Engineer (Python / React / LLM)
+911,2026-08-18T20:11:23+00:00,https://geekjob.ru/vacancy/6a847aa4eca93d73ad016587,Backend Engineer (Python / парсинг соцсетей / LLM)
+912,2026-08-18T20:11:26+00:00,https://hirehi.ru/development/ml-razrabotchik-v-bankovskikh-produktakh-78415,ml разработчик в банковских продуктах
+913,2026-08-18T20:11:30+00:00,https://hirehi.ru/development/ml-inzhener-dlia-bankovskikh-produktov-78433,ml инженер для банковских продуктов
+914,2026-08-19T00:11:53+00:00,https://hirify.me/jobs/860567-vaib-koder-fintech,Вайб-кодер (AI)
+915,2026-08-19T04:14:38+00:00,https://hirify.me/jobs/861297-ml-inzener-komanda-razrabotki-llm,ML-инженер (команда разработки LLM)
+916,2026-08-19T08:16:32+00:00,https://hh.ru/vacancy/136384542,Руководитель разработки AI-продукта / Head of AI Product / Technical Product Manager
+917,2026-08-19T08:16:35+00:00,https://hirify.me/jobs/861875-arxitektor-napravleniia-ai,Архитектор направления (AI)
+918,2026-08-19T08:16:39+00:00,https://career.habr.com/vacancies/1000167837,"Python Developer (AI,ML Москва)"
+919,2026-08-19T08:16:43+00:00,https://t.me/aivacancychannel/5059,AI Engineer / Backend Python
+920,2026-08-19T08:16:46+00:00,https://t.me/AI_vacancy/1603,Промт-инженер / Prompt Engineer
+921,2026-08-19T08:16:50+00:00,https://hh.ru/vacancy/136386309,"Инженер по автоматизации сопровождения (AI Hub Finance, направление ИИ агенты)"
+922,2026-08-19T08:16:54+00:00,https://rabota.sber.ru/search/inzhener-po-avtomatizacii-soprovozhdeniya-ai-hub-finance-napravlenie-ii-agenty-4561307/,"Инженер по автоматизации сопровождения (AI Hub Finance, направление ИИ агенты)"
+923,2026-08-19T08:16:57+00:00,https://hirehi.ru/analytics/sistemnyi-analitik-dlia-ai-agentov-testirovaniia-78571,системный аналитик для AI-агентов тестирования
+924,2026-08-19T12:14:39+00:00,https://t.me/aivacancychannel/5070,Senior AI Enablement Engineer
+925,2026-08-19T12:14:43+00:00,https://t.me/aivacancychannel/5068,AI-специалист / AI Engineer
+926,2026-08-19T12:14:47+00:00,https://hirify.me/jobs/862359-ai-llm-developer-python,Разработчик AI / Разработчик LLM (AI)
+927,2026-08-19T12:14:50+00:00,https://hirify.me/jobs/758038-middle-python-llm-engineer-rag,Python / LLM Engineer (RAG)
+928,2026-08-19T12:14:54+00:00,https://hirify.me/jobs/862745-python-llm-engineer-rag-i-ii-agenty,Python / LLM Engineer (RAG и ИИ-агенты)
+929,2026-08-19T12:15:00+00:00,https://hh.ru/vacancy/136399159,AI/LLM Инженер
+930,2026-08-19T12:15:03+00:00,https://hh.ru/vacancy/136395634,ML Engineer / AI Engineer (LLM &amp; AI Agents)
+932,2026-08-19T12:15:11+00:00,https://hirehi.ru/analytics/sistemnyi-analitik-78709,системный аналитик
+933,2026-08-19T12:15:15+00:00,https://hh.ru/vacancy/135696538,AI-инженер / специалист по автоматизации бизнес-процессов
+934,2026-08-19T12:15:19+00:00,https://rabota.sber.ru/search/rukovoditelya-napravleniya-po-metodologii-processov-sberai-4556848/,Руководителя направления по методологии процессов (SberAI)
+935,2026-08-19T16:14:45+00:00,https://t.me/ITjobsFeed/15978,Python / LLM Engineer: RAG и ИИ-агенты
+936,2026-08-19T16:14:49+00:00,https://hirify.me/jobs/382444-python-developer-ai,Python-разработчик (AI)
+937,2026-08-19T16:14:52+00:00,https://hirify.me/jobs/864463-lead-python-ai-developer,Главный разработчик Python (AI)
+938,2026-08-19T16:14:56+00:00,https://hh.ru/vacancy/136417846,Middle Backend AI Engineer (AI Agents) /Python Developer (ИБ проект)
+939,2026-08-19T16:15:00+00:00,https://t.me/aivacancychannel/5074,PROMPT ENGINEER / AI SPECIALIST
+940,2026-08-19T16:15:03+00:00,https://hirify.me/jobs/864702-ml-engineer-llm,ML Engineer (LLM)
+941,2026-08-19T16:15:07+00:00,https://hh.ru/vacancy/136417891,Инженер AI-агентов
+942,2026-08-19T16:15:11+00:00,https://hh.ru/vacancy/136418755,Python AI Automation Engineer
+943,2026-08-19T16:15:15+00:00,https://hirehi.ru/management/starshii-menedzher-produkta-dlia-obrazovatel-nogo-proekta-78876,старший менеджер продукта для образовательного проекта
+944,2026-08-19T16:15:18+00:00,https://rabota.sber.ru/search/project-manager-rnd-ml-4544737/,Project manager (RnD ML)
+945,2026-08-19T16:15:22+00:00,https://hirehi.ru/development/ml-razrabotchik-dlia-llm-reshenii-78877,ml разработчик для LLM-решений
+946,2026-08-19T16:15:26+00:00,https://hirehi.ru/development/python-razrabotchik-dlia-ai-instrumentov-78863,python разработчик для AI-инструментов
+947,2026-08-19T16:15:30+00:00,https://hirehi.ru/development/ml-inzhener-78860,ml инженер
+948,2026-08-19T16:15:33+00:00,https://hirehi.ru/development/ml-razrabotchik-78852,ML разработчик
+949,2026-08-19T16:15:37+00:00,https://rabota.sber.ru/search/backend-razrabotchik-java-4537209/,Backend разработчик (Java)
+950,2026-08-19T16:15:41+00:00,https://rabota.sber.ru/search/fullstack-analitik-giga-assistent-4552905/,Fullstack аналитик (Гига-ассистент)
+951,2026-08-19T20:34:07+00:00,https://hirehi.ru/development/ml-inzhener-dlia-reshenii-na-baze-llm-78898,ml инженер для решений на базе LLM
+952,2026-08-20T00:10:20+00:00,https://hirify.me/jobs/876926-ai-automation-fullstack-engineer-ai,AI Automation / Fullstack Engineer (AI)
+953,2026-08-20T08:15:38+00:00,https://hirify.me/jobs/887461-product-manager-ai,Product Manager (AI)
+954,2026-08-20T08:15:42+00:00,https://hh.ru/vacancy/136436598,Senior GenAI / Agentic AI Engineer — Специалист по науке о данных
+955,2026-08-20T08:15:46+00:00,https://t.me/ITjobsFeed/16004,Middle Python Developer (AI-агенты / Telegram-боты)
+956,2026-08-20T08:15:50+00:00,https://getmatch.ru/vacancies/35881-razrabotchik-ai-razrabotchik-llm,Разработчик AI / Разработчик LLM
+957,2026-08-20T08:15:54+00:00,https://t.me/remote_ai_jobs/380,Senior ML Engineer
+959,2026-08-23T20:59:34+00:00,https://t.me/ITjobsFeed/16015,Senior Mobile Developer iOS & AI Applications
+960,2026-08-23T20:59:37+00:00,https://t.me/ITjobsFeed/16048,SENIOR AI RESEARCHER (RETAIL / AGENTS)
+961,2026-08-23T20:59:41+00:00,https://t.me/ITjobsFeed/16056,Senior Python AI Engineer
+962,2026-08-23T20:59:45+00:00,https://t.me/ITjobsFeed/16110,Senior AI Agent Engineer
+963,2026-08-23T20:59:48+00:00,https://t.me/aivacancychannel/5093,AI-разработчик (Middle+ / Senior)
+964,2026-08-23T20:59:52+00:00,https://t.me/ITjobsFeed/16190,Руководитель команды в группу LLM
+965,2026-08-23T20:59:56+00:00,https://t.me/neurodromo/4266,AI-разработчик (Middle+ / Senior)
+966,2026-08-23T21:00:00+00:00,https://www.superjob.ru/vakansii/stazher-napravleniya-generativnyj-ii-51919034.html,Стажер направления Генеративный ИИ
+967,2026-08-23T21:00:03+00:00,https://t.me/aivacancychannel/5141,AI Engineer
+968,2026-08-23T21:00:07+00:00,https://t.me/aivacancychannel/5151,Middle Prompt Engineer — Voximplant
+969,2026-08-23T21:00:11+00:00,https://t.me/aivacancychannel/5154,AI Engineer / AI-разработчик
+970,2026-08-23T21:00:15+00:00,https://career.habr.com/vacancies/1000168339,AI исследователь
+971,2026-08-23T21:00:18+00:00,https://hirify.me/jobs/905984-llm-platform-engineer,LLM Platform Engineer
+972,2026-08-23T21:00:22+00:00,https://hirify.me/jobs/702083-ml-engineer-vlm-agents,ML-разработчик в команду Alice AI VLM Agents
+973,2026-08-23T21:00:26+00:00,https://hirify.me/jobs/790141-rukovoditel-komandy-llm-ai,Руководитель команды LLM (AI)
+974,2026-08-23T21:00:30+00:00,https://hirify.me/jobs/913813-mle-llm,MLE (LLM)
+975,2026-08-23T21:00:33+00:00,https://career.habr.com/vacancies/1000166542,AI архитектор
+976,2026-08-23T21:00:37+00:00,https://career.habr.com/vacancies/1000168006,Full Stack Team Lead (AI PDLC)
+977,2026-08-23T21:00:41+00:00,https://career.habr.com/vacancies/1000167955,Data Scientist (LLM / AI Agents)
+978,2026-08-23T21:00:44+00:00,https://career.habr.com/vacancies/1000167097,AI/ML Engineer
+979,2026-08-23T21:00:48+00:00,https://career.habr.com/vacancies/1000164602,LEAD AI/ML ENGINEER
+980,2026-08-23T21:00:52+00:00,https://hh.ru/vacancy/130687729,Senior AI/ML Developer
+981,2026-08-23T21:00:55+00:00,https://hh.ru/vacancy/136485648,Senior AI Engineer (LLM / RAG / Agentic AI)/ Generative AI Engineer
+982,2026-08-23T21:00:59+00:00,https://hh.ru/vacancy/136520631,Head of AI
+983,2026-08-23T21:01:03+00:00,https://rabota.sber.ru/search/senior-ai-engineer-ai-agenty-4524256/,Senior AI-engineer (AI-Агенты)
+984,2026-08-23T21:01:07+00:00,https://rabota.sber.ru/search/stazher-ai-engineer-4555136/,Стажер AI Engineer
+985,2026-08-23T21:01:10+00:00,https://rabota.sber.ru/search/specialist-po-ai-avtomatizacii-biznes-processov-4539125/,Специалист по AI-автоматизации бизнес-процессов
+986,2026-08-23T21:01:14+00:00,https://rabota.sber.ru/search/ai-inzhener-finansy-4549416/,AI инженер (Финансы)
+987,2026-08-23T21:01:18+00:00,https://rabota.sber.ru/search/ai-tech-lead-ai-implementation-lead-agentic-ai-4537676/,AI Tech Lead / AI Implementation Lead (Agentic AI)
+988,2026-08-23T21:01:21+00:00,https://t.me/ml_jobs_kz/986,AI Engineer (Middle/Senior)
+989,2026-08-23T21:01:25+00:00,https://t.me/remote_ai_jobs/381,Principal AI Engineer
+990,2026-08-23T21:01:29+00:00,https://t.me/ITjobsFeed/15858,AI Engineer
+991,2026-08-23T21:01:33+00:00,https://t.me/neurodromo/4278,AI Automation Engineer
+992,2026-08-23T21:01:36+00:00,https://t.me/aivacancychannel/5127,Консультант по внедрению AI / AI Solutions Consultant
+993,2026-08-23T21:01:40+00:00,https://hh.ru/vacancy/134829827,Инженер ИИ-автоматизаций / AI automation engineer
+994,2026-08-23T21:01:44+00:00,https://hh.ru/vacancy/136520468,AI Agent Engineer (1→1000) (вайбкодинг)
+995,2026-08-23T21:01:47+00:00,https://rabota.sber.ru/search/ai-engineer-python-4555195/,AI Engineer (Python)
+996,2026-08-23T21:01:51+00:00,https://rabota.sber.ru/search/python-ai-4556666/,Backend-инженер (AI/GenAI platform)
+997,2026-08-23T21:01:55+00:00,https://rabota.sber.ru/search/ai-agent-engineer-1-1000-vaybkoding-4549507/,AI Agent Engineer (1→1000) (вайбкодинг)
+998,2026-08-23T21:02:01+00:00,https://rabota.sber.ru/search/product-owner-ai-4555588/,Product Owner (AI)
+999,2026-08-23T21:02:04+00:00,https://rabota.sber.ru/search/typescript-node-js-developer-v-gigacode-ai-developer-platform-4558475/,TypeScript/Node.js Developer в GigaCode (AI Developer Platform)
+1000,2026-08-23T21:02:08+00:00,https://hh.ru/vacancy/136481715,AI Product Manager / AI Product Manager / Владелец AI продукта
+1001,2026-08-23T21:02:12+00:00,https://hh.ru/vacancy/136483612,AI Agent Engineer
+1002,2026-08-23T21:02:15+00:00,https://hh.ru/vacancy/135444211,AI Automation Engineer
+1003,2026-08-23T21:02:19+00:00,https://hh.ru/vacancy/133724345,"AI Engineer / LLM Engineer (RAG, документы, автоматизация инжиниринга)"
+1004,2026-08-23T21:02:23+00:00,https://hirify.me/jobs/913359-ml-prodakt-lid-ai-agenty,ML-продакт-лид (AI-агенты)
+1005,2026-08-23T21:02:27+00:00,https://rabota.sber.ru/search/senior-product-lead-gigachat-4517248/,Senior Product Lead (GigaChat)
+1006,2026-08-23T21:02:31+00:00,https://career.habr.com/vacancies/1000168324,Vibe Coder / разработчик с Claude Code и Codex
+1007,2026-08-23T21:02:34+00:00,https://t.me/ITjobsFeed/16031,Технический руководитель / AI-архитектор — цифровизация алюминиевой отрасли
+1010,2026-08-23T21:02:45+00:00,https://t.me/aivacancychannel/5122,Python-разработчик в AI-продукт 🤖
+1011,2026-08-23T21:02:49+00:00,https://hirehi.ru/development/ml-engineer-digital-security-80179,ml engineer digital security
+1013,2026-08-23T21:02:57+00:00,https://career.habr.com/vacancies/1000167987,AI-разработчик
+1014,2026-08-23T21:03:00+00:00,https://career.habr.com/vacancies/1000167783,GenAI-разработчик / бизнес-аналитик
+1015,2026-08-23T21:03:04+00:00,https://hh.ru/vacancy/135935736,"Python Fullstack Developer (middle+) — внутренние продукты, AI-автоматизация"
+1016,2026-08-23T21:03:08+00:00,https://rabota.sber.ru/search/python-razrabotchik-v-komandu-kiberbezopasnosti-ai-agentov-4554247/,Python-разработчик в команду кибербезопасности AI-агентов
+1017,2026-08-23T21:03:12+00:00,https://rabota.sber.ru/search/starshiy-razrabotchik-vladelec-proekta-multiagentnoy-sistemy-dka-4528829/,Старший разработчик / Владелец проекта мультиагентной системы (ДКА)
+1018,2026-08-23T21:03:16+00:00,https://rabota.sber.ru/search/ai-razrabotchik-v-komandu-poiska-product-market-fit-4549502/,AI-Разработчик в команду поиска product-market fit
+1019,2026-08-23T21:03:19+00:00,https://rabota.sber.ru/search/java-tech-lead-komanda-gigacode-4537652/,Java Tech Lead (Команда GigaCode)
+1020,2026-08-23T21:03:23+00:00,https://rabota.sber.ru/search/middle-java-developer-cifrovoy-pomoschnik-4532903/,Middle Java developer (цифровой помощник)
+1021,2026-08-23T21:03:27+00:00,https://t.me/aivacancychannel/5098,Python-разработчик в AI-продукт
+1022,2026-08-23T21:03:30+00:00,https://rabota.sber.ru/search/ml-inzhener-4546674/,ML-инженер
+1023,2026-08-23T21:03:34+00:00,https://rabota.sber.ru/search/ml-engineer-4554688/,ML Engineer
+1024,2026-08-23T21:03:38+00:00,https://rabota.sber.ru/search/full-stack-developer-python-ui-4547330/,Full-stack developer (Python+UI)
+1028,2026-08-24T22:10:48+00:00,https://t.me/aivacancychannel/5068,AI-специалист / AI Engineer
+1029,2026-08-24T22:10:52+00:00,https://t.me/neurodromo/4285,AI Engineer / AI-разработчик
+1030,2026-08-24T22:10:55+00:00,https://t.me/aivacancychannel/5141,AI Engineer
+1031,2026-08-24T22:10:59+00:00,https://t.me/aivacancychannel/5151,Middle Prompt Engineer — Voximplant
+1032,2026-08-24T22:11:02+00:00,https://t.me/aivacancychannel/5154,AI Engineer / AI-разработчик
+1033,2026-08-24T22:11:06+00:00,https://t.me/aivacancychannel/5203,Senior AI Researcher / ML & LLM Engineer
+1034,2026-08-24T22:11:10+00:00,https://careers.epam.com/en/vacancy/blt0b716349b1cb6058_en,Generative AI Systems Architect
+1035,2026-08-24T22:11:13+00:00,https://careers.epam.com/en/vacancy/blt09pwnnbf9sa545z6_en,Senior AI Integration .NET Full-Stack Developer with Angular
+1036,2026-08-24T22:11:17+00:00,https://careers.epam.com/en/vacancy/blt054c2e5206176805_en,AI Solution Architect
+1037,2026-08-24T22:11:20+00:00,https://careers.epam.com/en/vacancy/blt02zqzuos443sm9ki_en,AI Native Engineer
+1038,2026-08-24T22:11:24+00:00,https://careers.epam.com/en/vacancy/blt0268766b10518644_en,"Lead Python Developer (AI, LLM)"
+1039,2026-08-24T22:11:28+00:00,https://careers.epam.com/en/vacancy/blt017bc6dfb686cca0_en,Senior Python Engineer with AI
+1040,2026-08-24T22:11:31+00:00,https://hirehi.ru/management/product-manager-ai-edtech-80741,product manager AI EdTech
+1041,2026-08-24T22:11:35+00:00,https://hirehi.ru/management/product-manager-for-ai-products-80707,product manager for AI products
+1042,2026-08-24T22:11:38+00:00,https://getmatch.ru/vacancies/35881-razrabotchik-ai-razrabotchik-llm,Разработчик AI / Разработчик LLM
+1043,2026-08-24T22:11:42+00:00,https://career.habr.com/vacancies/1000168342,LLM Platform Engineer
+1044,2026-08-24T22:11:46+00:00,https://yandex.ru/jobs/vacancies/rukovoditel-mlkomandi-sistemnih-promptov-alice-ai-48115,Руководитель ML-команды системных промптов Alice AI
+1045,2026-08-24T22:11:49+00:00,https://career.habr.com/vacancies/1000168022,"Backend-разработчик/Инженер автоматизации IT-операций (Python, AI/LLM)"
+1046,2026-08-24T22:11:53+00:00,https://career.habr.com/vacancies/1000167313,Руководитель проекта по внедрению AI (Голосовые и текстовые роботы)
+1047,2026-08-24T22:11:56+00:00,https://career.habr.com/vacancies/1000168143,AI Junior+ Full-stack Developer
+1048,2026-08-24T22:12:00+00:00,https://career.habr.com/vacancies/1000167783,GenAI-разработчик / бизнес-аналитик
+1049,2026-08-24T22:12:04+00:00,https://career.habr.com/vacancies/1000166542,AI архитектор
+1050,2026-08-24T22:12:07+00:00,https://career.habr.com/vacancies/1000167837,"Python Developer (AI,ML Москва)"
+1051,2026-08-24T22:12:11+00:00,https://career.habr.com/vacancies/1000167097,AI/ML Engineer
+1052,2026-08-24T22:12:14+00:00,https://career.habr.com/vacancies/1000164602,LEAD AI/ML ENGINEER
+1053,2026-08-24T22:12:18+00:00,https://career.habr.com/vacancies/1000167955,Data Scientist (LLM / AI Agents)
+1054,2026-08-24T22:12:22+00:00,https://career.habr.com/vacancies/1000168324,AI Vibe Coder / разработчик с Claude Code и Codex
+1055,2026-08-24T22:12:25+00:00,https://hirify.me/jobs/915422-senior-solution-architect-ai,Senior Solution Architect (AI)
+1056,2026-08-24T22:12:29+00:00,https://hirify.me/jobs/915097-ai-developer-middle-senior,AI Разработчик (Middle+ / Senior)
+1057,2026-08-24T22:12:32+00:00,https://hirify.me/jobs/917079-ai-backend-developer-go,Разработчик в AI VK
+1058,2026-08-24T22:12:36+00:00,https://hh.kz/vacancy/136547516,Python AI разработчик
+1059,2026-08-24T22:12:40+00:00,https://hh.kz/vacancy/136543163,ML/LLM Engineer (Senior)
+1060,2026-08-24T22:12:43+00:00,https://hh.ru/vacancy/135703039,"Специалист по машинному обучению / ML-инженер (ML/LLM, AI-агенты для medtech)"
+1061,2026-08-24T22:12:47+00:00,https://hh.ru/vacancy/135661340,Lead Backend Developer / AI Engineer
+1062,2026-08-24T22:12:50+00:00,https://hh.ru/vacancy/136152968,AI Automation Specialist / Специалист по AI-автоматизации процессов / AI Engineer
+1063,2026-08-24T22:12:54+00:00,https://hh.ru/vacancy/136560561,AI Engineer (LLM / RAG)
+1064,2026-08-24T22:12:57+00:00,https://hh.ru/vacancy/136563942,Fullstack-разработчик / AI Developer
+1065,2026-08-24T22:13:01+00:00,https://hh.ru/vacancy/136566825,Java Developer (AI / GenAI)
+1066,2026-08-24T22:13:05+00:00,https://rabota.sber.ru/search/ml-engineer-ai-agents-python-4560627/,ML Engineer (AI Agents / Python)
+1067,2026-08-24T22:13:08+00:00,https://rabota.sber.ru/search/ai-tech-lead-ai-implementation-lead-agentic-ai-4537676/,AI Tech Lead / AI Implementation Lead (Agentic AI)
+1068,2026-08-24T22:13:12+00:00,https://t.me/remote_ai_jobs/382,AI Engineer III
+1069,2026-08-24T22:13:15+00:00,https://t.me/ITjobsFeed/15856,AI Engineer/(Backend / Python)
+1071,2026-08-24T22:13:23+00:00,https://t.me/neurodromo/4278,"💬 AI Automation Engineer в Skytech, оплату обсуждают с кандидатом"
+1074,2026-08-24T22:13:33+00:00,https://t.me/aivacancychannel/5127,Консультант по внедрению AI / AI Solutions Consultant
+1075,2026-08-24T22:13:37+00:00,https://t.me/aivacancychannel/5169,AI Product Manager / AI-специалиста
+1076,2026-08-24T22:13:41+00:00,https://t.me/AI_vacancy/1609,AI-исследователь (ИИ агенты)
+1077,2026-08-24T22:13:44+00:00,https://getmatch.ru/vacancies/35866-ai-architect-enterprise-architect-v,AI Architect / Enterprise Architect в команду архитекторов B2B
+1078,2026-08-24T22:13:48+00:00,https://hirify.me/jobs/914910-ai-product-growth-engineer,AI Product / Growth Engineer (AI)
+1079,2026-08-24T22:13:51+00:00,https://hh.kz/vacancy/136531411,ML-инженер (LLM)
+1080,2026-08-24T22:13:55+00:00,https://hh.ru/vacancy/136556293,AI Solutions Architect (Delivery & Automation)
+1081,2026-08-24T22:13:59+00:00,https://hh.ru/vacancy/135854121,AI Builder (AI Developer / Vibe Coder)
+1082,2026-08-24T22:14:02+00:00,https://rabota.sber.ru/search/sistemnyy-analitik-ai-skill-engineer-4538531/,Системный аналитик/AI Skill Engineer
+1083,2026-08-24T22:14:06+00:00,https://hh.ru/vacancy/136483612,AI Agent Engineer
+1084,2026-08-24T22:14:09+00:00,https://hh.ru/vacancy/136556224,AI Automation & Integration Engineer
+1085,2026-08-24T22:14:13+00:00,https://career.habr.com/vacancies/1000168230,"Product Engineer (PHP/Python + Vue, AI-first разработка)"
+1088,2026-08-24T22:14:24+00:00,https://t.me/ITjobsFeed/16048,#vacancy #remote #Вакансия #AI #Senior #DataScience #LLM #Retail #Удаленка #Python #ML...
+1091,2026-08-24T22:14:35+00:00,https://t.me/ITjobsFeed/16294,Тимлид разработки рантайма в Алису
+1092,2026-08-24T22:14:38+00:00,https://t.me/aivacancychannel/5093,AI-разработчик (Middle+ / Senior)
+1094,2026-08-24T22:14:45+00:00,https://hirehi.ru/development/ml-inzhener-llm-agentov-80712,ml инженер LLM-агентов
+1095,2026-08-24T22:14:49+00:00,https://getmatch.ru/vacancies/35870-senior-ai-enabled-engineer,Senior AI-Enabled Engineer
+1096,2026-08-24T22:14:53+00:00,https://career.habr.com/vacancies/1000168160,"Backend / Platform Engineer — Claude Code, оркестратор и данные"
+1097,2026-08-24T22:14:56+00:00,https://career.habr.com/vacancies/1000166528,ML Engineer
+1098,2026-08-24T22:15:00+00:00,https://career.habr.com/vacancies/1000168366,AI-инженер
+1099,2026-08-24T22:15:03+00:00,https://career.habr.com/vacancies/1000167987,AI-разработчик
+1100,2026-08-24T22:15:07+00:00,https://career.habr.com/vacancies/1000167929,Стажер AI-разработчик
+1101,2026-08-24T22:15:11+00:00,https://career.habr.com/vacancies/1000168185,AI-native Software Engineer
+1102,2026-08-24T22:15:14+00:00,https://t.me/ITjobsFeed/15894,Ищем Python-разработчика в AI-продукт| Удаленный формат | Full time | 100 000
+1104,2026-08-24T22:15:21+00:00,https://t.me/opento_data/848,⚠️ Требует проверки
+1105,2026-08-24T22:15:25+00:00,https://t.me/aivacancychannel/5098,Python-разработчика в AI-продукт
+1106,2026-08-24T22:15:29+00:00,https://t.me/AI_vacancy/1603,Промт-инженер / Prompt Engineer
+1107,2026-08-24T22:15:32+00:00,https://hirehi.ru/vacancies/ml-ai,вакансии для ML/AI-инженеров
+1108,2026-08-24T22:15:36+00:00,https://getmatch.ru/vacancies/35877-inzhener-agentnogo-programmirovaniia,Инженер агентного программирования
+1109,2026-08-24T22:15:40+00:00,https://rabota.sber.ru/search/ml-inzhener-4546674/,ML-инженер
+1112,2026-08-24T22:33:03+00:00,https://career.habr.com/vacancies/1000164856,Старший LLM-разработчик
+1113,2026-08-24T22:33:07+00:00,https://career.habr.com/vacancies/1000168217,Python разработчик
+1114,2026-08-24T22:33:11+00:00,https://career.habr.com/vacancies/1000168084,ML-инженер
+1115,2026-08-25T00:23:12+00:00,https://getmatch.ru/vacancies/35920-ai-agent-engineer-1-to-1000,"AI Agent Engineer (1 to 1000, вайбкодинг)"
+1116,2026-08-25T04:19:16+00:00,https://hirehi.ru/development/ml-engineer-agents-80748,ml engineer Agents
+1120,2026-08-25T12:47:31+00:00,https://t.me/aivacancychannel/5068,AI-специалист / AI Engineer
+1121,2026-08-25T12:47:34+00:00,https://t.me/aivacancychannel/5093,AI-разработчик (Middle+ / Senior)
+1122,2026-08-25T12:47:38+00:00,https://t.me/aivacancychannel/5141,AI Engineer
+1123,2026-08-25T12:47:42+00:00,https://t.me/neurodromo/4266,AI-разработчик (Middle+ / Senior)
+1124,2026-08-25T12:47:46+00:00,https://t.me/aivacancychannel/5151,Middle Prompt Engineer — Voximplant
+1125,2026-08-25T12:47:49+00:00,https://t.me/aivacancychannel/5154,AI Engineer / AI-разработчик
+1126,2026-08-25T12:47:53+00:00,https://t.me/ITjobsFeed/16356,"Lead Python Engineer (AI/ML, LLM-пайплайны)"
+1127,2026-08-25T12:47:57+00:00,https://t.me/neurodromo/4285,AI Engineer / AI-разработчик
+1128,2026-08-25T12:48:00+00:00,https://t.me/ITjobsFeed/16372,Специалист по науке о данных / GenAI + Agentic AI (LLM / RAG / AI-агенты / Multi-agent)
+1129,2026-08-25T12:48:04+00:00,https://t.me/neurodromo/4294,AI Tech Lead - GraphAware Hume в Neo4j
+1130,2026-08-25T12:48:08+00:00,https://t.me/aivacancychannel/5203,Senior AI Researcher / ML & LLM Engineer
+1131,2026-08-25T12:48:11+00:00,https://t.me/aivacancychannel/5220,Senior Data Scientist — GenAI + Agentic AI
+1132,2026-08-25T12:48:15+00:00,https://careers.epam.com/en/vacancy/blt0b716349b1cb6058_en,Generative AI Systems Architect
+1133,2026-08-25T12:48:19+00:00,https://careers.epam.com/en/vacancy/blt054c2e5206176805_en,AI Solution Architect
+1134,2026-08-25T12:48:22+00:00,https://careers.epam.com/en/vacancy/blt02zqzuos443sm9ki_en,AI Native Engineer
+1135,2026-08-25T12:48:26+00:00,https://careers.epam.com/en/vacancy/blt0268766b10518644_en,"Lead Python Developer (AI, LLM)"
+1136,2026-08-25T12:48:30+00:00,https://careers.epam.com/en/vacancy/blt017bc6dfb686cca0_en,Senior Python Engineer with AI
+1137,2026-08-25T12:48:33+00:00,https://hirehi.ru/management/product-manager-ai-platform-81135,product manager AI Platform
+1138,2026-08-25T12:48:37+00:00,https://career.habr.com/vacancies/1000167313,Руководитель проекта по внедрению AI (Голосовые и текстовые роботы)
+1139,2026-08-25T12:48:41+00:00,https://career.habr.com/vacancies/1000168366,AI-инженер
+1140,2026-08-25T12:48:44+00:00,https://career.habr.com/vacancies/1000168143,AI Junior+ Full-stack Developer
+1141,2026-08-25T12:48:48+00:00,https://career.habr.com/vacancies/1000166542,AI архитектор
+1142,2026-08-25T12:48:52+00:00,https://career.habr.com/vacancies/1000167783,GenAI-разработчик / бизнес-аналитик
+1143,2026-08-25T12:48:55+00:00,https://career.habr.com/vacancies/1000168057,AI application security engineer
+1144,2026-08-25T12:48:59+00:00,https://career.habr.com/vacancies/1000164602,LEAD AI/ML ENGINEER
+1145,2026-08-25T12:49:03+00:00,https://career.habr.com/vacancies/1000167097,AI/ML Engineer
+1146,2026-08-25T12:49:06+00:00,https://career.habr.com/vacancies/1000168006,Full Stack Team Lead (AI PDLC)
+1147,2026-08-25T12:49:10+00:00,https://hirify.me/jobs/917079-ai-backend-developer-go,Разработчик в AI VK
+1148,2026-08-25T12:49:14+00:00,https://hirify.me/jobs/825511-fullstack-rnd-ai-developer,Fullstack R&D Разработчик (AI)
+1149,2026-08-25T12:49:17+00:00,https://hirify.me/jobs/920487-senior-ai-agent-developer,Старший разработчик агентов для ИИзации Яндекс Лавки (AI)
+1150,2026-08-25T12:49:21+00:00,https://hirify.me/jobs/922137-python-developer-ai,Python (AI) developer
+1151,2026-08-25T12:49:25+00:00,https://hh.kz/vacancy/135574649,AI Engineer / AI-разработчик
+1152,2026-08-25T12:49:28+00:00,https://hh.kz/vacancy/136181391,Head of AI Cluster Coordination Department
+1153,2026-08-25T12:49:32+00:00,https://hh.kz/vacancy/136589118,AI/ML Architect / Архитектор ИИ-решений
+1154,2026-08-25T12:49:36+00:00,https://hh.kz/vacancy/136581668,AI & Data Solutions Architect
+1155,2026-08-25T12:49:39+00:00,https://hh.kz/vacancy/136601822,AI Engineer / LLM Engineer
+1156,2026-08-25T12:49:43+00:00,https://hh.kz/vacancy/136583324,Менеджер продукта AI
+1157,2026-08-25T12:49:47+00:00,https://rabota.sber.ru/search/ml-engineer-ai-agents-python-4560627/,ML Engineer (AI Agents / Python)
+1158,2026-08-25T12:49:50+00:00,https://rabota.sber.ru/search/ai-tech-lead-ai-implementation-lead-agentic-ai-4537676/,AI Tech Lead / AI Implementation Lead (Agentic AI)
+1159,2026-08-25T12:49:54+00:00,https://rabota.sber.ru/search/stazher-llm-ai-agenty-4563291/,Стажер (LLM & AI-агенты)
+1160,2026-08-25T12:49:58+00:00,https://t.me/ml_jobs_kz/988,Senior AI Engineer
+1161,2026-08-25T12:50:01+00:00,https://t.me/remote_ai_jobs/382,AI Engineer III
+1162,2026-08-25T12:50:05+00:00,https://t.me/aivacancychannel/5059,AI Engineer / Backend Python
+1163,2026-08-25T12:50:09+00:00,https://t.me/aivacancychannel/5074,PROMPT ENGINEER / AI SPECIALIST
+1164,2026-08-25T12:50:12+00:00,https://t.me/aivacancychannel/5127,Консультант по внедрению AI / AI Solutions Consultant
+1165,2026-08-25T12:50:16+00:00,https://t.me/aivacancychannel/5125,AI Automation Engineer
+1166,2026-08-25T12:50:20+00:00,https://t.me/neurodromo/4278,AI Automation Engineer
+1167,2026-08-25T12:50:23+00:00,https://t.me/aivacancychannel/5169,AI Product Manager / AI-специалиста
+1168,2026-08-25T12:50:27+00:00,https://t.me/AI_vacancy/1609,AI-исследователь (ИИ агенты)
+1169,2026-08-25T12:50:31+00:00,https://getmatch.ru/vacancies/35920-ai-agent-engineer-1-to-1000,"AI Agent Engineer (1 to 1000, вайбкодинг)"
+1170,2026-08-25T12:50:34+00:00,https://hh.kz/vacancy/136591850,"Data scientist / ML-инженер (NLP, LLM)"
+1171,2026-08-25T12:50:38+00:00,https://hh.kz/vacancy/135986918,Technical Project Manager (IT/AI)
+1172,2026-08-25T12:50:42+00:00,https://hh.ru/vacancy/136483612,AI Agent Engineer
+1173,2026-08-25T12:50:45+00:00,https://hh.kz/vacancy/136556224,AI Automation & Integration Engineer
+1174,2026-08-25T12:50:49+00:00,https://hh.kz/vacancy/136589276,AI / ML Engineer (LLM)
+1175,2026-08-25T12:50:53+00:00,https://hh.kz/vacancy/136581999,AI Agent Engineer (NLP/LLM)
+1176,2026-08-25T12:50:56+00:00,https://hh.ru/vacancy/136072543,AI-инженер / AI Automation Engineer
+1177,2026-08-25T12:51:00+00:00,https://hh.kz/vacancy/135680516,AI Developer
+1178,2026-08-25T12:51:04+00:00,https://rabota.sber.ru/search/sistemnyy-analitik-ai-skill-engineer-4538531/,Системный аналитик/AI Skill Engineer
+1179,2026-08-25T12:51:08+00:00,https://careers.just-ai.com/vacancy/product-manager,Middle Product Manager
+1180,2026-08-25T12:51:11+00:00,https://career.habr.com/vacancies/1000168230,"Product Engineer (PHP/Python + Vue, AI-first разработка)"
+1181,2026-08-25T12:51:15+00:00,https://career.habr.com/vacancies/1000168324,Vibe Coder / разработчик с Claude Code и Codex
+1185,2026-08-25T12:51:30+00:00,https://t.me/ITjobsFeed/16294,Тимлид разработки рантайма в Алису
+1186,2026-08-25T12:51:33+00:00,https://t.me/ITjobsFeed/16325,Senior Machine Learning Engineer
+1188,2026-08-25T12:51:41+00:00,https://t.me/ITjobsFeed/16376,ML-разработчик в группу семантических нейротехнологий
+1189,2026-08-25T12:51:44+00:00,https://careers.epam.com/en/vacancy/blt023b745cbef2ffa1_en,Senior Python/GenAI Engineer
+1190,2026-08-25T12:51:48+00:00,https://hirehi.ru/development/ml-inzhener-dlia-ai-agentov-81140,ml инженер для AI-агентов
+1191,2026-08-25T12:51:52+00:00,https://career.habr.com/vacancies/1000166528,ML Engineer
+1192,2026-08-25T12:51:55+00:00,https://career.habr.com/vacancies/1000168160,"Backend / Platform Engineer — Claude Code, оркестратор и данные"
+1193,2026-08-25T12:51:59+00:00,https://www.tbank.ru/career/it/vacancy/moscow/staff-inzhener/b1d5863d-be50-47b0-aea3-61c322889d19/,staff-инженер
+1194,2026-08-25T12:52:03+00:00,https://yandex.ru/jobs/vacancies/starshiy-razrabotchik-agentov-dlya-iizatsii-yandeks-lavki-48182,Старший разработчик агентов для ИИзации Яндекс Лавки
+1195,2026-08-25T12:52:06+00:00,https://career.habr.com/vacancies/1000167929,Стажер AI-разработчик
+1196,2026-08-25T12:52:10+00:00,https://career.habr.com/vacancies/1000167987,AI-разработчик
+1197,2026-08-25T12:52:14+00:00,https://career.habr.com/vacancies/1000168185,AI-native Software Engineer
+1198,2026-08-25T12:52:17+00:00,https://rabota.sber.ru/search/ml-engineer-blockchain-4553203/,ML Engineer (Blockchain)
+1199,2026-08-25T12:52:21+00:00,https://t.me/ITjobsFeed/15894,Ищем Python-разработчика в AI-продукт| Удаленный формат | Full time | 100 000
+1200,2026-08-25T12:52:25+00:00,https://t.me/ITjobsFeed/16031,⚠️ Требует проверки
+1201,2026-08-25T12:52:28+00:00,https://t.me/ITjobsFeed/16091,Публикатор: Yana Klapats
+1202,2026-08-25T12:52:32+00:00,https://t.me/aivacancychannel/5098,Python-разработчика в AI-продукт
+1203,2026-08-25T12:52:36+00:00,https://t.me/AI_vacancy/1603,Промт-инженер / Prompt Engineer
+1204,2026-08-25T12:52:39+00:00,https://t.me/aivacancychannel/5214,Ищу интегратора или команду для внедрения AI-чат-бота в продажи
+1205,2026-08-25T12:52:43+00:00,https://hirehi.ru/vacancies/ml-ai,ML/AI-инженеры (вакансии)
+1206,2026-08-25T12:52:47+00:00,https://team.vk.company/vacancy/52146/,Presale-архитектор ИИ-платформы
+1207,2026-08-25T12:52:50+00:00,https://rabota.sber.ru/search/ml-inzhener-4546674/,ML-инженер
+1208,2026-08-25T13:08:32+00:00,https://getmatch.ru/vacancies/35881-razrabotchik-ai-razrabotchik-llm,Разработчик AI / Разработчик LLM
+1209,2026-08-25T13:08:36+00:00,https://hh.kz/vacancy/136603064,Архитектор решений AI / ML / Highload (проектно)
+1210,2026-08-25T13:08:39+00:00,https://hh.kz/vacancy/136603221,Senior NLP/LLM Engineer
+1211,2026-08-25T13:08:43+00:00,https://getmatch.ru/vacancies/35866-ai-architect-enterprise-architect-v,AI Architect / Enterprise Architect в команду архитекторов B2B
+1212,2026-08-25T13:08:47+00:00,https://getmatch.ru/vacancies/35870-senior-ai-enabled-engineer,Senior AI-Enabled Engineer
+1213,2026-08-25T13:08:50+00:00,https://getmatch.ru/vacancies/35877-inzhener-agentnogo-programmirovaniia,Инженер агентного программирования
+1214,2026-08-25T13:24:41+00:00,https://t.me/neurodromo/4295,Разработчик AI
+1215,2026-08-25T13:24:44+00:00,https://career.habr.com/vacancies/1000168342,LLM Platform Engineer
+1216,2026-08-25T13:24:48+00:00,https://hirehi.ru/development/ml-inzhener-dlia-ai-copilot-81184,ml инженер для AI-copilot
+1217,2026-08-25T13:24:51+00:00,https://hirehi.ru/development/python-razrabotchik-dlia-ai-agentov-81175,python разработчик для AI-агентов
+1218,2026-08-25T13:24:55+00:00,https://career.habr.com/vacancies/1000164856,Старший LLM-разработчик в сервис Нейроюрист
+1219,2026-08-25T13:24:59+00:00,https://career.habr.com/vacancies/1000168217,Python разработчик
+1220,2026-08-25T13:25:02+00:00,https://career.habr.com/vacancies/1000168084,ML-инженер
+1221,2026-08-25T13:46:40+00:00,https://hirehi.ru/development/ml-inzhener-ai-agentov-81194,ml инженер AI-агентов
+1222,2026-08-25T14:42:15+00:00,https://rabota.sber.ru/search/python-razrabotchik-4544102/,Python разработчик
+

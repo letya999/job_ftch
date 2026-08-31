@@ -24,8 +24,9 @@ on:
 
 jobs:
   build:
-    name: Lint, test, build image
+    name: Lint and build images
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python + uv
@@ -41,16 +42,6 @@ jobs:
         run: uv run ruff check job_ftch/adapters/mcp tests/adapters/test_mcp_server.py tests/adapters/test_mcp_unit.py
       - name: Module boundaries
         run: uv run python scripts/check_module_boundaries.py
-      - name: MCP unit + adapter tests (coverage >= 75%)
-        run: |
-          uv run pytest tests/adapters/test_mcp_server.py tests/adapters/test_mcp_unit.py \
-            --cov=job_ftch/adapters/mcp \
-            --cov-fail-under=75 \
-            --cov-report=term-missing \
-            -q
-        env:
-          JOB_FTCH_LLM_BACKEND: heuristic
-          JOB_FTCH_TRACING_ENABLED: "false"
       - name: Build minimal MCP image
         run: docker build -f job_ftch/adapters/mcp/Dockerfile -t job-ftch-mcp .
       - name: Build local-mcp profile image

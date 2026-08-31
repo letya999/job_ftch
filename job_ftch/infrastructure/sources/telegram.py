@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import structlog
 
 from job_ftch.application.registry import register_source, register_source_spec
-from job_ftch.domain import RawItem, SourceKind
+from job_ftch.domain import RawItem, SourceKind, source_spec_identifier
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 
 
@@ -257,6 +257,7 @@ async def _safe_iter_messages(
     timeout_seconds: float | None = None,
     freshness_cutoff_utc: datetime | None = None,
     stats: TelegramStats | None = None,
+    min_id: int = 0,
 ) -> AsyncIterator[object]:
     """Safe pagination fetching chunks with Jitter and FloodWaitError handling."""
     import random
@@ -270,13 +271,15 @@ async def _safe_iter_messages(
     while yielded < limit:
         chunk_size = min(100, limit - yielded)
         try:
+            request_kwargs: dict[str, Any] = {
+                "limit": chunk_size,
+                "offset_id": offset_id,
+                "reply_to": reply_to,
+            }
+            if min_id > 0:
+                request_kwargs["min_id"] = min_id
             messages = await _await_telegram_call(
-                client.get_messages(
-                    chat,
-                    limit=chunk_size,
-                    offset_id=offset_id,
-                    reply_to=reply_to,
-                ),
+                client.get_messages(chat, **request_kwargs),
                 timeout_seconds=timeout_seconds,
             )
             retried_after_flood = False
@@ -356,6 +359,7 @@ class TelegramChannelSource:
         timeout_seconds: float | None = None,
         own_client: bool = False,
         freshness_cutoff_utc: datetime | None = None,
+        store: Any = None,
     ) -> None:
         self._client = client
         self._channel = channel
@@ -365,9 +369,15 @@ class TelegramChannelSource:
         self._timeout_seconds = timeout_seconds
         self._own_client = own_client
         self._freshness_cutoff_utc = freshness_cutoff_utc
+        self._store = store
         self.stats = TelegramStats()
 
     async def fetch(self) -> AsyncIterator[RawItem]:
+        cursor = self._store.incremental_cursor() if self._store is not None else None
+        source_id = source_spec_identifier(self.spec) if hasattr(self, "spec") else None
+        previous_id = int(await cursor.get(source_id) or 0) if cursor and source_id else 0
+        newest_id = previous_id
+        completed = False
         async with _client_session(self._client, own_client=self._own_client) as client:
             chat = await _await_telegram_call(
                 client.get_entity(self._channel),
@@ -382,7 +392,9 @@ class TelegramChannelSource:
                 timeout_seconds=self._timeout_seconds,
                 freshness_cutoff_utc=self._freshness_cutoff_utc,
                 stats=self.stats,
+                min_id=previous_id,
             ):
+                newest_id = max(newest_id, int(_get_attr(message, "id") or 0))
                 item = _message_to_raw_item(
                     source_kind=SourceKind.TELEGRAM_CHANNEL,
                     chat=chat,
@@ -391,6 +403,9 @@ class TelegramChannelSource:
                 )
                 if item is not None:
                     yield item
+            completed = True
+        if completed and cursor and source_id and newest_id > previous_id:
+            await cursor.set(source_id, str(newest_id))
 
 
 class TelegramGroupSource:
@@ -405,6 +420,7 @@ class TelegramGroupSource:
         timeout_seconds: float | None = None,
         own_client: bool = False,
         freshness_cutoff_utc: datetime | None = None,
+        store: Any = None,
     ) -> None:
         self._client = client
         self._group = group
@@ -414,9 +430,15 @@ class TelegramGroupSource:
         self._timeout_seconds = timeout_seconds
         self._own_client = own_client
         self._freshness_cutoff_utc = freshness_cutoff_utc
+        self._store = store
         self.stats = TelegramStats()
 
     async def fetch(self) -> AsyncIterator[RawItem]:
+        cursor = self._store.incremental_cursor() if self._store is not None else None
+        source_id = source_spec_identifier(self.spec) if hasattr(self, "spec") else None
+        previous_id = int(await cursor.get(source_id) or 0) if cursor and source_id else 0
+        newest_id = previous_id
+        completed = False
         async with _client_session(self._client, own_client=self._own_client) as client:
             chat = await _await_telegram_call(
                 client.get_entity(self._group),
@@ -431,7 +453,9 @@ class TelegramGroupSource:
                 timeout_seconds=self._timeout_seconds,
                 freshness_cutoff_utc=self._freshness_cutoff_utc,
                 stats=self.stats,
+                min_id=previous_id,
             ):
+                newest_id = max(newest_id, int(_get_attr(message, "id") or 0))
                 item = _message_to_raw_item(
                     source_kind=SourceKind.TELEGRAM_GROUP,
                     chat=chat,
@@ -440,6 +464,9 @@ class TelegramGroupSource:
                 )
                 if item is not None:
                     yield item
+            completed = True
+        if completed and cursor and source_id and newest_id > previous_id:
+            await cursor.set(source_id, str(newest_id))
 
 
 class TelegramCommentSource:
@@ -708,6 +735,7 @@ def _build_telegram_channel_source_v2(
         timeout_seconds=settings.telegram_timeout_seconds,
         own_client=True,
         freshness_cutoff_utc=spec.freshness_cutoff_utc,
+        store=store,
     )
 
 
@@ -734,6 +762,7 @@ def _build_telegram_group_source_v2(
         timeout_seconds=settings.telegram_timeout_seconds,
         own_client=True,
         freshness_cutoff_utc=spec.freshness_cutoff_utc,
+        store=store,
     )
 
 

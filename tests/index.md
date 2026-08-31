@@ -136,6 +136,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_softserve_site_parser.py](test_softserve_site_parser.py)
 - [test_solid_jobs_site_parser.py](test_solid_jobs_site_parser.py)
 - [test_source_assessment.py](test_source_assessment.py)
+- [test_source_board_repairs.py](test_source_board_repairs.py)
 - [test_source_classifier.py](test_source_classifier.py)
 - [test_source_health_behavior.py](test_source_health_behavior.py)
 - [test_source_policy.py](test_source_policy.py)

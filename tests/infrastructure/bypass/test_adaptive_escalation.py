@@ -416,6 +416,17 @@ async def test_rate_limit_activates_proxy_without_changing_engine() -> None:
 
 
 @pytest.mark.asyncio
+async def test_exhausted_http_timeout_activates_proxy_on_first_controller_report() -> None:
+    manager = AdaptiveBypassManager()
+    manager.bind_context(_ProxyContext())
+
+    kind = await manager.handle_failure("source", error=TimeoutError())
+
+    assert kind is FailureKind.TIMEOUT
+    assert manager.uses_proxy
+
+
+@pytest.mark.asyncio
 async def test_proxy_route_survives_engine_transition() -> None:
     manager = AdaptiveBypassManager()
     manager.bind_context(_ProxyContext())

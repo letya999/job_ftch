@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import time
@@ -52,7 +53,7 @@ def resolve_identity_ua(config: dict[str, Any], persona_kw: dict[str, Any]) -> s
 
 
 DEFAULT_WAIT = "domcontentloaded"
-DEFAULT_WAIT_FALLBACK = "networkidle"
+DEFAULT_WAIT_FALLBACK = "commit"
 
 _CHALLENGE_DETECTOR_ATTR = "_job_ftch_challenge_response_detector"
 
@@ -259,16 +260,24 @@ async def _patchright_route_handle_cancellation_safe(route_handler: Any, route: 
         route_handler._active_invocations.discard(invocation)
 
 
+def _patchright_needs_legacy_cancellation_fix(send: Any) -> bool:
+    return "timeout" not in inspect.signature(send).parameters
+
+
 def _install_patchright_cancellation_fix() -> None:
     """Install the narrow Patchright cancellation workaround once per process."""
     try:
-        from patchright._impl._connection import Channel
+        from patchright._impl._connection import Channel, Connection
         from patchright._impl._helper import RouteHandler
     except ImportError:
         return
     if getattr(Channel, _PATCHRIGHT_CANCELLATION_FIX_ATTR, False):
         return
-    Channel._inner_send = _patchright_inner_send_cancellation_safe
+    # New Patchright versions pass an explicit timeout and already abort the
+    # protocol callback on cancellation. Replacing that implementation with
+    # the legacy workaround breaks its call signature and browser startup.
+    if _patchright_needs_legacy_cancellation_fix(Connection._send_message_to_server):
+        Channel._inner_send = _patchright_inner_send_cancellation_safe
     setattr(Channel, _PATCHRIGHT_CANCELLATION_FIX_ATTR, True)
     if not getattr(RouteHandler, _PATCHRIGHT_ROUTE_FIX_ATTR, False):
         RouteHandler.handle = _patchright_route_handle_cancellation_safe
@@ -620,13 +629,7 @@ def _prefer_patchright(config: dict[str, Any], bypass_strategy: Any) -> bool:
 
 
 def _load_async_playwright(*, prefer_patchright: bool) -> Any:
-    if not prefer_patchright:
-        try:
-            from playwright.async_api import async_playwright as playwright_async_playwright
-
-            return playwright_async_playwright
-        except ImportError:
-            pass
+    del prefer_patchright  # The production image installs Patchright's Chromium only.
     try:
         from patchright.async_api import async_playwright as patchright_async_playwright
     except ImportError as exc:

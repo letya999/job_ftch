@@ -20,10 +20,8 @@ from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefault
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
     browser_scroll_collect_urls,
     extract_urls_with_limit,
-    normalize_search_keywords,
     resolve_browser_config,
     safe_fetch,
-    with_query_params,
 )
 
 if TYPE_CHECKING:
@@ -179,7 +177,7 @@ class GeekJobParser:
     has_custom_parse = True
     supports_discover = True
     supports_search = True
-    search_mode = "per_keyword"
+    search_mode = "listing"
 
     def build_search_urls(
         self,
@@ -189,17 +187,14 @@ class GeekJobParser:
         limit: int | None = None,
     ) -> list[str]:
         del limit
-        terms = normalize_search_keywords(keywords)
-        if not terms:
+        if not any(isinstance(term, str) and term.strip() for term in keywords or ()):
             return []
         parsed = urlparse(base_url)
         if not parsed.path.rstrip("/").endswith("/vacancies"):
             parsed = parsed._replace(path="/vacancies")
-        base = urlunparse(parsed)
-        # GeekJob's `qs` box is an all-terms query: a single combined multi-role
-        # string matches nothing (verified live), so fan out to one search URL
-        # per role instead.
-        return [with_query_params(base, {"qs": term}) for term in terms]
+        # One listing crawl is cheaper and more reliable than one full browser
+        # session per role; the shared relevance pipeline filters its vacancies.
+        return [urlunparse(parsed)]
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url

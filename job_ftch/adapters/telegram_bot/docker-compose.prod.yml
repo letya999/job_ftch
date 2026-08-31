@@ -26,6 +26,9 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       qdrant: { condition: service_started }
+    networks:
+      - default
+      - public_site
 
   bot:
     image: job-ftch-telegram-bot:prod
@@ -55,6 +58,7 @@ services:
       JOB_FTCH_QDRANT_URL: http://qdrant:6333
       JOB_FTCH_CONFIGS_DIR: /app/job_ftch/adapters/telegram_bot/config/tenants
       JOB_FTCH_LANGFUSE_HOST: http://host.docker.internal:3001
+      JOB_FTCH_OPENOBSERVE_URL: http://openobserve:5080
       HF_HUB_DISABLE_PROGRESS_BARS: "1"
       HF_HUB_VERBOSITY: error
       TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
@@ -82,6 +86,9 @@ services:
       - hf_cache:/opt/job-ftch-home/.cache/huggingface
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - public_site
     shm_size: "1gb"
     mem_limit: 3g
     cpus: 1.5
@@ -133,6 +140,15 @@ volumes:
   pgdata:
     name: telegram_bot_prod_pgdata
   qdrant_data:
+    name: telegram_bot_prod_qdrant_data
   bot_runtime:
+    name: telegram_bot_prod_bot_runtime
   bot_cache:
+    name: telegram_bot_prod_bot_cache
   hf_cache:
+    name: telegram_bot_prod_hf_cache
+
+networks:
+  public_site:
+    name: job_ftch_public
+    external: true

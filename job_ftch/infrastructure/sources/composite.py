@@ -11,13 +11,18 @@ from typing import TYPE_CHECKING, Any, cast
 import anyio
 from structlog.contextvars import bind_contextvars, reset_contextvars
 
-from job_ftch.domain import SourceOutcome, source_spec_identifier, source_spec_name
+from job_ftch.domain import (
+    QuarantinedRawItem,
+    RawItem,
+    SourceOutcome,
+    source_spec_identifier,
+    source_spec_name,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
     from job_ftch.application.contracts import Source
-    from job_ftch.domain import QuarantinedRawItem, RawItem
 
 logger = logging.getLogger("job_ftch.composite_source")
 
@@ -183,6 +188,15 @@ def _source_identity(source: object) -> tuple[str, str, str]:
     return f"{source_kind}:{source_name}", source_kind, source_name
 
 
+def _with_canonical_source_name(
+    item: RawItem | QuarantinedRawItem,
+    source_name: str,
+) -> RawItem | QuarantinedRawItem:
+    if item.source_name == source_name:
+        return item
+    return type(item).model_validate({**item.model_dump(), "source_name": source_name})
+
+
 class CompositeSource:
     """Fan-in source that aggregates items from multiple child sources.
 
@@ -291,7 +305,7 @@ class CompositeSource:
                 async with asyncio.timeout(self._hard_deadline_seconds):
                     async for item in source.fetch():
                         result.yielded += 1
-                        yield item
+                        yield _with_canonical_source_name(item, source_name)
             except TimeoutError:
                 result.evicted = True
                 result.eviction_kind = "hard_deadline"
@@ -347,7 +361,7 @@ class CompositeSource:
                 async with asyncio.timeout(self._hard_deadline_seconds):
                     async for item in source.fetch():
                         result.yielded += 1
-                        await queue.put(item)
+                        await queue.put(_with_canonical_source_name(item, source_name))
             except TimeoutError:
                 result.evicted = True
                 result.eviction_kind = "hard_deadline"
@@ -517,7 +531,7 @@ class CompositeSource:
                 set_source_deadline,
             )
 
-            source_id, source_kind, _source_name = _source_identity(source)
+            source_id, source_kind, source_name = _source_identity(source)
             context_tokens = bind_contextvars(
                 source_id=source_id,
                 source_kind=source_kind,
@@ -526,7 +540,7 @@ class CompositeSource:
             cancelled = False
             try:
                 async for item in source.fetch():
-                    await queue.put(item)
+                    await queue.put(_with_canonical_source_name(item, source_name))
             except asyncio.CancelledError:
                 # ``queue.put`` in the normal completion path is deliberately
                 # backpressured.  Once the consumer has been evicted, however,

@@ -22,13 +22,12 @@ def test_bare_hh_source_is_rewritten_as_single_combined_query() -> None:
     assert out[0].source_name == "hh"  # combined keeps the original name
 
 
-def test_bare_geekjob_source_fans_out_per_keyword() -> None:
+def test_bare_geekjob_source_uses_one_listing_crawl() -> None:
     specs = [CareerSiteSpec(url="https://geekjob.ru/vacancies", source_name="geekjob")]
     out = expand_career_site_specs(specs, ROLES)
-    assert len(out) == len(ROLES)  # per_keyword -> one source per role
-    assert [s.source_name for s in out] == ["geekjob_kw1", "geekjob_kw2"]
-    qs_values = [parse_qs(urlparse(s.url).query)["qs"][0] for s in out]
-    assert qs_values == ROLES
+    assert len(out) == 1
+    assert out[0].source_name == "geekjob"
+    assert out[0].url == "https://geekjob.ru/vacancies"
 
 
 def test_explicit_query_source_is_left_untouched() -> None:

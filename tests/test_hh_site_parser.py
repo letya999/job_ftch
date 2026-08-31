@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import pytest
 
+import job_ftch.infrastructure.sources.site_parsers.hh as hh_module
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.site_parsers.hh import (
     HhParser,
@@ -164,6 +165,68 @@ async def test_hh_parser_emits_items_from_listing_and_detail_pages() -> None:
     assert items[0].source_name == "hh_ru_jobs"
     assert "Data Scientist" in items[0].text
     assert "ML Engineer" in items[1].text
+
+
+@pytest.mark.asyncio
+async def test_hh_parser_routes_detail_captcha_to_bypass() -> None:
+    listing_url = "https://hh.ru/search/vacancy?employer_id=80"
+    detail_url = "https://hh.ru/vacancy/123"
+    second_detail_url = "https://hh.ru/vacancy/456"
+    client = _FakeClient(
+        {
+            listing_url: _FakeResponse(
+                '<div id="123" data-state="{&quot;publicationTime&quot;:'
+                '{&quot;@timestamp&quot;:1787558822}}">'
+                f'<a data-qa="serp-item__title" href="{detail_url}">Python developer</a>'
+                "</div>"
+                '<div id="456" data-state="{&quot;publicationTime&quot;:'
+                '{&quot;@timestamp&quot;:1787558822}}">'
+                f'<a data-qa="serp-item__title" href="{second_detail_url}">ML engineer</a>'
+                "</div>",
+                listing_url,
+            ),
+            detail_url: _FakeResponse('<div class="g-recaptcha"></div>', detail_url),
+        }
+    )
+
+    from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
+
+    with pytest.raises(BrowserChallengeError):
+        _ = [
+            item
+            async for item in HhParser().parse(
+                CareerSiteSpec(url="https://hh.ru/employer/80", source_name="alfa", limit=2),
+                client,
+            )
+        ]
+
+
+@pytest.mark.asyncio
+async def test_hh_parser_caps_detail_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hh_module, "_MAX_DETAIL_REQUESTS", 1)
+    listing_url = "https://hh.ru/search/vacancy?text=ai"
+    first_url = "https://hh.ru/vacancy/1"
+    second_url = "https://hh.ru/vacancy/2"
+    listing = (
+        f'<div id="1"><a href="{first_url}">First</a></div>'
+        f'<div id="2"><a href="{second_url}">Second</a></div>'
+    )
+    detail = '<script type="application/ld+json">{"@type":"JobPosting","title":"First"}</script>'
+    client = _FakeClient(
+        {
+            listing_url: _FakeResponse(listing, listing_url),
+            first_url: _FakeResponse(detail, first_url),
+        }
+    )
+
+    items = [
+        item
+        async for item in HhParser().parse(
+            CareerSiteSpec(url=listing_url, source_name="hh", limit=2), client
+        )
+    ]
+
+    assert [item.text for item in items] == ["First", "Second"]
 
 
 @pytest.mark.asyncio

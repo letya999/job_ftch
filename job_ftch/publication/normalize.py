@@ -10,6 +10,8 @@ import re
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
+from job_ftch.application.geo import normalize_geo_sources
+
 if TYPE_CHECKING:
     from job_ftch.domain import Job, JobRecord
 
@@ -55,93 +57,6 @@ WORK_MODE_LABELS: dict[str, str] = {
     "hybrid": "гибрид",
     "onsite": "офис",
 }
-
-# Separators site parsers leave in a free-text location field.
-_GEO_SPLIT = re.compile(r"\s*[;,/|&]\s*|\s+[-–—]\s+")
-
-# "г Москва", "пос. Северный" - settlement-type prefixes carry no information.
-_SETTLEMENT_PREFIX = re.compile(r"^(?:г|гор|пос|пгт|с|д|ст)\.?\s+", re.IGNORECASE)
-# "Russia (UTC+3)" - parenthetical notes are never part of the place name.
-_PAREN_NOTE = re.compile(r"\s*\([^)]*\)")
-
-# Work-mode words leak into the location field on several sites. The card has a
-# dedicated "Формат" row, so repeating them here is noise at best and, for
-# "Удалённая работа", a non-place masquerading as one.
-_GEO_NOISE = frozenset(
-    {
-        "office",
-        "офис",
-        "remote",
-        "hybrid",
-        "onsite",
-        "удалённо",
-        "удаленно",
-        "удалённая работа",
-        "удаленная работа",
-        "гибрид",
-        "разные локации",
-        "не указано",
-        "n/a",
-    }
-)
-
-# One place, one spelling. Sources write "Москва, RU", "Moscow, Russia" and
-# "г Москва" for the same city; a feed showing all three reads as three places.
-# Unknown values pass through untouched - this table is a normaliser, not a gate.
-_GEO_ALIASES = {
-    "ru": "Россия",
-    "рф": "Россия",
-    "rф": "Россия",  # latin R + cyrillic Ф, seen in live data
-    "russia": "Россия",
-    "russian federation": "Россия",
-    "moscow": "Москва",
-    "saint petersburg": "Санкт-Петербург",
-    "st petersburg": "Санкт-Петербург",
-    "spb": "Санкт-Петербург",
-    "novosibirsk": "Новосибирск",
-    "yekaterinburg": "Екатеринбург",
-    "ekaterinburg": "Екатеринбург",
-    "kazan": "Казань",
-    "kz": "Казахстан",
-    "kazakhstan": "Казахстан",
-    "almaty": "Алматы",
-    "astana": "Астана",
-    "by": "Беларусь",
-    "belarus": "Беларусь",
-    "minsk": "Минск",
-    "germany": "Германия",
-    "serbia": "Сербия",
-    "belgrade": "Белград",
-    "georgia": "Грузия",
-    "tbilisi": "Тбилиси",
-    "armenia": "Армения",
-    "yerevan": "Ереван",
-    "cyprus": "Кипр",
-    "united kingdom": "Великобритания",
-    "uk": "Великобритания",
-    "united states": "США",
-    "usa": "США",
-    "us": "США",
-    "worldwide": "по всему миру",
-    "europe": "Европа",
-}
-
-
-def _normalise_geo_chunk(chunk: str) -> str | None:
-    chunk = _PAREN_NOTE.sub("", chunk).strip(" .,")
-    if not chunk:
-        return None
-    chunk = _SETTLEMENT_PREFIX.sub("", chunk).strip()
-    lowered = chunk.lower()
-    if lowered in _GEO_NOISE:
-        return None
-    if lowered in _GEO_ALIASES:
-        return _GEO_ALIASES[lowered]
-    # "офис на станции м. Курская" - drop the mode word, keep the address.
-    for noise in _GEO_NOISE:
-        if lowered.startswith(noise + " "):
-            return _normalise_geo_chunk(chunk[len(noise) :])
-    return chunk or None
 
 
 def _fmt_amount(amount: int) -> str:
@@ -194,15 +109,7 @@ def format_geo(job: Job | JobRecord) -> str | None:
     if not any(sources):
         sources = [(getattr(job, "location", None) or "").strip()]
 
-    # Each of these can itself hold a list - a `country` of
-    # "United Kingdom, United States" is normal - so always split.
-    seen: list[str] = []
-    for source in sources:
-        for chunk in _GEO_SPLIT.split(source):
-            normalised = _normalise_geo_chunk(chunk) if chunk else None
-            if normalised and normalised.casefold() not in {s.casefold() for s in seen}:
-                seen.append(normalised)
-    return ", ".join(seen[:3]) if seen else None
+    return normalize_geo_sources(sources).display
 
 
 def format_work_mode(job: Job | JobRecord) -> str | None:

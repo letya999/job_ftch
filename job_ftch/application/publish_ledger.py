@@ -18,7 +18,9 @@ class RunStateStore(Protocol):
 
 _PUBLISH_LEDGER_KEY = "bot_publish:sent_ids"
 _PUBLISH_URL_LEDGER_KEY = "bot_publish:sent_urls"
-_PUBLISH_LEDGER_LIMIT = 500
+# Keep enough history to cover the production channel instead of forgetting
+# older URLs and re-publishing them after a restart or data migration.
+_PUBLISH_LEDGER_LIMIT = 10_000
 
 
 async def _maybe_await(value: object) -> object:

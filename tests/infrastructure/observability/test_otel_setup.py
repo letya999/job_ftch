@@ -198,6 +198,50 @@ def test_item_decision_trace_records_accept_contract(monkeypatch) -> None:
     assert span.attributes["job_ftch.ontology_snapshot_versions"] == '{"p1": "abc"}'
 
 
+def test_item_decision_trace_records_geo_normalization(monkeypatch) -> None:
+    span = _Span()
+    tracer = _Tracer(span)
+    monkeypatch.setattr(
+        "job_ftch.application.item_decision_trace.trace.get_tracer", lambda _: tracer
+    )
+    summary = RunSummary(tenant_id="ai_jobs", source_run_id="run-geo")
+    record = JobRecord(
+        raw_item_id="raw-geo",
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="justjoin",
+        title="ML Engineer",
+        location="Варшава, Польша",
+        city="Варшава",
+        country="Польша",
+        metadata={
+            "geo_normalized_location": "Варшава, Польша",
+            "geo_normalized_city": "Варшава",
+            "geo_normalized_country": "Польша",
+            "geo_normalization_steps": ("country:Россия->Польша",),
+        },
+    )
+
+    record_item_decision_trace(
+        summary=summary,
+        result={
+            "item": record,
+            "item_id": record.stable_id,
+            "current": record,
+            "source_kind": record.source_kind,
+            "source_name": record.source_name,
+            "outcome": "emitted",
+        },
+        final_status="ACCEPT",
+    )
+
+    assert span.attributes["job_ftch.geo.location"] == "Варшава, Польша"
+    assert span.attributes["job_ftch.geo.city"] == "Варшава"
+    assert span.attributes["job_ftch.geo.country"] == "Польша"
+    assert span.attributes["job_ftch.geo.normalized_location"] == "Варшава, Польша"
+    assert span.attributes["job_ftch.geo.normalized_country"] == "Польша"
+    assert span.attributes["job_ftch.geo.normalization_steps"] == '["country:Россия->Польша"]'
+
+
 def test_item_decision_trace_records_prefilter_drop_as_reject(monkeypatch) -> None:
     span = _Span()
     tracer = _Tracer(span)

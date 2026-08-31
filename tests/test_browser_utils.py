@@ -10,7 +10,9 @@ import pytest
 
 from job_ftch.infrastructure.sources.browser_utils import (
     _launch_browser_with_recovery,
+    _load_async_playwright,
     _patchright_inner_send_cancellation_safe,
+    _patchright_needs_legacy_cancellation_fix,
     _patchright_route_handle_cancellation_safe,
     _unroute_page_before_close,
     attach_operator_page,
@@ -512,7 +514,7 @@ def _stub_playwright_loader(
 
 
 @pytest.mark.asyncio
-async def test_open_page_uses_playwright_when_patchright_not_required(
+async def test_open_page_uses_default_browser_route_when_patchright_not_required(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -520,6 +522,26 @@ async def test_open_page_uses_playwright_when_patchright_not_required(
     async with open_page({"headless": True}):
         pass
     assert used == [False]
+
+
+def test_default_browser_loader_uses_patchright_runtime() -> None:
+    loader = _load_async_playwright(prefer_patchright=False)
+
+    assert loader.__module__.startswith("patchright.")
+
+
+def test_new_patchright_does_not_need_legacy_cancellation_fix() -> None:
+    def new_sender(
+        self: object,
+        target: object,
+        method: str,
+        params: dict[str, object],
+        timeout: float,
+        no_reply: bool = False,
+    ) -> None:
+        del self, target, method, params, timeout, no_reply
+
+    assert _patchright_needs_legacy_cancellation_fix(new_sender) is False
 
 
 @pytest.mark.asyncio
@@ -602,3 +624,24 @@ async def test_navigate_blocked_403_sets_observed_challenge() -> None:
             },
         )
     assert controller.observed_challenge_type == "cloudflare_challenge"
+
+
+@pytest.mark.asyncio
+async def test_navigate_falls_back_to_less_strict_commit() -> None:
+    waits: list[str | None] = []
+
+    class _Page:
+        async def goto(self, url: str, wait_until: str | None = None, timeout: object = None):
+            del url, timeout
+            waits.append(wait_until)
+            if len(waits) == 1:
+                raise TimeoutError
+            return SimpleNamespace(status=200)
+
+    await navigate(
+        _Page(),  # type: ignore[arg-type]
+        "https://example.com/jobs",
+        {"_allow_private_selfcheck_fixture": True},
+    )
+
+    assert waits == ["domcontentloaded", "commit"]

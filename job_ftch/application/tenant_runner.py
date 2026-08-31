@@ -178,7 +178,6 @@ def _update_source_health_payload(
     finished_at: datetime,
     drift_ratio_threshold: float = 0.2,
     min_baseline_threshold: float = 3.0,
-    failure_streak_pause: int = 3,
     majority_failure_ratio: float = 0.5,
 ) -> SourceHealth:
     prev_baseline_emitted = previous.baseline_emitted if previous else 0.0
@@ -218,8 +217,6 @@ def _update_source_health_payload(
         last_started_at = previous.last_started_at if previous else None
         success_count = previous_success
         next_baseline = prev_baseline_emitted
-        if failure_streak >= failure_streak_pause and (not previous or not previous.paused):
-            logger.info("source_auto_paused", source_id=source_id, failure_streak=failure_streak)
     else:
         failure_streak = 0
         last_started_at = started_at.isoformat() if started_at is not None else None
@@ -247,17 +244,9 @@ def _update_source_health_payload(
         baseline_emitted=next_baseline,
         drift_ratio=drift_ratio,
         degraded=degraded,
-        status=(
-            "degraded"
-            if degraded
-            else (
-                "paused"
-                if failure_streak >= failure_streak_pause
-                else ("failing" if had_failure else "healthy")
-            )
-        ),
-        paused=failure_streak >= failure_streak_pause,
-        skipped_runs=0 if not had_failure else (previous.skipped_runs if previous else 0),
+        status=("degraded" if degraded else ("failing" if had_failure else "healthy")),
+        paused=False,
+        skipped_runs=0,
         last_eviction_at=previous.last_eviction_at if previous else None,
         eviction_streak=previous.eviction_streak if previous else 0,
         last_eviction_kind=previous.last_eviction_kind if previous else None,
@@ -1347,11 +1336,11 @@ class TenantRunner:
         source_id: str,
         patch: dict[str, Any],
     ) -> dict[str, Any]:
-        unknown = [key for key in patch if key not in {"enabled", "limit"}]
+        unknown = [key for key in patch if key not in {"enabled", "limit", "url"}]
         if unknown:
             return {
                 "error": "invalid_arguments",
-                "message": "patch may only include enabled and/or limit",
+                "message": "patch may only include enabled, limit, and/or url",
                 "unknown_keys": unknown,
                 "source_id": source_id,
             }
@@ -1365,6 +1354,12 @@ class TenantRunner:
             return {
                 "error": "invalid_arguments",
                 "message": "limit must be an int or null",
+                "source_id": source_id,
+            }
+        if "url" in patch and not isinstance(patch["url"], str):
+            return {
+                "error": "invalid_arguments",
+                "message": "url must be a string",
                 "source_id": source_id,
             }
 
@@ -1387,6 +1382,13 @@ class TenantRunner:
                 "error": "config_limit_not_updatable",
                 "source_id": source_id,
                 "hint": "do not rewrite YAML; add a runtime source to change limit",
+            }
+        if is_config and "url" in patch:
+            return {
+                "status": "unsupported",
+                "error": "config_url_not_updatable",
+                "source_id": source_id,
+                "hint": "update the tenant config instead",
             }
         if is_config:
             target_id = _canonical_base_source_id(runtime, source_id, listed_item) or source_id
@@ -1429,6 +1431,25 @@ class TenantRunner:
                     "hint": "this source spec has no limit field",
                 }
             new_spec = new_spec.model_copy(update={"limit": patch["limit"]})
+        if "url" in patch:
+            fields = getattr(type(new_spec), "model_fields", {})
+            if "url" not in fields:
+                return {
+                    "status": "unsupported",
+                    "error": "url_not_supported",
+                    "source_id": source_id,
+                    "hint": "this source spec has no url field",
+                }
+            try:
+                new_spec = type(new_spec).model_validate(
+                    {**new_spec.model_dump(mode="python"), "url": patch["url"]}
+                )
+            except ValueError as exc:
+                return {
+                    "error": "invalid_arguments",
+                    "message": str(exc),
+                    "source_id": source_id,
+                }
         enabled = runtime_record.enabled if "enabled" not in patch else bool(patch["enabled"])
         updated = runtime_record.model_copy(update={"spec": new_spec, "enabled": enabled})
         previous = runtime_record
@@ -1707,16 +1728,13 @@ class TenantRunner:
                 except (ValueError, TypeError):
                     pass
 
-            # Task 5: Auto-pause with Half-open
+            # Sources stay enabled after failures. Clear legacy auto-pause rows
+            # so repaired adapters are exercised on the next scheduled run.
             if (not ignore_schedule_gates) and health and health.paused:
-                health.skipped_runs += 1
-                if health.skipped_runs >= runtime.settings.source_health_probe_every_n_runs:
-                    logger.info("source_probe", source_id=sid, skipped_runs=health.skipped_runs)
-                    health.skipped_runs = 0
-                else:
-                    await runtime.store.save_source_health(sid, health)
-                    continue
-                # Save the updated skipped_runs before probing
+                logger.info("source_auto_resumed", source_id=sid)
+                health.paused = False
+                health.skipped_runs = 0
+                health.status = "failing"
                 await runtime.store.save_source_health(sid, health)
 
             runnable_specs.append(spec)
@@ -1964,7 +1982,6 @@ class TenantRunner:
                 finished_at=finished_at,
                 drift_ratio_threshold=runtime.settings.source_health_drift_ratio,
                 min_baseline_threshold=runtime.settings.source_health_min_baseline,
-                failure_streak_pause=runtime.settings.source_health_failure_streak_pause,
             )
             failure_payload = failure_by_id.get(source_id)
             if failure_payload is not None:
@@ -2000,27 +2017,14 @@ class TenantRunner:
             eviction_payload = eviction_by_id.get(source_id)
             if eviction_payload is not None:
                 eviction_streak = (previous.eviction_streak if previous else 0) + 1
-                should_pause = (
-                    payload.paused
-                    or eviction_streak >= runtime.settings.source_eviction_pause_threshold
-                )
                 payload = payload.model_copy(
                     update={
                         "last_eviction_at": finished_at.isoformat(),
                         "eviction_streak": eviction_streak,
                         "last_eviction_kind": eviction_payload.get("eviction_kind"),
-                        "paused": should_pause,
-                        "status": "paused" if should_pause else payload.status,
+                        "paused": False,
                     }
                 )
-                if should_pause and not (previous.paused if previous else False):
-                    logger.info(
-                        "source_eviction_paused",
-                        tenant_id=runtime.tenant.tenant_id,
-                        source_id=source_id,
-                        eviction_streak=eviction_streak,
-                        eviction_kind=eviction_payload.get("eviction_kind"),
-                    )
             elif payload.eviction_streak != 0:
                 payload = payload.model_copy(update={"eviction_streak": 0})
             await runtime.store.save_source_health(source_id, payload)

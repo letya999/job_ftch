@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from job_ftch.application.contracts import TypeChangingNode
+from job_ftch.application.geo import normalize_geo_sources
 from job_ftch.domain import (
     JobDraft,
     JobRecord,
@@ -246,24 +247,43 @@ class LocationWorkModeNormalizationNode:
         work_mode = item.work_mode
         if work_mode is WorkMode.UNKNOWN:
             work_mode = _detect_work_mode(item.description, item.title, location)
-        if location is not None:
-            normalized = location.strip()
-            lowered = normalized.casefold()
-            if lowered in {"remote", "hybrid", "on-site", "onsite"}:
-                location = None
-        city = item.city or location
+        geo = normalize_geo_sources(
+            (
+                item.city,
+                item.country,
+                location,
+            )
+        )
+        location = geo.display
+        city = item.city or geo.city or location
+        country = geo.country or item.country
         region = item.region or location
         normalization_steps: list[str] = []
         if location != item.location:
             normalization_steps.append("location:normalized")
+        if city != item.city:
+            normalization_steps.append("city:inferred")
+        if country != item.country:
+            normalization_steps.extend(geo.corrections or ("country:normalized",))
         if work_mode != item.work_mode:
             normalization_steps.append("work_mode:inferred")
+        metadata = item.metadata
+        if normalization_steps:
+            metadata = {
+                **item.metadata,
+                "geo_normalized_location": location,
+                "geo_normalized_city": city,
+                "geo_normalized_country": country,
+                "geo_normalization_steps": tuple(normalization_steps),
+            }
         return item.model_copy(
             update={
                 "location": location,
                 "city": city,
                 "region": region,
+                "country": country,
                 "work_mode": work_mode,
+                "metadata": metadata,
                 "provenance": item.provenance.model_copy(
                     update={
                         "normalization": tuple(

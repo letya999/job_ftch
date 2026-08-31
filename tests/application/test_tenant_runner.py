@@ -907,10 +907,13 @@ async def test_tenant_runner_update_source_runtime_and_config_rules(tmp_path: Pa
         patched = await runner.update_source(
             "ai_jobs",
             source_id,
-            {"enabled": False, "limit": 7},
+            {"enabled": False, "limit": 7, "url": "https://example.org/vacancies"},
         )
         assert patched.get("enabled") is False
         assert patched["spec"]["limit"] == 7
+        assert patched["spec"]["url"] == "https://example.org/vacancies"
+        invalid_url = await runner.update_source("ai_jobs", source_id, {"url": ""})
+        assert invalid_url["error"] == "invalid_arguments"
         unknown = await runner.update_source("ai_jobs", source_id, {"parser": "generic"})
         assert unknown["error"] == "invalid_arguments"
         listed = await runner.list_sources("ai_jobs")
@@ -1533,8 +1536,8 @@ def test_source_level_failure_when_nothing_fetched() -> None:
     assert health.status == "failing"
 
 
-def test_failure_streak_pauses_then_healthy_probe_resets_once() -> None:
-    """Three consecutive majority failures pause; one healthy probe fully resets."""
+def test_failure_streak_keeps_source_enabled_then_healthy_run_resets_once() -> None:
+    """Repeated failures stay visible without disabling the source; health resets once."""
     failing = SourceRunStats(fetched=10, failed=8)
     health = _health_from(failing)
     assert health.failure_streak == 1 and not health.paused
@@ -1543,7 +1546,7 @@ def test_failure_streak_pauses_then_healthy_probe_resets_once() -> None:
     assert health.failure_streak == 2 and not health.paused
 
     health = _health_from(failing, previous=health)
-    assert health.failure_streak == 3 and health.paused and health.status == "paused"
+    assert health.failure_streak == 3 and not health.paused and health.status == "failing"
 
     healthy = _health_from(SourceRunStats(fetched=10, failed=1, emitted=9), previous=health)
     assert healthy.failure_streak == 0

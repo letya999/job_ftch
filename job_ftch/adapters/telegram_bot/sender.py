@@ -37,23 +37,29 @@ def _translate(error: Exception) -> Exception:
     return error
 
 
-def _render_with_layout(job: Job, layout: CardLayout, profile: str) -> str:
+def _render_with_layout(
+    job: Job,
+    layout: CardLayout,
+    profile: str,
+    reject_invalid: bool = False,
+) -> str | None:
     """Render every publication through the YAML card layout.
 
-    Cards that are structurally valid use the normal layout. Cards that fail
-    the public-vacancy substance gate still use the same layout, but are marked
-    for readers instead of falling back to the removed legacy formatter.
+    Public channel cards that fail the substance gate are skipped. Control-bot
+    replies may still show the marked card to the operator for review.
     Technical rendering errors are raised to the publisher and are never
     replaced with a differently formatted message.
     """
     card = build_card(job)
     outcome = validate_card(card, layout)
     if not outcome.ok:
-        logger.warning(
-            "card_validation_failed_marked",
+        logger.info(
+            "publication_card_rejected" if reject_invalid else "card_validation_failed_marked",
             job=str(getattr(job, "title", "")),
             reason=outcome.reject_reason,
         )
+        if reject_invalid:
+            return None
         return f"⚠️ <i>Требует проверки</i>\n\n{render_card(card, layout, profile=profile)}"
     return render_card(card, layout, profile=profile)
 
@@ -66,8 +72,8 @@ class TelegramCardSender:
 
     The YAML-driven renderer (``config/publication/card.yaml``) is loaded by
     default, matching ``TelegramPostingSink``; pass an explicit ``layout`` to
-    override it. Validation failures remain in this renderer and are marked
-    for readers instead of changing format.
+    override it. Validation failures are rejected for public channel delivery;
+    control-bot replies retain the review marker.
     """
 
     def __init__(
@@ -86,6 +92,8 @@ class TelegramCardSender:
     async def send(self, target: str, job: Job) -> None:
         try:
             text = self._render(job)
+            if text is None:
+                return
             await self._bot.send_message(
                 target,
                 text,
@@ -96,8 +104,8 @@ class TelegramCardSender:
         except Exception as error:
             raise _translate(error) from error
 
-    def _render(self, job: Job) -> str:
-        return _render_with_layout(job, self._layout, self._profile)
+    def _render(self, job: Job) -> str | None:
+        return _render_with_layout(job, self._layout, self._profile, True)
 
 
 class ReplyCardSender:
@@ -130,4 +138,6 @@ class ReplyCardSender:
             raise _translate(error) from error
 
     def _render(self, job: Job) -> str:
-        return _render_with_layout(job, self._layout, self._profile)
+        rendered = _render_with_layout(job, self._layout, self._profile)
+        assert rendered is not None
+        return rendered

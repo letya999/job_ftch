@@ -11,6 +11,7 @@ from selectolax.lexbor import LexborHTMLParser
 from job_ftch.application.registry import register_site_parser
 from job_ftch.domain import SourceKind
 from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
+from job_ftch.infrastructure.sources.career_site import client_for_config
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
@@ -213,36 +214,61 @@ class VtbParser:
 class AlfaBankParser:
     domain_pattern = r"^https?://(?:(?:job|digital)\.)?alfabank\.ru(?:/|$)"
     has_custom_parse = True
-    supports_discover = True
+    supports_discover = False
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
-        return SiteRuntimeDefaults(render=True, wait="domcontentloaded")
+        return SiteRuntimeDefaults(
+            render=False,
+            wait="domcontentloaded",
+            extra={"proxy_rescue_allow_domains": ["job.alfabank.ru"]},
+        )
 
     def parser_kind(self, url: str) -> str | None:
         del url
         return None
 
-    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
-        return await _discover_detail_board(
-            spec,
-            client,
-            href_pattern=re.compile(
-                r"/(?:vacanc(?:y|ies)|jobs?)/(?!khochu-stat-chastyu-alfa-digital)([^/?#]+)(?:/)?$"
-            ),
-        )
-
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
-        async for item in _parse_detail_board(
-            spec,
-            client,
-            href_pattern=re.compile(
-                r"/(?:vacanc(?:y|ies)|jobs?)/(?!khochu-stat-chastyu-alfa-digital)([^/?#]+)(?:/)?$"
-            ),
-            parser_name="alfabank_board",
-            company="Альфа-Банк",
-        ):
-            yield item
+        limit = spec.limit or 50
+        params = [("businessLine", str(value)) for value in range(1011, 1023)]
+        response = await client.get(
+            "https://job.alfabank.ru/api/vacancies",
+            params=[*params, ("take", str(limit))],
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        for vacancy in response.json().get("items", [])[:limit]:
+            title = str(vacancy.get("name") or "").strip()
+            slug = str(vacancy.get("slug") or "").strip()
+            if not title or not slug:
+                continue
+            text = "\n".join(
+                filter(
+                    None,
+                    (
+                        title,
+                        str(vacancy.get("descriptionText") or "").strip(),
+                        str(vacancy.get("requirements") or "").strip(),
+                        str(vacancy.get("duties") or "").strip(),
+                        str(vacancy.get("conditions") or "").strip(),
+                    ),
+                )
+            )
+            yield build_raw_item(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=spec.source_name or "alfabank_api",
+                external_id=str(vacancy.get("id") or slug),
+                url=urljoin("https://job.alfabank.ru", slug),
+                text=text,
+                metadata={
+                    "board_url": spec.url,
+                    "parser": "alfabank_api",
+                    "observation_kind": "vacancy_detail",
+                    "detail_vacancy_confirmed": True,
+                    "company": "Альфа-Банк",
+                    "company_authoritative": True,
+                },
+            )
 
 
 class T1InnotechParser:
@@ -390,12 +416,10 @@ class CasibCareerParser(_EmployerBoardParser):
 
 
 class HalykCareerParser(_EmployerBoardParser):
-    domain_pattern = (
-        r"^https?://(?:www\.)?halykbank\.kz/(?:index\.php/)?about/career/vacancies(?:/|$)"
-    )
+    domain_pattern = r"^https?://(?:www\.)?halykbank\.kz/(?:[a-z]{2}/)?(?:index\.php/)?about/career/vacancies(?:/|$)"
     parser_name = "halyk_career"
     company = "Halyk Bank"
-    detail_pattern = re.compile(r"/about/career/vacancies-inner/(\d+)(?:/)?$")
+    detail_pattern = re.compile(r"/(?:[a-z]{2}/)?about/career/vacancies-inner/(\d+)(?:/)?$")
 
 
 class FreedomCareerParser(_EmployerBoardParser):
@@ -414,6 +438,45 @@ class BeelineKazakhstanCareerParser(_EmployerBoardParser):
     domain_pattern = r"^https?://people\.beeline\.kz(?:/|$)"
     parser_name = "beeline_kz_career"
     company = "Beeline Kazakhstan"
+
+
+class TochkaCareerParser(_EmployerBoardParser):
+    domain_pattern = r"^https?://hr\.tochka\.com/vacancies(?:/|$)"
+    supports_discover = False
+    supports_search = True
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del base_url, keywords, limit
+        return []
+
+    parser_name = "tochka_career"
+    company = "Точка Банк"
+    detail_pattern = re.compile(r"/vacancies/catalog/([^/?#]+)(?:/)?$")
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        async with client_for_config(client, {"skip_ssl": True}) as insecure_client:
+            return await _discover_detail_board(
+                spec,
+                insecure_client,
+                href_pattern=self.detail_pattern,
+            )
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        async with client_for_config(client, {"skip_ssl": True}) as insecure_client:
+            async for item in _parse_detail_board(
+                spec,
+                insecure_client,
+                href_pattern=self.detail_pattern,
+                parser_name=self.parser_name,
+                company=self.company,
+            ):
+                yield item
 
 
 class YandexUzbekistanParser(_EmployerBoardParser):
@@ -478,6 +541,7 @@ for _parser_class in (
     FreedomCareerParser,
     ForteCareerParser,
     BeelineKazakhstanCareerParser,
+    TochkaCareerParser,
     YandexUzbekistanParser,
     UzumCareerParser,
     ClickCareerParser,
