@@ -804,7 +804,11 @@ class CareerSiteSource(Source["RawItem"]):
                 )
 
         initial_bypass = self.spec.bypass or "auto"
-        self.bypass_strategy = resolve_bypass(initial_bypass, self.spec.bypass_config)
+        bypass_config = dict(self.spec.bypass_config)
+        parser_proxy_domains = self.spec.monitor_config.get("proxy_rescue_allow_domains")
+        if parser_proxy_domains:
+            bypass_config["proxy_rescue_allow_domains"] = parser_proxy_domains
+        self.bypass_strategy = resolve_bypass(initial_bypass, bypass_config)
         cached_bypass = cached_strategy.get("bypass") if cached_strategy else None
         if (
             initial_bypass == "auto"
@@ -819,7 +823,7 @@ class CareerSiteSource(Source["RawItem"]):
             from job_ftch.infrastructure.bypass.context import BypassContext
 
             self._bypass_ctx = await BypassContext.for_url(
-                self.spec.url, config=self.spec.bypass_config
+                self.spec.url, config=bypass_config
             )
             bind_context = getattr(self.bypass_strategy, "bind_context", None)
             if callable(bind_context):

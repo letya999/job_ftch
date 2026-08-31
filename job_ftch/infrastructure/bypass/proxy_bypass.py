@@ -657,7 +657,14 @@ class ResidentialProxyBypass(ProxyBypass):
         settings = get_settings()
         self._gateway: GatewayProxyProvider | None = None
         self._strict_geo = bool(getattr(settings, "proxy_strict_geo", False))
-        self._rescue_allow_domains = tuple(getattr(settings, "proxy_rescue_allow_domains", ()))
+        self._rescue_allow_domains = tuple(
+            dict.fromkeys(
+                [
+                    *getattr(settings, "proxy_rescue_allow_domains", ()),
+                    *self._config.get("proxy_rescue_allow_domains", ()),
+                ]
+            )
+        )
         self._rescue_deny_domains = tuple(getattr(settings, "proxy_rescue_deny_domains", ()))
         provider = getattr(settings, "proxy_provider", "raw")
         gateway = getattr(settings, "proxy_gateway", "")

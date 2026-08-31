@@ -350,6 +350,22 @@ class TestStrictGeoBinding:
 
 
 class TestResidentialProxyRescueRouting:
+    def test_source_config_extends_global_rescue_allowlist(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("JOB_FTCH_PROXY_RESCUE_ALLOW_DOMAINS", "career.habr.com")
+        import job_ftch.config
+
+        job_ftch.config.get_settings.cache_clear()
+        from job_ftch.infrastructure.bypass.proxy_bypass import ResidentialProxyBypass
+
+        bypass = ResidentialProxyBypass(
+            {"proxy_rescue_allow_domains": ["job.2gis.ru"]}
+        )
+
+        assert bypass._domain_allowed("career.habr.com")
+        assert bypass._domain_allowed("job.2gis.ru")
+
     def test_gateway_is_available_to_bypass_context(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("JOB_FTCH_PROXY_PROVIDER", "dataimpulse")
         monkeypatch.setenv("JOB_FTCH_PROXY_GATEWAY", "http://gw.dataimpulse.com:823")

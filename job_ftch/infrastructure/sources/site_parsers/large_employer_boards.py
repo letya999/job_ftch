@@ -218,7 +218,11 @@ class AlfaBankParser:
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
-        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+        return SiteRuntimeDefaults(
+            render=False,
+            wait="domcontentloaded",
+            extra={"proxy_rescue_allow_domains": ["job.alfabank.ru"]},
+        )
 
     def parser_kind(self, url: str) -> str | None:
         del url
