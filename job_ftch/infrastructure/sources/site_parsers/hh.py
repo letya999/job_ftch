@@ -464,10 +464,9 @@ class HhParser:
                 logger.debug("hh.browser_discover_failed", url=spec.url, error=str(exc))
 
         seen_final_ids: set[str] = set()
-        details_blocked = False
         detail_requests = 0
         for detail_url in collected_urls[:limit]:
-            if details_blocked or detail_requests >= _MAX_DETAIL_REQUESTS:
+            if detail_requests >= _MAX_DETAIL_REQUESTS:
                 snapshot = listing_snapshots.get(_detail_identity(detail_url))
                 if snapshot:
                     yield _item_from_listing(detail_url, *snapshot, source_name, spec.url)
@@ -477,11 +476,17 @@ class HhParser:
             response.raise_for_status()
             if is_challenge_response(response.text):
                 logger.warning("hh.captcha_detected_detail", url=detail_url)
-                details_blocked = True
-                snapshot = listing_snapshots.get(_detail_identity(detail_url))
-                if snapshot:
-                    yield _item_from_listing(detail_url, *snapshot, source_name, spec.url)
-                continue
+                from job_ftch.infrastructure.sources.monitors.shared import (
+                    BrowserChallengeError,
+                )
+
+                raise BrowserChallengeError(
+                    url=detail_url,
+                    status_code=response.status_code,
+                    headers=dict(getattr(response, "headers", {})),
+                    body=getattr(response, "content", response.text.encode()),
+                    challenge_type="captcha",
+                )
             final_url = str(response.url)
             final_id = _detail_identity(final_url)
             if final_id in seen_final_ids:

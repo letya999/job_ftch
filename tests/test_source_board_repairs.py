@@ -1,13 +1,15 @@
 from job_ftch.application.registry import resolve_site_parser
 from job_ftch.infrastructure.sources.site_parsers.gazprombank import _extract_listing
 from job_ftch.infrastructure.sources.site_parsers.hh_employer_fallbacks import (
-    AlfaBankHhFallback,
-    TwoGisHhFallback,
+    TwoGisCareerParser,
 )
 from job_ftch.infrastructure.sources.site_parsers.kolesa import (
     _nuxt_vacancies_are_explicitly_empty,
 )
-from job_ftch.infrastructure.sources.site_parsers.large_employer_boards import TochkaCareerParser
+from job_ftch.infrastructure.sources.site_parsers.large_employer_boards import (
+    AlfaBankParser,
+    TochkaCareerParser,
+)
 from job_ftch.infrastructure.sources.site_parsers.ozon import OzonCareerParser
 from job_ftch.infrastructure.sources.site_parsers.tele2_kz import _extract_hh_employer_url
 
@@ -44,15 +46,14 @@ def test_tele2_extracts_linked_hh_employer_board() -> None:
     )
 
 
-def test_unreachable_company_boards_resolve_to_official_fallbacks() -> None:
-    assert isinstance(resolve_site_parser("https://job.2gis.ru/vacancies"), TwoGisHhFallback)
+def test_company_boards_resolve_to_company_owned_parsers() -> None:
+    assert isinstance(resolve_site_parser("https://job.2gis.ru/vacancies"), TwoGisCareerParser)
     assert isinstance(
         resolve_site_parser("https://job.alfabank.ru/vacancies/digital"),
-        AlfaBankHhFallback,
+        AlfaBankParser,
     )
     ozon = resolve_site_parser("https://career.ozon.ru/")
     assert isinstance(ozon, OzonCareerParser)
-    assert ozon.employer_url.startswith("https://hh.ru/employer/2180")
     assert isinstance(
         resolve_site_parser("https://hr.tochka.com/vacancies/it/"),
         TochkaCareerParser,

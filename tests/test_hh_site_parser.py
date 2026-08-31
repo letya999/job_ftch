@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 import pytest
 
@@ -169,7 +168,7 @@ async def test_hh_parser_emits_items_from_listing_and_detail_pages() -> None:
 
 
 @pytest.mark.asyncio
-async def test_hh_parser_uses_listing_title_when_detail_is_captcha() -> None:
+async def test_hh_parser_routes_detail_captcha_to_bypass() -> None:
     listing_url = "https://hh.ru/search/vacancy?employer_id=80"
     detail_url = "https://hh.ru/vacancy/123"
     second_detail_url = "https://hh.ru/vacancy/456"
@@ -190,19 +189,16 @@ async def test_hh_parser_uses_listing_title_when_detail_is_captcha() -> None:
         }
     )
 
-    items = [
-        item
-        async for item in HhParser().parse(
-            CareerSiteSpec(url="https://hh.ru/employer/80", source_name="alfa", limit=2),
-            client,
-        )
-    ]
+    from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
 
-    assert len(items) == 2
-    assert items[0].text == "Python developer"
-    assert items[0].created_at == datetime.fromtimestamp(1787558822, tz=UTC)
-    assert items[0].metadata["parser"] == "site_hh_listing"
-    assert items[1].text == "ML engineer"
+    with pytest.raises(BrowserChallengeError):
+        _ = [
+            item
+            async for item in HhParser().parse(
+                CareerSiteSpec(url="https://hh.ru/employer/80", source_name="alfa", limit=2),
+                client,
+            )
+        ]
 
 
 @pytest.mark.asyncio

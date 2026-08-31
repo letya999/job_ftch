@@ -122,18 +122,18 @@ async def test_employer_parser_skips_landing_and_policy_pages() -> None:
 
 
 @pytest.mark.asyncio
-async def test_alfa_parser_skips_generic_join_card() -> None:
+async def test_alfa_parser_uses_company_api() -> None:
     class AlfaClient:
         async def get(self, url: str, **_: object) -> _Response:
             response = _Response()
-            response.text = (
-                (
-                    '<a href="/vacancies/khochu-stat-chastyu-alfa-digital--194275">Join</a>'
-                    '<a href="/vacancies/sistemnii_analitik__105584">System analyst</a>'
-                )
-                if url.endswith("/vacancies")
-                else "<main><h1>System analyst</h1><p>Design banking APIs.</p></main>"
-            )
+            response.json = lambda: {
+                "items": [{
+                    "id": "105584",
+                    "name": "System analyst",
+                    "slug": "/moskva/system-analyst_105584",
+                    "descriptionText": "Design banking APIs.",
+                }]
+            }
             return response
 
     items = [
@@ -144,7 +144,7 @@ async def test_alfa_parser_skips_generic_join_card() -> None:
         )
     ]
 
-    assert [item.external_id for item in items] == ["sistemnii_analitik__105584"]
+    assert [item.external_id for item in items] == ["105584"]
     assert "Design banking APIs" in items[0].text
     assert items[0].metadata["company"] == "Альфа-Банк"
 

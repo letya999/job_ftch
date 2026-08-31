@@ -9,8 +9,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
+from job_ftch.domain import SourceKind
+from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
-from job_ftch.infrastructure.sources.site_parsers.hh import HhParser
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -71,12 +72,10 @@ class OzonCareerParser:
     ) -> list[str]:
         del base_url, keywords, limit
         return []
-    employer_url = "https://hh.ru/employer/2180?dpt=ozonru-2180-inttech"
-
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
         return SiteRuntimeDefaults(
-            render=True,
+            render=False,
             wait="domcontentloaded",
             include_if_detail_page=False,
             extra={"canonical_url": _OZON_VACANCY_URL},
@@ -87,9 +86,46 @@ class OzonCareerParser:
         return None
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
-        delegated = spec.model_copy(update={"url": self.employer_url})
-        async for item in HhParser().parse(delegated, client):
-            yield item
+        limit = spec.limit or 50
+        response = await client.get(
+            "https://job-api.ozon.ru/v2/vacancy",
+            params={"meta.limit": limit, "meta.page": 1},
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        for vacancy in response.json().get("items", [])[:limit]:
+            external_id = str(vacancy.get("internalUuid") or vacancy.get("hhId") or "")
+            title = str(vacancy.get("title") or "").strip()
+            if not external_id or not title:
+                continue
+            roles = vacancy.get("professionalRoles") or []
+            text = "\n".join(
+                filter(
+                    None,
+                    (
+                        title,
+                        str(vacancy.get("department") or "").strip(),
+                        str(vacancy.get("city") or "").strip(),
+                        ", ".join(str(role.get("title") or "") for role in roles),
+                        str(vacancy.get("description") or "").strip(),
+                    ),
+                )
+            )
+            yield build_raw_item(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=spec.source_name or "ozon_api",
+                external_id=external_id,
+                url=f"{_OZON_VACANCY_URL}{external_id}",
+                text=text,
+                metadata={
+                    "board_url": spec.url,
+                    "parser": "ozon_api",
+                    "observation_kind": "vacancy_detail",
+                    "detail_vacancy_confirmed": True,
+                    "company": "Ozon",
+                    "company_authoritative": True,
+                },
+            )
 
 
 register_site_parser(

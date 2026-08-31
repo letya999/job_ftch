@@ -214,36 +214,57 @@ class VtbParser:
 class AlfaBankParser:
     domain_pattern = r"^https?://(?:(?:job|digital)\.)?alfabank\.ru(?:/|$)"
     has_custom_parse = True
-    supports_discover = True
+    supports_discover = False
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
-        return SiteRuntimeDefaults(render=True, wait="domcontentloaded")
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
 
     def parser_kind(self, url: str) -> str | None:
         del url
         return None
 
-    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
-        return await _discover_detail_board(
-            spec,
-            client,
-            href_pattern=re.compile(
-                r"/(?:vacanc(?:y|ies)|jobs?)/(?!khochu-stat-chastyu-alfa-digital)([^/?#]+)(?:/)?$"
-            ),
-        )
-
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
-        async for item in _parse_detail_board(
-            spec,
-            client,
-            href_pattern=re.compile(
-                r"/(?:vacanc(?:y|ies)|jobs?)/(?!khochu-stat-chastyu-alfa-digital)([^/?#]+)(?:/)?$"
-            ),
-            parser_name="alfabank_board",
-            company="Альфа-Банк",
-        ):
-            yield item
+        limit = spec.limit or 50
+        params = [("businessLine", str(value)) for value in range(1011, 1023)]
+        response = await client.get(
+            "https://job.alfabank.ru/api/vacancies",
+            params=[*params, ("take", str(limit))],
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        for vacancy in response.json().get("items", [])[:limit]:
+            title = str(vacancy.get("name") or "").strip()
+            slug = str(vacancy.get("slug") or "").strip()
+            if not title or not slug:
+                continue
+            text = "\n".join(
+                filter(
+                    None,
+                    (
+                        title,
+                        str(vacancy.get("descriptionText") or "").strip(),
+                        str(vacancy.get("requirements") or "").strip(),
+                        str(vacancy.get("duties") or "").strip(),
+                        str(vacancy.get("conditions") or "").strip(),
+                    ),
+                )
+            )
+            yield build_raw_item(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=spec.source_name or "alfabank_api",
+                external_id=str(vacancy.get("id") or slug),
+                url=urljoin("https://job.alfabank.ru", slug),
+                text=text,
+                metadata={
+                    "board_url": spec.url,
+                    "parser": "alfabank_api",
+                    "observation_kind": "vacancy_detail",
+                    "detail_vacancy_confirmed": True,
+                    "company": "Альфа-Банк",
+                    "company_authoritative": True,
+                },
+            )
 
 
 class T1InnotechParser:
@@ -392,11 +413,11 @@ class CasibCareerParser(_EmployerBoardParser):
 
 class HalykCareerParser(_EmployerBoardParser):
     domain_pattern = (
-        r"^https?://(?:www\.)?halykbank\.kz/(?:index\.php/)?about/career/vacancies(?:/|$)"
+        r"^https?://(?:www\.)?halykbank\.kz/(?:[a-z]{2}/)?(?:index\.php/)?about/career/vacancies(?:/|$)"
     )
     parser_name = "halyk_career"
     company = "Halyk Bank"
-    detail_pattern = re.compile(r"/about/career/vacancies-inner/(\d+)(?:/)?$")
+    detail_pattern = re.compile(r"/(?:[a-z]{2}/)?about/career/vacancies-inner/(\d+)(?:/)?$")
 
 
 class FreedomCareerParser(_EmployerBoardParser):
