@@ -10,7 +10,9 @@ from typing import TYPE_CHECKING, Any
 
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
-from job_ftch.infrastructure.sources.site_parsers.hh import HhParser
+from job_ftch.infrastructure.sources.site_parsers.hh_employer_fallbacks import (
+    parse_hh_employer_api,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -80,8 +82,7 @@ class OzonCareerParser:
         return None
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
-        delegated = spec.model_copy(update={"url": self.employer_url})
-        async for item in HhParser().parse(delegated, client):
+        async for item in parse_hh_employer_api(spec, client, employer_id="2180"):
             yield item
 
 
