@@ -2017,27 +2017,14 @@ class TenantRunner:
             eviction_payload = eviction_by_id.get(source_id)
             if eviction_payload is not None:
                 eviction_streak = (previous.eviction_streak if previous else 0) + 1
-                should_pause = (
-                    payload.paused
-                    or eviction_streak >= runtime.settings.source_eviction_pause_threshold
-                )
                 payload = payload.model_copy(
                     update={
                         "last_eviction_at": finished_at.isoformat(),
                         "eviction_streak": eviction_streak,
                         "last_eviction_kind": eviction_payload.get("eviction_kind"),
-                        "paused": should_pause,
-                        "status": "paused" if should_pause else payload.status,
+                        "paused": False,
                     }
                 )
-                if should_pause and not (previous.paused if previous else False):
-                    logger.info(
-                        "source_eviction_paused",
-                        tenant_id=runtime.tenant.tenant_id,
-                        source_id=source_id,
-                        eviction_streak=eviction_streak,
-                        eviction_kind=eviction_payload.get("eviction_kind"),
-                    )
             elif payload.eviction_streak != 0:
                 payload = payload.model_copy(update={"eviction_streak": 0})
             await runtime.store.save_source_health(source_id, payload)

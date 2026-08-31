@@ -5,6 +5,7 @@ import inspect
 from job_ftch.application import registry
 from job_ftch.application.registry import known_board_assessment_hint
 from job_ftch.infrastructure.sources import site_parsers
+from job_ftch.infrastructure.sources.site_parsers.base import SiteParser
 
 
 def test_site_parsers_package_imports_linkedin_module() -> None:
@@ -31,8 +32,8 @@ def test_registered_site_parsers_implement_current_contract() -> None:
                 # Inheriting the Protocol stub makes ``hasattr(parse)`` true
                 # but the runtime then receives an empty async generator.
                 # A custom parser must provide its own executable method.
-                assert "parse" in type(parser).__dict__, entry.name
                 assert parse is not None, entry.name
+                assert type(parser).parse is not SiteParser.parse, entry.name
                 assert inspect.iscoroutinefunction(parse) or inspect.isasyncgenfunction(parse), (
                     entry.name
                 )
