@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+import job_ftch.infrastructure.sources.site_parsers.hh as hh_module
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.site_parsers.hh import (
     HhParser,
@@ -202,6 +203,34 @@ async def test_hh_parser_uses_listing_title_when_detail_is_captcha() -> None:
     assert items[0].created_at == datetime.fromtimestamp(1787558822, tz=UTC)
     assert items[0].metadata["parser"] == "site_hh_listing"
     assert items[1].text == "ML engineer"
+
+
+@pytest.mark.asyncio
+async def test_hh_parser_caps_detail_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hh_module, "_MAX_DETAIL_REQUESTS", 1)
+    listing_url = "https://hh.ru/search/vacancy?text=ai"
+    first_url = "https://hh.ru/vacancy/1"
+    second_url = "https://hh.ru/vacancy/2"
+    listing = (
+        f'<div id="1"><a href="{first_url}">First</a></div>'
+        f'<div id="2"><a href="{second_url}">Second</a></div>'
+    )
+    detail = '<script type="application/ld+json">{"@type":"JobPosting","title":"First"}</script>'
+    client = _FakeClient(
+        {
+            listing_url: _FakeResponse(listing, listing_url),
+            first_url: _FakeResponse(detail, first_url),
+        }
+    )
+
+    items = [
+        item
+        async for item in HhParser().parse(
+            CareerSiteSpec(url=listing_url, source_name="hh", limit=2), client
+        )
+    ]
+
+    assert [item.text for item in items] == ["First", "Second"]
 
 
 @pytest.mark.asyncio

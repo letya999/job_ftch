@@ -61,6 +61,7 @@ _URL_FILTER = (
 _LISTING_TIMESTAMP_RE = re.compile(
     r'"publicationTime"\s*:\s*\{[^}]*"@timestamp"\s*:\s*(\d+)'
 )
+_MAX_DETAIL_REQUESTS = 10
 
 
 def _is_allowed_detail_host(detail_url: str, board_url: str) -> bool:
@@ -464,12 +465,14 @@ class HhParser:
 
         seen_final_ids: set[str] = set()
         details_blocked = False
+        detail_requests = 0
         for detail_url in collected_urls[:limit]:
-            if details_blocked:
+            if details_blocked or detail_requests >= _MAX_DETAIL_REQUESTS:
                 snapshot = listing_snapshots.get(_detail_identity(detail_url))
                 if snapshot:
                     yield _item_from_listing(detail_url, *snapshot, source_name, spec.url)
                 continue
+            detail_requests += 1
             response = await effective_client.get(detail_url, follow_redirects=True)
             response.raise_for_status()
             if is_challenge_response(response.text):
