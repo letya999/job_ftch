@@ -171,31 +171,37 @@ async def test_hh_parser_emits_items_from_listing_and_detail_pages() -> None:
 async def test_hh_parser_uses_listing_title_when_detail_is_captcha() -> None:
     listing_url = "https://hh.ru/search/vacancy?employer_id=80"
     detail_url = "https://hh.ru/vacancy/123"
+    second_detail_url = "https://hh.ru/vacancy/456"
     client = _FakeClient(
         {
             listing_url: _FakeResponse(
                 '<div id="123" data-state="{&quot;publicationTime&quot;:'
                 '{&quot;@timestamp&quot;:1787558822}}">'
                 f'<a data-qa="serp-item__title" href="{detail_url}">Python developer</a>'
+                "</div>"
+                '<div id="456" data-state="{&quot;publicationTime&quot;:'
+                '{&quot;@timestamp&quot;:1787558822}}">'
+                f'<a data-qa="serp-item__title" href="{second_detail_url}">ML engineer</a>'
                 "</div>",
                 listing_url,
             ),
-            detail_url: _FakeResponse("<html>captcha recaptcha</html>", detail_url),
+            detail_url: _FakeResponse('<div class="g-recaptcha"></div>', detail_url),
         }
     )
 
     items = [
         item
         async for item in HhParser().parse(
-            CareerSiteSpec(url="https://hh.ru/employer/80", source_name="alfa", limit=1),
+            CareerSiteSpec(url="https://hh.ru/employer/80", source_name="alfa", limit=2),
             client,
         )
     ]
 
-    assert len(items) == 1
+    assert len(items) == 2
     assert items[0].text == "Python developer"
     assert items[0].created_at == datetime.fromtimestamp(1787558822, tz=UTC)
     assert items[0].metadata["parser"] == "site_hh_listing"
+    assert items[1].text == "ML engineer"
 
 
 @pytest.mark.asyncio

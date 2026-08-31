@@ -463,11 +463,18 @@ class HhParser:
                 logger.debug("hh.browser_discover_failed", url=spec.url, error=str(exc))
 
         seen_final_ids: set[str] = set()
+        details_blocked = False
         for detail_url in collected_urls[:limit]:
+            if details_blocked:
+                snapshot = listing_snapshots.get(_detail_identity(detail_url))
+                if snapshot:
+                    yield _item_from_listing(detail_url, *snapshot, source_name, spec.url)
+                continue
             response = await effective_client.get(detail_url, follow_redirects=True)
             response.raise_for_status()
             if is_challenge_response(response.text):
                 logger.warning("hh.captcha_detected_detail", url=detail_url)
+                details_blocked = True
                 snapshot = listing_snapshots.get(_detail_identity(detail_url))
                 if snapshot:
                     yield _item_from_listing(detail_url, *snapshot, source_name, spec.url)
