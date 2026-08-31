@@ -16,6 +16,7 @@ class TwoGisCareerParser(_EmployerBoardParser):
     parser_name = "two_gis_career"
     company = "2GIS"
     detail_pattern = re.compile(r"/vacancies/[^/?#]+/(\d+)(?:/)?$")
+    supports_discover = False
     supports_search = True
 
     def build_search_urls(
