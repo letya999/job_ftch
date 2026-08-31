@@ -31,6 +31,12 @@ class Tele2KazakhstanParser:
     domain_pattern = r"^https?://job\.tele2\.kz(?:/|$)"
     has_custom_parse = True
     supports_search = True
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del base_url, keywords, limit
+        return []
     supports_discover = False
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:

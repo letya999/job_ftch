@@ -421,6 +421,12 @@ class TochkaCareerParser(_EmployerBoardParser):
     domain_pattern = r"^https?://hr\.tochka\.com/vacancies(?:/|$)"
     supports_discover = False
     supports_search = True
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del base_url, keywords, limit
+        return []
     parser_name = "tochka_career"
     company = "Точка Банк"
     detail_pattern = re.compile(r"/vacancies/catalog/([^/?#]+)(?:/)?$")
