@@ -167,6 +167,33 @@ async def test_hh_parser_emits_items_from_listing_and_detail_pages() -> None:
 
 
 @pytest.mark.asyncio
+async def test_hh_parser_uses_listing_title_when_detail_is_captcha() -> None:
+    listing_url = "https://hh.ru/search/vacancy?employer_id=80"
+    detail_url = "https://hh.ru/vacancy/123"
+    client = _FakeClient(
+        {
+            listing_url: _FakeResponse(
+                f'<a data-qa="serp-item__title" href="{detail_url}">Python developer</a>',
+                listing_url,
+            ),
+            detail_url: _FakeResponse("<html>captcha recaptcha</html>", detail_url),
+        }
+    )
+
+    items = [
+        item
+        async for item in HhParser().parse(
+            CareerSiteSpec(url="https://hh.ru/employer/80", source_name="alfa", limit=1),
+            client,
+        )
+    ]
+
+    assert len(items) == 1
+    assert items[0].text == "Python developer"
+    assert items[0].metadata["parser"] == "site_hh_listing"
+
+
+@pytest.mark.asyncio
 async def test_hh_parser_handles_hh_by_redirecting_to_rabota_by_detail() -> None:
     listing_html = '<a href="https://rabota.by/vacancy/999?query=ai">Job</a>'
     detail_html = """

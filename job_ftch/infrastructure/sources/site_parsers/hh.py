@@ -115,6 +115,20 @@ def _extract_vacancy_urls(html_text: str, base_url: str, *, limit: int) -> list[
     return urls
 
 
+def _extract_listing_titles(html_text: str, base_url: str) -> dict[str, str]:
+    tree = HTMLParser(html.unescape(html_text))
+    titles: dict[str, str] = {}
+    for anchor in tree.css("a[href]"):
+        url = urljoin(base_url, str(anchor.attributes.get("href", "") or "")).split("?")[0]
+        identity = _detail_identity(url)
+        if not _DETAIL_URL_RE.search(url):
+            continue
+        title = " ".join(anchor.text(separator=" ", strip=True).split())
+        if title:
+            titles.setdefault(identity, title)
+    return titles
+
+
 def _listing_page_url(url: str, page: int) -> str:
     if page <= 0:
         return url
@@ -239,6 +253,28 @@ def _item_from_detail_html(
     )
 
 
+def _item_from_listing(
+    detail_url: str,
+    title: str,
+    source_name: str,
+    board_url: str,
+) -> RawItem:
+    external_id = _detail_identity(detail_url)
+    return build_raw_item(
+        source_kind=SourceKind.CAREER_SITE,
+        source_name=source_name,
+        external_id=external_id,
+        url=detail_url,
+        text=title,
+        metadata={
+            "board_url": board_url,
+            "job_url": detail_url,
+            "parser": "site_hh_listing",
+            "detail_vacancy_confirmed": False,
+        },
+    )
+
+
 class HhParser:
     domain_pattern = _DOMAIN_PATTERN
     has_custom_parse = True
@@ -349,6 +385,7 @@ class HhParser:
                 effective_client = client
 
         collected_urls: list[str] = []
+        listing_titles: dict[str, str] = {}
         seen_detail_ids: set[str] = set()
         page_count = self._page_count(limit)
         captcha_detected = False
@@ -377,6 +414,7 @@ class HhParser:
                     20,
                 ),
             )
+            listing_titles.update(_extract_listing_titles(response.text, str(response.url)))
             new_urls = [
                 url
                 for url in page_urls
@@ -409,6 +447,9 @@ class HhParser:
             response.raise_for_status()
             if is_challenge_response(response.text):
                 logger.warning("hh.captcha_detected_detail", url=detail_url)
+                title = listing_titles.get(_detail_identity(detail_url))
+                if title:
+                    yield _item_from_listing(detail_url, title, source_name, spec.url)
                 continue
             final_url = str(response.url)
             final_id = _detail_identity(final_url)
@@ -423,6 +464,10 @@ class HhParser:
             )
             if item is not None:
                 yield item
+            else:
+                title = listing_titles.get(final_id)
+                if title:
+                    yield _item_from_listing(final_url, title, source_name, spec.url)
 
     @property
     def __name__(self) -> str:
