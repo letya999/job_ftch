@@ -231,7 +231,7 @@ parsers:
     wait: "domcontentloaded"
     include_if_detail_page: false
   - name: protected_browser_defaults
-    domain_pattern: "^https?://(?:himalayas\\.app|(?:www\\.)?foody\\.com\\.cy|(?:www\\.)?fishingbooker\\.com|theprotocol\\.it|(?:www\\.)?pracuj\\.pl|(?:www\\.)?cypruswork\\.com)(?:/|$)"
+    domain_pattern: "^https?://(?:himalayas\\.app|(?:www\\.)?foody\\.com\\.cy|(?:www\\.)?fishingbooker\\.com|theprotocol\\.it|(?:www\\.)?pracuj\\.pl|(?:www\\.)?cypruswork\\.com|jobs\\.ashbyhq\\.com|careers\\.higgsfield\\.kz|job\\.beeline\\.ru)(?:/|$)"
     has_custom_parse: false
     supports_discover: false
     render: true
@@ -248,6 +248,14 @@ parsers:
       protected_hint: "waf_challenge"
       wait_fallback: "load"
       settle_seconds: 5
+      captcha_authorized_domains:
+        - jobs.ashbyhq.com
+        - careers.higgsfield.kz
+        - job.beeline.ru
+      proxy_rescue_allow_domains:
+        - jobs.ashbyhq.com
+        - careers.higgsfield.kz
+        - job.beeline.ru
   - name: rabota_by
     domain_pattern: "^https?://([a-z0-9-]+\\.)?rabota\\.by(?:/|$)"
     has_custom_parse: true
