@@ -419,6 +419,7 @@ class BeelineKazakhstanCareerParser(_EmployerBoardParser):
 
 class TochkaCareerParser(_EmployerBoardParser):
     domain_pattern = r"^https?://hr\.tochka\.com/vacancies(?:/|$)"
+    supports_discover = False
     parser_name = "tochka_career"
     company = "Точка Банк"
     detail_pattern = re.compile(r"/vacancies/catalog/([^/?#]+)(?:/)?$")

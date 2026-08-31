@@ -8,9 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from job_ftch.application.registry import register_site_parser
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
-from job_ftch.infrastructure.sources.site_parsers.hh_employer_fallbacks import (
-    parse_hh_employer_api,
-)
+from job_ftch.infrastructure.sources.site_parsers.hh import HhParser
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -48,10 +46,8 @@ class Tele2KazakhstanParser:
         employer_url = _extract_hh_employer_url(response.text)
         if employer_url is None:
             raise ValueError("Tele2 Kazakhstan no longer exposes its HH employer board")
-        match = re.search(r"/employer/(\d+)", employer_url)
-        if match is None:
-            raise ValueError("Tele2 Kazakhstan HH employer link has no numeric id")
-        async for item in parse_hh_employer_api(spec, client, employer_id=match.group(1)):
+        delegated = spec.model_copy(update={"url": employer_url})
+        async for item in HhParser().parse(delegated, client):
             yield item
 
     @property
