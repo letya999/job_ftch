@@ -932,6 +932,38 @@ async def test_monitor_receives_runtime_bypass_strategy(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_parser_captcha_allowlist_reaches_bypass_config(monkeypatch):
+    captured = {}
+
+    def fake_resolve(name, bypass_config=None):
+        captured["name"] = name
+        captured["config"] = bypass_config
+        return SimpleNamespace()
+
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.career_site_source.resolve_bypass",
+        fake_resolve,
+    )
+    source = CareerSiteSource(
+        spec=CareerSiteSpec(
+            url="https://jobs.ashbyhq.com/example",
+            monitor_config={
+                "captcha_authorized_domains": ["jobs.ashbyhq.com"],
+                "proxy_rescue_allow_domains": ["jobs.ashbyhq.com"],
+            },
+        ),
+        http_client=object(),
+        auth=MagicMock(),
+    )
+
+    await source._init_strategy()
+
+    assert captured["name"] == "auto"
+    assert captured["config"]["captcha_authorized_domains"] == ["jobs.ashbyhq.com"]
+    assert captured["config"]["proxy_rescue_allow_domains"] == ["jobs.ashbyhq.com"]
+
+
+@pytest.mark.asyncio
 async def test_monitor_config_can_select_monitor(monkeypatch):
     spec = CareerSiteSpec(
         type="career_site",
