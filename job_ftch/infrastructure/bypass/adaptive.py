@@ -174,7 +174,9 @@ class AdaptiveBypassManager:
         self._transition_policy = TransitionPolicy()
         from job_ftch.config import get_settings
 
-        self._timeout_threshold = get_settings().bypass_timeout_escalate_threshold
+        # handle_failure is called after the HTTP retry budget is exhausted;
+        # waiting for another source run loses the in-memory failure window.
+        self._timeout_threshold = int(self.config.get("timeout_escalate_threshold", 1))
         settings = get_settings()
         self._budget = AttemptBudget(
             max_route_attempts=int(
