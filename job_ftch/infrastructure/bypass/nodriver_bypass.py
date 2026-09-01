@@ -536,11 +536,17 @@ class NodriverBypass:
         use_proxy: bool,
         viewport: dict[str, Any] | None,
     ) -> Any:
+        sandbox = bool(config.get("sandbox", True))
+        if getattr(os, "geteuid", lambda: 1000)() == 0:
+            sandbox = False
         browser = await nodriver.start(
             headless=bool(config.get("headless", True)),
             user_data_dir=user_data_dir,
             browser_executable_path=self._browser_executable_path,
             browser_args=browser_args,
+            # Chromium refuses its sandbox when the worker runs as root (the
+            # production container does). Keep it enabled for ordinary users.
+            sandbox=sandbox,
             lang=self._lang or str(config.get("locale", "en-US")),
         )
         proxy_url = (

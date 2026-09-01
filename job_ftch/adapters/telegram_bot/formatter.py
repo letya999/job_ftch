@@ -6,6 +6,8 @@ import re
 from html import escape
 from typing import TYPE_CHECKING
 
+from job_ftch.publication.normalize import format_compensation, format_geo
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -98,21 +100,14 @@ def format_vacancy_card(job: Job | JobRecord) -> str:
         work_mode = None
 
     # Location
-    location = escape(job.location or "")[:_MAX_LOCATION] if job.location else None
+    normalized_location = format_geo(job)
+    location = escape(normalized_location or "")[:_MAX_LOCATION] if normalized_location else None
 
     # Salary from nested compensation object
     salary_part = ""
-    comp = getattr(job, "compensation", None)
-    if comp is not None:
-        s_from = f"{comp.min_amount:,}".replace(",", " ") if comp.min_amount is not None else ""
-        s_to = f"{comp.max_amount:,}".replace(",", " ") if comp.max_amount is not None else ""
-        currency = comp.currency
-        if s_from and s_to:
-            salary_part = f" • 💰 {s_from}–{s_to} {currency}"
-        elif s_from:
-            salary_part = f" • 💰 от {s_from} {currency}"
-        elif s_to:
-            salary_part = f" • 💰 до {s_to} {currency}"
+    salary = format_compensation(job)
+    if salary:
+        salary_part = f" • 💰 {salary}"
 
     safe_url = _safe_href(resolve_job_url(job))
     url_line = f'🔗 <a href="{safe_url}">Открыть вакансию</a>' if safe_url else ""

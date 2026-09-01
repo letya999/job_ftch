@@ -108,6 +108,7 @@ class CareerSiteSpec(BaseSourceSpec):
     scraper: str | None = None  # registered scraper name; None = auto from monitor
     scraper_config: dict[str, Any] = Field(default_factory=dict)  # passed to scraper
     site_parser: str | None = None  # explicit site-parser pin; default remains URL-bound
+    search_locked: bool = False  # keep an operator-authored query unchanged
     scraper_fallback: list[str] = Field(default_factory=list)  # fallback scraper chain
     detail_limit: int | None = None  # max detail pages to scrape (None = unlimited)
     url_filter: str | dict[str, Any] | None = None  # regex or {include, exclude}

@@ -107,6 +107,16 @@ def test_extract_sitemap_orders_by_id_and_filters_keywords() -> None:
     assert filtered == ["https://getmatch.ru/vacancies/35178-senior-ai-engineer-ai-agenty"]
 
 
+def test_getmatch_preserves_phrase_queries_when_reading_url() -> None:
+    from job_ftch.infrastructure.sources.site_parsers.getmatch import _keywords_from_spec
+
+    spec = CareerSiteSpec(
+        url="https://getmatch.ru/vacancies?query=AI+engineer+OR+LLM+engineer",
+        source_name="getmatch",
+    )
+    assert _keywords_from_spec(spec) == ["AI engineer", "LLM engineer"]
+
+
 def test_item_from_detail_html_extracts_core_fields() -> None:
     html = _read("site_parsers", "getmatch", "detail.html")
     item = item_from_detail_html(

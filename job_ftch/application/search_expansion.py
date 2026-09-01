@@ -1,14 +1,14 @@
-"""Expand bare career-site sources into keyword-filtered search sources.
+"""Expand career-site sources after source assessment selects search behavior.
 
 A tenant lists aggregator sources as plain listing URLs (e.g.
 ``https://geekjob.ru/vacancies``). Given the tenant's target roles, each source
-whose resolved site parser advertises ``supports_search`` is rewritten into one
+whose resolved site parser has a verified search recipe is rewritten into one
 (combined) or several (per-keyword) concrete search URLs so ingest starts from a
 pre-filtered result page instead of the whole board.
 
-The transform is idempotent: a source whose URL already carries an explicit
-search query (``?text=``, ``?q=`` …) is left untouched, so hand-tuned sources
-keep their operator-authored queries.
+The assessment is attached to each prepared source before this function runs.
+Specific parser builders remain the runtime fallback when the generic HTML-form
+probe cannot assess an SPA/API search surface.
 """
 
 from __future__ import annotations
@@ -43,28 +43,54 @@ def expand_career_site_specs(
         if not isinstance(spec, CareerSiteSpec):
             expanded.append(spec)
             continue
-        if _url_has_search_query(spec.url):
-            expanded.append(spec)
+        if _url_has_search_query(spec.url) and spec.search_locked:
+            expanded.append(_attach_search_keywords(spec, roles, base_url=spec.url))
+            continue
+        base_url = spec.url
+        assessment = (getattr(spec, "monitor_config", {}) or {}).get("_search_assessment")
+        assessed_executor = assessment.get("executor") if isinstance(assessment, dict) else None
+        assessed_status = assessment.get("status") if isinstance(assessment, dict) else None
+        if assessed_executor in {"generic_get", "generic_post", "generic_browser"}:
+            expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
             continue
         parser = resolve_site_parser_for_spec(spec)
+        # A failed generic-form probe must not suppress a deterministic search
+        # URL builder owned by a special parser.  The two mechanisms probe
+        # different surfaces: many SPA/API boards have no HTML <form> at all.
+        # Assessment remains telemetry; the parser builder is the runtime
+        # fallback requested by the source contract.
+        if parser is not None and getattr(parser, "supports_search", False):
+            try:
+                urls = list(parser.build_search_urls(spec.url, roles, limit=spec.limit))
+            except Exception as exc:  # noqa: BLE001 - never let expansion drop a source
+                logger.warning("search_expansion_failed", url=spec.url, error=str(exc))
+                urls = []
+            if urls:
+                for index, url in enumerate(urls):
+                    expanded.append(
+                        _clone_with_search_url(
+                            _attach_search_keywords(
+                                spec,
+                                roles,
+                                base_url=base_url,
+                                runtime_executor="specific_url",
+                            ),
+                            url,
+                            index,
+                            len(urls),
+                        )
+                    )
+                continue
+        if assessed_status and assessed_status != "verified":
+            expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
+            continue
         if parser is None or not getattr(parser, "supports_search", False):
-            # Tier-1: parser has no authoritative search URLs. Attach keywords
-            # so CareerSiteSource can rewrite the listing via a discovered GET
-            # form. Presence of a SiteParser is not a skip — only
-            # ``supports_search`` is.
-            expanded.append(_attach_search_keywords(spec, roles))
+            # Every career source carries the roles into runtime. A specific
+            # parser may still be used after the generic search executor finds
+            # a form or browser/API recipe.
+            expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
             continue
-        try:
-            urls = list(parser.build_search_urls(spec.url, roles, limit=spec.limit))
-        except Exception as exc:  # noqa: BLE001 - never let expansion drop a source
-            logger.warning("search_expansion_failed", url=spec.url, error=str(exc))
-            expanded.append(spec)
-            continue
-        if not urls:
-            expanded.append(spec)
-            continue
-        for index, url in enumerate(urls):
-            expanded.append(_clone_with_search_url(spec, url, index, len(urls)))
+        expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
     return expanded
 
 
@@ -75,9 +101,18 @@ def _url_has_search_query(url: str) -> bool:
     )
 
 
-def _attach_search_keywords(spec: SourceSpec, roles: list[str]) -> SourceSpec:
+def _attach_search_keywords(
+    spec: SourceSpec,
+    roles: list[str],
+    *,
+    base_url: str | None = None,
+    runtime_executor: str | None = None,
+) -> SourceSpec:
     monitor_config = dict(getattr(spec, "monitor_config", {}) or {})
     monitor_config["_search_keywords"] = list(roles)
+    monitor_config["_search_base_url"] = base_url or getattr(spec, "url", "")
+    if runtime_executor:
+        monitor_config["_search_runtime_executor"] = runtime_executor
     return spec.model_copy(update={"monitor_config": monitor_config})
 
 

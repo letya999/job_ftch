@@ -7,8 +7,10 @@ scraping it yielded a 254-character "description" made of "Show contacts",
 characters. The body lives behind a second call, ``/api/vacancies/{id}``, whose
 ``text`` field holds the full HTML.
 
-So this parser fetches the listing, then the per-vacancy detail, and emits
-complete items. When the API is unavailable it yields nothing, which lets
+So this parser fetches the listing API, then the per-vacancy detail, and emits
+complete items. The page is only needed to discover a custom API base; when it
+is unavailable the documented default API host is still tried. When the API is
+unavailable it yields nothing, which lets
 ``CareerSiteSource`` fall through to the generic crawl rather than reimplement
 bypass and browser escalation here. That fallback is why neither
 ``confirmed_empty_on_empty`` nor ``terminal_on_empty`` is set.
@@ -176,6 +178,11 @@ class HirifyParser:
         terms = normalize_search_keywords(keywords)
         if not terms:
             return []
+        parsed = urlparse(base_url)
+        # Hirify has no `/vacancies` page; keep real category routes, but make
+        # generic DB entries using that common path land on the working home.
+        if parsed.path.rstrip("/") == "/vacancies":
+            base_url = parsed._replace(path="/").geturl()
         # Hirify searches via its API; the page URL carries `search`/`params`
         # which `_query_for_spec` forwards to /api/vacancies. Its search box
         # treats a bare space-joined string as all-terms (matches nothing) but
@@ -485,10 +492,10 @@ class HirifyParser:
         """
         try:
             response = await safe_fetch(client, spec.url)
-        except Exception as exc:  # noqa: BLE001 - fall back to the generic crawl
+            html = str(response.text)
+        except Exception as exc:  # noqa: BLE001 - API has a documented default host
             logger.info("hirify_page_fetch_failed", url=spec.url, error=str(exc))
-            return
-        html = str(response.text)
+            html = ""
 
         try:
             rows = await self._fetch_listing_rows(spec, client, html)

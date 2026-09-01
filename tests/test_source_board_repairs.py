@@ -53,8 +53,8 @@ def test_company_boards_resolve_to_company_owned_parsers() -> None:
         resolve_site_parser("https://hr.tochka.com/vacancies/it/"),
         TochkaCareerParser,
     )
-    assert resolve_site_parser("https://job.2gis.ru/vacancies").supports_search is True
+    assert resolve_site_parser("https://job.2gis.ru/vacancies").supports_search is False
     assert resolve_site_parser("https://job.2gis.ru/vacancies").supports_discover is False
-    assert resolve_site_parser("https://career.ozon.ru/").supports_search is True
-    assert resolve_site_parser("https://job.tele2.kz/").supports_search is True
-    assert resolve_site_parser("https://hr.tochka.com/vacancies/it/").supports_search is True
+    assert resolve_site_parser("https://career.ozon.ru/").supports_search is False
+    assert resolve_site_parser("https://job.tele2.kz/").supports_search is False
+    assert resolve_site_parser("https://hr.tochka.com/vacancies/it/").supports_search is False

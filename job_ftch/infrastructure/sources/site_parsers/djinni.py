@@ -1,32 +1,16 @@
-"""Runtime defaults for Djinni listing pages.
-
-Djinni exposes stable detail URLs under ``/jobs/<id>-<slug>/`` and works with
-the generic career-site monitor stack. This parser only narrows discovery.
-"""
+"""Special parser for Djinni aggregator pages."""
 
 from __future__ import annotations
 
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
-from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
+from job_ftch.infrastructure.sources.site_parsers.aggregator_boards import DjinniAggregatorParser
 
-_URL_FILTER = r"djinni\.co/jobs/\d+-[a-z0-9-]+/?$"
+_DOMAIN_PATTERN = r"^https?://djinni\.co(?:/|$)"
 
 
-class DjinniParser:
-    domain_pattern = r"^https?://djinni\.co/jobs(?:/|$)"
-    has_custom_parse = False
-
-    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
-        del url
-        return SiteRuntimeDefaults(url_filter=_URL_FILTER, include_if_detail_page=False)
-
-    def parser_kind(self, url: str) -> str | None:
-        del url
-        return None
-
-    @property
-    def __name__(self) -> str:
-        return "DjinniParser"
+class DjinniParser(DjinniAggregatorParser):
+    domain_pattern = _DOMAIN_PATTERN
+    parser_name = "djinni"
 
 
 register_site_parser(
@@ -36,6 +20,6 @@ register_site_parser(
         "known_site",
         "site_parser:djinni.co",
         has_stable_url=True,
-        rationale="Djinni exposes stable job detail URLs and is best ingested through the generic monitor stack.",
+        rationale="Djinni exposes SSR job cards and stable detail URLs; the parser follows each detail and optional origin link.",
     ),
 )(DjinniParser)

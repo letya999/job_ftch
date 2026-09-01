@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from job_ftch.application.geo import normalize_geo_sources
 from job_ftch.domain import (
     EmploymentType,
     JobExtractionStatus,
@@ -189,6 +190,26 @@ class FullExtractionNode:
         if _is_unusable_location(location):
             location = _first_metadata_location(job.metadata) or location
 
+        # This node runs after the main location stage. Re-derive the structured
+        # pair from the post-accept location so enrichment cannot reintroduce a
+        # stale country-only value (for example Warsaw + Russia).
+        metadata_country = job.metadata.get("country")
+        existing_country = job.country or (
+            metadata_country
+            if job.metadata.get("country_authoritative") and isinstance(metadata_country, str)
+            else None
+        )
+        location_geo = normalize_geo_sources((location, existing_country))
+        city: str | None
+        country: str | None
+        if location_geo.city:
+            city = location_geo.city
+            country = location_geo.country or existing_country
+        else:
+            existing_geo = normalize_geo_sources((job.city, job.country))
+            city = existing_geo.city or job.city
+            country = existing_geo.country or existing_country
+
         # Same reasoning for work mode: several sites publish schema.org's
         # TELECOMMUTE marker in JSON-LD while never stating the mode in prose,
         # so a posting that is plainly remote reached the card as "unknown".
@@ -238,12 +259,8 @@ class FullExtractionNode:
                 "title": title,
                 "company": company,
                 "location": location,
-                "country": job.country
-                or (
-                    job.metadata.get("country")
-                    if job.metadata.get("country_authoritative")
-                    else None
-                ),
+                "city": city,
+                "country": country,
                 "language": language,
                 "work_mode": work_mode,
                 "seniority": extracted.seniority

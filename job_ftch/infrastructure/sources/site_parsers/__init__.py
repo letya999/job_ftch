@@ -11,6 +11,8 @@ from __future__ import annotations
 
 # Import built-in parsers to trigger registration.
 from job_ftch.infrastructure.sources.site_parsers import (
+    aggregator_boards,
+    airi,
     arc,
     askwire,
     astanahub,
@@ -40,6 +42,7 @@ from job_ftch.infrastructure.sources.site_parsers import (
     helloworld,
     hh,
     hh_employer_fallbacks,
+    hirehi,
     hireme,
     hirify,
     htec,
@@ -114,6 +117,8 @@ __all__ = [
     "SiteRuntimeDefaults",
     "SiteSpecificParser",
     "threecx",
+    "airi",
+    "aggregator_boards",
     "astanahub",
     "arc",
     "askwire",
@@ -143,6 +148,7 @@ __all__ = [
     "helloworld",
     "hh",
     "hh_employer_fallbacks",
+    "hirehi",
     "htec",
     "hireme",
     "hirify",

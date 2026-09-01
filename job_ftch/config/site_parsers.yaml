@@ -49,11 +49,31 @@ parsers:
     include_if_detail_page: false
   - name: djinni
     domain_pattern: "^https?://djinni\\.co/jobs(?:/|$)"
-    has_custom_parse: false
+    has_custom_parse: true
     supports_discover: false
     runtime_defaults:
       url_filter: "djinni\\.co/jobs/\\d+-[a-z0-9-]+/?$"
       include_if_detail_page: false
+  - name: agilefluent
+    domain_pattern: "^https?://jobboard\\.agilefluent\\.ru(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+  - name: quick_offer
+    domain_pattern: "^https?://quick-offer\\.ru(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+  - name: aijobs
+    domain_pattern: "^https?://aijobs\\.net(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+  - name: ai_engineer
+    domain_pattern: "^https?://ai\\.engineer(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+  - name: remote_rocketship
+    domain_pattern: "^https?://(?:www\\.)?remoterocketship\\.com(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
   - name: dou_jobs
     domain_pattern: "^https?://jobs\\.dou\\.ua(?:/|$)"
     has_custom_parse: false
@@ -402,7 +422,7 @@ parsers:
     api_path: "/jobs/api/publications"
     limit: 50
     browser:
-      scroll_loops: 120
+      scroll_loops: 8
       scroll_pause_ms: 1200
       scroll_px: 3000
       stale_rounds: 4

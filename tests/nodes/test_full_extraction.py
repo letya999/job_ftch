@@ -258,6 +258,23 @@ async def test_usable_extracted_location_is_not_overridden(make_job_record) -> N
 
 
 @pytest.mark.anyio
+async def test_full_extraction_rebuilds_city_country_from_post_accept_location(
+    make_job_record,
+) -> None:
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        city=None,
+        country="Россия",
+        location=None,
+    )
+
+    enriched = await FullExtractionNode(_FieldLLM(location="Warsaw")).process(job)
+
+    assert enriched.city == "Варшава"
+    assert enriched.country == "Польша"
+
+
+@pytest.mark.anyio
 async def test_llm_location_used_when_metadata_has_none(make_job_record) -> None:
     """Prose stays the primary source; sites without structured geo still work."""
     llm = _FieldLLM(location="Berlin, DE")

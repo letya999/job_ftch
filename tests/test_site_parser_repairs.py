@@ -113,6 +113,52 @@ async def test_geekjob_parser_discovers_static_listing_urls() -> None:
 
 
 @pytest.mark.asyncio
+async def test_geekjob_parser_uses_search_api_for_role_query() -> None:
+    parser = GeekJobParser()
+
+    class _ApiResponse(_FakeResponse):
+        def json(self) -> dict[str, object]:
+            return {
+                "data": [
+                    {"id": "abc123", "position": "ML Engineer"},
+                    {"id": "def456", "position": "Machine Learning Engineer"},
+                ]
+            }
+
+    class _ApiClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def get(
+            self, url: str, *, follow_redirects: bool = True, **kwargs: object
+        ) -> _ApiResponse:
+            del follow_redirects
+            self.calls.append((url, kwargs))
+            return _ApiResponse("", url)
+
+    client = _ApiClient()
+    urls = await parser.discover(
+        CareerSiteSpec(
+            url="https://geekjob.ru/vacancies?qs=machine+learning",
+            source_name="geekjob_jobs",
+            limit=2,
+        ),
+        client,
+    )
+
+    assert urls == [
+        "https://geekjob.ru/vacancy/abc123",
+        "https://geekjob.ru/vacancy/def456",
+    ]
+    assert client.calls == [
+        (
+            "https://geekjob.ru/json/find/vacancy",
+            {"params": {"page": "1", "qs": "machine learning"}},
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_geekjob_parser_uses_browser_fallback_for_lazy_listing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -1,9 +1,8 @@
-"""Tier-1 generic search-form detection for career sites without `supports_search`.
+"""Search-form detection shared by source assessment and runtime.
 
-Aggregators that advertise `supports_search` (hh, habr, geekjob, hirify, VK,
-Sber, …) build their search URLs authoritatively via `build_search_urls`. For
-every other career site — including ones with a SiteParser that does not
-implement search — we fall back to this best-effort path:
+Specific parser URL builders and this generic path are both tested by source
+assessment; `supports_search` is only a hint and no longer bypasses the form
+probe. For a generic career site we:
 
 1. fetch the listing page and look for an HTML `<form>` with a text/search input
    (`detect_search_form`);
@@ -13,18 +12,18 @@ implement search — we fall back to this best-effort path:
    combined query vs the unfiltered page vs a nonsense token — and only adopt a
    URL that demonstrably narrows the listing.
 
-Only GET forms are usable here: their query parameter is visible and
-reproducible as a URL. POST-only search forms are reported but not rewritten
-(they would need a browser round-trip). When nothing works the caller keeps the
-original listing URL and the normal crawl proceeds unchanged.
+GET forms produce reproducible URLs; POST forms can produce a safe payload for
+assessment/runtime. When nothing works the caller keeps the original listing
+URL and the normal crawl proceeds unchanged.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urljoin, urlparse, urlunparse
 
 import structlog
 from selectolax.parser import HTMLParser
@@ -87,7 +86,7 @@ def _input_search_score(node: Any) -> int:
     )
     score = 100 if input_type == "search" else 0
     for index, hint in enumerate(_SEARCH_NAME_HINTS):
-        if name == hint or haystack.find(hint) != -1:
+        if name == hint or (len(hint) > 1 and haystack.find(hint) != -1):
             score += len(_SEARCH_NAME_HINTS) - index
             break
     return score
@@ -112,7 +111,7 @@ def detect_search_form(html: str, base_url: str) -> SearchFormSpec | None:
             if score > candidate_score:
                 candidate_input = node
                 candidate_score = score
-        if candidate_input is None or candidate_score < 0:
+        if candidate_input is None or candidate_score <= 0:
             continue
         query_param = (candidate_input.attributes.get("name") or "").strip()
         if not query_param:
@@ -131,6 +130,52 @@ def detect_search_form(html: str, base_url: str) -> SearchFormSpec | None:
             best = SearchFormSpec(
                 action=action, method=method, query_param=query_param, hidden=hidden
             )
+    # Some server-rendered boards expose a search contract only through
+    # schema.org SearchAction, without rendering an HTML form.  Treat its
+    # URL template as a reproducible GET form so assessment and runtime use the
+    # same path.  Ignore malformed or non-search templates.
+    tree = HTMLParser(html or "")
+    for node in tree.css('script[type="application/ld+json"]'):
+        try:
+            payload = json.loads(node.text())
+        except (TypeError, json.JSONDecodeError):
+            continue
+        actions = payload if isinstance(payload, list) else [payload]
+        for entry in actions:
+            if not isinstance(entry, dict):
+                continue
+            potential_action = entry.get("potentialAction")
+            candidates = (
+                potential_action if isinstance(potential_action, list) else [potential_action]
+            )
+            for candidate in candidates:
+                if not isinstance(candidate, dict) or candidate.get("@type") != "SearchAction":
+                    continue
+                target = candidate.get("target")
+                template = target.get("urlTemplate") if isinstance(target, dict) else target
+                if not isinstance(template, str) or "{search_term_string}" not in template:
+                    continue
+                absolute = urljoin(base_url, template.replace("{search_term_string}", ""))
+                parsed = urlparse(absolute)
+                params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+                query_param = next(
+                    (
+                        key
+                        for key, value in parse_qsl(
+                            urlparse(template).query, keep_blank_values=True
+                        )
+                        if "search_term_string" in value
+                    ),
+                    None,
+                )
+                if query_param is None:
+                    continue
+                return SearchFormSpec(
+                    action=urlunparse(parsed._replace(query="")),
+                    method="get",
+                    query_param=query_param,
+                    hidden={key: value for key, value in params.items() if key != query_param},
+                )
     return best
 
 
@@ -140,6 +185,13 @@ def build_generic_search_url(form: SearchFormSpec, query: str) -> str | None:
         return None
     params = {**form.hidden, form.query_param: query}
     return with_query_params(form.action, params)
+
+
+def build_generic_search_payload(form: SearchFormSpec, query: str) -> dict[str, str] | None:
+    """Build a safe form payload for a POST search probe or browser submit."""
+    if not query.strip():
+        return None
+    return {**form.hidden, form.query_param: query}
 
 
 def count_candidate_job_links(html: str, base_url: str) -> int:
@@ -204,6 +256,7 @@ async def discover_working_search_url(
         build_generic_search_url(form, " OR ".join(terms)),
         build_generic_search_url(form, " or ".join(terms)),
     ]
+    candidates.extend(build_generic_search_url(form, term) for term in terms[:3])
 
     async def _count(url: str | None) -> int:
         if not url:
@@ -215,9 +268,15 @@ async def discover_working_search_url(
             return -1
 
     nonsense_count = await _count(nonsense_url)
-    if nonsense_count >= 0 and unfiltered > 0 and nonsense_count >= max(1, int(0.8 * unfiltered)):
+    if nonsense_count >= 0 and unfiltered >= 3 and nonsense_count >= max(1, int(0.8 * unfiltered)):
         # The query parameter is ignored: nonsense returns ~the full listing.
-        log.info("generic_search_query_ignored", url=base_url, unfiltered=unfiltered)
+        log.info(
+            "generic_search_query_ignored",
+            url=base_url,
+            unfiltered=unfiltered,
+            nonsense_results=nonsense_count,
+            reason="nonsense_not_narrowed",
+        )
         return None
 
     best_url: str | None = None
@@ -226,7 +285,9 @@ async def discover_working_search_url(
         count = await _count(candidate)
         # A working query yields at least one result and does not simply return
         # the whole (or larger) unfiltered page.
-        if count > best_count and (unfiltered == 0 or count <= unfiltered):
+        if not candidate or candidate == base_url:
+            continue
+        if count > best_count and (unfiltered == 0 or count < unfiltered):
             best_count = count
             best_url = candidate
     if best_url and best_count > 0:

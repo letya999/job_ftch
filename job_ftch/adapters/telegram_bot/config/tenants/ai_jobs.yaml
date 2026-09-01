@@ -29,8 +29,8 @@ sources:
     limit: 100
     source_name: ai_engineers_guild
   # One bare entry URL per host. Search queries are generated on the fly from the
-  # tenant's target roles by expand_career_site_specs (Tier-2 parser build_search_urls
-  # for hh/habr/geekjob/hirify/superjob, Tier-1 on-site search form for the rest).
+  # tenant's target roles by expand_career_site_specs after source assessment
+  # selects a specific URL/API or generic GET/POST/browser search recipe.
   # Do NOT hardcode ?text=/?q=/?keywords= here: it pins a stale query and disables
   # that dynamic expansion.
   - type: career_site

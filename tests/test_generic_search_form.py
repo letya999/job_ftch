@@ -73,6 +73,27 @@ def test_build_generic_search_url_rejects_post() -> None:
     assert build_generic_search_url(form, "x") is None
 
 
+def test_detect_search_action_template_without_html_form() -> None:
+    html = (
+        '<script type="application/ld+json">'
+        '{"@context":"https://schema.org","potentialAction":'
+        '{"@type":"SearchAction","target":"https://hirehi.ru/?search={search_term_string}"}}'
+        "</script>"
+    )
+    form = detect_search_form(html, "https://hirehi.ru/")
+    assert form is not None
+    assert form.query_param == "search"
+    assert form.action == "https://hirehi.ru/"
+    assert build_generic_search_url(form, "ML Engineer") == (
+        "https://hirehi.ru/?search=ML+Engineer"
+    )
+
+
+def test_detect_search_form_ignores_application_form_fields() -> None:
+    html = '<form><input name="firstName"><input name="email"></form>'
+    assert detect_search_form(html, "https://example.com/jobs") is None
+
+
 def test_count_candidate_job_links_same_host_only() -> None:
     html = (
         '<a href="/vacancy/100">a</a>'

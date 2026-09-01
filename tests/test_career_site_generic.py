@@ -794,7 +794,7 @@ async def test_maybe_apply_generic_search_does_not_skip_parser_without_search(
 
 
 @pytest.mark.asyncio
-async def test_maybe_apply_generic_search_skips_parser_with_supports_search(
+async def test_maybe_apply_generic_search_runs_for_parser_with_supports_search(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spec = CareerSiteSpec(
@@ -803,23 +803,23 @@ async def test_maybe_apply_generic_search_skips_parser_with_supports_search(
         monitor_config={"_search_keywords": ["ML Engineer"]},
     )
     source = CareerSiteSource(spec=spec, http_client=FakeHttpClient({}), auth=MagicMock())
+    probed: list[str] = []
 
-    class _SearchParser:
-        supports_search = True
+    async def _bypass(_http: object) -> object:
+        return object()
 
-    monkeypatch.setattr(
-        "job_ftch.application.registry.resolve_site_parser_for_spec",
-        lambda _spec: _SearchParser(),
-    )
+    async def _discover(_fetch, url, keywords, log=None):  # type: ignore[no-untyped-def]
+        del _fetch, keywords, log
+        probed.append(url)
+        return None
 
-    async def _discover(*_args, **_kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("supports_search parsers must skip generic form detection")
-
+    monkeypatch.setattr(source, "_apply_bypass_http", _bypass)
     monkeypatch.setattr(
         "job_ftch.infrastructure.sources.site_parsers.generic_search.discover_working_search_url",
         _discover,
     )
     await source._maybe_apply_generic_search(object())
+    assert probed == ["https://hh.ru/search/vacancy"]
 
 
 @pytest.mark.asyncio
