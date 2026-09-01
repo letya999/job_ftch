@@ -268,7 +268,7 @@ async def test_full_extraction_rebuilds_city_country_from_post_accept_location(
         location=None,
     )
 
-    enriched = await FullExtractionNode(_FieldLLM(location="Warsaw")).process(job)
+    enriched = await FullExtractionNode(_FieldLLM(location="Warsaw, Poland")).process(job)
 
     assert enriched.city == "Варшава"
     assert enriched.country == "Польша"

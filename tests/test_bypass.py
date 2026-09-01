@@ -16,7 +16,7 @@ from job_ftch.infrastructure.sources.site_fingerprinter import fingerprint
 
 
 def test_curl_cffi_security_fixed_release_loads_on_python_312() -> None:
-    """curl-cffi 0.15.0 needs the narrow compatibility import path."""
+    """The pinned curl-cffi release must load on Python 3.12."""
     assert curl_bypass_module._CurlSession is not None
 
 

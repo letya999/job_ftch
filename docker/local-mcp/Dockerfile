@@ -1,6 +1,6 @@
 # Single-container local MCP runtime for Codex CLI + CLIProxyAPI.
 # SQLite only. No OpenObserve / Langfuse / Postgres / Qdrant / heavy embeddings.
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:e5c9fa26ffb76e11e0f054f30dc2523a2f9693f0c36c0cf1e39b27e152d899fc
 
 WORKDIR /app
 
@@ -21,19 +21,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /opt/job-ftch-home /opt/playwright /data /app/config
 
 # Dependency metadata first for better layer caching.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE uv.lock ./
 RUN mkdir -p job_ftch scripts && touch job_ftch/__init__.py
 
 # Core local stack: MCP + SQLite + OpenAI-compatible LLM + scrapers + browser.
-RUN pip install --no-cache-dir \
-    ".[mcp,local_mcp,sqlite,openai,feeds,site_scrapers,browser,stealth,extraction,language]"
+RUN /usr/local/bin/python -m pip install --no-cache-dir "uv==0.9.26" \
+    && uv sync --locked --no-dev --extra mcp --extra local-mcp --extra sqlite \
+        --extra openai --extra feeds --extra site-scrapers --extra browser \
+        --extra stealth --extra extraction --extra language
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Chromium for career-site adaptive path (no camoufox/nodriver/torch in this image).
 RUN patchright install --with-deps chromium
 
 COPY . /app
-RUN pip install --no-cache-dir --no-deps . \
-    && mkdir -p /data
+RUN mkdir -p /data
 
 # Default tenant configs for local MCP (override with volume mount).
 COPY docker/local-mcp/config/ /app/config/

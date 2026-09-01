@@ -80,21 +80,6 @@ _REGION_ALIASES = {
     "europe": "Европа",
 }
 
-_CITY_COUNTRY = {
-    "Москва": "Россия",
-    "Санкт-Петербург": "Россия",
-    "Новосибирск": "Россия",
-    "Екатеринбург": "Россия",
-    "Казань": "Россия",
-    "Алматы": "Казахстан",
-    "Астана": "Казахстан",
-    "Минск": "Беларусь",
-    "Белград": "Сербия",
-    "Тбилиси": "Грузия",
-    "Ереван": "Армения",
-    "Варшава": "Польша",
-}
-
 
 @dataclass(frozen=True)
 class GeoNormalization:
@@ -115,13 +100,18 @@ def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
             if normalized and normalized.casefold() not in {item.casefold() for item in seen}:
                 seen.append(normalized)
 
-    city = next((item for item in seen if item in _CITY_COUNTRY), None)
     country = next((item for item in seen if item in set(_COUNTRY_ALIASES.values())), None)
-    expected_country = _CITY_COUNTRY.get(city or "")
-    if expected_country and country and country != expected_country:
-        seen = [expected_country if item == country else item for item in seen]
-        corrections.append(f"country:{country}->{expected_country}")
-        country = expected_country
+    city = None
+    if country:
+        country_index = seen.index(country)
+        city = next(
+            (
+                item
+                for item in seen[:country_index]
+                if item not in _GEO_NOISE and item not in _REGION_ALIASES.values()
+            ),
+            None,
+        )
 
     return GeoNormalization(
         display=", ".join(seen[:3]) if seen else None,

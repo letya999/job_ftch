@@ -22,9 +22,7 @@ from job_ftch.adapters.fastapi.adapter import create_app
 from job_ftch.domain.source_spec import LocalFixtureSpec
 from job_ftch.nodes.sanitize import SanitizeNode
 
-builder = PipelineBuilder().source(
-    LocalFixtureSpec(path="fixtures/e2e/multisource_positive.jsonl")
-)
+builder = PipelineBuilder().source(LocalFixtureSpec(path="fixtures/e2e/multisource_positive.jsonl"))
 builder.stage(SanitizeNode())
 app = create_app(builder)
 ```

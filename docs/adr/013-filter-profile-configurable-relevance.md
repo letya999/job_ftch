@@ -20,8 +20,8 @@ Introduce `FilterProfile` as a first-class domain object in `domain/filter_profi
 class FilterProfile(BaseModel):
     positive_keywords: list[str]
     negative_keywords: list[str]
-    required_patterns: list[str]   # all must match
-    min_score: float = 0.0         # item score threshold after scoring stage
+    required_patterns: list[str]  # all must match
+    min_score: float = 0.0  # item score threshold after scoring stage
     case_sensitive: bool = False
 ```
 
