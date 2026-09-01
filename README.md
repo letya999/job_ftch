@@ -1,7 +1,7 @@
 # job_ftch
 
 ![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
+![License](https://img.shields.io/badge/license-AGPL--3.0--only-green.svg)
 ![Status](https://img.shields.io/badge/status-MVP-orange.svg)
 
 [Documentation](https://letya999.github.io/job_ftch/) · [Telegram vacancy feed](https://t.me/ai_engineer_jobs) · [AI Engineers Guild](https://t.me/ai_engineers_guild) · [GitHub](https://github.com/letya999/job_ftch)
@@ -93,4 +93,4 @@ uv run job_ftch runs list
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+AGPL-3.0-only. See [LICENSE](LICENSE).

@@ -13,18 +13,20 @@ Template for a custom Scorer/Normalizer plugin.
 from job_ftch.application.contracts import Stage, PluginMetadata
 from job_ftch.domain import JobRecord
 
+
 class MyScorer(Stage[JobRecord, JobRecord]):
     async def process(self, item: JobRecord) -> JobRecord | None:
         # Custom scoring logic
         score = 0.8
         return item.model_copy(update={"quality_score": score})
 
+
 metadata = PluginMetadata(
     name="my_scorer",
     version="1.0.0",
     plugin_type="scorer",
     description="Custom quality scoring",
-    entry_point_group="job_ftch.scorers"
+    entry_point_group="job_ftch.scorers",
 )
 ```
 

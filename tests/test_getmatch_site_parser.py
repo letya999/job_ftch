@@ -16,6 +16,7 @@ from job_ftch.infrastructure.sources.site_parsers.getmatch import (
     GetmatchIngestError,
     GetmatchPageKind,
     GetmatchParser,
+    _looks_like_challenge,
     canonicalize_vacancy_url,
     classify_getmatch_payload,
     extract_vacancy_urls_from_html,
@@ -178,6 +179,17 @@ def test_embedded_captcha_script_on_real_detail_is_not_challenge() -> None:
         '<script src="https://captcha-api.yandex.ru/captcha.js?render=onload"></script></body>',
     )
     assert classify_getmatch_payload(html, expected="detail") is GetmatchPageKind.DETAIL
+
+
+def test_challenge_script_with_spaced_end_tag_is_removed_before_visibility_check() -> None:
+    html = """
+    <html><body>
+      <script>checking your browser</script >
+      <style>body { display: none }</style>
+      Just a moment...
+    </body></html>
+    """
+    assert _looks_like_challenge(html)
 
 
 def test_listing_translation_empty_text_is_not_empty_state() -> None:

@@ -43,8 +43,9 @@ stayed `PROPOSED` and stopped at the design discussion. The implementation
 1. New `FailureSignal` Protocol in `application/contracts.py`:
    ```python
    class FailureSignal(Protocol):
-       def classify(self, *, status_code: int | None, body: bytes | None,
-                    error: BaseException | None) -> FailureKind: ...
+       def classify(
+           self, *, status_code: int | None, body: bytes | None, error: BaseException | None
+       ) -> FailureKind: ...
    ```
    `FailureKind ∈ {"ok", "rate_limit", "captcha", "blocked", "timeout", "parse_empty", "unknown"}`.
 2. Default implementation `HeuristicFailureSignal` (in

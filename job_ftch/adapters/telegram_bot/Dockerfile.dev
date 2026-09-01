@@ -5,9 +5,10 @@ WORKDIR /app
 
 # The bot executes browser-backed sources itself, so do not rely on a stale
 # runtime base image to supply Patchright or Chromium.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE uv.lock ./
 USER root
-RUN pip install --no-cache-dir ".[bot,browser,stealth,camoufox,nodriver]" \
+RUN /usr/local/bin/python -m pip install --no-cache-dir "uv==0.9.26" \
+    && uv sync --locked --no-dev --all-extras \
     && patchright install --with-deps chromium \
     && patchright install-deps firefox \
     && HOME=/opt/job-ftch-home camoufox set official/stable \
@@ -22,6 +23,6 @@ USER appuser
 
 # Source code is mounted via docker-compose volume — no COPY here.
 # Any code change is live after `docker compose restart bot`.
-ENV PYTHONPATH=/app \
+ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app \
     JOB_FTCH_CONFIGS_DIR=/app/job_ftch/adapters/telegram_bot/config/tenants
 CMD ["xvfb-run", "-a", "job_ftch", "telegram-bot"]

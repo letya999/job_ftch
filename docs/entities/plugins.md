@@ -69,9 +69,11 @@ sinks и nodes обычно создаются при сборке pipeline; ass
 # Способ 1: декоратор (встроенные и пакетные плагины)
 from job_ftch.application.registry import register_source
 
+
 @register_source("my_custom_api")
 def create_my_source(settings):
     return MyCustomSource(settings)
+
 
 # Способ 2: entry point в pyproject.toml (сторонние пакеты)
 # [project.entry-points."job_ftch.sources"]

@@ -34,6 +34,7 @@ name `"in_memory"`, not via a concrete import:
 ```python
 _FALLBACK_STORE_BACKEND = "memory"
 
+
 def _create_fallback_store(settings: Settings) -> object:
     factory = _store_factories.get(_FALLBACK_STORE_BACKEND)
     if factory is None:

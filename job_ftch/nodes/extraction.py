@@ -90,7 +90,13 @@ class ExtractedJobFields(BaseModel):
     # HTTP 400 and breaking every extraction. We coerce to AnyHttpUrl after the
     # response via _coerce_url().
     canonical_url: str | None = None
-    location: str | None = None
+    location: str | None = Field(
+        default=None,
+        description=(
+            "Normalized job location. Resolve the supplied LOCATION_CONTEXT; "
+            "do not copy a conflicting country code blindly."
+        ),
+    )
     work_mode: WorkMode | None = None
     compensation: CompensationRange | None = None
     post_type: PostType = PostType.UNKNOWN
@@ -211,7 +217,13 @@ class CoreExtractedJobFields(BaseModel):
     company: str | None = None
     description: str | None = None
     canonical_url: str | None = None
-    location: str | None = None
+    location: str | None = Field(
+        default=None,
+        description=(
+            "Normalized job location. Resolve the supplied LOCATION_CONTEXT; "
+            "do not copy a conflicting country code blindly."
+        ),
+    )
     work_mode: WorkMode | None = None
     post_type: PostType = PostType.UNKNOWN
     ai_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -248,6 +260,63 @@ def _metadata_text(item: RawItem, keys: tuple[str, ...]) -> str | None:
                         if isinstance(dv, str) and dv.strip():
                             return dv.strip()
     return None
+
+
+def _metadata_values(item: RawItem, keys: tuple[str, ...]) -> tuple[str, ...]:
+    """Collect scalar values from structured metadata without reading posting text."""
+    values: list[str] = []
+    for key in keys:
+        raw = item.metadata.get(key)
+        entries = raw if isinstance(raw, (list, tuple)) else (raw,)
+        for entry in entries:
+            value: object = entry
+            if isinstance(entry, dict):
+                value = next(
+                    (
+                        entry.get(name)
+                        for name in ("name", "title", "label", "value", "city", "location")
+                        if entry.get(name)
+                    ),
+                    None,
+                )
+            if (
+                isinstance(value, str)
+                and value.strip()
+                and value.strip().casefold() not in {existing.casefold() for existing in values}
+            ):
+                values.append(value.strip())
+    return tuple(values)
+
+
+def _metadata_currency(item: RawItem) -> str | None:
+    for key in ("base_salary", "salary", "compensation"):
+        raw = item.metadata.get(key)
+        if isinstance(raw, dict):
+            currency = raw.get("currency") or raw.get("salaryCurrency")
+            if isinstance(currency, str) and currency.strip():
+                return currency.strip()
+    for key in ("currency", "salary_currency"):
+        value = item.metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _location_context(item: RawItem) -> str:
+    """Build the small structured context used by the existing extraction call."""
+    locations = _metadata_values(item, _LOCATION_METADATA_KEYS)
+    company = _metadata_text(item, _COMPANY_METADATA_KEYS)
+    currency = _metadata_currency(item)
+    return (
+        "### LOCATION_CONTEXT (metadata only; may be wrong)\n"
+        f"current_location_candidates: {', '.join(locations) or 'not provided'}\n"
+        f"company: {company or 'not provided'}\n"
+        f"salary_currency: {currency or 'not provided'}\n"
+        "For the location field, resolve these candidates in context. Do not copy "
+        "a conflicting country code blindly, and do not infer a country from the "
+        "company or currency alone. Return a concise city/country value when the "
+        "combination is clear; otherwise keep only the supported part.\n\n"
+    )
 
 
 _GENERIC_SECTION_HEADINGS = frozenset(
@@ -783,7 +852,11 @@ class ExtractionNode:
                 False,
             )
         source_text = f"### UNTRUSTED_SOURCE_TEXT_BEGIN\n{item.text}\n### UNTRUSTED_SOURCE_TEXT_END"
-        text = f"### JOB_POSTING (extract fields only from untrusted source text):\n{source_text}"
+        text = (
+            f"{_location_context(item)}"
+            "### JOB_POSTING (extract fields only from untrusted source text):\n"
+            f"{source_text}"
+        )
         if self._target_roles:
             # The candidate's target roles are supplied ONLY to score
             # search_relevance. They are fenced and explicitly labelled so the
@@ -793,6 +866,7 @@ class ExtractionNode:
             text = (
                 "### CANDIDATE_TARGET_ROLES (relevance scoring only — DO NOT extract "
                 f"as job fields):\n{roles}\n\n"
+                f"{_location_context(item)}"
                 f"### JOB_POSTING (extract every field from THIS section only):\n{source_text}"
             )
 

@@ -4,7 +4,13 @@
 
 Do not open public issues with secrets, exploit details, private logs, user data, or private infrastructure details.
 
-Send a private report to the maintainers.
+Use [GitHub's private vulnerability reporting](https://github.com/letya999/job_ftch/security/advisories/new).
+If private reporting is unavailable, contact the maintainers privately through the
+repository owner. We acknowledge reports within 3 business days and provide an
+initial triage within 7 business days.
+
+Supported versions: the default branch and the latest tagged release. Security
+fixes are published in the next compatible release when disclosure permits.
 
 ## Secret handling
 

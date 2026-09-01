@@ -3,14 +3,14 @@ name = "job-ftch"
 version = "0.0.13"
 description = "Open-source async pipeline for ingesting AI/tech job vacancies from Telegram and career sites"
 readme = "README.md"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 requires-python = ">=3.12"
 authors = [{ name = "job_ftch contributors" }]
 keywords = ["jobs", "telegram", "pipeline", "async", "open-source"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: GNU Affero General Public License v3",
     "Framework :: AsyncIO",
 ]
 
@@ -45,10 +45,9 @@ parity_lab = [
     "starlette==1.3.1",
 ]
 # curl-cffi impersonation profiles are pinned per release so floating minors
-# cannot silently mutate the JA3/JA4 baseline. Version 0.15.0 is required for
-# PYSEC-2026-2431; its Python 3.12 import regression is handled narrowly in
-# infrastructure/bypass/curl_bypass.py until upstream releases a compatible fix.
-stealth = ["playwright-stealth>=2.0.3", "curl-cffi==0.15.0"]
+# cannot silently mutate the JA3/JA4 baseline. Keep this version aligned with
+# the `all` extra and regenerate uv.lock when it changes.
+stealth = ["playwright-stealth>=2.0.3", "curl-cffi==0.16.2"]
 tls_client = ["tls-client>=1.0.1"]
 openai = ["openai>=1.30", "instructor>=1.4"]
 telegram = ["telethon>=1.36", "aiogram>=3.7"]
@@ -63,7 +62,7 @@ bot = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "aiosqlite>=0.20",
-    "pypdf>=6.15.0",
+    "pypdf>=6.16.1",
     "python-docx>=1.1",
     "pdfminer.six>=20231228",
     "PyYAML>=6.0",
@@ -83,7 +82,7 @@ realtime = [
     "aiohttp>=3.9.0",
     "websockets>=12.0",
 ]
-resume = ["pypdf>=6.15.0", "python-docx>=1.1", "pdfminer.six>=20231228"]
+resume = ["pypdf>=6.16.1", "python-docx>=1.1", "pdfminer.six>=20231228"]
 language = ["lingua-language-detector>=2.0"]
 translation = ["ctranslate2>=4.0", "sentencepiece>=0.1.99"]
 reranker = ["fastembed>=0.3"]
@@ -106,7 +105,7 @@ all = [
     "faststream>=0.5",
     "patchright>=1.49",
     "playwright-stealth>=2.0.3",
-    "curl-cffi==0.15.0",
+    "curl-cffi==0.16.2",
     "tls-client>=1.0.1",
     "cloakbrowser>=0.5.1",
     "camoufox>=0.5.4",
@@ -126,7 +125,7 @@ all = [
     "websockets>=12.0",
     "jmespath>=1.0",
     "fastembed>=0.3",
-    "pypdf>=6.15.0",
+    "pypdf>=6.16.1",
     "python-docx>=1.1",
     "pdfminer.six>=20231228",
     "openai>=1.30",
@@ -187,7 +186,7 @@ dev = [
     # formatting of the same files, so an unpinned floor let a local run "fix" code that
     # the CI version then rejected. A formatter has to be byte-deterministic; bump this
     # deliberately, not by accident.
-    "ruff==0.15.16",
+    "ruff==0.16.5",
     # Bounded below a major so the type and test verdicts cannot silently diverge between
     # a developer machine and CI the way ruff did.
     "mypy>=2.1,<3",
