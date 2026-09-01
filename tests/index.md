@@ -29,6 +29,8 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [conftest.py](conftest.py)
 - [test_adaptive_concurrency.py](test_adaptive_concurrency.py)
 - [test_adaptive_escalation.py](test_adaptive_escalation.py)
+- [test_aggregator_board_parsers.py](test_aggregator_board_parsers.py)
+- [test_airi_site_parser.py](test_airi_site_parser.py)
 - [test_api_sniffer_bypass.py](test_api_sniffer_bypass.py)
 - [test_app_e2e.py](test_app_e2e.py)
 - [test_application_garbage.py](test_application_garbage.py)

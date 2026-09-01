@@ -59,6 +59,18 @@ def source_spec_identifier(spec: SourceSpec) -> str:
     return f"{spec.type}:{source_spec_name(spec)}"
 
 
+def source_spec_fingerprint(spec: SourceSpec) -> str:
+    """Return a stable fingerprint for assessment invalidation."""
+    import json
+
+    payload = spec.model_dump(mode="json")
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+
 def source_spec_locator(spec: SourceSpec) -> str | None:
     for field_name in ("entity", "url", "feed_url", "base_url", "path", "company"):
         value = getattr(spec, field_name, None)

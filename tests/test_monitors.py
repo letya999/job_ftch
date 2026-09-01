@@ -2,6 +2,7 @@ import pytest
 
 from job_ftch.application.contracts import BoardMonitor
 from job_ftch.domain.site_models import MonitorResult
+from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.monitors.api_sniffer import discover as sniffer_discover
 from job_ftch.infrastructure.sources.monitors.dom import discover as dom_discover
 
@@ -33,3 +34,22 @@ async def test_normalize_monitor_result_set():
     res = normalize_monitor_result({"http://example.com/job1"})
     assert isinstance(res, MonitorResult)
     assert "http://example.com/job1" in res.urls
+
+
+@pytest.mark.asyncio
+async def test_dom_monitor_uses_browser_search_prefetch() -> None:
+    html = "<html><a href='/jobs/42'>ML Engineer</a></html>"
+
+    class _NoFetchClient:
+        async def get(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("prefetched browser result must avoid a second HTTP fetch")
+
+    result = await dom_discover(
+        CareerSiteSpec(
+            url="https://example.com/careers",
+            monitor_config={"_prefetched_listing_html": html},
+        ),
+        _NoFetchClient(),  # type: ignore[arg-type]
+    )
+
+    assert any("/jobs/42" in url for url in result)

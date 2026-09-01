@@ -10,7 +10,7 @@
     {"type": "career_site", "url": "https://hh.ru/search/vacancy",             "source_name": "hh_ru",          "limit": 50},
     {"type": "career_site", "url": "https://hh.kz/search/vacancy",             "source_name": "hh_kz",          "limit": 50},
     {"type": "career_site", "url": "https://yandex.ru/jobs/vacancies",         "source_name": "yandex_jobs",    "limit": 50},
-    {"type": "career_site", "url": "https://www.superjob.ru/vacancy/search/",  "source_name": "superjob_ru",    "limit": 50},
+    {"type": "career_site", "url": "https://www.superjob.ru/vacancy/search/",  "source_name": "superjob_ru",    "limit": 50, "bypass": "cloak", "monitor": "dom", "monitor_config": {"render": true, "wait": "domcontentloaded", "settle_seconds": 1, "url_filter": "www\\.superjob\\.ru/vakansii/[^/?#]+-\\d+\\.html$"}},
     {"type": "career_site", "url": "https://rabota.sber.ru/search",            "source_name": "rabota_sber_ru", "limit": 50},
     {"type": "career_site", "url": "https://www.tbank.ru/career/vacancies/it/","source_name": "tbank_it",       "limit": 50},
     {"type": "career_site", "url": "https://team.vk.company/vacancy/",         "source_name": "vk_careers",     "limit": 50},

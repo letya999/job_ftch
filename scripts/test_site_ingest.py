@@ -31,6 +31,8 @@ from job_ftch.application.registry import (
     resolve_bypass,
     resolve_site_parser,
 )
+from job_ftch.application.search_expansion import expand_career_site_specs
+from job_ftch.application.source_assessment import create_source_assessment_service
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import TenantRunner, _merge_effective_sources
 from job_ftch.config import Settings, get_settings
@@ -47,6 +49,7 @@ from job_ftch.infrastructure.classifiers.keyword_lists import (
 from job_ftch.infrastructure.sources.career_site import client_for_config
 from job_ftch.infrastructure.sources.monitor_detector import get_ordered_monitors
 from job_ftch.infrastructure.sources.site_fingerprinter import fingerprint
+from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 from job_ftch.nodes.post_type import PostTypeClassificationNode
 
 
@@ -188,6 +191,8 @@ def _failure_bucket(
         return "rate_limited"
     if status_code in {401, 403, 503}:
         return "blocked_or_protected"
+    if stats.get("zero_reason") == "confirmed_empty":
+        return "no_open_vacancies"
     if "challenge.html" in final_url and "429" in final_url:
         return "rate_limited"
     if "429" in title or "too many requests" in title:
@@ -211,13 +216,14 @@ async def _probe_site_source(
     runtime: Any,
     spec: CareerSiteSpec,
     *,
+    store: Any,
     max_items: int,
     timeout_seconds: float,
     window_days: int | None = None,
     include_full_text: bool = False,
 ) -> dict[str, Any]:
     bounded = _bounded_spec(spec, max_items, window_days=window_days)
-    source = create_source_from_spec(bounded, auth=runtime.auth_provider, store=runtime.store)
+    source = create_source_from_spec(bounded, auth=runtime.auth_provider, store=store)
     source_id = source_spec_identifier(spec)
     diagnostic_timeout = min(20.0, max(5.0, timeout_seconds / 3))
     try:
@@ -232,7 +238,7 @@ async def _probe_site_source(
         }
     try:
         selection = await asyncio.wait_for(
-            _selection_diagnostic(source, spec),
+            _selection_diagnostic(source, source.spec),
             timeout=diagnostic_timeout,
         )
     except TimeoutError:
@@ -363,7 +369,12 @@ async def _probe_site_source(
 async def _run(args: argparse.Namespace) -> dict[str, Any]:
     configs_dir = Path(args.configs_dir) if args.configs_dir else _default_configs_dir()
     settings = _build_settings(configs_dir).model_copy(
-        update={"bgem3_enabled": False, "embedding_prefilter_enabled": False}
+        update={
+            "llm_backend": "heuristic",
+            "bgem3_enabled": False,
+            "embedding_enabled": False,
+            "embedding_prefilter_enabled": False,
+        }
     )
     tenants = [
         tenant.model_copy(
@@ -379,11 +390,18 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     runtime = runner.get_runtime(args.tenant_id)
     await runner._ensure_runtime_sources_loaded(runtime)
 
-    effective_sources = _merge_effective_sources(
-        runtime.base_sources,
-        runtime.runtime_sources,
-        runtime.disabled_source_ids,
-    )
+    if args.include_disabled:
+        by_id = {source_spec_identifier(spec): spec for spec in runtime.base_sources}
+        by_id.update(
+            (source_id, record.spec) for source_id, record in runtime.runtime_sources.items()
+        )
+        effective_sources = list(by_id.values())
+    else:
+        effective_sources = _merge_effective_sources(
+            runtime.base_sources,
+            runtime.runtime_sources,
+            runtime.disabled_source_ids,
+        )
     site_specs = [spec for spec in effective_sources if isinstance(spec, CareerSiteSpec)]
     if args.only:
         selected = set(args.only)
@@ -395,6 +413,37 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             or spec.url in selected
         ]
 
+    assessment_service = create_source_assessment_service()
+    assessment_semaphore = asyncio.Semaphore(max(args.concurrency, 1))
+
+    async def _assess(spec: CareerSiteSpec) -> CareerSiteSpec:
+        async with assessment_semaphore:
+            assessment = await assessment_service.assess(spec)
+        search = assessment.search
+        if search is None:
+            return spec
+        monitor_config = dict(spec.monitor_config)
+        monitor_config["_search_assessment"] = search.model_dump(mode="json")
+        monitor_config["_search_base_url"] = spec.url
+        return spec.model_copy(update={"monitor_config": monitor_config})
+
+    assessed_specs = await asyncio.gather(*(_assess(spec) for spec in site_specs))
+    active_profiles = await runtime.store.list_all_active_candidate_profiles()
+    target_roles = tuple(
+        dict.fromkeys(
+            role
+            for record in active_profiles
+            for profile in record.profile.search_profiles
+            for role in profile.target_roles
+            if role.strip()
+        )
+    )
+    site_specs = [
+        spec
+        for spec in expand_career_site_specs(assessed_specs, target_roles)
+        if isinstance(spec, CareerSiteSpec)
+    ]
+    probe_store = InMemoryStore()
     semaphore = asyncio.Semaphore(max(args.concurrency, 1))
 
     async def _one(spec: CareerSiteSpec) -> dict[str, Any]:
@@ -402,6 +451,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             return await _probe_site_source(
                 runtime,
                 spec,
+                store=probe_store,
                 max_items=args.max_items,
                 timeout_seconds=args.timeout_seconds,
                 window_days=args.window_days,
@@ -409,6 +459,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             )
 
     results = await asyncio.gather(*(_one(spec) for spec in site_specs))
+    await runner.close()
 
     by_bucket = Counter(item["failure_bucket"] or "ok" for item in results)
     failures_by_kind = Counter(
@@ -426,6 +477,9 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         "timeout_seconds": args.timeout_seconds,
         "concurrency": args.concurrency,
         "window_days": args.window_days,
+        "inventory_count": len(effective_sources),
+        "include_disabled": args.include_disabled,
+        "target_role_count": len(target_roles),
         "site_count": len(site_specs),
         "summary": {
             "ok": sum(1 for item in results if item["status"] == "ok"),
@@ -478,6 +532,11 @@ def main() -> None:
     parser.add_argument("--max-items", type=int, default=20)
     parser.add_argument("--timeout-seconds", type=float, default=120.0)
     parser.add_argument("--concurrency", type=int, default=3)
+    parser.add_argument(
+        "--include-disabled",
+        action="store_true",
+        help="Probe disabled runtime records too; the database remains read-only.",
+    )
     parser.add_argument("--window-days", type=int)
     parser.add_argument("--report-path", default="artifacts/debug/site_ingest_report.json")
     parser.add_argument(

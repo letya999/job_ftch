@@ -22,15 +22,15 @@ def test_bare_hh_source_is_rewritten_as_single_combined_query() -> None:
     assert out[0].source_name == "hh"  # combined keeps the original name
 
 
-def test_bare_geekjob_source_uses_one_listing_crawl() -> None:
+def test_bare_geekjob_source_expands_to_role_searches() -> None:
     specs = [CareerSiteSpec(url="https://geekjob.ru/vacancies", source_name="geekjob")]
     out = expand_career_site_specs(specs, ROLES)
-    assert len(out) == 1
-    assert out[0].source_name == "geekjob"
-    assert out[0].url == "https://geekjob.ru/vacancies"
+    assert len(out) == len(ROLES)
+    assert [item.source_name for item in out] == ["geekjob_kw1", "geekjob_kw2"]
+    assert [parse_qs(urlparse(item.url).query)["qs"] for item in out] == [[role] for role in ROLES]
 
 
-def test_explicit_query_source_is_left_untouched() -> None:
+def test_explicit_query_source_is_rebuilt_with_current_roles() -> None:
     specs = [
         CareerSiteSpec(
             url="https://hh.ru/search/vacancy?text=machine+learning&area=113",
@@ -38,7 +38,19 @@ def test_explicit_query_source_is_left_untouched() -> None:
         )
     ]
     out = expand_career_site_specs(specs, ROLES)
-    assert out == specs  # idempotent: hand-authored query preserved
+    assert parse_qs(urlparse(out[0].url).query)["text"] == ["AI engineer OR LLM engineer"]
+    assert parse_qs(urlparse(out[0].url).query)["area"] == ["113"]
+
+
+def test_locked_explicit_query_source_is_left_untouched() -> None:
+    specs = [
+        CareerSiteSpec(
+            url="https://hh.ru/search/vacancy?text=machine+learning&area=113",
+            source_name="hh_ml",
+            search_locked=True,
+        )
+    ]
+    assert expand_career_site_specs(specs, ROLES)[0].url == specs[0].url
 
 
 def test_non_career_sources_pass_through() -> None:
@@ -84,6 +96,28 @@ def test_source_without_search_parser_gets_runtime_keywords() -> None:
     assert len(out) == 1
     assert out[0].url == "https://acme.example/careers"
     assert out[0].monitor_config["_search_keywords"] == ROLES
+
+
+def test_unverified_assessment_still_applies_specific_builder(monkeypatch) -> None:
+    class Parser:
+        supports_search = True
+
+        def build_search_urls(self, url, keywords, *, limit=None):
+            del keywords, limit
+            return [f"{url}?q=runtime-fallback"]
+
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser_for_spec", lambda _spec: Parser()
+    )
+    spec = CareerSiteSpec(
+        url="https://example.com/jobs",
+        source_name="example",
+        monitor_config={"_search_assessment": {"status": "unsupported", "executor": "none"}},
+    )
+    out = expand_career_site_specs([spec], ROLES)
+    assert out[0].url == "https://example.com/jobs?q=runtime-fallback"
+    assert out[0].monitor_config["_search_keywords"] == ROLES
+    assert out[0].monitor_config["_search_runtime_executor"] == "specific_url"
 
 
 def test_per_keyword_clone_gets_unique_source_name() -> None:

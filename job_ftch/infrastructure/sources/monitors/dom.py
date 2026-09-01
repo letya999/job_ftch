@@ -547,6 +547,9 @@ async def discover(
     board_url = spec.url
     config = spec.monitor_config
     render = config.get("render", False)
+    prefetched_html = config.get("_prefetched_listing_html")
+    if isinstance(prefetched_html, str) and prefetched_html:
+        render = False
     bypass_strategy = config.get("_bypass_strategy")
     url_matcher = _build_url_matcher(config.get("url_filter"))
     pagination = config.get("pagination")
@@ -577,7 +580,11 @@ async def discover(
             )
             urls = await _extract_links_rendered(page, board_url, config, url_matcher)
     else:
-        html = await fetch_page_text(board_url, client)
+        html = (
+            prefetched_html
+            if isinstance(prefetched_html, str) and prefetched_html
+            else await fetch_page_text(board_url, client)
+        )
         if not html:
             log.warning("dom.fetch_failed", board_url=board_url)
             return set()

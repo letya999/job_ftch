@@ -1,7 +1,7 @@
 ---
 title: "Career-site runtime flow"
 description: "Фактический control-flow CareerSiteSource.fetch(): strategy init, site parser, generic search, monitor chain, discover/enrich, freshness, zero-yield taxonomy и teardown."
-updated: 2026-08-22
+updated: 2026-09-01
 ---
 # Career-site runtime flow
 
@@ -16,8 +16,8 @@ updated: 2026-08-22
 ```text
 _init_strategy            -> domain, cached strategy, bypass, BypassContext
 start_operation(listing)  -> per-source browser-launch budget
-_maybe_apply_generic_search -> keyword-search URL rewrite (skip only if URL already
-                              has a query or parser.supports_search)
+_maybe_apply_generic_search -> assessed search executor (specific URL/API,
+                              generic GET/POST, or bounded browser attempt)
 _try_site_parser          -> site-specific fast path (может завершить fetch)
 _resolve_monitors         -> auto-detect или explicit monitor chain
 _run_monitor_chain        -> discover -> enrich (основной объём вакансий)
@@ -69,11 +69,13 @@ bypass используются как стартовая точка: `bypass_st
 
 ## Generic keyword-search rewrite
 
-`_maybe_apply_generic_search` пытается переписать `spec.url` на search-URL из
-`target_roles` **до** site parser. Skip только если в URL уже есть известный
-query-параметр или resolved parser имеет `supports_search=True`. Наличие
-SiteParser само по себе не skip: SuperJob / Yandex / T-Bank / Kolesa / Avito
-без `build_search_urls` должны увидеть переписанный URL. Подробнее —
+`_maybe_apply_generic_search` применяет recipe из source assessment **до** site
+parser. Каждый career source получает актуальные `target_roles`. Executor и
+extractor независимы: generic form может подать данные specific parser, а
+specific parser search — generic monitor chain. `supports_search=True` — лишь
+capability hint, а не bypass; candidate принимается только после positive
+query и nonsense-control проверки. Непроверенный или упавший search всегда
+возвращает исходный listing URL. Подробнее —
 [search_query_ingest.md](search_query_ingest.md). На любой ошибке исходный URL
 сохраняется (never-fail). После успешного parser generic search повторно не
 вызывается.

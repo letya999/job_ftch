@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
-from job_ftch.domain.runtime_source import source_spec_identifier
+from job_ftch.domain.runtime_source import source_spec_fingerprint, source_spec_identifier
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import Store
@@ -79,10 +79,15 @@ class SourceAssessmentService:
         source_id = source_spec_identifier(spec)
         if not force:
             cached = await load_source_assessment(store, source_id)
-            if cached is not None and not _is_assessment_stale(cached, ttl_days):
+            if (
+                cached is not None
+                and cached.spec_fingerprint == source_spec_fingerprint(spec)
+                and not _is_assessment_stale(cached, ttl_days)
+            ):
                 return cached
 
         result = await self.assess(spec)
+        result = result.model_copy(update={"spec_fingerprint": source_spec_fingerprint(spec)})
         await store_source_assessment(store, result)
         return result
 

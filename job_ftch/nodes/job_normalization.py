@@ -336,8 +336,6 @@ class CompensationParsingNode:
                         period=period,
                     )
 
-                    if item.compensation is not None:
-                        return item
                     return item.model_copy(
                         update={
                             "compensation": compensation,

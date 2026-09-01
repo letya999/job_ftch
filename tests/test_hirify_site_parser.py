@@ -154,6 +154,19 @@ async def test_body_comes_from_the_per_vacancy_endpoint() -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_api_still_runs_when_listing_page_is_unavailable() -> None:
+    class _ApiOnlyClient(_ApiClient):
+        async def get(self, url: str, **kwargs: object) -> object:
+            if "/api/vacancies" in url:
+                return await super().get(url, **kwargs)
+            raise RuntimeError("listing page unavailable")
+
+    items = [item async for item in HirifyParser().parse(_spec(), _ApiOnlyClient())]
+
+    assert len(items) == 1
+
+
+@pytest.mark.asyncio
 async def test_structured_fields_reach_metadata() -> None:
     items = [item async for item in HirifyParser().parse(_spec(), _ApiClient())]
 

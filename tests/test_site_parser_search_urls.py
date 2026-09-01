@@ -12,6 +12,7 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     with_query_params,
 )
 from job_ftch.infrastructure.sources.site_parsers.hh import HhParser
+from job_ftch.infrastructure.sources.site_parsers.hirehi import HireHiParser
 from job_ftch.infrastructure.sources.site_parsers.hirify import HirifyParser
 from job_ftch.infrastructure.sources.site_parsers.sber import SberParser
 from job_ftch.infrastructure.sources.site_parsers.vk import VkTeamParser
@@ -27,10 +28,9 @@ def test_aggregators_declare_search_modes() -> None:
     for parser in (HhParser(), HabrCareerParser(), HirifyParser(), VkTeamParser(), SberParser()):
         assert parser.supports_search is True
         assert parser.search_mode == "combined"
-    # GeekJob uses one listing crawl; the shared relevance pipeline filters it.
-    geekjob = GeekJobParser()
-    assert geekjob.supports_search is True
-    assert geekjob.search_mode == "listing"
+    for parser in (GeekJobParser(), HireHiParser()):
+        assert parser.supports_search is True
+        assert parser.search_mode == "per_keyword"
 
 
 def test_hh_builds_single_or_query_preserving_area() -> None:
@@ -58,9 +58,16 @@ def test_habr_uses_q_and_type_all() -> None:
     assert query["type"] == ["all"]
 
 
-def test_geekjob_builds_one_listing_url() -> None:
+def test_geekjob_builds_api_search_urls() -> None:
     urls = GeekJobParser().build_search_urls("https://geekjob.ru/vacancies", ROLES)
-    assert urls == ["https://geekjob.ru/vacancies"]
+    assert len(urls) == len(ROLES)
+    assert all("qs=" in url for url in urls)
+
+
+def test_hirehi_builds_server_search_urls() -> None:
+    urls = HireHiParser().build_search_urls("https://hirehi.ru/", ROLES)
+    assert len(urls) == len(ROLES)
+    assert all("search=" in url for url in urls)
 
 
 def test_hirify_sets_search_with_or_operator_and_title_company() -> None:
@@ -87,6 +94,7 @@ def test_empty_keywords_yield_no_urls() -> None:
         HhParser(),
         HabrCareerParser(),
         GeekJobParser(),
+        HireHiParser(),
         HirifyParser(),
         VkTeamParser(),
         SberParser(),
