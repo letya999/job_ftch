@@ -365,9 +365,10 @@ def _looks_like_challenge(text: str) -> bool:
     has_h1 = bool(re.search(r"<h1\b", text, flags=re.I))
     if has_vacancy_shell or has_h1:
         return False
-    visible = re.sub(r"<script\b[^>]*>.*?</script>", " ", text, flags=re.I | re.S)
-    visible = re.sub(r"<style\b[^>]*>.*?</style>", " ", visible, flags=re.I | re.S)
-    visible = " ".join(re.sub(r"<[^>]+>", " ", visible).split())
+    tree = HTMLParser(text)
+    for node in tree.css("script, style"):
+        node.decompose()
+    visible = " ".join(tree.text(separator=" ", strip=True).split())
     return len(visible) < 400
 
 

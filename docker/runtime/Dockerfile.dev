@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:e5c9fa26ffb76e11e0f054f30dc2523a2f9693f0c36c0cf1e39b27e152d899fc
 
 WORKDIR /app
 
@@ -15,10 +15,12 @@ RUN mkdir -p /opt/job-ftch-home /opt/playwright
 # Dependency metadata only, with a placehnewer package so the wheel can build. The verify
 # script is copied after the installs on purpose: copying it here tied the ~1.1 GB install
 # layer to that file, so editing it re-downloaded torch and CUDA.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE uv.lock ./
 RUN mkdir -p job_ftch scripts && touch job_ftch/__init__.py
 
-RUN pip install --no-cache-dir ".[postgres,openai,qdrant,feeds,site_scrapers,browser,stealth,camoufox,nodriver,embeddings,bgem3,tracing]"
+RUN /usr/local/bin/python -m pip install --no-cache-dir "uv==0.9.26" \
+    && uv sync --locked --no-dev --all-extras
+ENV PATH="/app/.venv/bin:$PATH"
 RUN patchright install --with-deps chromium
 # Camoufox is Firefox-based and needs GTK, which the Chromium dep set does not provide.
 # `camoufox fetch` only downloads the binary, so without this the tier imports fine and

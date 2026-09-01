@@ -6,14 +6,14 @@ mkdocs-material==9.7.7
 pymdown-extensions==11.0.1
 
 # Security pins for transitive dependencies used by the documentation plugins.
-GitPython==3.1.58
-idna==3.18
+GitPython==3.1.61
+idna==3.19
 
 # Навигация из структуры папок вместо ручного nav.
 mkdocs-awesome-pages-plugin==2.9.3
 
 # Дата последнего изменения из git рядом с last_verified.
-mkdocs-git-revision-date-localized-plugin==1.3.0
+mkdocs-git-revision-date-localized-plugin==1.5.4
 
 # Разбор frontmatter в линтерах и проверка стиля YAML.
 PyYAML==6.0.2

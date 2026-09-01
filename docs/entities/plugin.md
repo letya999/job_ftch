@@ -50,18 +50,18 @@ python-пакетах (third-party plugins).
 (enum):
 
 ```python SOURCE         # Поставщик данных (Source Protocol)
-SINK           # Получатель данных (Sink Protocol)
-NODE           # Узел обработки (Stage Protocol)
-STORE          # Хранилище pipeline (Store Protocol)
-JOB_GROUP_STORE # Хранилище групп вакансий BYPASS         # Обход антибот-защит (BypassStrategy Protocol)
-LLM            # Языковая модель (LLMProvider Protocol)
-EMBEDDING      # Векторизация текста (EmbeddingProvider Protocol)
-VECTOR         # Векторное хранилище (VectorBackend Protocol)
-JOB_BACKEND    # Хранилище вакансий (JobPersistenceBackend Protocol)
-SEARCH_BACKEND # Полнотекстовый поиск (SearchBackend Protocol)
-AUTH           # Провайдер credentials (AuthProvider Protocol)
-MONITOR        # Монитор карьер-сайта SCRAPER        # HTML скрапер PARSER         # Парсер структуры страницы RERANKER       # Reranking для поиска
-SOURCE_ASSESSMENT # Pre-ingest source assessment adapter
+SINK  # Получатель данных (Sink Protocol)
+NODE  # Узел обработки (Stage Protocol)
+STORE  # Хранилище pipeline (Store Protocol)
+JOB_GROUP_STORE  # Хранилище групп вакансий BYPASS         # Обход антибот-защит (BypassStrategy Protocol)
+LLM  # Языковая модель (LLMProvider Protocol)
+EMBEDDING  # Векторизация текста (EmbeddingProvider Protocol)
+VECTOR  # Векторное хранилище (VectorBackend Protocol)
+JOB_BACKEND  # Хранилище вакансий (JobPersistenceBackend Protocol)
+SEARCH_BACKEND  # Полнотекстовый поиск (SearchBackend Protocol)
+AUTH  # Провайдер credentials (AuthProvider Protocol)
+MONITOR  # Монитор карьер-сайта SCRAPER        # HTML скрапер PARSER         # Парсер структуры страницы RERANKER       # Reranking для поиска
+SOURCE_ASSESSMENT  # Pre-ingest source assessment adapter
 ```
 
 ### Жизненный цикл плагина (PluginState)
@@ -85,7 +85,6 @@ SOURCE_ASSESSMENT # Pre-ingest source assessment adapter
 используйте декораторы:
 
 ```python from job_ftch.application.registry import register_source
-
 # Указываем имя, версию и опциональные библиотеки, которые требуются
 @register_source("my_custom_api", version="1.0.0", requires_extras=("my_extra",))
 def create_my_source(settings):
@@ -108,12 +107,13 @@ my_api = "my_pkg.sources:register"
 2. В коде (`my_pkg/sources.py`):
 
 ```python def register():
-    from job_ftch.application.registry import register_source
-    from .my_source import MyAPISource
+from job_ftch.application.registry import register_source
+from .my_source import MyAPISource
 
-    @register_source("my_api")
-    def factory(settings):
-        return MyAPISource(settings)
+
+@register_source("my_api")
+def factory(settings):
+    return MyAPISource(settings)
 ```
 
 При старте приложения вызов функции `load_extensions()`
@@ -125,13 +125,12 @@ my_api = "my_pkg.sources:register"
 плагинов через `PluginRegistry`:
 
 ```python from job_ftch.application.plugin_registry import _default_registry from job_ftch.application.plugin import PluginKind from job_ftch.application.registry import load_extensions
-
 load_extensions()
 
 # Узнаем все зарегистрированные источники sources = _default_registry.list_by_kind(PluginKind.SOURCE)
 for entry in sources:
     print(f"{entry.descriptor.name}: {entry.state}")
-    
+
 # Вывод:
 # telegram_channel: active
 # career_site: active

@@ -16,6 +16,7 @@ from job_ftch.application.registry import register_source
 from job_ftch.domain import RawItem, SourceKind, QuarantinedRawItem
 from job_ftch.domain.source_spec import SourceSpec
 
+
 @register_source("my_custom_source")
 class MySource(Source[RawItem]):
     def __init__(self, spec: SourceSpec):
@@ -29,8 +30,9 @@ class MySource(Source[RawItem]):
             source_name="my_source",
             external_id="123",
             text="Job description here",
-            url="https://example.com/job/123"
+            url="https://example.com/job/123",
         )
+
 
 # Metadata (optional but recommended)
 metadata = PluginMetadata(
@@ -38,7 +40,7 @@ metadata = PluginMetadata(
     version="1.0.0",
     plugin_type="source",
     description="Fetches jobs from My Custom Source API",
-    entry_point_group="job_ftch.sources"
+    entry_point_group="job_ftch.sources",
 )
 ```
 
@@ -55,7 +57,8 @@ my_source = "my_plugin_package.source:MySource"
 from job_ftch.domain import RawItem
 from tests.test_plugin_contracts import TestSourcePluginContract
 
+
 class TestMySourceContract(TestSourcePluginContract):
     def get_source(self):
-        return MySource(spec=...) # provide mock/test spec
+        return MySource(spec=...)  # provide mock/test spec
 ```

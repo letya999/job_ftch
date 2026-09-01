@@ -6,12 +6,7 @@ from job_ftch.config import get_settings
 
 
 def _load_curl_session() -> tuple[Any | None, BaseException | None]:
-    """Import curl-cffi, applying its temporary Python 3.12 compatibility fix.
-
-    curl-cffi 0.15.0 fixes PYSEC-2026-2431 but omitted ``typing.Any`` from
-    one module.  The failed import is retried with that annotation name
-    temporarily available through builtins; no project-wide symbol remains.
-    """
+    """Import curl-cffi while tolerating older dependency import defects."""
     try:
         from curl_cffi.requests import AsyncSession
 

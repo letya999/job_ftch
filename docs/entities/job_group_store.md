@@ -55,19 +55,13 @@ class JobGroupStore(Protocol):
     async def create(self, job: JobRecord) -> JobGroup:
         """Создает новую группу из вакансии."""
 
-    async def merge(
-        self, group_id: str, job: JobRecord, merge_confidence: float = 1.0
-    ) -> JobGroup:
+    async def merge(self, group_id: str, job: JobRecord, merge_confidence: float = 1.0) -> JobGroup:
         """Добавляет вакансию в существующую группу."""
 
-    async def find_by_fingerprint(
-        self, fingerprint: str
-    ) -> JobGroup | None:
+    async def find_by_fingerprint(self, fingerprint: str) -> JobGroup | None:
         """Ищет группу по вычисленному хэшу."""
-        
-    async def find_by_url(
-        self, canonical_url: str
-    ) -> JobGroup | None:
+
+    async def find_by_url(self, canonical_url: str) -> JobGroup | None:
         """Ищет группу по каноническому URL (например, greenhouse.io/...)."""
 ```
 

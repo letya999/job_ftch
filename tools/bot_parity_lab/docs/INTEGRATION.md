@@ -5,6 +5,7 @@ The lab never imports or scans the target project. Integration is a one-function
 ```python
 from paritylab.clients.base import ClientHookContext
 
+
 async def run_owned_browser(context: ClientHookContext) -> dict[str, object]:
     browser = await your_browser_factory()
     page = await browser.new_page(ignore_https_errors=True)

@@ -258,14 +258,17 @@ def test_referrer_chain_realistic():
     assert len(chain) >= 2
     assert chain[-1].url == "https://example.com/jobs"
 
+
 def test_physical_context_consistency():
     ctx = PhysicalContext(timezone="America/New_York", ip_country="US")
     assert ctx.is_consistent()
+
 
 def test_cognitive_state_transitions():
     machine = CognitiveStateMachine(seed=42)
     machine.transition(UserEvent(type="long_pause"))
     assert machine.current_state == CognitiveState.DISTRACTED
+
 
 def test_fingerprint_evolution_improves():
     evo = FingerprintEvolution(seed=42)
@@ -274,11 +277,13 @@ def test_fingerprint_evolution_improves():
     evolved = evo.evolve(population, success_rates)
     assert evolved != population
 
+
 def test_temporal_graph_consistency():
     graph = TemporalGraph()
     graph.add_session(Session(id="s1", persona_id="p1", timestamp=1000))
     graph.add_session(Session(id="s2", persona_id="p1", timestamp=2000))
     assert graph.check_consistency(Session(id="s3", persona_id="p1", timestamp=3000))
+
 
 def test_multi_layer_applies_all():
     layers = [MockLayer(), MockLayer()]

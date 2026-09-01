@@ -30,7 +30,9 @@ Two independent dimensions, each defined as a protocol in `application/contracts
 
 ```python
 class IngestMode(Protocol):
-    async def fetch_items(self, source: Source, cursor: IncrementalCursor) -> AsyncIterator[RawItem]: ...
+    async def fetch_items(
+        self, source: Source, cursor: IncrementalCursor
+    ) -> AsyncIterator[RawItem]: ...
 ```
 
 Implementations:
