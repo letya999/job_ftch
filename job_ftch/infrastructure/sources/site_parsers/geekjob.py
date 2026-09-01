@@ -176,8 +176,11 @@ class GeekJobParser:
     domain_pattern = r"(?:www\.)?geekjob\.ru(?:/|$)"
     has_custom_parse = True
     supports_discover = True
-    supports_search = True
-    search_mode = "listing"
+    supports_search = False
+    # The previous implementation returned the bare listing while claiming
+    # that it had applied the role query. Let assessment try the shared search
+    # box/API path instead.
+    search_mode = "none"
 
     def build_search_urls(
         self,

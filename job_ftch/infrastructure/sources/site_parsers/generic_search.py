@@ -1,9 +1,8 @@
-"""Tier-1 generic search-form detection for career sites without `supports_search`.
+"""Search-form detection shared by source assessment and runtime.
 
-Aggregators that advertise `supports_search` (hh, habr, geekjob, hirify, VK,
-Sber, …) build their search URLs authoritatively via `build_search_urls`. For
-every other career site — including ones with a SiteParser that does not
-implement search — we fall back to this best-effort path:
+Specific parser URL builders and this generic path are both tested by source
+assessment; `supports_search` is only a hint and no longer bypasses the form
+probe. For a generic career site we:
 
 1. fetch the listing page and look for an HTML `<form>` with a text/search input
    (`detect_search_form`);
@@ -13,10 +12,9 @@ implement search — we fall back to this best-effort path:
    combined query vs the unfiltered page vs a nonsense token — and only adopt a
    URL that demonstrably narrows the listing.
 
-Only GET forms are usable here: their query parameter is visible and
-reproducible as a URL. POST-only search forms are reported but not rewritten
-(they would need a browser round-trip). When nothing works the caller keeps the
-original listing URL and the normal crawl proceeds unchanged.
+GET forms produce reproducible URLs; POST forms can produce a safe payload for
+assessment/runtime. When nothing works the caller keeps the original listing
+URL and the normal crawl proceeds unchanged.
 """
 
 from __future__ import annotations
@@ -142,6 +140,13 @@ def build_generic_search_url(form: SearchFormSpec, query: str) -> str | None:
     return with_query_params(form.action, params)
 
 
+def build_generic_search_payload(form: SearchFormSpec, query: str) -> dict[str, str] | None:
+    """Build a safe form payload for a POST search probe or browser submit."""
+    if not query.strip():
+        return None
+    return {**form.hidden, form.query_param: query}
+
+
 def count_candidate_job_links(html: str, base_url: str) -> int:
     """Count distinct same-host anchors that look like job/detail links."""
     tree = HTMLParser(html or "")
@@ -204,6 +209,7 @@ async def discover_working_search_url(
         build_generic_search_url(form, " OR ".join(terms)),
         build_generic_search_url(form, " or ".join(terms)),
     ]
+    candidates.extend(build_generic_search_url(form, term) for term in terms[:3])
 
     async def _count(url: str | None) -> int:
         if not url:
@@ -215,9 +221,19 @@ async def discover_working_search_url(
             return -1
 
     nonsense_count = await _count(nonsense_url)
-    if nonsense_count >= 0 and unfiltered > 0 and nonsense_count >= max(1, int(0.8 * unfiltered)):
+    if (
+        nonsense_count >= 0
+        and unfiltered >= 3
+        and nonsense_count >= max(1, int(0.8 * unfiltered))
+    ):
         # The query parameter is ignored: nonsense returns ~the full listing.
-        log.info("generic_search_query_ignored", url=base_url, unfiltered=unfiltered)
+        log.info(
+            "generic_search_query_ignored",
+            url=base_url,
+            unfiltered=unfiltered,
+            nonsense_results=nonsense_count,
+            reason="nonsense_not_narrowed",
+        )
         return None
 
     best_url: str | None = None
@@ -226,7 +242,9 @@ async def discover_working_search_url(
         count = await _count(candidate)
         # A working query yields at least one result and does not simply return
         # the whole (or larger) unfiltered page.
-        if count > best_count and (unfiltered == 0 or count <= unfiltered):
+        if not candidate or candidate == base_url:
+            continue
+        if count > best_count and (unfiltered == 0 or count < unfiltered):
             best_count = count
             best_url = candidate
     if best_url and best_count > 0:

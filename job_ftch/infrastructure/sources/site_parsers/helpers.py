@@ -126,8 +126,8 @@ def with_query_params(url: str, params: dict[str, str]) -> str:
 def url_has_search_query(url: str, param_names: Any = SEARCH_QUERY_PARAM_NAMES) -> bool:
     """True if ``url`` already carries a non-empty known search parameter.
 
-    Used for idempotent spec expansion: a source whose URL was authored with an
-    explicit query (e.g. ``?text=LLM+engineer``) must never be re-expanded.
+    Used to identify an existing search surface. Runtime expansion may rebuild
+    it from current target roles unless the source sets ``search_locked``.
     """
     parsed = urlparse(url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))

@@ -27,10 +27,10 @@ def test_aggregators_declare_search_modes() -> None:
     for parser in (HhParser(), HabrCareerParser(), HirifyParser(), VkTeamParser(), SberParser()):
         assert parser.supports_search is True
         assert parser.search_mode == "combined"
-    # GeekJob uses one listing crawl; the shared relevance pipeline filters it.
+    # GeekJob has no verified URL search and must use the shared fallback.
     geekjob = GeekJobParser()
-    assert geekjob.supports_search is True
-    assert geekjob.search_mode == "listing"
+    assert geekjob.supports_search is False
+    assert geekjob.search_mode == "none"
 
 
 def test_hh_builds_single_or_query_preserving_area() -> None:

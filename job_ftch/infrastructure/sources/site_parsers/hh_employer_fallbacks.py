@@ -18,8 +18,7 @@ class TwoGisCareerParser(_EmployerBoardParser):
     company = "2GIS"
     detail_pattern = re.compile(r"/vacancies/[^/?#]+/(\d+)(?:/)?$")
     supports_discover = False
-    supports_search = True
-
+    supports_search = False
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
         return SiteRuntimeDefaults(

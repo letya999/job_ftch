@@ -493,10 +493,12 @@ async def _attach_source_assessment(
         "probe_failed": result.freshness.probe_failed,
         "probe_blocked": result.freshness.probe_blocked,
         "rationale": result.freshness.rationale,
+        "spec_fingerprint": result.spec_fingerprint,
         "recommended_monitors": recommended_monitors,
         "assessed_at": result.assessed_at.isoformat(),
         "capabilities": result.capabilities.model_dump(mode="json"),
         "evidence": [item.model_dump(mode="json") for item in result.evidence],
+        "search": result.search.model_dump(mode="json") if result.search is not None else None,
     }
     return payload
 
@@ -1010,8 +1012,8 @@ class TenantRunner:
         # only legacy nodes see live anti-patterns and role/skill additions.
         effective_catalog = merge_derived_ontology(catalog, runtime_derived_ontology)
 
-        # Rewrite bare aggregator sources into keyword-filtered search URLs using
-        # the tenant's target roles. Sources with an explicit query are untouched.
+        # Apply the source-assessed search recipe using the tenant's current
+        # target roles. Unverified recipes keep the original listing URL.
         effective_sources = expand_career_site_specs(
             effective_sources,
             tuple(
@@ -1230,6 +1232,17 @@ class TenantRunner:
             interval_seconds=_resolve_source_interval_seconds(runtime, spec),
             now=now,
         )
+        from job_ftch.domain.source_spec import CareerSiteSpec
+
+        if isinstance(effective_spec, CareerSiteSpec) and assessment is not None:
+            search = getattr(assessment, "search", None)
+            if search is not None:
+                monitor_config = dict(effective_spec.monitor_config)
+                monitor_config["_search_assessment"] = search.model_dump(mode="json")
+                monitor_config["_search_base_url"] = spec.url
+                effective_spec = effective_spec.model_copy(
+                    update={"monitor_config": monitor_config}
+                )
         return sid, effective_spec
 
     async def add_source_spec(

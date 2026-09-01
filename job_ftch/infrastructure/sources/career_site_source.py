@@ -102,6 +102,10 @@ class ZeroYieldReason(StrEnum):
 
 @dataclass
 class FetchStats:
+    search_executor: str | None = None
+    search_status: str | None = None
+    search_query_mode: str | None = None
+    search_applied: bool = False
     requested_parser: str | None = None
     actual_parser: str | None = None
     parser_urls_discovered: int = 0
@@ -132,6 +136,10 @@ class FetchStats:
 
     def to_log_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
+            "search_executor": self.search_executor,
+            "search_status": self.search_status,
+            "search_query_mode": self.search_query_mode,
+            "search_applied": self.search_applied,
             "requested_parser": self.requested_parser,
             "actual_parser": self.actual_parser,
             "fallback_chain": self.fallback_chain,
@@ -1639,9 +1647,8 @@ class CareerSiteSource(Source["RawItem"]):
                     max_browser_launches=get_settings().bypass_max_listing_browser_launches,
                 )
 
-            # Rewrite listing URL before the site parser so parsers without
-            # ``supports_search`` still see a keyword-filtered URL. Parsers
-            # that advertise ``supports_search`` skip this rewrite themselves.
+            # Apply the assessed search recipe before the site parser. A
+            # specific parser is not an exemption from the shared search path.
             await self._maybe_apply_generic_search(original_http)
 
             site_parser_emitted = False
@@ -1684,28 +1691,87 @@ class CareerSiteSource(Source["RawItem"]):
                     pass
 
     async def _maybe_apply_generic_search(self, original_http: Any) -> None:
-        """Tier-1: rewrite spec.url to a keyword-filtered search URL if possible.
-
-        Skip only when the URL already has a known search query, or the resolved
-        parser advertises ``supports_search`` (it builds its own URLs). Presence
-        of a SiteParser alone is not a skip. Detects a GET search form on the
-        listing page and adopts it only if it verifiably narrows the result set.
-        Never fails the run — on any error the original URL is kept.
-        """
+        """Apply a generic GET recipe when the source assessment selected it."""
         keywords = self.spec.monitor_config.get("_search_keywords")
         if not keywords:
             return
-        from job_ftch.application.registry import resolve_site_parser_for_spec
         from job_ftch.infrastructure.sources.http_retry import fetch_with_retry
         from job_ftch.infrastructure.sources.site_parsers.generic_search import (
+            build_generic_search_payload,
+            detect_search_form,
             discover_working_search_url,
         )
-        from job_ftch.infrastructure.sources.site_parsers.helpers import url_has_search_query
 
-        if url_has_search_query(self.spec.url):
+        assessment = self.spec.monitor_config.get("_search_assessment")
+        executor = assessment.get("executor") if isinstance(assessment, dict) else None
+        self.stats.search_executor = executor or None
+        self.stats.search_status = (
+            assessment.get("status") if isinstance(assessment, dict) else None
+        )
+        self.stats.search_query_mode = (
+            assessment.get("query_mode") if isinstance(assessment, dict) else None
+        )
+        base_url = str(self.spec.monitor_config.get("_search_base_url") or self.spec.url)
+        if self.spec.search_locked or not base_url:
             return
-        parser = resolve_site_parser_for_spec(self.spec)
-        if parser is not None and getattr(parser, "supports_search", False):
+        if executor in {"specific_url", "specific_api"} and self.spec.url != base_url:
+            return
+        if executor == "generic_browser":
+            await self._apply_generic_browser_search(
+                base_url,
+                keywords,
+                query_mode=(assessment.get("query_mode") if isinstance(assessment, dict) else None),
+            )
+            return
+        if executor == "generic_post":
+            try:
+                client = await self._apply_bypass_http(original_http)
+                response = await fetch_with_retry(client, base_url, follow_redirects=True)
+                form = detect_search_form(str(response.text), base_url)
+                if form is not None and form.method == "post":
+                    query_mode = (
+                        assessment.get("query_mode") if isinstance(assessment, dict) else None
+                    )
+                    queries = [
+                        " OR ".join(keywords),
+                        " or ".join(keywords),
+                        *keywords[:3],
+                    ]
+                    if query_mode == "combined_lower_or":
+                        queries = [" or ".join(keywords), " OR ".join(keywords), *keywords[:3]]
+                    for query in queries:
+                        payload = build_generic_search_payload(form, query)
+                        if payload is None:
+                            continue
+                        posted = await client.post(
+                            form.action, data=payload, follow_redirects=True
+                        )
+                        if posted.is_success and str(posted.url) != base_url:
+                            logger.info(
+                                "generic_search_url_rewrite",
+                                original=base_url,
+                                search_url=str(posted.url),
+                                method="post",
+                            )
+                            self.stats.search_applied = True
+                            self.spec = self.spec.model_copy(update={"url": str(posted.url)})
+                            return
+                logger.info(
+                    "generic_search_runtime_fallback",
+                    url=base_url,
+                    executor=executor,
+                    reason="post_result_has_no_reproducible_url",
+                )
+            except Exception as exc:  # noqa: BLE001 - search remains best-effort
+                logger.debug("generic_search_post_apply_failed", url=base_url, error=str(exc))
+            return
+        if executor not in {None, "", "generic_get"}:
+            logger.info(
+                "generic_search_runtime_deferred",
+                url=base_url,
+                executor=executor,
+                reason="unknown_search_executor",
+            )
             return
 
         try:
@@ -1720,15 +1786,92 @@ class CareerSiteSource(Source["RawItem"]):
 
         try:
             search_url = await discover_working_search_url(
-                _fetch, self.spec.url, keywords, log=logger
+                _fetch, base_url, keywords, log=logger
             )
         except Exception as exc:  # noqa: BLE001
-            logger.debug("generic_search_apply_failed", url=self.spec.url, error=str(exc))
+            logger.debug("generic_search_apply_failed", url=base_url, error=str(exc))
             return
 
         if search_url and search_url != self.spec.url:
-            logger.info("generic_search_url_rewrite", original=self.spec.url, search_url=search_url)
+            logger.info("generic_search_url_rewrite", original=base_url, search_url=search_url)
+            self.stats.search_applied = True
             self.spec = self.spec.model_copy(update={"url": search_url})
+
+    async def _apply_generic_browser_search(
+        self, base_url: str, keywords: list[str], *, query_mode: str | None = None
+    ) -> bool:
+        """Submit a discovered search form when only the browser can execute it."""
+        from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
+        from job_ftch.infrastructure.sources.site_parsers.generic_search import detect_search_form
+        from job_ftch.infrastructure.sources.site_parsers.helpers import resolve_browser_config
+        from job_ftch.infrastructure.sources.source_deadline import await_with_source_deadline
+
+        browser_config = resolve_browser_config(self.spec, self.bypass_strategy)
+        browser_config["_bypass_strategy"] = self.bypass_strategy
+        browser_config["_pipeline_stats"] = self.stats
+        try:
+            async with open_page(browser_config, bypass_strategy=self.bypass_strategy) as page:
+                await await_with_source_deadline(navigate(page, base_url, browser_config))
+                html = await await_with_source_deadline(page.content())
+                form = detect_search_form(str(html), str(getattr(page, "url", base_url)))
+                separator = " or " if query_mode == "combined_lower_or" else " OR "
+                query = separator.join(keywords)
+                query_param = form.query_param if form is not None else "q"
+                submitted = await await_with_source_deadline(
+                    page.evaluate(
+                        """
+                        ([name, value]) => {
+                            const input = Array.from(document.querySelectorAll('input'))
+                              .find(node => node.name === name)
+                              || document.querySelector('input[type="search"]');
+                            if (!input) return false;
+                            input.value = value;
+                            input.dispatchEvent(new Event('input', {bubbles: true}));
+                            input.dispatchEvent(new Event('change', {bubbles: true}));
+                            if (input.form && typeof input.form.requestSubmit === 'function') {
+                              input.form.requestSubmit();
+                            } else if (input.form) {
+                              input.form.submit();
+                            } else {
+                              input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', bubbles: true}));
+                              input.dispatchEvent(new KeyboardEvent('keyup', {key: 'Enter', bubbles: true}));
+                            }
+                            return true;
+                        }
+                        """,
+                        [query_param, query],
+                    )
+                )
+                if not submitted:
+                    logger.info("generic_search_browser_submit_unavailable", url=base_url)
+                    return False
+                await await_with_source_deadline(page.wait_for_timeout(750))
+                result_html = str(
+                    await await_with_source_deadline(page.content())
+                )[:500_000]
+                result_url = str(getattr(page, "url", base_url) or base_url)
+                if result_url != base_url:
+                    logger.info(
+                        "generic_search_url_rewrite",
+                        original=base_url,
+                        search_url=result_url,
+                        method="browser",
+                    )
+                    self.stats.search_applied = True
+                    self.spec = self.spec.model_copy(update={"url": result_url})
+                    return True
+                monitor_config = dict(self.spec.monitor_config)
+                monitor_config["_prefetched_listing_html"] = result_html
+                self.spec = self.spec.model_copy(update={"monitor_config": monitor_config})
+                self.stats.search_applied = True
+                logger.info(
+                    "generic_search_browser_dom_only",
+                    url=base_url,
+                    reason="result_url_unchanged",
+                )
+        except Exception as exc:  # noqa: BLE001 - browser search remains best-effort
+            logger.debug("generic_search_browser_apply_failed", url=base_url, error=str(exc))
+        return False
 
     def _effective_limit(self) -> int | None:
         """Return the declared detail cap or MVP default."""

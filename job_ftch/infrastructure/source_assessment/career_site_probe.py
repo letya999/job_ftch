@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+import html as html_lib
 import inspect
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -17,12 +20,22 @@ from job_ftch.application.registry import (
 from job_ftch.domain.source_assessment import (
     AssessmentConfidence,
     FreshnessAssessment,
+    SearchAssessment,
+    SearchAssessmentStatus,
+    SearchExecutor,
+    SearchQueryMode,
     SourceCapabilities,
     SourceEvidence,
 )
 from job_ftch.infrastructure.sources.monitors.dom import extract_static_job_links
 from job_ftch.infrastructure.sources.site_defaults import apply_runtime_defaults
 from job_ftch.infrastructure.sources.site_fingerprinter import SiteClass, fingerprint
+from job_ftch.infrastructure.sources.site_parsers.generic_search import (
+    build_generic_search_payload,
+    count_candidate_job_links,
+    detect_search_form,
+    discover_working_search_url,
+)
 from job_ftch.infrastructure.sources.source_policy import resolve_source_policy
 
 if TYPE_CHECKING:
@@ -67,6 +80,7 @@ class CareerSiteProbeResult:
     capabilities: SourceCapabilities
     evidence: tuple[SourceEvidence, ...]
     freshness: FreshnessAssessment
+    search: SearchAssessment | None = None
 
 
 def _confidence_rank(value: AssessmentConfidence) -> int:
@@ -272,6 +286,250 @@ async def _call_assessment_probe(callback: Any, **kwargs: Any) -> Any:
     return result
 
 
+_SEARCH_ASSESSMENT_VERSION = "search_assessment.v1"
+_SEARCH_NONSENSE = "zzqxnonsense7391"
+_SEARCH_STOPWORDS = frozenset(
+    {
+        "career",
+        "careers",
+        "jobs",
+        "job",
+        "vacancies",
+        "vacancy",
+        "работа",
+        "вакансии",
+        "карьера",
+    }
+)
+
+
+def _search_probe_terms(html: str) -> list[str]:
+    """Extract two safe, likely-present terms for a source-local search probe."""
+    headings = re.findall(r"<(?:h1|h2|h3|title)\b[^>]*>(.*?)</(?:h1|h2|h3|title)>", html, re.I | re.S)
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw in headings:
+        text = re.sub(r"<[^>]+>", " ", html_lib.unescape(raw))
+        words = re.findall(r"[A-Za-zА-Яа-я][A-Za-zА-Яа-я0-9+#.-]{2,}", text)
+        for word in words:
+            if word.casefold() in _SEARCH_STOPWORDS or word.casefold() in seen:
+                continue
+            seen.add(word.casefold())
+            terms.append(word)
+            if len(terms) >= 2:
+                return terms
+    return terms or ["engineer", "developer"]
+
+
+def _search_surface_signature(html: str, base_url: str) -> tuple[Any, ...]:
+    links = tuple(
+        sorted(
+            set(extract_static_job_links(html, base_url, limit=100))
+        )
+    )
+    if links:
+        return ("links", links)
+    return ("surface", len(html), hashlib.sha256(html[:_MAX_HTML_CHARS].encode()).hexdigest())
+
+
+def _query_mode(url_or_query: str) -> SearchQueryMode:
+    value = unquote(url_or_query)
+    if " OR " in value:
+        return SearchQueryMode.COMBINED_UPPER_OR
+    if " or " in value:
+        return SearchQueryMode.COMBINED_LOWER_OR
+    return SearchQueryMode.EXACT
+
+
+def _specific_parser_name(parser: Any) -> str:
+    return str(getattr(parser, "parser_name", None) or type(parser).__name__)
+
+
+async def _probe_specific_search(
+    spec: CareerSiteSpec,
+    parser: Any,
+    client: httpx.AsyncClient,
+    base_html: str,
+    base_url: str,
+) -> SearchAssessment | None:
+    builder = getattr(parser, "build_search_urls", None)
+    if not callable(builder):
+        return None
+    terms = _search_probe_terms(base_html)
+    try:
+        candidates = list(builder(base_url, terms, limit=3))[:2]
+        negative_candidates = list(builder(base_url, [_SEARCH_NONSENSE], limit=1))[:1]
+    except Exception:
+        return None
+    baseline = _search_surface_signature(base_html, base_url)
+    for candidate in candidates:
+        if not isinstance(candidate, str) or not candidate or candidate == base_url:
+            continue
+        try:
+            positive_response = await client.get(candidate, follow_redirects=True)
+            positive_response.raise_for_status()
+            positive_html = positive_response.text[:_MAX_HTML_CHARS]
+            positive_signature = _search_surface_signature(positive_html, base_url)
+            negative_html = ""
+            if negative_candidates:
+                negative_response = await client.get(negative_candidates[0], follow_redirects=True)
+                if negative_response.is_success:
+                    negative_html = negative_response.text[:_MAX_HTML_CHARS]
+            negative_signature = _search_surface_signature(negative_html, base_url) if negative_html else ()
+        except Exception:
+            continue
+        changed = positive_signature != baseline
+        negative_same_as_positive = (
+            bool(negative_signature) and negative_signature == positive_signature
+        )
+        if not changed or negative_same_as_positive:
+            continue
+        result_count = count_candidate_job_links(positive_html, base_url)
+        return SearchAssessment(
+            status=SearchAssessmentStatus.VERIFIED,
+            executor=SearchExecutor.SPECIFIC_API
+            if urlparse(candidate).path.casefold().find("api") >= 0
+            else SearchExecutor.SPECIFIC_URL,
+            query_mode=_query_mode(candidate),
+            parser=_specific_parser_name(parser),
+            base_url=base_url,
+            positive_results=result_count or 1,
+            result_set_changed=True,
+            query_observed=True,
+            confidence=AssessmentConfidence.HIGH,
+            rationale="Specific parser search candidate changed the result surface and rejected the nonsense control.",
+            strategy_version=_SEARCH_ASSESSMENT_VERSION,
+        )
+    return None
+
+
+async def _probe_generic_search(
+    client: httpx.AsyncClient,
+    base_url: str,
+    base_html: str,
+    terms: list[str],
+) -> SearchAssessment:
+    form = detect_search_form(base_html, base_url)
+    if form is None:
+        match = re.search(
+            r"<input\b[^>]*(?:type=[\"']search[\"'][^>]*|name=[\"'](?:q|query|search|text)[\"'][^>]*)>",
+            base_html,
+            re.IGNORECASE,
+        )
+        if match:
+            param_match = re.search(r"\bname=[\"']([^\"']+)[\"']", match.group(0), re.I)
+            return SearchAssessment(
+                status=SearchAssessmentStatus.UNSUPPORTED,
+                executor=SearchExecutor.GENERIC_BROWSER,
+                base_url=base_url,
+                query_param=param_match.group(1) if param_match else "q",
+                rationale="A search input was found, but browser execution is required to discover its submit/API behavior.",
+                strategy_version=_SEARCH_ASSESSMENT_VERSION,
+            )
+        return SearchAssessment(
+            status=SearchAssessmentStatus.UNSUPPORTED,
+            base_url=base_url,
+            rationale="No search form was found in the source listing HTML.",
+            strategy_version=_SEARCH_ASSESSMENT_VERSION,
+        )
+
+    if form.usable_via_url:
+        async def _fetch(url: str) -> str:
+            response = await client.get(url, follow_redirects=True)
+            response.raise_for_status()
+            return response.text[:_MAX_HTML_CHARS]
+
+        selected_url = await discover_working_search_url(_fetch, base_url, terms)
+        if selected_url:
+            selected_html = await _fetch(selected_url)
+            return SearchAssessment(
+                status=SearchAssessmentStatus.VERIFIED,
+                executor=SearchExecutor.GENERIC_GET,
+                query_mode=_query_mode(selected_url),
+                base_url=base_url,
+                action_url=form.action,
+                method=form.method,
+                query_param=form.query_param,
+                positive_results=count_candidate_job_links(selected_html, base_url),
+                result_set_changed=True,
+                query_observed=True,
+                confidence=AssessmentConfidence.MEDIUM,
+                rationale="Generic GET form produced a narrowed result surface.",
+                strategy_version=_SEARCH_ASSESSMENT_VERSION,
+            )
+
+    if form.method == "post":
+        baseline = _search_surface_signature(base_html, base_url)
+        negative_payload = build_generic_search_payload(form, _SEARCH_NONSENSE)
+        negative_html = ""
+        try:
+            negative_response = await client.post(
+                form.action, data=negative_payload, follow_redirects=True
+            )
+            if negative_response.is_success:
+                negative_html = negative_response.text[:_MAX_HTML_CHARS]
+        except Exception:
+            pass
+        negative_signature = (
+            _search_surface_signature(negative_html, base_url) if negative_html else ()
+        )
+        for query in (" OR ".join(terms), " or ".join(terms), *terms[:3]):
+            payload = build_generic_search_payload(form, query)
+            if payload is None:
+                continue
+            try:
+                response = await client.post(form.action, data=payload, follow_redirects=True)
+                response.raise_for_status()
+                result_html = response.text[:_MAX_HTML_CHARS]
+            except Exception:
+                continue
+            changed = _search_surface_signature(result_html, base_url) != baseline
+            positive_signature = _search_surface_signature(result_html, base_url)
+            if changed and negative_signature and negative_signature != positive_signature:
+                return SearchAssessment(
+                    status=SearchAssessmentStatus.VERIFIED,
+                    executor=SearchExecutor.GENERIC_POST,
+                    query_mode=_query_mode(query),
+                    base_url=base_url,
+                    action_url=form.action,
+                    method=form.method,
+                    query_param=form.query_param,
+                    positive_results=count_candidate_job_links(result_html, base_url),
+                    result_set_changed=True,
+                    query_observed=True,
+                    confidence=AssessmentConfidence.MEDIUM,
+                    rationale="Generic POST form produced a narrowed result surface.",
+                    strategy_version=_SEARCH_ASSESSMENT_VERSION,
+                )
+
+    return SearchAssessment(
+        status=SearchAssessmentStatus.UNSUPPORTED,
+        base_url=base_url,
+        action_url=form.action,
+        method=form.method,
+        query_param=form.query_param,
+        rationale="A search form was found but no tested query format narrowed the result surface.",
+        strategy_version=_SEARCH_ASSESSMENT_VERSION,
+    )
+
+
+async def _assess_search(
+    spec: CareerSiteSpec,
+    client: httpx.AsyncClient,
+    html: str,
+    base_url: str,
+) -> SearchAssessment:
+    """Try specific and generic search routes without producing RawItems."""
+    from job_ftch.application.registry import resolve_site_parser_for_spec
+
+    parser = resolve_site_parser_for_spec(spec)
+    if parser is not None:
+        result = await _probe_specific_search(spec, parser, client, html, base_url)
+        if result is not None:
+            return result
+    return await _probe_generic_search(client, base_url, html, _search_probe_terms(html))
+
+
 class CareerSiteAssessmentEngine:
     """Collect bounded freshness evidence from existing career-site infrastructure."""
 
@@ -286,6 +544,7 @@ class CareerSiteAssessmentEngine:
         confidence = AssessmentConfidence.MEDIUM
         probe_failed = False
         probe_blocked = False
+        search_assessment: SearchAssessment | None = None
 
         headers = {
             "User-Agent": _PROBE_USER_AGENT,
@@ -356,6 +615,44 @@ class CareerSiteAssessmentEngine:
                         },
                     )
                 )
+
+                try:
+                    search_assessment = await _assess_search(
+                        normalized_spec,
+                        client,
+                        html,
+                        final_url,
+                    )
+                    evidence.append(
+                        SourceEvidence(
+                            kind="search_assessment",
+                            value=search_assessment.status.value,
+                            confidence=search_assessment.confidence,
+                            details={
+                                "executor": search_assessment.executor.value,
+                                "query_mode": search_assessment.query_mode.value,
+                                "parser": search_assessment.parser,
+                                "method": search_assessment.method,
+                                "query_param": search_assessment.query_param,
+                                "rationale": search_assessment.rationale,
+                            },
+                        )
+                    )
+                except Exception as exc:  # noqa: BLE001 - search is best-effort
+                    search_assessment = SearchAssessment(
+                        status=SearchAssessmentStatus.PROBE_FAILED,
+                        base_url=final_url,
+                        rationale="Search assessment failed without affecting freshness assessment.",
+                        strategy_version=_SEARCH_ASSESSMENT_VERSION,
+                    )
+                    evidence.append(
+                        SourceEvidence(
+                            kind="search_assessment",
+                            value=search_assessment.status.value,
+                            confidence=AssessmentConfidence.LOW,
+                            details={"error": type(exc).__name__},
+                        )
+                    )
 
                 if response.status_code in (401, 403, 429, 503):
                     probe_blocked = True
@@ -445,6 +742,13 @@ class CareerSiteAssessmentEngine:
                 )
             )
             confidence = AssessmentConfidence.LOW
+            if search_assessment is None:
+                search_assessment = SearchAssessment(
+                    status=SearchAssessmentStatus.PROBE_FAILED,
+                    base_url=normalized_spec.url,
+                    rationale="Career-site surface probe failed before search assessment completed.",
+                    strategy_version=_SEARCH_ASSESSMENT_VERSION,
+                )
 
         freshness = _freshness_from_capabilities(
             capabilities,
@@ -457,6 +761,7 @@ class CareerSiteAssessmentEngine:
             capabilities=capabilities,
             evidence=_merge_evidence(evidence),
             freshness=freshness,
+            search=search_assessment,
         )
 
     def _surface_evidence(

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qs, urlparse
 
+import httpx
 import pytest
 
 from job_ftch.application.source_assessment import (
@@ -28,6 +30,8 @@ from job_ftch.domain.tenant import TenantConfig
 from job_ftch.infrastructure.source_assessment.career_site_probe import (
     CareerSiteAssessmentEngine,
     CareerSiteProbeResult,
+    _probe_generic_search,
+    _probe_specific_search,
 )
 
 
@@ -134,6 +138,70 @@ def _probe_result(
             rationale="test no signal",
         )
     return CareerSiteProbeResult(capabilities=capabilities, evidence=(), freshness=freshness)
+
+
+@pytest.mark.asyncio
+async def test_specific_search_assessment_rejects_ignored_query() -> None:
+    base_url = "https://example.com/jobs"
+    base_html = (
+        '<h1>Engineer</h1><a href="/jobs/1">Engineer</a>'
+        '<a href="/jobs/2">Manager</a>'
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = parse_qs(urlparse(str(request.url)).query).get("q", [""])[0]
+        if query == "zzqxnonsense7391":
+            body = base_html
+        elif query:
+            body = '<h1>Engineer</h1><a href="/jobs/1">Engineer</a>'
+        else:
+            body = base_html
+        return httpx.Response(200, text=body, request=request)
+
+    class Parser:
+        parser_name = "example_parser"
+
+        def build_search_urls(self, base: str, keywords: list[str], *, limit: int | None = None):
+            del limit
+            return [f"{base}?q={'+'.join(keywords)}"]
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await _probe_specific_search(
+            CareerSiteSpec(url=base_url), Parser(), client, base_html, base_url
+        )
+
+    assert result is not None
+    assert result.executor.value == "specific_url"
+    assert result.status.value == "verified"
+
+
+@pytest.mark.asyncio
+async def test_generic_post_search_assessment_is_available_for_specific_surface() -> None:
+    base_url = "https://example.com/jobs"
+    base_html = (
+        '<form method="post" action="/search">'
+        '<input type="search" name="q"><input type="hidden" name="csrf" value="safe">'
+        '</form><a href="/jobs/1">Engineer</a><a href="/jobs/2">Manager</a>'
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            values = parse_qs(request.content.decode())
+            query = values.get("q", [""])[0]
+            if query == "zzqxnonsense7391":
+                body = "<form method='post'><input type='search' name='q'></form>"
+            else:
+                body = "<form method='post'><input type='search' name='q'></form><a href='/jobs/1'>Engineer</a>"
+        else:
+            body = base_html
+        return httpx.Response(200, text=body, request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await _probe_generic_search(client, base_url, base_html, ["Engineer", "Manager"])
+
+    assert result.executor.value == "generic_post"
+    assert result.status.value == "verified"
+    assert result.query_param == "q"
 
 
 @pytest.mark.asyncio
@@ -454,6 +522,33 @@ async def test_assessment_persists_and_reuses_cached_report(
     assert second == first
     assert store.set_calls == set_calls_after_first
     assert await load_source_assessment(store, first.source_id) == first  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_assessment_cache_is_invalidated_when_spec_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from job_ftch.infrastructure.source_assessment import builtin
+
+    calls = 0
+
+    async def _fake_assess(self: object, spec: object) -> CareerSiteProbeResult:
+        nonlocal calls
+        del self, spec
+        calls += 1
+        return _probe_result()
+
+    monkeypatch.setattr(builtin.CareerSiteAssessmentEngine, "assess", _fake_assess)
+    service = create_source_assessment_service()
+    store = _StateStore()
+    first_spec = CareerSiteSpec(url="https://example.com/jobs", source_name="jobs")
+    second_spec = first_spec.model_copy(update={"url": "https://example.com/careers"})
+
+    await service.assess_and_store(first_spec, store)  # type: ignore[arg-type]
+    await service.assess_and_store(second_spec, store)  # type: ignore[arg-type]
+
+    assert calls == 2
+    assert store.set_calls == 2
 
 
 @pytest.mark.asyncio

@@ -1,13 +1,14 @@
 ---
 title: "Source assessment"
 description: "Pre-ingest оценка источников: capability hints, freshness evidence, probe outcomes и границы ответственности."
-updated: 2026-07-28
+updated: 2026-09-01
 ---
 # Source assessment
 
 `SourceAssessmentAdapter` — это pre-ingest слой. Он оценивает `SourceSpec` до
 того, как normal ingest начнёт читать элементы. Его задача — понять capability
-источника и freshness evidence, а не добыть вакансии.
+источника, freshness evidence и безопасную search strategy, а не добыть
+вакансии.
 
 ## Зачем он нужен
 
@@ -34,6 +35,7 @@ updated: 2026-07-28
 - `SourceCapabilities`;
 - `SourceEvidence`;
 - `FreshnessAssessment`;
+- `SearchAssessment` — source-scoped рецепт поиска без target roles и секретов;
 - persisted source-scoped run state.
 
 Assessment должен различать:
@@ -58,6 +60,13 @@ catalog. Это основной путь для известных ATS/board fa
 
 Generic source assessment отвечает консервативно. Если источник не доказал
 freshness, runtime должен считать snapshot path необходимым.
+
+Для career sites assessment также bounded-проверяет search surface. Сначала
+проверяется зарегистрированный specific URL/API candidate, затем статическая
+GET/POST-форма и, при необходимости, browser-visible search input. Проверка
+использует реальный термин с listing page и nonsense control; одного совпадения
+числа ссылок недостаточно. Результат сохраняется как безопасный search recipe и
+исполняется с актуальными target roles во время ingest.
 
 ## Career-site probe
 
@@ -84,6 +93,10 @@ Assessment не должен:
 - принимать relevance/routing/posting decision;
 - хранить секреты;
 - переписывать registry knowledge в отдельный hardcoded catalog.
+
+Search assessment не сохраняет target roles, cookies, CSRF values или
+credentials. Search executor и vacancy extractor выбираются независимо:
+generic search может передать результат specific parser.
 
 Assessment может:
 

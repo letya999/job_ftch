@@ -195,6 +195,7 @@ def _augment_with_probe(
             "capabilities": capabilities,
             "evidence": _merge_evidence(result.evidence, probe.evidence),
             "freshness": freshness,
+            "search": probe.search or result.search,
         }
     )
 
@@ -379,12 +380,12 @@ class KnownSourceAssessmentAdapter:
     async def assess(
         self, spec: SourceSpec, context: SourceAssessmentContext
     ) -> SourceAssessmentResult:
+        probe = await _assess_career_site_probe(spec) if spec.type == "career_site" else None
         if spec.type == "career_site":
             parser_hint = resolve_site_parser_assessment_hint(str(getattr(spec, "url", "")))
             if parser_hint is not None:
-                return _result_from_hint(spec, context, parser_hint)
-
-        probe = await _assess_career_site_probe(spec) if spec.type == "career_site" else None
+                result = _result_from_hint(spec, context, parser_hint)
+                return _augment_with_probe(result, probe) if probe is not None else result
 
         if spec.type in self._KNOWN_API_TYPES or spec.type == "rest_api":
             return _result(

@@ -30,7 +30,7 @@ def test_bare_geekjob_source_uses_one_listing_crawl() -> None:
     assert out[0].url == "https://geekjob.ru/vacancies"
 
 
-def test_explicit_query_source_is_left_untouched() -> None:
+def test_explicit_query_source_is_rebuilt_with_current_roles() -> None:
     specs = [
         CareerSiteSpec(
             url="https://hh.ru/search/vacancy?text=machine+learning&area=113",
@@ -38,7 +38,19 @@ def test_explicit_query_source_is_left_untouched() -> None:
         )
     ]
     out = expand_career_site_specs(specs, ROLES)
-    assert out == specs  # idempotent: hand-authored query preserved
+    assert parse_qs(urlparse(out[0].url).query)["text"] == ["AI engineer OR LLM engineer"]
+    assert parse_qs(urlparse(out[0].url).query)["area"] == ["113"]
+
+
+def test_locked_explicit_query_source_is_left_untouched() -> None:
+    specs = [
+        CareerSiteSpec(
+            url="https://hh.ru/search/vacancy?text=machine+learning&area=113",
+            source_name="hh_ml",
+            search_locked=True,
+        )
+    ]
+    assert expand_career_site_specs(specs, ROLES)[0].url == specs[0].url
 
 
 def test_non_career_sources_pass_through() -> None:
@@ -83,6 +95,29 @@ def test_source_without_search_parser_gets_runtime_keywords() -> None:
     out = expand_career_site_specs(specs, ROLES)
     assert len(out) == 1
     assert out[0].url == "https://acme.example/careers"
+    assert out[0].monitor_config["_search_keywords"] == ROLES
+
+
+def test_unverified_assessment_does_not_apply_specific_builder(monkeypatch) -> None:
+    class Parser:
+        supports_search = True
+
+        def build_search_urls(self, url, keywords, *, limit=None):
+            del keywords, limit
+            return [f"{url}?q=should-not-run"]
+
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser_for_spec", lambda _spec: Parser()
+    )
+    spec = CareerSiteSpec(
+        url="https://example.com/jobs",
+        source_name="example",
+        monitor_config={
+            "_search_assessment": {"status": "unsupported", "executor": "none"}
+        },
+    )
+    out = expand_career_site_specs([spec], ROLES)
+    assert out[0].url == spec.url
     assert out[0].monitor_config["_search_keywords"] == ROLES
 
 
