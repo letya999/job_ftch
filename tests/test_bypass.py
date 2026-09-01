@@ -438,6 +438,7 @@ async def test_nodriver_bypass_preserves_browser_config(
             "--safebrowsing-disable-auto-update",
             "--window-size=1440,900",
         ],
+        "sandbox": True,
         "lang": "en-US",
     }
     assert captured["proxy_context"] == {

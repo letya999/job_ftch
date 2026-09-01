@@ -49,10 +49,25 @@ see `job_ftch/infrastructure/sources/site_parsers/`):
 |------|------|-------|-------|
 | hh.ru / hh.kz | combined | `text=A OR B` + `search_field=name` + `ored_clusters=true` | Uppercase `OR`. `search_field=name` restricts to the vacancy title; without it, generic terms (manager, specialist) match descriptions and flood results. |
 | career.habr.com | combined | `q=A OR B` + `type=all` | Uppercase `OR`. |
-| geekjob.ru | assessment-driven | specific builder disabled | The old builder returned the bare listing while claiming search; assessment must verify a working GET/POST/browser/API surface first. |
-| hirify.me | combined | `search=A or B` + `params=title,company` | Lowercase ` or `. Search runs through the `/api/vacancies` endpoint; the page URL carries `search`/`params` which `_query_for_spec` forwards. |
+| geekjob.ru | per-keyword | `qs=ROLE` → `/json/find/vacancy` | The page form is only a shell; the JSON endpoint is the authoritative search surface. |
+| hirehi.ru | per-keyword | `search=ROLE` | Server-rendered JSON-LD vacancy links change with the query; one URL per role avoids undocumented boolean semantics. |
+| hirify.me | combined | `search=A or B` + `params=title,company` | Search runs through `/api/vacancies`; the page URL carries `search`/`params`, which `_query_for_spec` forwards. |
+| getmatch.ru | combined/local | `query=A OR B` + sitemap slug match | Getmatch exposes no public server-side search API; the parser preserves phrases and applies the query against canonical vacancy slugs. |
 | team.vk.company | combined | `query=A OR B` | Discover already reads `query`/`search`/`title` and maps it to the API `title` param. |
 | rabota.sber.ru | combined | `query=A OR B` | Parse already maps listing `query` to API `searchString`. |
+| jobboard.agilefluent.ru | per-keyword | API `filters.roles=[ROLE]` | Uses the board API; signed origin URLs are decoded and followed when reachable. |
+| djinni.co | per-keyword | `all_keywords=ROLE` + `search_type=title-only` | Follows Djinni detail pages and an exposed external vacancy link when present. |
+
+The other requested aggregator boards use their existing category/listing URL
+as the search surface: Quick Offer and AIJobs are filtered locally against
+detail-page text, because their public HTML does not expose a stable free-text
+URL contract. RemoteRocketship is browser-capable but currently may be hidden
+behind an anti-bot challenge. `ai.engineer` is registered deliberately as a
+terminal empty parser because its current URL is an AI engineering community
+site, not a vacancy board. Every aggregator parser follows its detail page
+first and only replaces the aggregator URL with an origin URL after that
+origin was fetched successfully; otherwise the aggregator detail remains the
+safe canonical item.
 
 For `combined` a single verified search URL replaces the bare source and keeps the
 original `source_name`. For `per_keyword` each URL becomes its own source with a
@@ -61,9 +76,10 @@ unique.
 
 Adding a new aggregator = add `supports_search`, `search_mode`, and
 `build_search_urls` to its parser, then a unit test in
-`tests/test_site_parser_search_urls.py`. The builder is accepted only after
-assessment proves that it changes the result surface and rejects the nonsense
-control.
+`tests/test_site_parser_search_urls.py`. Each builder must have a deterministic
+positive query path and a negative nonsense-query control. Assessment remains
+useful for measuring the site, but runtime search does not silently fall back to
+the bare listing when the parser has a verified search contract.
 
 ## Tier-1: generic search-form detection (best-effort)
 

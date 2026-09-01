@@ -7,7 +7,7 @@ import json
 import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import structlog
 from selectolax.parser import HTMLParser
@@ -15,13 +15,16 @@ from selectolax.parser import HTMLParser
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
 from job_ftch.domain import SourceKind
 from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
+from job_ftch.infrastructure.sources.http_retry import fetch_with_retry
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
     browser_scroll_collect_urls,
     extract_urls_with_limit,
+    normalize_search_keywords,
     resolve_browser_config,
     safe_fetch,
+    with_query_params,
 )
 
 if TYPE_CHECKING:
@@ -176,11 +179,8 @@ class GeekJobParser:
     domain_pattern = r"(?:www\.)?geekjob\.ru(?:/|$)"
     has_custom_parse = True
     supports_discover = True
-    supports_search = False
-    # The previous implementation returned the bare listing while claiming
-    # that it had applied the role query. Let assessment try the shared search
-    # box/API path instead.
-    search_mode = "none"
+    supports_search = True
+    search_mode = "per_keyword"
 
     def build_search_urls(
         self,
@@ -190,14 +190,49 @@ class GeekJobParser:
         limit: int | None = None,
     ) -> list[str]:
         del limit
-        if not any(isinstance(term, str) and term.strip() for term in keywords or ()):
+        terms = normalize_search_keywords(keywords)
+        if not terms:
             return []
         parsed = urlparse(base_url)
         if not parsed.path.rstrip("/").endswith("/vacancies"):
             parsed = parsed._replace(path="/vacancies")
-        # One listing crawl is cheaper and more reliable than one full browser
-        # session per role; the shared relevance pipeline filters its vacancies.
-        return [urlunparse(parsed)]
+        # The HTML page exposes the box as `qs`, while the real result surface
+        # is the JSON endpoint below. One request per role avoids relying on an
+        # undocumented boolean operator in GeekJob's search syntax.
+        listing_url = urlunparse(parsed)
+        return [with_query_params(listing_url, {"qs": term}) for term in terms]
+
+    @staticmethod
+    def _search_query(url: str) -> str:
+        query = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+        return str(query.get("qs") or "").strip()
+
+    async def _discover_search_api(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        query = self._search_query(spec.url)
+        if not query:
+            return []
+        api_url = urljoin(spec.url, "/json/find/vacancy")
+        response = await fetch_with_retry(
+            client,
+            api_url,
+            params={"page": "1", "qs": query},
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return []
+        urls: list[str] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            vacancy_id = row.get("id")
+            if isinstance(vacancy_id, (str, int)) and str(vacancy_id).strip():
+                urls.append(urljoin(spec.url, f"/vacancy/{str(vacancy_id).strip()}"))
+            if len(urls) >= self._limit(spec.limit):
+                break
+        return urls
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
@@ -245,15 +280,29 @@ class GeekJobParser:
     async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
         limit = self._limit(spec.limit)
         detail_re = self._detail_re()
+
+        if self._search_query(spec.url):
+            try:
+                urls = await self._discover_search_api(spec, client)
+            except Exception as exc:  # noqa: BLE001 - HTML remains a safe fallback
+                logger.info("geekjob.search_api_failed", url=spec.url, error=str(exc))
+                urls = []
+            if urls:
+                return urls[:limit]
+
         page_count = self._page_count(limit)
         collected: list[str] = []
+        listing_url = spec.url
+        if self._search_query(spec.url):
+            parsed = urlparse(spec.url)
+            listing_url = urlunparse(parsed._replace(query=""))
 
         for page in range(1, page_count + 1):
-            listing_url = self._listing_page_url(spec.url, page)
+            page_url = self._listing_page_url(listing_url, page)
             try:
-                response = await safe_fetch(client, listing_url)
+                response = await safe_fetch(client, page_url)
             except Exception as exc:
-                logger.debug("geekjob.listing_fetch_failed", url=listing_url, error=str(exc))
+                logger.debug("geekjob.listing_fetch_failed", url=page_url, error=str(exc))
                 break
             for url in extract_urls_with_limit(
                 str(response.text),
@@ -274,10 +323,10 @@ class GeekJobParser:
         browser_config = resolve_browser_config(spec, bypass_strategy)
         browser = getattr(getattr(self, "_manifest_entry", None), "browser", None)
         async with open_page(browser_config, bypass_strategy=bypass_strategy) as page:
-            await navigate(page, spec.url, browser_config)
+            await navigate(page, listing_url, browser_config)
             urls = await browser_scroll_collect_urls(
                 page,
-                getattr(page, "url", spec.url) or spec.url,
+                getattr(page, "url", listing_url) or listing_url,
                 detail_re,
                 limit=limit,
                 scroll_loops=getattr(browser, "scroll_loops", None) or 8,
@@ -295,6 +344,12 @@ class GeekJobParser:
         limit = self._limit(spec.limit)
         source_name = spec.source_name or "geekjob"
         detail_urls = await self.discover(spec, client)
+        search_query = self._search_query(spec.url).casefold()
+        search_terms = (
+            normalize_search_keywords(re.split(r"\s+OR\s+|\s+or\s+", search_query))
+            if search_query
+            else []
+        )
         seen_ids: set[str] = set()
         for detail_url in detail_urls[:limit]:
             id_match = re.search(r"/(?:vacancy/([a-z0-9-]+)|jobs/(\d+))", detail_url)
@@ -314,6 +369,13 @@ class GeekJobParser:
                 spec.url,
             )
             if item is not None:
+                if search_terms:
+                    haystack = item.text.casefold()
+                    if not any(
+                        all(token in haystack for token in term.casefold().split())
+                        for term in search_terms
+                    ):
+                        continue
                 yield item
 
     @property

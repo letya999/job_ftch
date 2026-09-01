@@ -19,10 +19,11 @@ URL and the normal crawl proceeds unchanged.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qsl, urljoin, urlparse, urlunparse
 
 import structlog
 from selectolax.parser import HTMLParser
@@ -85,7 +86,7 @@ def _input_search_score(node: Any) -> int:
     )
     score = 100 if input_type == "search" else 0
     for index, hint in enumerate(_SEARCH_NAME_HINTS):
-        if name == hint or haystack.find(hint) != -1:
+        if name == hint or (len(hint) > 1 and haystack.find(hint) != -1):
             score += len(_SEARCH_NAME_HINTS) - index
             break
     return score
@@ -110,7 +111,7 @@ def detect_search_form(html: str, base_url: str) -> SearchFormSpec | None:
             if score > candidate_score:
                 candidate_input = node
                 candidate_score = score
-        if candidate_input is None or candidate_score < 0:
+        if candidate_input is None or candidate_score <= 0:
             continue
         query_param = (candidate_input.attributes.get("name") or "").strip()
         if not query_param:
@@ -129,6 +130,52 @@ def detect_search_form(html: str, base_url: str) -> SearchFormSpec | None:
             best = SearchFormSpec(
                 action=action, method=method, query_param=query_param, hidden=hidden
             )
+    # Some server-rendered boards expose a search contract only through
+    # schema.org SearchAction, without rendering an HTML form.  Treat its
+    # URL template as a reproducible GET form so assessment and runtime use the
+    # same path.  Ignore malformed or non-search templates.
+    tree = HTMLParser(html or "")
+    for node in tree.css('script[type="application/ld+json"]'):
+        try:
+            payload = json.loads(node.text())
+        except (TypeError, json.JSONDecodeError):
+            continue
+        actions = payload if isinstance(payload, list) else [payload]
+        for entry in actions:
+            if not isinstance(entry, dict):
+                continue
+            potential_action = entry.get("potentialAction")
+            candidates = (
+                potential_action if isinstance(potential_action, list) else [potential_action]
+            )
+            for candidate in candidates:
+                if not isinstance(candidate, dict) or candidate.get("@type") != "SearchAction":
+                    continue
+                target = candidate.get("target")
+                template = target.get("urlTemplate") if isinstance(target, dict) else target
+                if not isinstance(template, str) or "{search_term_string}" not in template:
+                    continue
+                absolute = urljoin(base_url, template.replace("{search_term_string}", ""))
+                parsed = urlparse(absolute)
+                params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+                query_param = next(
+                    (
+                        key
+                        for key, value in parse_qsl(
+                            urlparse(template).query, keep_blank_values=True
+                        )
+                        if "search_term_string" in value
+                    ),
+                    None,
+                )
+                if query_param is None:
+                    continue
+                return SearchFormSpec(
+                    action=urlunparse(parsed._replace(query="")),
+                    method="get",
+                    query_param=query_param,
+                    hidden={key: value for key, value in params.items() if key != query_param},
+                )
     return best
 
 
@@ -221,11 +268,7 @@ async def discover_working_search_url(
             return -1
 
     nonsense_count = await _count(nonsense_url)
-    if (
-        nonsense_count >= 0
-        and unfiltered >= 3
-        and nonsense_count >= max(1, int(0.8 * unfiltered))
-    ):
+    if nonsense_count >= 0 and unfiltered >= 3 and nonsense_count >= max(1, int(0.8 * unfiltered)):
         # The query parameter is ignored: nonsense returns ~the full listing.
         log.info(
             "generic_search_query_ignored",

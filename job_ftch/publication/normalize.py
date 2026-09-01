@@ -68,28 +68,33 @@ def format_compensation(job: Job | JobRecord) -> str | None:
     if comp is None:
         return None
 
-    lo = comp.min_amount
-    hi = comp.max_amount
+    lo_raw = getattr(comp, "min_amount", None)
+    hi_raw = getattr(comp, "max_amount", None)
+    lo = lo_raw if isinstance(lo_raw, int) else None
+    hi = hi_raw if isinstance(hi_raw, int) else None
     if lo is None and hi is None:
         return None
 
-    sym = CURRENCY_SYMBOLS.get(comp.currency, comp.currency)
+    currency = str(getattr(comp, "currency", "")).upper()
+    sym = CURRENCY_SYMBOLS.get(currency, currency)
 
     if lo is not None and hi is not None:
         rng = _fmt_amount(lo) if lo == hi else f"{_fmt_amount(lo)}–{_fmt_amount(hi)}"
     elif lo is not None:
         rng = f"от {_fmt_amount(lo)}"
     else:
+        assert hi is not None
         rng = f"до {_fmt_amount(hi)}"
 
     period = ""
-    if comp.period and hasattr(comp.period, "value") and comp.period.value != "unknown":
-        period = PERIOD_LABELS.get(comp.period.value, f"/{comp.period.value}")
+    raw_period = getattr(comp, "period", None)
+    if raw_period and hasattr(raw_period, "value") and raw_period.value != "unknown":
+        period = PERIOD_LABELS.get(raw_period.value, f"/{raw_period.value}")
 
     gross_mark = ""
-    if comp.gross is True:
+    if getattr(comp, "gross", None) is True:
         gross_mark = " до вычета"
-    elif comp.gross is False:
+    elif getattr(comp, "gross", None) is False:
         gross_mark = " на руки"
 
     return f"{rng} {sym}{period}{gross_mark}".strip()
@@ -102,12 +107,18 @@ def format_geo(job: Job | JobRecord) -> str | None:
     Belgrade") far more often than the structured ``city``/``country`` pair, and
     reading only the latter dropped the geo from most career-site cards.
     """
-    sources = [
-        (getattr(job, "city", None) or "").strip(),
-        (getattr(job, "country", None) or "").strip(),
-    ]
-    if not any(sources):
-        sources = [(getattr(job, "location", None) or "").strip()]
+    city = (getattr(job, "city", None) or "").strip()
+    country = (getattr(job, "country", None) or "").strip()
+    location = (getattr(job, "location", None) or "").strip()
+    # Keep a complete structured pair authoritative, but do not discard a
+    # location when only one structured field survived enrichment. That was the
+    # path that rendered Warsaw with a stale country-only value of Russia.
+    if city:
+        sources = [city, country]
+    elif country:
+        sources = [location, country]
+    else:
+        sources = [location]
 
     return normalize_geo_sources(sources).display
 

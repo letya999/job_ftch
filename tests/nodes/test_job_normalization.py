@@ -171,6 +171,25 @@ async def test_compensation_parsing_uses_text_units_over_llm_number() -> None:
 
 
 @pytest.mark.asyncio
+async def test_compensation_parsing_prefers_structured_salary_over_llm_number() -> None:
+    node = CompensationParsingNode()
+    record = JobRecord(
+        raw_item_id="structured-salary-wins",
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="test",
+        description="Backend Engineer role.",
+        compensation={"currency": "RUB", "min_amount": 3},
+        metadata={"base_salary": {"currency": "RUB", "min": 300000, "max": 450000}},
+    )
+
+    processed = await node.process(record)
+
+    assert processed.compensation is not None
+    assert processed.compensation.min_amount == 300000
+    assert processed.compensation.max_amount == 450000
+
+
+@pytest.mark.asyncio
 async def test_compensation_parsing_ignores_benefit_deposit() -> None:
     node = CompensationParsingNode()
     item = JobRecord(

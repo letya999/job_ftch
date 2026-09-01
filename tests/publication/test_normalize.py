@@ -213,6 +213,9 @@ class TestGeoNormalisation:
         assert format_geo(_job(location="Warsaw / Russia")) == "Варшава, Польша"
         assert format_geo(_job(city="Warszawa", country="Россия")) == "Варшава, Польша"
 
+    def test_location_is_used_when_only_country_is_structured(self) -> None:
+        assert format_geo(_job(country="Россия", location="Warsaw")) == "Варшава, Польша"
+
     def test_unknown_place_passes_through(self) -> None:
         """The table normalises; it must not drop places it does not know."""
         assert format_geo(_job(location="Bonnatal, Germany")) == "Bonnatal, Германия"

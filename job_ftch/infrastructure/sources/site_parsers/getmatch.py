@@ -565,7 +565,11 @@ def _keywords_from_spec(spec: CareerSiteSpec) -> list[str]:
     for key in ("query", "q", "search", "text", "qs"):
         value = query.get(key)
         if isinstance(value, str) and value.strip():
-            return normalize_search_keywords(re.split(r"\s+OR\s+|\s+", value))
+            # Preserve multi-word roles. Getmatch has no public server-side
+            # search endpoint; its sitemap slug is the deterministic local
+            # search surface, so splitting on whitespace made `AI engineer`
+            # degenerate into the far too broad token `AI`.
+            return normalize_search_keywords(re.split(r"\s+OR\s+|\s+or\s+", value))
     roles = getattr(spec, "target_roles", None) or ()
     return normalize_search_keywords(roles)
 

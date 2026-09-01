@@ -87,9 +87,7 @@ class SourceAssessmentService:
                 return cached
 
         result = await self.assess(spec)
-        result = result.model_copy(
-            update={"spec_fingerprint": source_spec_fingerprint(spec)}
-        )
+        result = result.model_copy(update={"spec_fingerprint": source_spec_fingerprint(spec)})
         await store_source_assessment(store, result)
         return result
 

@@ -305,7 +305,9 @@ _SEARCH_STOPWORDS = frozenset(
 
 def _search_probe_terms(html: str) -> list[str]:
     """Extract two safe, likely-present terms for a source-local search probe."""
-    headings = re.findall(r"<(?:h1|h2|h3|title)\b[^>]*>(.*?)</(?:h1|h2|h3|title)>", html, re.I | re.S)
+    headings = re.findall(
+        r"<(?:h1|h2|h3|title)\b[^>]*>(.*?)</(?:h1|h2|h3|title)>", html, re.I | re.S
+    )
     terms: list[str] = []
     seen: set[str] = set()
     for raw in headings:
@@ -322,11 +324,7 @@ def _search_probe_terms(html: str) -> list[str]:
 
 
 def _search_surface_signature(html: str, base_url: str) -> tuple[Any, ...]:
-    links = tuple(
-        sorted(
-            set(extract_static_job_links(html, base_url, limit=100))
-        )
-    )
+    links = tuple(sorted(set(extract_static_job_links(html, base_url, limit=100))))
     if links:
         return ("links", links)
     return ("surface", len(html), hashlib.sha256(html[:_MAX_HTML_CHARS].encode()).hexdigest())
@@ -375,7 +373,9 @@ async def _probe_specific_search(
                 negative_response = await client.get(negative_candidates[0], follow_redirects=True)
                 if negative_response.is_success:
                     negative_html = negative_response.text[:_MAX_HTML_CHARS]
-            negative_signature = _search_surface_signature(negative_html, base_url) if negative_html else ()
+            negative_signature = (
+                _search_surface_signature(negative_html, base_url) if negative_html else ()
+            )
         except Exception:
             continue
         changed = positive_signature != baseline
@@ -434,6 +434,7 @@ async def _probe_generic_search(
         )
 
     if form.usable_via_url:
+
         async def _fetch(url: str) -> str:
             response = await client.get(url, follow_redirects=True)
             response.raise_for_status()
@@ -557,7 +558,11 @@ class CareerSiteAssessmentEngine:
                 headers=headers,
                 timeout=_PROBE_TIMEOUT,
                 follow_redirects=True,
-                transport=SSRFGuardedTransport(httpx.AsyncHTTPTransport()),
+                transport=SSRFGuardedTransport(
+                    httpx.AsyncHTTPTransport(
+                        verify=not bool((normalized_spec.monitor_config or {}).get("skip_ssl"))
+                    )
+                ),
             ) as client:
                 try:
                     profile = await fingerprint(normalized_spec.url, client)

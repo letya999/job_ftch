@@ -1704,6 +1704,9 @@ class CareerSiteSource(Source["RawItem"]):
 
         assessment = self.spec.monitor_config.get("_search_assessment")
         executor = assessment.get("executor") if isinstance(assessment, dict) else None
+        runtime_executor = self.spec.monitor_config.get("_search_runtime_executor")
+        if runtime_executor:
+            executor = str(runtime_executor)
         self.stats.search_executor = executor or None
         self.stats.search_status = (
             assessment.get("status") if isinstance(assessment, dict) else None
@@ -1713,6 +1716,9 @@ class CareerSiteSource(Source["RawItem"]):
         )
         base_url = str(self.spec.monitor_config.get("_search_base_url") or self.spec.url)
         if self.spec.search_locked or not base_url:
+            return
+        if runtime_executor == "specific_url" and self.spec.url != base_url:
+            self.stats.search_applied = True
             return
         if executor in {"specific_url", "specific_api"} and self.spec.url != base_url:
             return
@@ -1743,9 +1749,7 @@ class CareerSiteSource(Source["RawItem"]):
                         payload = build_generic_search_payload(form, query)
                         if payload is None:
                             continue
-                        posted = await client.post(
-                            form.action, data=payload, follow_redirects=True
-                        )
+                        posted = await client.post(form.action, data=payload, follow_redirects=True)
                         if posted.is_success and str(posted.url) != base_url:
                             logger.info(
                                 "generic_search_url_rewrite",
@@ -1785,9 +1789,7 @@ class CareerSiteSource(Source["RawItem"]):
             return str(response.text)
 
         try:
-            search_url = await discover_working_search_url(
-                _fetch, base_url, keywords, log=logger
-            )
+            search_url = await discover_working_search_url(_fetch, base_url, keywords, log=logger)
         except Exception as exc:  # noqa: BLE001
             logger.debug("generic_search_apply_failed", url=base_url, error=str(exc))
             return
@@ -1846,9 +1848,7 @@ class CareerSiteSource(Source["RawItem"]):
                     logger.info("generic_search_browser_submit_unavailable", url=base_url)
                     return False
                 await await_with_source_deadline(page.wait_for_timeout(750))
-                result_html = str(
-                    await await_with_source_deadline(page.content())
-                )[:500_000]
+                result_html = str(await await_with_source_deadline(page.content()))[:500_000]
                 result_url = str(getattr(page, "url", base_url) or base_url)
                 if result_url != base_url:
                     logger.info(

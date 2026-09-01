@@ -1239,7 +1239,7 @@ class TenantRunner:
             if search is not None:
                 monitor_config = dict(effective_spec.monitor_config)
                 monitor_config["_search_assessment"] = search.model_dump(mode="json")
-                monitor_config["_search_base_url"] = spec.url
+                monitor_config["_search_base_url"] = effective_spec.url
                 effective_spec = effective_spec.model_copy(
                     update={"monitor_config": monitor_config}
                 )

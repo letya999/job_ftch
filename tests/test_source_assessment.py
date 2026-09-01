@@ -143,10 +143,7 @@ def _probe_result(
 @pytest.mark.asyncio
 async def test_specific_search_assessment_rejects_ignored_query() -> None:
     base_url = "https://example.com/jobs"
-    base_html = (
-        '<h1>Engineer</h1><a href="/jobs/1">Engineer</a>'
-        '<a href="/jobs/2">Manager</a>'
-    )
+    base_html = '<h1>Engineer</h1><a href="/jobs/1">Engineer</a><a href="/jobs/2">Manager</a>'
 
     def handler(request: httpx.Request) -> httpx.Response:
         query = parse_qs(urlparse(str(request.url)).query).get("q", [""])[0]
