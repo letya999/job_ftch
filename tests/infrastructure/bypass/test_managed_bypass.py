@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import httpx
@@ -146,9 +147,7 @@ async def test_nodriver_recovers_corrupt_shared_profile(monkeypatch, tmp_path):
     assert starts[1] == starts[0]
     assert len(starts) == 3
     assert starts[2] != starts[0]
-    assert starts[2].startswith("nodriver_recovery_profile_") or starts[2].split("\\")[
-        -1
-    ].startswith("nodriver_recovery_profile_")
+    assert Path(starts[2]).name.startswith("nodriver_recovery_profile_")
     quarantined = list((tmp_path / "_quarantine").glob("profile.*"))
     assert len(quarantined) == 1
     assert (quarantined[0] / "stale-lock").exists()
