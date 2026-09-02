@@ -1001,6 +1001,7 @@ async def test_parser_captcha_allowlist_reaches_bypass_config(monkeypatch):
             monitor_config={
                 "captcha_authorized_domains": ["jobs.ashbyhq.com"],
                 "proxy_rescue_allow_domains": ["jobs.ashbyhq.com"],
+                "proxy_geo": "US",
             },
         ),
         http_client=object(),
@@ -1012,6 +1013,7 @@ async def test_parser_captcha_allowlist_reaches_bypass_config(monkeypatch):
     assert captured["name"] == "auto"
     assert captured["config"]["captcha_authorized_domains"] == ["jobs.ashbyhq.com"]
     assert captured["config"]["proxy_rescue_allow_domains"] == ["jobs.ashbyhq.com"]
+    assert captured["config"]["proxy_geo"] == "US"
 
 
 @pytest.mark.asyncio

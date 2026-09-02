@@ -372,12 +372,10 @@ async def test_nodriver_bypass_preserves_browser_config(
         async def create_context(
             self,
             *,
-            url: str,
             proxy_server: str,
-            proxy_bypass_list: list[str],
+            proxy_bypass_list: str,
         ) -> _FakeTab:
             captured["proxy_context"] = {
-                "url": url,
                 "proxy_server": proxy_server,
                 "proxy_bypass_list": proxy_bypass_list,
             }
@@ -442,9 +440,8 @@ async def test_nodriver_bypass_preserves_browser_config(
         "lang": "en-US",
     }
     assert captured["proxy_context"] == {
-        "url": "about:blank",
         "proxy_server": "http://proxy.local:8080",
-        "proxy_bypass_list": ["localhost"],
+        "proxy_bypass_list": "localhost",
     }
     assert captured["window_size"] == (0, 0, 1440, 900)
 
