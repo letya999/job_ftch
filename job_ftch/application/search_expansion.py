@@ -7,8 +7,8 @@ whose resolved site parser has a verified search recipe is rewritten into one
 pre-filtered result page instead of the whole board.
 
 The assessment is attached to each prepared source before this function runs.
-Specific parser builders remain the runtime fallback when the generic HTML-form
-probe cannot assess an SPA/API search surface.
+Specific parser builders remain the fallback for callers without an assessment;
+assessed but unverified candidates stay at their original listing URL.
 """
 
 from __future__ import annotations
@@ -53,44 +53,34 @@ def expand_career_site_specs(
         if assessed_executor in {"generic_get", "generic_post", "generic_browser"}:
             expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
             continue
-        parser = resolve_site_parser_for_spec(spec)
-        # A failed generic-form probe must not suppress a deterministic search
-        # URL builder owned by a special parser.  The two mechanisms probe
-        # different surfaces: many SPA/API boards have no HTML <form> at all.
-        # Assessment remains telemetry; the parser builder is the runtime
-        # fallback requested by the source contract.
-        if parser is not None and getattr(parser, "supports_search", False):
-            try:
-                urls = list(parser.build_search_urls(spec.url, roles, limit=spec.limit))
-            except Exception as exc:  # noqa: BLE001 - never let expansion drop a source
-                logger.warning("search_expansion_failed", url=spec.url, error=str(exc))
-                urls = []
-            if urls:
-                for index, url in enumerate(urls):
-                    expanded.append(
-                        _clone_with_search_url(
-                            _attach_search_keywords(
-                                spec,
-                                roles,
-                                base_url=base_url,
-                                runtime_executor="specific_url",
-                            ),
-                            url,
-                            index,
-                            len(urls),
-                        )
-                    )
-                continue
         if assessed_status and assessed_status != "verified":
             expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
             continue
+        parser = resolve_site_parser_for_spec(spec)
         if parser is None or not getattr(parser, "supports_search", False):
             # Every career source carries the roles into runtime. A specific
             # parser may still be used after the generic search executor finds
             # a form or browser/API recipe.
             expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
             continue
-        expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
+        try:
+            urls = list(parser.build_search_urls(spec.url, roles, limit=spec.limit))
+        except Exception as exc:  # noqa: BLE001 - never let expansion drop a source
+            logger.warning("search_expansion_failed", url=spec.url, error=str(exc))
+            expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
+            continue
+        if not urls:
+            expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
+            continue
+        for index, url in enumerate(urls):
+            expanded.append(
+                _clone_with_search_url(
+                    _attach_search_keywords(spec, roles, base_url=base_url),
+                    url,
+                    index,
+                    len(urls),
+                )
+            )
     return expanded
 
 
@@ -106,13 +96,10 @@ def _attach_search_keywords(
     roles: list[str],
     *,
     base_url: str | None = None,
-    runtime_executor: str | None = None,
 ) -> SourceSpec:
     monitor_config = dict(getattr(spec, "monitor_config", {}) or {})
     monitor_config["_search_keywords"] = list(roles)
     monitor_config["_search_base_url"] = base_url or getattr(spec, "url", "")
-    if runtime_executor:
-        monitor_config["_search_runtime_executor"] = runtime_executor
     return spec.model_copy(update={"monitor_config": monitor_config})
 
 

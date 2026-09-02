@@ -20,8 +20,8 @@ class HireHiParser:
 
     domain_pattern = r"^https?://(?:www\.)?hirehi\.ru(?:/|$)"
     has_custom_parse = False
-    supports_search = True
-    search_mode = "per_keyword"
+    supports_search = False
+    search_mode = "none"
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url

@@ -25,12 +25,14 @@ def _query(url: str) -> dict[str, list[str]]:
 
 
 def test_aggregators_declare_search_modes() -> None:
-    for parser in (HhParser(), HabrCareerParser(), HirifyParser(), VkTeamParser(), SberParser()):
+    for parser in (HhParser(), HirifyParser(), VkTeamParser(), SberParser()):
         assert parser.supports_search is True
         assert parser.search_mode == "combined"
-    for parser in (GeekJobParser(), HireHiParser()):
-        assert parser.supports_search is True
-        assert parser.search_mode == "per_keyword"
+    assert GeekJobParser().supports_search is True
+    assert GeekJobParser().search_mode == "per_keyword"
+    for parser in (HabrCareerParser(), HireHiParser()):
+        assert parser.supports_search is False
+        assert parser.search_mode == "none"
 
 
 def test_hh_builds_single_or_query_preserving_area() -> None:
