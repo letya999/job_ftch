@@ -776,7 +776,7 @@ async def test_scrape_with_fallback_still_scrapes_200_job_html() -> None:
 
 
 @pytest.mark.asyncio
-async def test_maybe_apply_generic_search_does_not_skip_parser_without_search(
+async def test_maybe_apply_generic_search_skips_unassessed_recipe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spec = CareerSiteSpec(
@@ -809,11 +809,11 @@ async def test_maybe_apply_generic_search_does_not_skip_parser_without_search(
         _discover,
     )
     await source._maybe_apply_generic_search(object())
-    assert probed == ["https://www.superjob.ru/vacancy/search/"]
+    assert probed == []
 
 
 @pytest.mark.asyncio
-async def test_maybe_apply_generic_search_runs_for_parser_with_supports_search(
+async def test_maybe_apply_generic_search_skips_unverified_recipe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spec = CareerSiteSpec(
@@ -838,7 +838,39 @@ async def test_maybe_apply_generic_search_runs_for_parser_with_supports_search(
         _discover,
     )
     await source._maybe_apply_generic_search(object())
-    assert probed == ["https://hh.ru/search/vacancy"]
+    assert probed == []
+
+
+@pytest.mark.asyncio
+async def test_maybe_apply_generic_search_runs_for_verified_recipe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = CareerSiteSpec(
+        url="https://example.com/jobs",
+        source_name="example",
+        monitor_config={
+            "_search_keywords": ["ML Engineer"],
+            "_search_assessment": {"status": "verified", "executor": "generic_get"},
+        },
+    )
+    source = CareerSiteSource(spec=spec, http_client=FakeHttpClient({}), auth=MagicMock())
+    probed: list[str] = []
+
+    async def _bypass(_http: object) -> object:
+        return object()
+
+    async def _discover(_fetch, url, keywords, log=None):  # type: ignore[no-untyped-def]
+        del _fetch, keywords, log
+        probed.append(url)
+        return None
+
+    monkeypatch.setattr(source, "_apply_bypass_http", _bypass)
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.site_parsers.generic_search.discover_working_search_url",
+        _discover,
+    )
+    await source._maybe_apply_generic_search(object())
+    assert probed == ["https://example.com/jobs"]
 
 
 @pytest.mark.asyncio
@@ -969,6 +1001,7 @@ async def test_parser_captcha_allowlist_reaches_bypass_config(monkeypatch):
             monitor_config={
                 "captcha_authorized_domains": ["jobs.ashbyhq.com"],
                 "proxy_rescue_allow_domains": ["jobs.ashbyhq.com"],
+                "proxy_geo": "US",
             },
         ),
         http_client=object(),
@@ -980,6 +1013,7 @@ async def test_parser_captcha_allowlist_reaches_bypass_config(monkeypatch):
     assert captured["name"] == "auto"
     assert captured["config"]["captcha_authorized_domains"] == ["jobs.ashbyhq.com"]
     assert captured["config"]["proxy_rescue_allow_domains"] == ["jobs.ashbyhq.com"]
+    assert captured["config"]["proxy_geo"] == "US"
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ the spec URL and applies its `runtime_defaults(url)`.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from job_ftch.domain.source_spec import CareerSiteSpec
@@ -76,6 +77,13 @@ def apply_runtime_defaults(spec: CareerSiteSpec) -> CareerSiteSpec:
 
     monitor_config = dict(default_monitor_config)
     monitor_config.update(spec.monitor_config)
+    country_tld = (urlparse(str(spec.url)).hostname or "").rsplit(".", 1)[-1]
+    if (
+        "proxy_rescue_allow_domains" in monitor_config
+        and "proxy_geo" not in monitor_config
+        and len(country_tld) == 2
+    ):
+        monitor_config["proxy_geo"] = country_tld.upper()
 
     url_filter = spec.url_filter
     if url_filter is None:

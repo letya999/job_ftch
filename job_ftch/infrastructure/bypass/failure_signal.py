@@ -127,6 +127,9 @@ _IP_BLOCK_MARKERS: tuple[str, ...] = (
     "access from your ip",
     "too many requests from this ip",
     "proxy detected",
+    "international traffic",
+    "международный трафик",
+    "отключите vpn",
 )
 
 _FINGERPRINT_BLOCK_MARKERS: tuple[str, ...] = (
