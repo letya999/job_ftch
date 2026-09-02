@@ -3,22 +3,6 @@ FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
-# The bot executes browser-backed sources itself, so do not rely on a stale
-# runtime base image to supply Patchright or Chromium.
-USER root
-COPY pyproject.toml README.md LICENSE uv.lock ./
-RUN /usr/local/bin/python -m pip install --no-cache-dir "uv==0.9.26" \
-    && uv sync --locked --no-dev --all-extras \
-    && patchright install --with-deps chromium \
-    && patchright install-deps firefox \
-    && HOME=/opt/job-ftch-home camoufox set official/stable \
-    && HOME=/opt/job-ftch-home camoufox fetch \
-    && HOME=/opt/job-ftch-home python -m cloakbrowser install \
-    && (getent group appuser >/dev/null || groupadd --system appuser) \
-    && (id -u appuser >/dev/null 2>&1 || useradd --system --gid appuser --home-dir /opt/job-ftch-home --shell /usr/sbin/nologin appuser) \
-    && mkdir -p /opt/job-ftch-home \
-    && chown -R appuser:appuser /opt/job-ftch-home /opt/playwright
-
 # Bake the current source over the runtime base so standalone production images
 # execute the exact adapter revision that was built.
 COPY --chown=appuser:appuser . /app

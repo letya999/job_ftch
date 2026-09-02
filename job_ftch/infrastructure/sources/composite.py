@@ -61,6 +61,8 @@ class SourceFetchResult:
     generic_scraper_used: bool = False
     parser_urls_discovered: int = 0
     detail_cards_extracted: int = 0
+    detail_attempted: int = 0
+    detail_protection_failures: int = 0
 
 
 _TECHNICAL_ZERO_REASONS = {
@@ -72,6 +74,12 @@ _TECHNICAL_ZERO_REASONS = {
     "soft_403_with_content",
     "stale_url",
     "parser_gap",
+    "monitor_error",
+    "transport_error",
+    "upstream_error",
+    "parser_error",
+    "policy_not_scraped",
+    "rate_limited",
 }
 
 _OUTCOME_BY_ZERO_REASON = {
@@ -81,13 +89,26 @@ _OUTCOME_BY_ZERO_REASON = {
     "soft_403_with_content": "soft_403_with_content",
     "stale_url": "stale_url",
     "parser_gap": "parser_gap",
-    "all_scrapers_failed": "detail_extraction_failed",
-    "all_monitors_exhausted": "listing_discovery_failed",
     "monitor_empty": "unconfirmed_empty",
     "confirmed_empty": "no_open_vacancies",
     "board_gone": "board_gone",
+    "monitor_error": "source_error",
+    "transport_error": "transport_error",
+    "upstream_error": "upstream_error",
+    "parser_error": "parser_error",
+    "policy_not_scraped": "policy_not_scraped",
     "rate_limited": "rate_limited",
 }
+
+
+def _zero_yield_outcome(result: SourceFetchResult) -> SourceOutcome | None:
+    if result.zero_reason in {"all_scrapers_failed", "all_monitors_exhausted"}:
+        return (
+            "detail_extraction_failed"
+            if result.detail_attempted > 0 or result.parser_urls_discovered > 0
+            else "listing_discovery_failed"
+        )
+    return cast("SourceOutcome | None", _OUTCOME_BY_ZERO_REASON.get(result.zero_reason or ""))
 
 
 def _capture_source_stats(source: object, result: SourceFetchResult) -> None:
@@ -116,6 +137,8 @@ def _capture_source_stats(source: object, result: SourceFetchResult) -> None:
             "freshness_filtered",
             "freshness_undated_passed",
             "parser_duplicates_suppressed",
+            "detail_attempted",
+            "detail_protection_failures",
         ):
             setattr(result, name, int(getattr(stats, name, 0) or 0))
         result.requested_parser = getattr(stats, "requested_parser", None)
@@ -136,9 +159,7 @@ def _capture_source_stats(source: object, result: SourceFetchResult) -> None:
             result.terminal_outcome = "parsed_ok"
             result.completion_state = "completed_limited" if result.limited else "completed"
     elif result.zero_reason:
-        result.terminal_outcome = cast(
-            "SourceOutcome | None", _OUTCOME_BY_ZERO_REASON.get(result.zero_reason)
-        )
+        result.terminal_outcome = _zero_yield_outcome(result)
         # Keep the specific diagnostic outcome (for example failed detail
         # extraction) but never treat a hard-deadline run as a complete source
         # snapshot merely because it reached a zero-yield branch while timing

@@ -95,6 +95,11 @@ def test_prod_bot_image_copies_current_source_over_runtime_base() -> None:
     text = TELEGRAM_DOCKERFILE_PROD.read_text(encoding="utf-8")
 
     assert "COPY --chown=appuser:appuser . /app" in text
+    assert "uv sync" not in text
+    assert "patchright install" not in text
+    assert "camoufox fetch" not in text
+    assert "cloakbrowser install" not in text
+    assert "chown -R" not in text
 
 
 def test_workflow_paths_exist() -> None:

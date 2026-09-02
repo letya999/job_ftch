@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from job_ftch.infrastructure.sources.browser_utils import (
+    _cleanup_browser_stack,
     _launch_browser_with_recovery,
     _load_async_playwright,
     _patchright_inner_send_cancellation_safe,
@@ -84,7 +85,7 @@ async def test_patchright_route_callback_does_not_complete_cancelled_future() ->
 
 
 @pytest.mark.asyncio
-async def test_unroute_drain_suppresses_cancellation_to_finish_cleanup() -> None:
+async def test_unroute_drain_propagates_cancellation_after_cleanup_attempt() -> None:
     started = asyncio.Event()
     release = asyncio.Event()
     behaviors: list[str] = []
@@ -98,12 +99,10 @@ async def test_unroute_drain_suppresses_cancellation_to_finish_cleanup() -> None
     task = asyncio.create_task(_unroute_page_before_close(Page()))
     await started.wait()
     task.cancel()
-    await asyncio.sleep(0)
-    assert not task.done()
-
     release.set()
-    await task
-    assert behaviors == ["ignoreErrors"]
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert behaviors == ["wait"]
 
 
 @pytest.mark.asyncio
@@ -114,10 +113,34 @@ async def test_unroute_drain_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None
 
     class Page:
         async def unroute_all(self, *, behavior: str) -> None:
-            assert behavior == "ignoreErrors"
+            assert behavior == "wait"
             await asyncio.Event().wait()
 
     await _unroute_page_before_close(Page())
+
+
+@pytest.mark.asyncio
+async def test_browser_stack_falls_back_and_closes_within_one_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from job_ftch.infrastructure.sources import browser_utils
+
+    monkeypatch.setattr(browser_utils, "_BROWSER_CLEANUP_TIMEOUT_SECONDS", 0.05)
+    calls: list[str] = []
+
+    class Target:
+        async def close(self) -> None:
+            calls.append("close")
+
+    class Page(Target):
+        async def unroute_all(self, *, behavior: str) -> None:
+            calls.append(behavior)
+            if behavior == "wait":
+                await asyncio.Event().wait()
+
+    await _cleanup_browser_stack(Page(), Target())
+
+    assert calls == ["wait", "ignoreErrors", "close", "close"]
 
 
 def test_select_stale_driver_pids_selects_old_childless_browsers() -> None:
@@ -303,7 +326,7 @@ async def test_open_page_applies_bypass_only_to_launch_kwargs(
     assert "proxy" not in context_kwargs
     assert "args" not in context_kwargs
     assert bypass.page_calls == 1
-    assert page.unroute_behaviors == ["ignoreErrors"]
+    assert page.unroute_behaviors == ["wait"]
 
 
 @pytest.mark.asyncio

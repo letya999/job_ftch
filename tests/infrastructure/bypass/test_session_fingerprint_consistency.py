@@ -235,6 +235,18 @@ async def test_clearance_cookie_continues_from_listing_to_details() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sync_cookie_exporter_is_supported() -> None:
+    manager = AdaptiveBypassManager()
+    page = SimpleNamespace(export_cookies=lambda: [{"name": "cf_clearance", "value": "value"}])
+
+    await manager.capture_session_state(page)
+
+    assert manager.prepare_browser_config({"url": "https://example.test"})["cookies"] == [
+        {"name": "cf_clearance", "value": "value"}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_listing_pagination_and_details_share_identity_and_profile() -> None:
     manager = AdaptiveBypassManager()
     context = SimpleNamespace(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import re
@@ -850,12 +851,16 @@ class AdaptiveBypassManager:
         raw: Any = None
         exporter = getattr(page, "export_cookies", None)
         if callable(exporter):
-            raw = await exporter()
+            raw = exporter()
+            if inspect.isawaitable(raw):
+                raw = await raw
         else:
             context = getattr(page, "context", None)
             cookies = getattr(context, "cookies", None)
             if callable(cookies):
-                raw = await cookies()
+                raw = cookies()
+                if inspect.isawaitable(raw):
+                    raw = await raw
         if not isinstance(raw, list):
             return
         allowed: list[dict[str, Any]] = []
