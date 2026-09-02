@@ -23,7 +23,7 @@ import structlog
 
 logger = structlog.get_logger("job_ftch.bypass.session_memory")
 
-_DEFAULT_STORAGE_DIR = "data/session_memory"
+_DEFAULT_STORAGE_DIR = ".runtime/session_memory"
 _COOKIE_ALLOWLIST = frozenset({"cf_clearance", "cf_bm", "dd_cookie", "_px3", "datadome"})
 
 

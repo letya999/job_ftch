@@ -8,6 +8,7 @@ from __future__ import annotations
 import html
 import json
 import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -61,13 +62,16 @@ class WorkxAmParser:
 
         emitted = 0
         for job in jobs:
+            if not isinstance(job, Mapping):
+                continue
             slug = job.get("slug")
             if not slug:
                 continue
 
             job_url = f"https://workx.am/jobs/{slug}"
             title = job.get("title", "")
-            company_name = job.get("company", {}).get("name", "")
+            company = job.get("company")
+            company_name = company.get("name", "") if isinstance(company, Mapping) else ""
 
             html_parts = [f"<h1>{title}</h1>"]
             if company_name:
