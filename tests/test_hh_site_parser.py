@@ -36,6 +36,14 @@ class _FakeClient:
         return self._responses[url]
 
 
+def test_hh_runtime_defaults_authorize_proxy_and_captcha_hosts() -> None:
+    from job_ftch.infrastructure.sources.site_defaults import apply_runtime_defaults
+
+    spec = apply_runtime_defaults(CareerSiteSpec(url="https://hh.ru/search/vacancy"))
+    assert "hh.ru" in spec.monitor_config["proxy_rescue_allow_domains"]
+    assert "hh.kz" in spec.monitor_config["captcha_authorized_domains"]
+
+
 def test_listing_page_url_adds_page_query() -> None:
     assert _listing_page_url("https://hh.ru/search/vacancy?text=ai", 0) == (
         "https://hh.ru/search/vacancy?text=ai"

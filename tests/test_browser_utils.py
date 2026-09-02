@@ -10,11 +10,14 @@ import pytest
 
 from job_ftch.infrastructure.sources.browser_utils import (
     _cleanup_browser_stack,
+    _effective_browser_channel,
     _launch_browser_with_recovery,
     _load_async_playwright,
     _patchright_inner_send_cancellation_safe,
     _patchright_needs_legacy_cancellation_fix,
     _patchright_route_handle_cancellation_safe,
+    _proc_matches_session,
+    _remember_unavailable_browser_channel,
     _unroute_page_before_close,
     attach_operator_page,
     navigate,
@@ -120,12 +123,12 @@ async def test_unroute_drain_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_browser_stack_falls_back_and_closes_within_one_budget(
+async def test_browser_stack_closes_within_one_budget_when_unroute_hangs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from job_ftch.infrastructure.sources import browser_utils
 
-    monkeypatch.setattr(browser_utils, "_BROWSER_CLEANUP_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(browser_utils, "_BROWSER_CLEANUP_TIMEOUT_SECONDS", 0.8)
     calls: list[str] = []
 
     class Target:
@@ -135,12 +138,12 @@ async def test_browser_stack_falls_back_and_closes_within_one_budget(
     class Page(Target):
         async def unroute_all(self, *, behavior: str) -> None:
             calls.append(behavior)
-            if behavior == "wait":
-                await asyncio.Event().wait()
+            await asyncio.Event().wait()
 
-    await _cleanup_browser_stack(Page(), Target())
+    closed = await _cleanup_browser_stack(Page(), Target())
 
-    assert calls == ["wait", "ignoreErrors", "close", "close"]
+    assert calls == ["ignoreErrors", "close", "close"]
+    assert closed is True
 
 
 def test_select_stale_driver_pids_selects_old_childless_browsers() -> None:
@@ -326,7 +329,7 @@ async def test_open_page_applies_bypass_only_to_launch_kwargs(
     assert "proxy" not in context_kwargs
     assert "args" not in context_kwargs
     assert bypass.page_calls == 1
-    assert page.unroute_behaviors == ["wait"]
+    assert page.unroute_behaviors == ["ignoreErrors"]
 
 
 @pytest.mark.asyncio
@@ -586,6 +589,109 @@ async def test_open_page_uses_patchright_when_process_identity_required(
     async with open_page({"headless": True}, bypass_strategy=_PatchrightBypass()):
         pass
     assert used == [True]
+
+
+def test_effective_browser_channel_skips_system_chrome_in_bundled_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from job_ftch.infrastructure.sources import browser_utils
+
+    browser_utils._UNAVAILABLE_BROWSER_CHANNELS.clear()
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    assert _effective_browser_channel("chrome") == "chrome"
+    assert _effective_browser_channel("") is None
+
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "/opt/playwright")
+    assert _effective_browser_channel("chrome") is None
+    assert _effective_browser_channel("msedge") == "msedge"
+
+    monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
+    _remember_unavailable_browser_channel("msedge")
+    assert _effective_browser_channel("msedge") is None
+    browser_utils._UNAVAILABLE_BROWSER_CHANNELS.clear()
+
+
+def test_proc_matches_session_uses_launch_switch() -> None:
+    session = "sess-test-one"
+    assert _proc_matches_session(
+        "chrome --headless=new --job-ftch-session=sess-test-one about:blank",
+        session,
+    )
+    assert not _proc_matches_session(
+        "chrome --headless=new --job-ftch-session=other about:blank",
+        session,
+    )
+
+
+@pytest.mark.asyncio
+async def test_open_page_tags_chromium_args_with_session_switch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    _stub_playwright_loader(monkeypatch, captured)
+    async with open_page({"headless": True}):
+        pass
+    launch_kwargs = captured["launch_kwargs"]
+    assert isinstance(launch_kwargs, dict)
+    args = launch_kwargs["args"]
+    assert isinstance(args, list)
+    assert any(str(arg).startswith("--job-ftch-session=") for arg in args)
+
+
+@pytest.mark.asyncio
+async def test_open_page_skips_chrome_channel_when_browsers_path_is_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_settings() -> SimpleNamespace:
+        return SimpleNamespace(
+            browser_default_timeout_ms=1234,
+            browser_context_timeout_ms=4321,
+            browser_channel="chrome",
+            browser_headless=True,
+            career_site_browser_concurrency=4,
+        )
+
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", "/opt/playwright")
+    monkeypatch.setattr("job_ftch.config.get_settings", fake_settings)
+    monkeypatch.setattr("job_ftch.infrastructure.sources.browser_utils.get_settings", fake_settings)
+    fake_async_api = SimpleNamespace(async_playwright=lambda: _FakeAsyncPlaywrightContext(captured))
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.browser_utils._load_async_playwright",
+        lambda **_kwargs: fake_async_api.async_playwright,
+    )
+    async with open_page({"headless": True}):
+        pass
+    launch_kwargs = captured["launch_kwargs"]
+    assert isinstance(launch_kwargs, dict)
+    assert "channel" not in launch_kwargs
+
+
+@pytest.mark.asyncio
+async def test_cleanup_reports_failure_when_browser_close_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from job_ftch.infrastructure.sources import browser_utils
+
+    monkeypatch.setattr(browser_utils, "_BROWSER_CLEANUP_TIMEOUT_SECONDS", 0.02)
+
+    class Page:
+        async def unroute_all(self, *, behavior: str) -> None:
+            del behavior
+
+        async def close(self) -> None:
+            return None
+
+    class Context:
+        async def close(self) -> None:
+            return None
+
+    class Browser:
+        async def close(self) -> None:
+            await asyncio.Event().wait()
+
+    assert await _cleanup_browser_stack(Page(), Context(), Browser()) is False
 
 
 @pytest.mark.asyncio

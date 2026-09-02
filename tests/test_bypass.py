@@ -409,6 +409,7 @@ async def test_nodriver_bypass_preserves_browser_config(
         "user_agent": "Agent/2.0",
         "locale": "ru-RU",
         "viewport": {"width": 1440, "height": 900},
+        "sandbox": True,
     }
 
     async with bypass.open_page(config, use_proxy=True):
@@ -444,6 +445,53 @@ async def test_nodriver_bypass_preserves_browser_config(
         "proxy_bypass_list": "localhost",
     }
     assert captured["window_size"] == (0, 0, 1440, 900)
+
+
+@pytest.mark.asyncio
+async def test_nodriver_disables_sandbox_inside_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeTab:
+        url = "about:blank"
+
+        async def set_window_size(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        async def close(self) -> None:
+            return None
+
+    class _FakeBrowser:
+        async def get(self, url: str) -> _FakeTab:
+            del url
+            return _FakeTab()
+
+        async def stop(self) -> None:
+            return None
+
+    async def _fake_start(**kwargs: object) -> _FakeBrowser:
+        captured["start_kwargs"] = kwargs
+        return _FakeBrowser()
+
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.bypass.nodriver_bypass.nodriver",
+        type("ND", (), {"start": staticmethod(_fake_start)})(),
+    )
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.bypass.nodriver_bypass._should_disable_chromium_sandbox",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.bypass.nodriver_bypass.get_settings",
+        lambda: type("S", (), {"browser_default_timeout_ms": 4321})(),
+    )
+
+    bypass = NodriverBypass()
+    async with bypass.open_page({"headless": True}):
+        pass
+
+    assert captured["start_kwargs"]["sandbox"] is False
 
 
 def test_failure_signal_ddos_guard_is_captcha() -> None:

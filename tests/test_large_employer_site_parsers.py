@@ -58,6 +58,43 @@ async def test_large_employer_parser_discovers_details_for_core_enrichment() -> 
     assert urls == ["https://careers.yadro.com/vacancy/102472"]
 
 
+def test_vtb_runtime_defaults_relax_tls_and_admit_proxy_host() -> None:
+    from job_ftch.infrastructure.sources.site_defaults import apply_runtime_defaults
+
+    spec = apply_runtime_defaults(CareerSiteSpec(url="https://rabota.vtb.ru/career-it/"))
+    assert spec.monitor_config["skip_ssl"] is True
+    assert spec.monitor_config["proxy_rescue_allow_domains"] == [
+        "rabota.vtb.ru",
+        "rabota-vtb.ru",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_vtb_parser_follows_it_landing_to_numeric_career_listing() -> None:
+    class LandingClient:
+        async def get(self, url: str, **_: object) -> _Response:
+            response = _Response()
+            if "career-it" in url:
+                response.text = (
+                    '<a href="https://rabota-vtb.ru/career?department=vtb-4181-teh">'
+                    "Откликнуться на вакансии</a>"
+                )
+            elif url.rstrip("/").endswith("/career") or "department=" in url:
+                response.text = '<a href="/career/134519550">Data Engineer</a>'
+            else:
+                response.text = "<main><h1>Data Engineer</h1></main>"
+            return response
+
+    items = [
+        item
+        async for item in VtbParser().parse(
+            CareerSiteSpec(url="https://rabota.vtb.ru/career-it/", limit=5),
+            LandingClient(),
+        )
+    ]
+    assert [item.external_id for item in items] == ["134519550"]
+
+
 @pytest.mark.asyncio
 async def test_vtb_parser_accepts_numeric_career_detail_url() -> None:
     response = _Response()

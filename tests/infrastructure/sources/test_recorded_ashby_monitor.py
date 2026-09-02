@@ -46,7 +46,9 @@ class _HtmlClient(_Client):
 
     async def get(self, url: str, **kwargs: object) -> _HtmlResponse:
         self.calls.append((url, kwargs))
-        return _HtmlResponse(self._text)
+        response = _HtmlResponse(self._text)
+        response.url = url
+        return response
 
 
 def _listing_payload() -> dict[str, object]:
@@ -93,3 +95,27 @@ async def test_ashby_monitor_does_not_guess_token_from_an_unrelated_domain() -> 
 
     assert result is None
     assert [url for url, _ in client.calls] == ["https://bolt.eu/en/careers/positions/"]
+
+
+@pytest.mark.asyncio
+async def test_ashby_monitor_reads_token_from_redirected_board_url() -> None:
+    class _RedirectClient(_Client):
+        async def get(self, url: str, **kwargs: object) -> _Response:
+            self.calls.append((url, kwargs))
+            if "careers.higgsfield.kz" in url:
+                response = _HtmlResponse("<html><body>Higgsfield careers</body></html>")
+                response.url = "https://jobs.ashbyhq.com/example"
+                return response
+            return _Response(self._payload)
+
+    client = _RedirectClient(_listing_payload())
+
+    detected = await can_handle("https://careers.higgsfield.kz/", client)
+    items = await discover(
+        SimpleNamespace(url="https://careers.higgsfield.kz/", monitor_config={}),
+        client,
+    )
+
+    assert detected == {"token": "example", "jobs": 1}
+    assert len(items) == 1
+    assert items[0].title == "Machine Learning Engineer"

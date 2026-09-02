@@ -83,6 +83,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_justjoin_site_parser.py](test_justjoin_site_parser.py)
 - [test_kapital_bir_site_parser.py](test_kapital_bir_site_parser.py)
 - [test_kaspersky_site_parser.py](test_kaspersky_site_parser.py)
+- [test_kcell_enbek_higgsfield_parsers.py](test_kcell_enbek_higgsfield_parsers.py)
 - [test_kolesa_site_parser.py](test_kolesa_site_parser.py)
 - [test_language_detection.py](test_language_detection.py)
 - [test_large_employer_site_parsers.py](test_large_employer_site_parsers.py)

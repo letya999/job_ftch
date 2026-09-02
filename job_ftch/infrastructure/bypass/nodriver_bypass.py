@@ -69,6 +69,17 @@ class _NodriverResponse:
         return self._body.encode("utf-8", errors="ignore")
 
 
+def _should_disable_chromium_sandbox() -> bool:
+    """Chromium's sandbox does not start in Docker as a non-root appuser.
+
+    Retrying with sandbox=False after a connect failure doubles launch time and
+    is a common source-deadline killer under production concurrency.
+    """
+    if getattr(os, "geteuid", lambda: 1000)() == 0:
+        return True
+    return Path("/.dockerenv").exists()
+
+
 def _default_browser_executable_path() -> str | None:
     configured = os.environ.get("JOB_FTCH_NODRIVER_BROWSER_EXECUTABLE_PATH", "").strip()
     if configured:
@@ -564,6 +575,8 @@ class NodriverBypass:
         viewport: dict[str, Any] | None,
     ) -> Any:
         sandbox = bool(config.get("sandbox", True))
+        if "sandbox" not in config and _should_disable_chromium_sandbox():
+            sandbox = False
         if getattr(os, "geteuid", lambda: 1000)() == 0:
             sandbox = False
 

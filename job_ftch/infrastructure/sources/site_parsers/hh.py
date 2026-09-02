@@ -60,6 +60,15 @@ _URL_FILTER = (
 )
 _LISTING_TIMESTAMP_RE = re.compile(r'"publicationTime"\s*:\s*\{[^}]*"@timestamp"\s*:\s*(\d+)')
 _MAX_DETAIL_REQUESTS = 10
+_PROXY_DOMAINS = [
+    "hh.ru",
+    "hh.kz",
+    "hh.uz",
+    "hh.by",
+    "hh1.az",
+    "headhunter.kg",
+    "rabota.by",
+]
 
 
 def _is_allowed_detail_host(detail_url: str, board_url: str) -> bool:
@@ -331,9 +340,13 @@ class HhParser:
             )
         ]
 
-    def runtime_defaults(self, url: str) -> dict[str, str]:
+    def runtime_defaults(self, url: str) -> dict[str, Any]:
         del url
-        return {"url_filter": _URL_FILTER}
+        return {
+            "url_filter": _URL_FILTER,
+            "captcha_authorized_domains": list(_PROXY_DOMAINS),
+            "proxy_rescue_allow_domains": list(_PROXY_DOMAINS),
+        }
 
     def parser_kind(self, url: str) -> str | None:
         del url

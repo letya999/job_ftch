@@ -182,6 +182,50 @@ class YadroParser:
             yield item
 
 
+_VTB_DETAIL_RE = re.compile(r"/career/(\d+)(?:/)?$")
+_VTB_LISTING_RE = re.compile(r"rabota-vtb\.ru/career(?:/?(?:\?|$))", re.IGNORECASE)
+
+
+def _vtb_has_detail_links(html: str, base_url: str) -> bool:
+    page = LexborHTMLParser(html)
+    return any(
+        _VTB_DETAIL_RE.search(urljoin(base_url, str(anchor.attributes.get("href") or "").strip()))
+        for anchor in page.css("a[href]")
+    )
+
+
+def _vtb_listing_fallbacks(html: str, base_url: str) -> list[str]:
+    seen: set[str] = set()
+    urls: list[str] = []
+    for anchor in LexborHTMLParser(html).css("a[href]"):
+        href = urljoin(base_url, str(anchor.attributes.get("href") or "").strip()).split("#", 1)[0]
+        if not _VTB_LISTING_RE.search(href) or _VTB_DETAIL_RE.search(href):
+            continue
+        if href in seen:
+            continue
+        seen.add(href)
+        urls.append(href)
+    return urls
+
+
+async def _vtb_listing_spec(spec: CareerSiteSpec, client: Any) -> CareerSiteSpec:
+    """Follow the IT landing page through to the numeric career listing."""
+    response = await client.get(spec.url, follow_redirects=True)
+    response.raise_for_status()
+    html = response.text
+    current_url = str(getattr(response, "url", spec.url) or spec.url)
+    if _vtb_has_detail_links(html, current_url):
+        return spec
+    for listing_url in _vtb_listing_fallbacks(html, current_url):
+        listing_spec = spec.model_copy(update={"url": listing_url})
+        listing_response = await client.get(listing_url, follow_redirects=True)
+        listing_response.raise_for_status()
+        listing_html_url = str(getattr(listing_response, "url", listing_url) or listing_url)
+        if _vtb_has_detail_links(listing_response.text, listing_html_url):
+            return listing_spec
+    return spec
+
+
 class VtbParser:
     domain_pattern = r"^https?://(?:rabota\.vtb\.ru|rabota-vtb\.ru)(?:/|$)"
     has_custom_parse = True
@@ -189,26 +233,35 @@ class VtbParser:
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
-        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+        return SiteRuntimeDefaults(
+            render=False,
+            wait="domcontentloaded",
+            extra={
+                "skip_ssl": True,
+                "proxy_rescue_allow_domains": ["rabota.vtb.ru", "rabota-vtb.ru"],
+            },
+        )
 
     def parser_kind(self, url: str) -> str | None:
         del url
         return None
 
     async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
-        return await _discover_detail_board(
-            spec, client, href_pattern=re.compile(r"/career/(\d+)(?:/)?$")
-        )
+        async with client_for_config(client, spec.monitor_config) as scoped:
+            listing_spec = await _vtb_listing_spec(spec, scoped)
+            return await _discover_detail_board(listing_spec, scoped, href_pattern=_VTB_DETAIL_RE)
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
-        async for item in _parse_detail_board(
-            spec,
-            client,
-            href_pattern=re.compile(r"/career/(\d+)(?:/)?$"),
-            parser_name="vtb_board",
-            company="ВТБ",
-        ):
-            yield item
+        async with client_for_config(client, spec.monitor_config) as scoped:
+            listing_spec = await _vtb_listing_spec(spec, scoped)
+            async for item in _parse_detail_board(
+                listing_spec,
+                scoped,
+                href_pattern=_VTB_DETAIL_RE,
+                parser_name="vtb_board",
+                company="ВТБ",
+            ):
+                yield item
 
 
 class AlfaBankParser:

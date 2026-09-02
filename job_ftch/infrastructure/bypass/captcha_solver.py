@@ -1024,6 +1024,33 @@ class CaptchaSolverBypass:
             self._cookie_cache.clear()
 
 
+def _iter_domain_values(raw: Any) -> list[str]:
+    if isinstance(raw, str):
+        return [part.strip() for part in raw.split(",") if part.strip()]
+    if isinstance(raw, (list, tuple, set, frozenset)):
+        values: list[str] = []
+        for item in raw:
+            text = str(item).strip()
+            if text:
+                values.append(text)
+        return values
+    return []
+
+
+def _authorized_domains_from_config(config: dict[str, Any], settings: Any) -> frozenset[str]:
+    """Union parser extras, bypass_config, and global captcha allowlists.
+
+    Site parsers write ``captcha_authorized_domains`` into monitor/bypass
+    config. The solver historically read only ``authorized_domains``, so
+    SuperJob/Ashby/Higgsfield allowlists never reached the paid solver.
+    """
+    collected: list[str] = []
+    for key in ("authorized_domains", "captcha_authorized_domains"):
+        collected.extend(_iter_domain_values(config.get(key)))
+    collected.extend(_iter_domain_values(getattr(settings, "captcha_authorized_domains", ())))
+    return frozenset(item.strip().lower().lstrip(".") for item in collected if item.strip())
+
+
 def _create_captcha_solver(
     bypass_config: dict[str, Any] | None = None,
 ) -> CaptchaSolverBypass:
@@ -1054,9 +1081,7 @@ def _create_captcha_solver(
         proxy_url=str(config.get("proxy_url", "")),
         enabled_providers=frozenset(settings.captcha_enabled_providers),
         provider_routes=provider_routes,
-        authorized_domains=frozenset(
-            config.get("authorized_domains", settings.captcha_authorized_domains)
-        ),
+        authorized_domains=_authorized_domains_from_config(config, settings),
     )
 
 

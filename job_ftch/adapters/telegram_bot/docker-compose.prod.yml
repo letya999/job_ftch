@@ -53,6 +53,7 @@ services:
       - ./.env.prod
     environment:
       JOB_FTCH_ENV: prod
+      JOB_FTCH_BROWSER_CHANNEL: ""
       JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml
       JOB_FTCH_STORE_DSN: postgresql://${POSTGRES_USER:-job_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-job_ftch}
       JOB_FTCH_QDRANT_URL: http://qdrant:6333

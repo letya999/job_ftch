@@ -52,6 +52,7 @@ class _Store:
 class _Runner:
     def __init__(self) -> None:
         self.store = _Store()
+        self.catalog_ids = ["career_site:example"]
 
     def get_runtime(self, tenant_id: str) -> SimpleNamespace:
         assert tenant_id == "ai_jobs"
@@ -67,6 +68,10 @@ class _Runner:
             emitted=1,
         )
 
+    async def list_sources(self, tenant_id: str) -> list[dict[str, str]]:
+        assert tenant_id == "ai_jobs"
+        return [{"source_id": source_id} for source_id in self.catalog_ids]
+
 
 @pytest.mark.asyncio
 async def test_tenant_health_reports_store_source_scheduler_and_publish_state() -> None:
@@ -79,3 +84,33 @@ async def test_tenant_health_reports_store_source_scheduler_and_publish_state() 
     assert payload["scheduler"]["last_error"] is None
     assert payload["publish"]["last_error"] == "rate limit"
     assert payload["publish"]["last_sent"] == 2
+
+
+@pytest.mark.asyncio
+async def test_tenant_health_ignores_stale_search_overlay_rows() -> None:
+    runner = _Runner()
+    now = datetime.now(UTC)
+    runner.store.health.append(
+        SourceHealth(
+            source_id="career_site:hirehi_ru_kw1",
+            source_kind="career_site",
+            source_name="hirehi_ru_kw1",
+            last_run_at=(now - timedelta(days=12)).isoformat(),
+            last_success_at=(now - timedelta(days=12)).isoformat(),
+            failure_streak=0,
+            success_count=4,
+            last_fetched=0,
+            last_emitted=0,
+            last_failed=0,
+            last_quarantined=0,
+            baseline_emitted=5.0,
+            drift_ratio=0.0,
+            degraded=True,
+            status="degraded",
+        )
+    )
+
+    payload = await _tenant_health(runner, "ai_jobs")  # type: ignore[arg-type]
+
+    assert payload["sources"]["total"] == 1
+    assert payload["sources"]["bad_source_ids"] == ["career_site:example"]
