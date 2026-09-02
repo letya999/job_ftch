@@ -106,7 +106,9 @@ async def test_higgsfield_parser_emits_ashby_api_payloads() -> None:
     class _AshbyClient:
         async def get(self, url: str, **_: object) -> _Response:
             if "careers.higgsfield.kz" in url:
-                response = _Response(text="<html>redirect</html>", url="https://jobs.ashbyhq.com/higgsfieldai")
+                response = _Response(
+                    text="<html>redirect</html>", url="https://jobs.ashbyhq.com/higgsfieldai"
+                )
                 return response
             return _Response(payload=listing, url=url)
 
