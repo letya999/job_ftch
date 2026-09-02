@@ -106,7 +106,7 @@ Persist session state between runs to simulate "returning user":
 - Visit count and last visit timestamp
 - Behavioral profile (average reading time, scroll patterns)
 
-**Storage:** `data/session_memory/{persona_id}.json`
+**Storage:** `.runtime/session_memory/{persona_id}.json`
 
 **Integration:** Call `SessionMemory.capture_from_browser()` before browser
 close. Call `SessionMemory.apply_to_browser()` after browser open.
