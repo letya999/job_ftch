@@ -1102,3 +1102,24 @@ def test_domain_authorization_suffix_matching() -> None:
 def test_empty_allowlist_authorizes_nothing() -> None:
     solver = CaptchaSolverBypass(authorized_domains=frozenset())
     assert not solver._domain_authorized("example.com")
+
+
+def test_factory_unions_parser_captcha_authorized_domains(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "job_ftch.config.get_settings",
+        lambda: SimpleNamespace(
+            captcha_provider="browser_wait",
+            captcha_provider_routes={},
+            captcha_solver_timeout_budget_seconds=10.0,
+            captcha_solver_backoff_seconds=1.0,
+            captcha_enabled_providers=frozenset(),
+            captcha_authorized_domains=["hh.ru"],
+        ),
+    )
+    solver = _create_captcha_solver(
+        {"captcha_authorized_domains": ["www.superjob.ru", "careers.higgsfield.kz"]}
+    )
+    assert solver._domain_authorized("www.superjob.ru")
+    assert solver._domain_authorized("careers.higgsfield.kz")
+    assert solver._domain_authorized("hh.ru")
+    assert not solver._domain_authorized("evil.test")

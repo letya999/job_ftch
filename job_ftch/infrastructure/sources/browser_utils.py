@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any
@@ -81,8 +82,44 @@ BROWSER_KEYS = frozenset(
 )
 
 _BROWSER_CLEANUP_TIMEOUT_SECONDS = 2.0
+_BROWSER_CLEANUP_CANCEL_DRAIN_SECONDS = 0.05
 _BROWSER_DRIVER_STALE_SECONDS = 180
 _BROWSER_TERMINATE_GRACE_SECONDS = 5.0
+_BROWSER_SESSION_SWITCH_PREFIX = "--job-ftch-session="
+_UNAVAILABLE_BROWSER_CHANNELS: set[str] = set()
+
+
+def _browser_session_switch(session_id: str) -> str:
+    return f"{_BROWSER_SESSION_SWITCH_PREFIX}{session_id}"
+
+
+def _proc_matches_session(signature: str, session_id: str) -> bool:
+    marker = _browser_session_switch(session_id).casefold()
+    return marker in signature
+
+
+def _remember_unavailable_browser_channel(channel: str) -> None:
+    cleaned = str(channel or "").strip()
+    if cleaned:
+        _UNAVAILABLE_BROWSER_CHANNELS.add(cleaned)
+
+
+def _effective_browser_channel(configured: Any) -> str | None:
+    """Return a Playwright channel to try, or None to use bundled Chromium.
+
+    Production images install Patchright's Chromium only. Retrying the default
+    ``chrome`` channel on every page burns the source deadline under load.
+    """
+    channel = str(configured or "").strip() or None
+    if channel is None:
+        return None
+    if channel in _UNAVAILABLE_BROWSER_CHANNELS:
+        return None
+    # PLAYWRIGHT_BROWSERS_PATH is the production-image signal that Chromium
+    # lives in the bundled cache, not as a system Chrome install.
+    if channel == "chrome" and os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+        return None
+    return channel
 
 
 def normalize_browser_timeout_ms(value: Any) -> int:
@@ -299,17 +336,14 @@ async def _await_browser_cleanup(
         return True
     except TimeoutError:
         task.cancel()
-        with suppress(asyncio.CancelledError, Exception):
-            await asyncio.wait_for(asyncio.shield(task), timeout=0.25)
+        with suppress(asyncio.CancelledError, TimeoutError, Exception):
+            await asyncio.wait_for(task, timeout=_BROWSER_CLEANUP_CANCEL_DRAIN_SECONDS)
         log.warning("browser.cleanup_timeout", step=label)
         return False
     except asyncio.CancelledError:
-        with suppress(asyncio.CancelledError, Exception):
-            await asyncio.wait_for(asyncio.shield(task), timeout=0.25)
-        if not task.done():
-            task.cancel()
-            with suppress(asyncio.CancelledError, Exception):
-                await task
+        task.cancel()
+        with suppress(asyncio.CancelledError, TimeoutError, Exception):
+            await asyncio.wait_for(task, timeout=_BROWSER_CLEANUP_CANCEL_DRAIN_SECONDS)
         log.warning("browser.cleanup_cancelled", step=label)
         raise
     except Exception as exc:
@@ -325,12 +359,19 @@ async def _unroute_page_before_close(page: Any) -> None:
     await _await_browser_cleanup(unroute_all(behavior="wait"), label="unroute_all")
 
 
-async def _cleanup_browser_stack(page: Any, context: Any, browser: Any | None = None) -> None:
-    """Close one browser stack inside a single shared cleanup deadline."""
+async def _cleanup_browser_stack(page: Any, context: Any, browser: Any | None = None) -> bool:
+    """Close one browser stack inside a single shared cleanup deadline.
+
+    Returns True when the process-owning close (browser, else context) finished.
+    Production teardown uses ``unroute_all(ignoreErrors)``: waiting for in-flight
+    routes was the dominant ``browser.cleanup_timeout`` source and left Chromium
+    alive after the budget expired.
+    """
     loop = asyncio.get_running_loop()
     total_budget = _BROWSER_CLEANUP_TIMEOUT_SECONDS
     deadline = loop.time() + total_budget
-    step_cap = max(0.001, min(0.5, total_budget / 5))
+    step_cap = max(0.001, min(0.5, total_budget / 4))
+    closed_ok = True
 
     async def _step(awaitable: Any, *, label: str, cap: float | None = None) -> bool:
         remaining = deadline - loop.time()
@@ -346,13 +387,11 @@ async def _cleanup_browser_stack(page: Any, context: Any, browser: Any | None = 
 
     unroute_all = getattr(page, "unroute_all", None)
     if callable(unroute_all):
-        drained = await _step(unroute_all(behavior="wait"), label="unroute_all", cap=step_cap)
-        if not drained:
-            await _step(
-                unroute_all(behavior="ignoreErrors"),
-                label="unroute_all.ignore_errors",
-                cap=step_cap,
-            )
+        await _step(
+            unroute_all(behavior="ignoreErrors"),
+            label="unroute_all.ignore_errors",
+            cap=step_cap,
+        )
 
     for target, method_name, label in (
         (page, "close", "page.close"),
@@ -361,7 +400,8 @@ async def _cleanup_browser_stack(page: Any, context: Any, browser: Any | None = 
     ):
         method = getattr(target, method_name, None)
         if callable(method):
-            await _step(method(), label=label, cap=step_cap)
+            closed_ok = await _step(method(), label=label, cap=step_cap)
+    return closed_ok
 
 
 def _proc_signature(proc: Any) -> str:
@@ -485,6 +525,40 @@ def reap_stale_browser_drivers(*, min_age_seconds: int = _BROWSER_DRIVER_STALE_S
     for proc in alive:
         with suppress(Exception):
             proc.kill()
+
+
+def terminate_session_browsers(
+    session_id: str,
+    *,
+    grace: float = _BROWSER_TERMINATE_GRACE_SECONDS,
+) -> None:
+    """Kill Chromium descendants launched with this session switch.
+
+    Used when graceful Playwright close times out. Sibling scrapes use a
+    different session id, so they are left alone.
+    """
+    marker = str(session_id or "").strip()
+    if not marker:
+        return
+    try:
+        import psutil
+    except ImportError:
+        return
+    targets = [
+        proc
+        for proc in _browser_descendants()
+        if _proc_matches_session(_proc_signature(proc), marker)
+    ]
+    if not targets:
+        return
+    for proc in targets:
+        with suppress(Exception):
+            proc.terminate()
+    _gone, alive = psutil.wait_procs(targets, timeout=grace)
+    for proc in alive:
+        with suppress(Exception):
+            proc.kill()
+    log.warning("browser.session_descendants_terminated", count=len(targets), session=marker[:12])
 
 
 def terminate_browser_descendants(
@@ -716,8 +790,9 @@ async def _open_playwright_page(
 ) -> AsyncIterator[Page]:
     settings = get_settings()
     headless = config.get("headless", settings.browser_headless)
-    channel = config.get("channel") or settings.browser_channel or None
+    channel = _effective_browser_channel(config.get("channel") or settings.browser_channel)
     stealth = config.get("stealth", True)
+    session_id = uuid.uuid4().hex
 
     bypass_ctx = await _resolve_bypass_context(config)
 
@@ -730,6 +805,7 @@ async def _open_playwright_page(
 
     if headless:
         launch_args.append("--headless=new")
+    launch_args.append(_browser_session_switch(session_id))
 
     launch_kwargs: dict[str, Any] = {
         "headless": headless,
@@ -778,6 +854,7 @@ async def _open_playwright_page(
                 label="browser.launch.channel",
             )
         except Exception:
+            _remember_unavailable_browser_channel(channel)
             log.info("browser.channel_fallback", channel=channel)
             launch_kwargs.pop("channel", None)
             browser = None
@@ -838,7 +915,9 @@ async def _open_playwright_page(
         # Windows when navigation was cancelled by a source deadline.  Close
         # the innermost resources first; every close is best-effort because a
         # target may already have been terminated by Patchright.
-        await _cleanup_browser_stack(page, context, browser)
+        closed = await _cleanup_browser_stack(page, context, browser)
+        if not closed:
+            terminate_session_browsers(session_id)
         reap_stale_browser_drivers()
 
 
@@ -864,8 +943,9 @@ async def _open_persistent_page(
     )
     owns_profile_dir = not bool(shared_profile_dir)
     headless = config.get("headless", settings.browser_headless)
-    channel = config.get("channel") or settings.browser_channel or None
+    channel = _effective_browser_channel(config.get("channel") or settings.browser_channel)
     stealth = config.get("stealth", True)
+    session_id = uuid.uuid4().hex
 
     bypass_ctx = await _resolve_bypass_context(config)
     persona_kw = bypass_ctx.context_kwargs() if bypass_ctx else {}
@@ -877,6 +957,7 @@ async def _open_persistent_page(
         args.append("--disable-http2")
     if headless:
         args.append("--headless=new")
+    args.append(_browser_session_switch(session_id))
 
     launch_kwargs: dict[str, Any] = {
         "user_data_dir": user_data_dir,
@@ -916,6 +997,7 @@ async def _open_persistent_page(
                 label="browser.launch_persistent_context.channel",
             )
         except Exception:
+            _remember_unavailable_browser_channel(channel)
             log.info("browser.channel_fallback", channel=channel)
             launch_kwargs.pop("channel", None)
             context = None
@@ -958,7 +1040,9 @@ async def _open_persistent_page(
             await page.goto(config["warmup_url"])
         yield page
     finally:
-        await _cleanup_browser_stack(page, context)
+        closed = await _cleanup_browser_stack(page, context)
+        if not closed:
+            terminate_session_browsers(session_id)
         reap_stale_browser_drivers()
         import shutil
 

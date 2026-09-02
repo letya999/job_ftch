@@ -24,6 +24,10 @@ class SuperJobRuParser:
             url_filter=r"superjob\.ru/vakansii/[a-z0-9-]+-\d+\.html$",
             include_if_detail_page=False,
             extra={
+                "bypass_capability": "cloudflare_challenge",
+                "bypass_capability_reason": "superjob_waf",
+                "challenge_retries": 1,
+                "persistent_context": True,
                 "captcha_authorized_domains": ["www.superjob.ru", "superjob.ru"],
                 "proxy_rescue_allow_domains": ["www.superjob.ru", "superjob.ru"],
             },

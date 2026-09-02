@@ -15,7 +15,6 @@ from job_ftch.domain.site_models import (
 from job_ftch.infrastructure.sources.monitors.shared import (
     MAX_JOBS,
     BoardGoneError,
-    fetch_page_text,
     normalize_job_location_type,
     normalize_salary_unit,
     truncated_rich_result,
@@ -153,6 +152,9 @@ async def discover(
 ) -> MonitorResult | list[DiscoveredPostingPayload]:
     board_url = spec.url
     token = spec.monitor_config.get("token") or _token_from_url(board_url)
+    if not token:
+        detected = await can_handle(board_url, client)
+        token = (detected or {}).get("token")
 
     if not token:
         raise ValueError(f"Cannot derive Ashby token from {board_url!r}")
@@ -198,20 +200,27 @@ async def can_handle(url: str, client: httpx.AsyncClient | None = None) -> dict[
     if client is None:
         return None
 
-    html = await fetch_page_text(url, client)
-    if html:
+    try:
+        response = await client.get(url, follow_redirects=True)
+        response.raise_for_status()
+    except Exception:
+        return None
+
+    html = str(getattr(response, "text", "") or "")
+    found = _token_from_url(str(getattr(response, "url", "") or ""))
+    if not found and html:
         for pattern in _PAGE_PATTERNS:
             match = pattern.search(html)
-            if match:
+            if match and match.group(1) not in _IGNORE_TOKENS:
                 found = match.group(1)
-                if found not in _IGNORE_TOKENS:
-                    count = await _fetch_job_count(found, client)
-                    result: dict[str, Any] = {"token": found}
-                    if count is not None:
-                        result["jobs"] = count
-                    return result
-
-    return None
+                break
+    if not found:
+        return None
+    count = await _fetch_job_count(found, client)
+    result: dict[str, Any] = {"token": found}
+    if count is not None:
+        result["jobs"] = count
+    return result
 
 
 register_monitor(

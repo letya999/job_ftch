@@ -22,7 +22,7 @@ from job_ftch.application.source_inputs import build_source_spec_from_input
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.config import Settings, get_settings
-from job_ftch.domain import ManagedCandidateProfile
+from job_ftch.domain import ManagedCandidateProfile, SourceHealth
 from job_ftch.infrastructure.auth.env_auth import EnvAuthProvider
 
 try:
@@ -66,12 +66,61 @@ def _worst_status(statuses: list[str]) -> str:
     return "ok"
 
 
+def _health_from_latest_run(item: SourceHealth, finished_at: datetime | None) -> bool:
+    if finished_at is None:
+        return False
+    run_at = _parse_health_datetime(item.last_run_at)
+    if run_at is None:
+        return False
+    finished = finished_at if finished_at.tzinfo is not None else finished_at.replace(tzinfo=UTC)
+    return abs((run_at - finished.astimezone(UTC)).total_seconds()) <= 30 * 60
+
+
+async def _catalog_source_ids(runner: TenantRunner, tenant_id: str) -> set[str]:
+    list_sources = getattr(runner, "list_sources", None)
+    if not callable(list_sources):
+        return set()
+    try:
+        listed = await list_sources(tenant_id)
+    except Exception:
+        logger.debug("health_catalog_unavailable", tenant_id=tenant_id)
+        return set()
+    return {
+        str(item.get("source_id"))
+        for item in listed
+        if isinstance(item, dict) and item.get("source_id")
+    }
+
+
+def _live_source_health(
+    source_health: list[SourceHealth],
+    *,
+    catalog_ids: set[str],
+    finished_at: datetime | None,
+) -> list[SourceHealth]:
+    if not catalog_ids and finished_at is None:
+        return source_health
+    live: list[SourceHealth] = []
+    for item in source_health:
+        if catalog_ids and item.source_id in catalog_ids:
+            live.append(item)
+            continue
+        if _health_from_latest_run(item, finished_at):
+            live.append(item)
+    return live
+
+
 async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]:
     runtime = runner.get_runtime(tenant_id)
     store = runtime.store
     try:
         summary = await runner.get_status(tenant_id)
-        source_health = await store.list_source_health()
+        catalog_ids = await _catalog_source_ids(runner, tenant_id)
+        source_health = _live_source_health(
+            await store.list_source_health(),
+            catalog_ids=catalog_ids,
+            finished_at=summary.finished_at if summary is not None else None,
+        )
         scheduler_state = {
             key: await store.get_run_state(key)
             for key in (

@@ -29,7 +29,6 @@ _DOMAIN_PATTERN = (
     r"(?:www\.)?pracuj\.pl|"
     r"(?:www\.)?cypruswork\.com|"
     r"jobs\.ashbyhq\.com|"
-    r"careers\.higgsfield\.kz|"
     r"job\.beeline\.ru"
     r")(?:/|$)"
 )
@@ -58,12 +57,10 @@ class ProtectedBrowserDefaultsParser:
                 "settle_seconds": 5,
                 "captcha_authorized_domains": [
                     "jobs.ashbyhq.com",
-                    "careers.higgsfield.kz",
                     "job.beeline.ru",
                 ],
                 "proxy_rescue_allow_domains": [
                     "jobs.ashbyhq.com",
-                    "careers.higgsfield.kz",
                     "job.beeline.ru",
                 ],
             },
