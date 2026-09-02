@@ -32,6 +32,17 @@ def _is_probable_job_link(url: str) -> bool:
     return is_probable_job_url(url)
 
 
+def _http_url_values(raw: object) -> list[str]:
+    """Keep browser-evaluated values at the untrusted JS/Python boundary."""
+    if not isinstance(raw, list):
+        return []
+    return [
+        value.strip()
+        for value in raw
+        if isinstance(value, str) and value.strip().startswith("http")
+    ]
+
+
 MAX_URLS = 10_000
 _MAX_HTML_FOR_BOARD_CHECK = 500_000
 # One-level expansion is a recovery path, not a site crawl.  It is bounded so
@@ -353,12 +364,8 @@ async def visible_job_links_on_page(
     except Exception as exc:
         log.info("dom.visible_hrefs_failed", error=type(exc).__name__)
         return []
-    if not isinstance(raw, list):
-        return []
     filtered: set[str] = set()
-    for item in raw:
-        if not isinstance(item, str) or not item.startswith("http"):
-            continue
+    for item in _http_url_values(raw):
         if matcher:
             if matcher.search(item):
                 filtered.add(item)
@@ -440,7 +447,7 @@ async def _extract_links_rendered(
     raise_if_browser_challenge(html, url=board_url)
     check_ats_redirect(html, board_url)
 
-    urls: list[str] = await page.evaluate(_RENDERED_HREF_JS)
+    urls = _http_url_values(await page.evaluate(_RENDERED_HREF_JS))
 
     filtered: set[str] = set()
     for url in urls:

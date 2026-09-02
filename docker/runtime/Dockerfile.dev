@@ -29,7 +29,7 @@ RUN patchright install-deps firefox
 RUN python -m camoufox fetch
 RUN python -m cloakbrowser install
 
-COPY scripts/verify_browser_runtime.py ./scripts/verify_browser_runtime.py
+COPY . /app
 RUN python scripts/verify_browser_runtime.py
 
 ENV PYTHONPATH=/app
