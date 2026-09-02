@@ -606,9 +606,8 @@ class NodriverBypass:
         )
         if proxy_url:
             tab = await browser.create_context(
-                url="about:blank",
                 proxy_server=proxy_url,
-                proxy_bypass_list=["localhost"],
+                proxy_bypass_list="localhost",
             )
         else:
             tab = await browser.get("about:blank")

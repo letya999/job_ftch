@@ -91,6 +91,15 @@ def test_browser_challenge_is_not_a_listing_page() -> None:
         )
 
 
+def test_geo_block_page_is_not_a_listing_page() -> None:
+    with pytest.raises(BrowserChallengeError):
+        raise_if_browser_challenge(
+            "<html><title>Отключите VPN</title><body>"
+            "Доступ ограничен: международный трафик временно отключён.</body></html>",
+            url="https://job.beeline.ru/vacancies",
+        )
+
+
 class _DatedSiteParser:
     has_custom_parse = True
     supports_discover = False

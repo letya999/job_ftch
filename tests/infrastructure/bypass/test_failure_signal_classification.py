@@ -44,6 +44,12 @@ from job_ftch.infrastructure.bypass.failure_signal import (
         (402, b"Payment Required", None, FailureKind.PAYMENT_REQUIRED),
         (498, b"Anti-bot block", None, FailureKind.BLOCKED),
         (499, b"Client Closed Request", None, FailureKind.BLOCKED),
+        (
+            200,
+            "Отключите VPN: международный трафик временно ограничен".encode(),
+            None,
+            FailureKind.BLOCKED_IP,
+        ),
     ],
 )
 def test_failure_signal_classifies_challenge_and_transport_patterns(

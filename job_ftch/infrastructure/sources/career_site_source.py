@@ -853,7 +853,11 @@ class CareerSiteSource(Source["RawItem"]):
 
         initial_bypass = self.spec.bypass or "auto"
         bypass_config = dict(self.spec.bypass_config)
-        for config_key in ("proxy_rescue_allow_domains", "captcha_authorized_domains"):
+        for config_key in (
+            "proxy_rescue_allow_domains",
+            "captcha_authorized_domains",
+            "proxy_geo",
+        ):
             parser_domains = self.spec.monitor_config.get(config_key)
             if parser_domains:
                 bypass_config[config_key] = parser_domains
@@ -2151,7 +2155,9 @@ class CareerSiteSource(Source["RawItem"]):
                 continue
             if self._bypass_ctx:
                 self._bypass_ctx.record_success(candidate.url)
-            yield payload_to_raw_item(payload, self.spec, source_name)
+            item = payload_to_raw_item(payload, self.spec, source_name)
+            self.stats.zero_reason = None
+            yield item
 
         urls_to_scrape = {c.url for c in candidates if c.rich_payload is None}
         if not urls_to_scrape:
@@ -2179,6 +2185,7 @@ class CareerSiteSource(Source["RawItem"]):
         ranked_generic = _rank_detail_urls(urls_to_scrape - seen_trusted, self.spec.url)
         ranked = [*ranked_trusted, *ranked_generic]
         async for item in self._iter_scraped_detail_items(ranked, scraper_chain, source_name):
+            self.stats.zero_reason = None
             yield item
 
     async def _scrape_detail_url_to_raw_item(
