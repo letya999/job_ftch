@@ -4,6 +4,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -207,6 +208,37 @@ def test_timeout_result_is_a_watchdog_deadline_failure() -> None:
     assert result["eviction_kind"] == "task_watchdog"
     assert result["deadline_exceeded"] is True
     assert result["elapsed_seconds"] == 12.35
+
+
+def test_timeout_result_preserves_live_source_evidence() -> None:
+    module = _load_script_module()
+    source_result = SourceFetchResult("career_site:slow", "career_site", "slow")
+    source = SimpleNamespace(
+        spec=CareerSiteSpec(url="https://slow.example.test/jobs", source_name="slow"),
+        stats=SimpleNamespace(
+            zero_reason=SimpleNamespace(value="all_scrapers_failed"),
+            parser_urls_discovered=12,
+            detail_attempted=3,
+            detail_protection_failures=1,
+            monitored=12,
+            source_partial=False,
+            truncated=False,
+            monitor_truncated=0,
+        ),
+        bypass_strategy=None,
+    )
+    live_probe = module._LiveProbe(source, source_result, [])
+
+    result = module._timeout_result(
+        "https://slow.example.test/jobs",
+        elapsed_seconds=12.345,
+        live_probe=live_probe,
+    )
+
+    assert result["deadline_exceeded"] is True
+    assert result["terminal_outcome"] == "detail_extraction_failed"
+    assert result["stats"]["detail_attempted"] == 3
+    assert result["stats"]["parser_urls_discovered"] == 12
 
 
 def test_probe_marks_items_from_partial_source_as_not_completed() -> None:

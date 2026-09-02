@@ -131,20 +131,51 @@ async def test_nodriver_recovers_corrupt_shared_profile(monkeypatch, tmp_path):
     class _FakeNodriver:
         async def start(self, **kwargs):
             starts.append(kwargs["user_data_dir"])
-            if len(starts) == 1:
+            if len(starts) <= 2:
                 raise Exception("Failed to connect to browser")
             return _FakeBrowser()
 
     monkeypatch.setattr(nodriver_bypass, "nodriver", _FakeNodriver())
 
     async with nodriver_bypass.NodriverBypass().open_page(
-        {"persistent_context": True, "_profile_dir": str(profile)}
+        {"persistent_context": True, "_profile_dir": str(profile), "sandbox": False}
     ):
         pass
 
-    assert starts == [str(profile.resolve()), str(profile.resolve())]
-    assert not (profile / "stale-lock").exists()
-    assert any((tmp_path / "_quarantine").glob("profile.*"))
+    assert starts[0] == str(profile.resolve())
+    assert starts[1] == starts[0]
+    assert len(starts) == 3
+    assert starts[2] != starts[0]
+    assert starts[2].startswith("nodriver_recovery_profile_") or starts[2].split("\\")[
+        -1
+    ].startswith("nodriver_recovery_profile_")
+    quarantined = list((tmp_path / "_quarantine").glob("profile.*"))
+    assert len(quarantined) == 1
+    assert (quarantined[0] / "stale-lock").exists()
+
+
+@pytest.mark.asyncio
+async def test_nodriver_keeps_shared_profile_when_clean_recovery_also_fails(monkeypatch, tmp_path):
+    import job_ftch.infrastructure.bypass.nodriver_bypass as nodriver_bypass
+
+    profile = tmp_path / "profile"
+    profile.mkdir()
+
+    class _FakeNodriver:
+        async def start(self, **kwargs):
+            del kwargs
+            raise Exception("Failed to connect to browser")
+
+    monkeypatch.setattr(nodriver_bypass, "nodriver", _FakeNodriver())
+
+    with pytest.raises(Exception, match="Failed to connect"):
+        async with nodriver_bypass.NodriverBypass().open_page(
+            {"persistent_context": True, "_profile_dir": str(profile), "sandbox": False}
+        ):
+            pass
+
+    assert profile.exists()
+    assert not (tmp_path / "_quarantine").exists()
 
 
 @pytest.mark.asyncio

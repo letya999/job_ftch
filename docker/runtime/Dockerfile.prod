@@ -26,7 +26,7 @@ RUN sed -i 's/^Components: main$/Components: main contrib/' \
         ttf-mscorefonts-installer \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /opt/job-ftch-home /opt/playwright && chown -R appuser:appuser /opt/job-ftch-home /opt/playwright
+RUN mkdir -p /opt/job-ftch-home /opt/playwright && chown appuser:appuser /opt/job-ftch-home /opt/playwright
 
 # Dependency metadata only, with a placehnewer package so the wheel can build. The verify
 # script is copied after the installs on purpose: copying it here tied the ~1.1 GB install
@@ -42,12 +42,14 @@ RUN patchright install --with-deps chromium
 # `camoufox fetch` only downloads the binary, so without this the tier imports fine and
 # then dies at launch with "libgtk-3.so.0: cannot open shared object file".
 RUN patchright install-deps firefox
+RUN mkdir -p /opt/job-ftch-home/.cache/camoufox \
+    && chown appuser:appuser /opt/job-ftch-home/.cache/camoufox
 RUN python -m camoufox fetch
 RUN python -m cloakbrowser install
-RUN chown -R appuser:appuser /opt/job-ftch-home /opt/playwright
 
 COPY --chown=appuser:appuser . /app
-RUN mkdir -p /app/.runtime && chown -R appuser:appuser /app /app/.runtime
+RUN mkdir -p /app/.runtime /app/artifacts \
+    && chown appuser:appuser /app/.runtime /app/artifacts
 
 COPY scripts/verify_browser_runtime.py ./scripts/verify_browser_runtime.py
 

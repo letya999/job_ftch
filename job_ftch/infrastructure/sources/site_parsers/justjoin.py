@@ -21,6 +21,7 @@ _DOMAIN_PATTERN = r"justjoin\.it"
 class JustjoinItParser:
     domain_pattern = _DOMAIN_PATTERN
     has_custom_parse = True
+    terminal_on_error = True
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url

@@ -201,7 +201,7 @@ def test_deadline_preserves_specific_zero_outcome_but_marks_partial() -> None:
 
     _capture_source_stats(source, result)
 
-    assert result.terminal_outcome == "detail_extraction_failed"
+    assert result.terminal_outcome == "listing_discovery_failed"
     assert result.completion_state == "partial"
 
 

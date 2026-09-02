@@ -13,6 +13,8 @@ from job_ftch.infrastructure.sources.career_site import client_for_config
 from job_ftch.infrastructure.sources.career_site_source import (
     CareerSiteSource,
     FetchStats,
+    ZeroYieldReason,
+    _classified_failure,
     _is_valid_detail_candidate,
 )
 from job_ftch.infrastructure.sources.embedded_state_utils import (
@@ -60,6 +62,23 @@ class FakeHttpClient:
     async def get(self, url: str, *, follow_redirects: bool = True):  # type: ignore[no-untyped-def]
         del follow_redirects
         return self._responses[url]
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code", "expected"),
+    [
+        (TimeoutError("request timeout"), None, ZeroYieldReason.TRANSPORT_ERROR),
+        (RuntimeError("server error"), 500, ZeroYieldReason.UPSTREAM_ERROR),
+        (TypeError("unhashable type: list"), None, ZeroYieldReason.MONITOR_ERROR),
+    ],
+)
+def test_source_failures_are_not_relabelled_as_protected(
+    error: Exception, status_code: int | None, expected: ZeroYieldReason
+) -> None:
+    reason, captcha_type = _classified_failure(error, status_code=status_code)
+
+    assert reason == expected
+    assert captcha_type is None
 
 
 class _FakeManagedClient:

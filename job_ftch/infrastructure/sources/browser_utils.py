@@ -284,29 +284,37 @@ def _install_patchright_cancellation_fix() -> None:
         setattr(RouteHandler, _PATCHRIGHT_ROUTE_FIX_ATTR, True)
 
 
-async def _await_browser_cleanup(awaitable: Any, *, label: str) -> None:
+async def _await_browser_cleanup(
+    awaitable: Any,
+    *,
+    label: str,
+    timeout_seconds: float | None = None,
+) -> bool:
     task = asyncio.ensure_future(awaitable)
+    timeout = (
+        _BROWSER_CLEANUP_TIMEOUT_SECONDS if timeout_seconds is None else max(0.0, timeout_seconds)
+    )
     try:
-        await asyncio.wait_for(task, timeout=_BROWSER_CLEANUP_TIMEOUT_SECONDS)
+        await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+        return True
     except TimeoutError:
         task.cancel()
         with suppress(asyncio.CancelledError, Exception):
-            await task
+            await asyncio.wait_for(asyncio.shield(task), timeout=0.25)
         log.warning("browser.cleanup_timeout", step=label)
+        return False
     except asyncio.CancelledError:
-        task.cancel()
         with suppress(asyncio.CancelledError, Exception):
-            await task
+            await asyncio.wait_for(asyncio.shield(task), timeout=0.25)
+        if not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await task
         log.warning("browser.cleanup_cancelled", step=label)
+        raise
     except Exception as exc:
         log.debug("browser.cleanup_failed", step=label, error=type(exc).__name__)
-
-
-async def _call_browser_cleanup(target: Any, method_name: str, *, label: str) -> None:
-    method = getattr(target, method_name, None)
-    if not callable(method):
-        return
-    await _await_browser_cleanup(method(), label=label)
+        return False
 
 
 async def _unroute_page_before_close(page: Any) -> None:
@@ -314,7 +322,46 @@ async def _unroute_page_before_close(page: Any) -> None:
     unroute_all = getattr(page, "unroute_all", None)
     if not callable(unroute_all):
         return
-    await _await_browser_cleanup(unroute_all(behavior="ignoreErrors"), label="unroute_all")
+    await _await_browser_cleanup(unroute_all(behavior="wait"), label="unroute_all")
+
+
+async def _cleanup_browser_stack(page: Any, context: Any, browser: Any | None = None) -> None:
+    """Close one browser stack inside a single shared cleanup deadline."""
+    loop = asyncio.get_running_loop()
+    total_budget = _BROWSER_CLEANUP_TIMEOUT_SECONDS
+    deadline = loop.time() + total_budget
+    step_cap = max(0.001, min(0.5, total_budget / 5))
+
+    async def _step(awaitable: Any, *, label: str, cap: float | None = None) -> bool:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            return False
+        return await _await_browser_cleanup(
+            awaitable,
+            label=label,
+            timeout_seconds=min(remaining, cap) if cap is not None else remaining,
+        )
+
+    unroute_all = getattr(page, "unroute_all", None)
+    if callable(unroute_all):
+        drained = await _step(unroute_all(behavior="wait"), label="unroute_all", cap=step_cap)
+        if not drained:
+            await _step(
+                unroute_all(behavior="ignoreErrors"),
+                label="unroute_all.ignore_errors",
+                cap=step_cap,
+            )
+
+    for target, method_name, label in (
+        (page, "close", "page.close"),
+        (context, "close", "context.close"),
+        (browser, "close", "browser.close"),
+    ):
+        method = getattr(target, method_name, None)
+        if callable(method):
+            await _step(method(), label=label, cap=step_cap)
 
 
 def _proc_signature(proc: Any) -> str:
@@ -791,10 +838,7 @@ async def _open_playwright_page(
         # Windows when navigation was cancelled by a source deadline.  Close
         # the innermost resources first; every close is best-effort because a
         # target may already have been terminated by Patchright.
-        await _unroute_page_before_close(page)
-        await _call_browser_cleanup(page, "close", label="page.close")
-        await _call_browser_cleanup(context, "close", label="context.close")
-        await _call_browser_cleanup(browser, "close", label="browser.close")
+        await _cleanup_browser_stack(page, context, browser)
         reap_stale_browser_drivers()
 
 
@@ -914,9 +958,7 @@ async def _open_persistent_page(
             await page.goto(config["warmup_url"])
         yield page
     finally:
-        await _unroute_page_before_close(page)
-        await _call_browser_cleanup(page, "close", label="page.close")
-        await _call_browser_cleanup(context, "close", label="context.close")
+        await _cleanup_browser_stack(page, context)
         reap_stale_browser_drivers()
         import shutil
 

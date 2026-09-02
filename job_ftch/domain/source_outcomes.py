@@ -15,5 +15,11 @@ SourceOutcome = Literal[
     "unconfirmed_empty",
     "no_open_vacancies",
     "board_gone",
+    "source_error",
+    "transport_error",
+    "upstream_error",
+    "parser_error",
+    "policy_not_scraped",
+    "rate_limited",
     "failed",
 ]

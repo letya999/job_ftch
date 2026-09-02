@@ -31,6 +31,9 @@ except ImportError:
 
 _PROFILE_LOCKS: dict[str, asyncio.Lock] = {}
 _PROFILE_LOCKS_GUARD = asyncio.Lock()
+# ponytail: one process-wide launch lock; per-profile locks serialize normal
+# use, while Chromium startup itself is fragile under concurrent spawns.
+_NODRIVER_START_LOCK = asyncio.Lock()
 logger = structlog.get_logger(__name__)
 
 
@@ -476,6 +479,21 @@ class NodriverBypass:
         current_user_data_dir = user_data_dir
         current_owns_profile_dir = owns_profile_dir
         recovery_attempted = False
+        sandbox_fallback_attempted = False
+        current_config = config
+        failed_shared_profile: str | None = None
+
+        async def _quarantine_recovered_profile() -> None:
+            if failed_shared_profile is None:
+                return
+            profile_lock = await _profile_lock_for(failed_shared_profile)
+            async with profile_lock:
+                if _quarantine_profile_dir(failed_shared_profile):
+                    logger.warning(
+                        "nodriver_profile_quarantined_after_clean_profile_succeeded",
+                        profile_hash=Path(failed_shared_profile).name,
+                    )
+
         while True:
             profile_lock = (
                 await _profile_lock_for(current_user_data_dir) if current_user_data_dir else None
@@ -485,7 +503,7 @@ class NodriverBypass:
                     async with (
                         profile_lock,
                         self._open_page_unlocked(
-                            config,
+                            current_config,
                             browser_args=browser_args,
                             user_data_dir=current_user_data_dir,
                             owns_profile_dir=current_owns_profile_dir,
@@ -494,10 +512,11 @@ class NodriverBypass:
                         ) as page,
                     ):
                         yield page
+                    await _quarantine_recovered_profile()
                     return
 
                 async with self._open_page_unlocked(
-                    config,
+                    current_config,
                     browser_args=browser_args,
                     user_data_dir=current_user_data_dir,
                     owns_profile_dir=current_owns_profile_dir,
@@ -505,8 +524,18 @@ class NodriverBypass:
                     viewport=viewport if isinstance(viewport, dict) else None,
                 ) as page:
                     yield page
+                await _quarantine_recovered_profile()
                 return
             except Exception as exc:
+                if (
+                    not sandbox_fallback_attempted
+                    and "sandbox" not in config
+                    and _is_nodriver_connect_failure(exc)
+                ):
+                    sandbox_fallback_attempted = True
+                    current_config = {**config, "sandbox": False}
+                    logger.warning("nodriver_sandbox_fallback_after_connect_failure")
+                    continue
                 if (
                     recovery_attempted
                     or not current_user_data_dir
@@ -515,15 +544,13 @@ class NodriverBypass:
                 ):
                     raise
                 recovery_attempted = True
-                if _quarantine_profile_dir(current_user_data_dir):
-                    logger.warning(
-                        "nodriver_profile_quarantined_after_connect_failure",
-                        profile_hash=Path(current_user_data_dir).name,
-                    )
-                    continue
+                failed_shared_profile = current_user_data_dir
                 current_user_data_dir = tempfile.mkdtemp(prefix="nodriver_recovery_profile_")
                 current_owns_profile_dir = True
-                logger.warning("nodriver_profile_recovery_using_temp_profile")
+                logger.warning(
+                    "nodriver_profile_recovery_using_temp_profile",
+                    profile_hash=Path(str(user_data_dir)).name,
+                )
 
     @asynccontextmanager
     async def _open_page_unlocked(
@@ -539,16 +566,41 @@ class NodriverBypass:
         sandbox = bool(config.get("sandbox", True))
         if getattr(os, "geteuid", lambda: 1000)() == 0:
             sandbox = False
-        browser = await nodriver.start(
-            headless=bool(config.get("headless", True)),
-            user_data_dir=user_data_dir,
-            browser_executable_path=self._browser_executable_path,
-            browser_args=browser_args,
-            # Chromium refuses its sandbox when the worker runs as root (the
-            # production container does). Keep it enabled for ordinary users.
+
+        async def _start() -> Any:
+            async with _NODRIVER_START_LOCK:
+                return await nodriver.start(
+                    headless=bool(config.get("headless", True)),
+                    user_data_dir=user_data_dir,
+                    browser_executable_path=self._browser_executable_path,
+                    browser_args=browser_args,
+                    # Chromium refuses its sandbox when the worker runs as root.
+                    # Keep it enabled for ordinary users.
+                    sandbox=sandbox,
+                    lang=self._lang or str(config.get("locale", "en-US")),
+                )
+
+        started_at = time.monotonic()
+        logger.info(
+            "nodriver_starting",
+            uid=getattr(os, "geteuid", lambda: None)(),
+            executable_exists=bool(
+                self._browser_executable_path and Path(self._browser_executable_path).is_file()
+            ),
+            persistent_profile=bool(user_data_dir and not owns_profile_dir),
             sandbox=sandbox,
-            lang=self._lang or str(config.get("locale", "en-US")),
         )
+        try:
+            browser = await _start()
+        except Exception as exc:
+            if not _is_nodriver_connect_failure(exc):
+                raise
+            from job_ftch.infrastructure.sources.browser_utils import reap_stale_browser_drivers
+
+            reap_stale_browser_drivers()
+            await asyncio.sleep(0.1)
+            browser = await _start()
+        logger.info("nodriver_started", elapsed_seconds=round(time.monotonic() - started_at, 3))
         proxy_url = (
             config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY") if use_proxy else None
         )
@@ -575,9 +627,7 @@ class NodriverBypass:
                 )
             yield page
         finally:
-            stop_result = browser.stop()
-            if inspect.isawaitable(stop_result):
-                await stop_result
+            await _close_nodriver_browser(browser)
             if user_data_dir is not None and owns_profile_dir:
                 shutil.rmtree(user_data_dir, ignore_errors=True)
 
@@ -622,24 +672,45 @@ def _is_nodriver_connect_failure(exc: Exception) -> bool:
     return "failed to connect to browser" in message
 
 
-def _playwright_eval_expression(expression: str) -> str:
-    stripped = expression.strip()
-    if stripped.startswith("() =>") or stripped.startswith("async () =>"):
-        return f"({expression})()"
-    if stripped.startswith("function"):
-        return f"({expression})()"
-    return expression
+async def _close_nodriver_browser(browser: Any) -> None:
+    """Close nodriver's CDP transport and reap its subprocess before loop shutdown."""
+    from job_ftch.infrastructure.sources.browser_utils import _await_browser_cleanup
+
+    close = getattr(browser, "aclose", None)
+    process = getattr(browser, "_process", None)
+    if callable(close):
+        await _await_browser_cleanup(close(), label="nodriver.browser.aclose")
+        if process is not None and getattr(process, "returncode", None) is None:
+            with suppress(ProcessLookupError):
+                process.terminate()
+            wait = getattr(process, "wait", None)
+            if callable(wait) and not await _await_browser_cleanup(
+                wait(), label="nodriver.browser.wait"
+            ):
+                with suppress(ProcessLookupError):
+                    process.kill()
+                await _await_browser_cleanup(wait(), label="nodriver.browser.kill_wait")
+        return
+
+    stop = getattr(browser, "stop", None)
+    if callable(stop):
+        result = stop()
+        if inspect.isawaitable(result):
+            await _await_browser_cleanup(result, label="nodriver.browser.stop")
 
 
 def _quarantine_profile_dir(user_data_dir: str) -> bool:
+    """Move one proven-bad shared profile and retain only its newest snapshot."""
     path = Path(user_data_dir)
     if not path.exists():
         return True
     quarantine_root = path.parent / "_quarantine"
-    target = quarantine_root / f"{path.name}.{int(time.time())}.{os.getpid()}"
+    target = quarantine_root / f"{path.name}.{time.time_ns()}.{os.getpid()}"
     try:
         quarantine_root.mkdir(parents=True, exist_ok=True)
         shutil.move(str(path), str(target))
+        for stale in sorted(quarantine_root.glob(f"{path.name}.*"))[:-1]:
+            shutil.rmtree(stale, ignore_errors=True)
     except OSError as exc:
         logger.warning(
             "nodriver_profile_quarantine_failed",
@@ -648,6 +719,15 @@ def _quarantine_profile_dir(user_data_dir: str) -> bool:
         )
         return False
     return True
+
+
+def _playwright_eval_expression(expression: str) -> str:
+    stripped = expression.strip()
+    if stripped.startswith("() =>") or stripped.startswith("async () =>"):
+        return f"({expression})()"
+    if stripped.startswith("function"):
+        return f"({expression})()"
+    return expression
 
 
 def _materialize_runtime_value(raw: Any) -> Any:

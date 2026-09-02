@@ -147,6 +147,29 @@ class _EmptySiteParser:
             yield
 
 
+class _PolicyLimitedDiscoveryParser:
+    has_custom_parse = True
+    supports_discover = True
+    terminal_on_empty = True
+    parser_name = "policy_limited"
+
+    async def discover(self, spec: CareerSiteSpec, client: object) -> list[str]:
+        del spec, client
+        return []
+
+
+class _TerminalErrorParser:
+    has_custom_parse = True
+    supports_discover = False
+    terminal_on_error = True
+    parser_name = "terminal_error"
+
+    async def parse(self, spec: CareerSiteSpec, client: object):  # type: ignore[no-untyped-def]
+        del spec, client
+        raise TypeError("malformed API payload")
+        yield  # pragma: no cover
+
+
 def test_should_enable_render_on_monitor_retry_for_browser_tiers() -> None:
     browser = SimpleNamespace(requires_browser=True)
     http_only = SimpleNamespace(requires_browser=False)
@@ -256,6 +279,52 @@ async def test_pinned_special_parser_empty_is_terminal(monkeypatch: MonkeyPatch)
     assert source.stats.requested_parser == "empty_special"
     assert source.stats.actual_parser == "empty_special"
     assert source.stats.monitor_attempts == []
+
+
+@pytest.mark.asyncio
+async def test_discovery_parser_terminal_empty_is_policy_outcome(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from job_ftch.infrastructure.sources.career_site_source import ZeroYieldReason
+
+    source = CareerSiteSource(
+        spec=CareerSiteSpec(url="https://example.com/jobs", source_name="example"),
+        http_client=object(),
+        auth=MagicMock(),
+    )
+    source.bypass_strategy = _NoopBypass()
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser_for_spec",
+        lambda _: _PolicyLimitedDiscoveryParser(),
+    )
+
+    assert [item async for item in source._try_site_parser(object())] == []
+    assert source._parser_failure_is_terminal is True
+    assert source.stats.zero_reason == ZeroYieldReason.POLICY_NOT_SCRAPED
+
+
+@pytest.mark.asyncio
+async def test_parser_terminal_error_does_not_fall_through_to_dom(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from job_ftch.infrastructure.sources.career_site_source import ZeroYieldReason
+
+    source = CareerSiteSource(
+        spec=CareerSiteSpec(url="https://example.com/jobs", source_name="example"),
+        http_client=object(),
+        auth=MagicMock(),
+    )
+    source.bypass_strategy = _NoopBypass()
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser_for_spec",
+        lambda _: _TerminalErrorParser(),
+    )
+
+    with pytest.raises(TypeError, match="malformed API payload"):
+        _ = [item async for item in source._try_site_parser(object())]
+
+    assert source._parser_failure_is_terminal is True
+    assert source.stats.zero_reason == ZeroYieldReason.PARSER_ERROR
 
 
 def test_resolve_scraper_chain_prefers_json_ld_for_generic_and_dom() -> None:

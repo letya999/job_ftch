@@ -412,7 +412,10 @@ def looks_like_listing_url(url: str, *, board_url: str | None = None) -> bool:
 
 
 def rank_job_urls(urls: list[str] | set[str], *, board_url: str | None = None) -> list[str]:
-    scored = [(url, score_job_url(url, board_url=board_url)) for url in set(urls)]
+    scored = [
+        (url, score_job_url(url, board_url=board_url))
+        for url in {value for value in urls if isinstance(value, str)}
+    ]
     positives = [(url, score) for url, score in scored if score > 0]
     chosen = positives or scored
     chosen.sort(key=lambda item: (-item[1], item[0]))

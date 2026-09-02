@@ -98,6 +98,30 @@ class ZeroYieldReason(StrEnum):
     SOFT_403_WITH_CONTENT = "soft_403_with_content"
     STALE_URL = "stale_url"
     PARSER_GAP = "parser_gap"
+    MONITOR_ERROR = "monitor_error"
+    TRANSPORT_ERROR = "transport_error"
+    UPSTREAM_ERROR = "upstream_error"
+    PARSER_ERROR = "parser_error"
+    POLICY_NOT_SCRAPED = "policy_not_scraped"
+    RATE_LIMITED = "rate_limited"
+
+
+_TYPED_FAILURE_REASONS = frozenset(
+    {
+        ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT,
+        ZeroYieldReason.WAF_CHALLENGE,
+        ZeroYieldReason.PROVIDER_TUNNEL_DENIED,
+        ZeroYieldReason.SOFT_403_WITH_CONTENT,
+        ZeroYieldReason.STALE_URL,
+        ZeroYieldReason.BOARD_GONE,
+        ZeroYieldReason.MONITOR_ERROR,
+        ZeroYieldReason.TRANSPORT_ERROR,
+        ZeroYieldReason.UPSTREAM_ERROR,
+        ZeroYieldReason.PARSER_ERROR,
+        ZeroYieldReason.POLICY_NOT_SCRAPED,
+        ZeroYieldReason.RATE_LIMITED,
+    }
+)
 
 
 @dataclass
@@ -237,25 +261,14 @@ def _has_substantial_html_content(body: bytes | None) -> bool:
     return len(visible) >= 200
 
 
-def _classified_zero_reason(
-    exc: BaseException | None,
-    *,
-    status_code: int | None = None,
-    response_body: bytes | None = None,
-) -> ZeroYieldReason:
-    return _classified_protection(
-        exc,
-        status_code=status_code,
-        response_body=response_body,
-    )[0]
-
-
-def _classified_protection(
+def _classified_failure(
     exc: BaseException | None,
     *,
     status_code: int | None = None,
     response_body: bytes | None = None,
 ) -> tuple[ZeroYieldReason, str | None]:
+    from job_ftch.infrastructure.bypass.failure_signal import FailureKind, classify_error
+
     error_text = str(exc or "").casefold()
     if "err_tunnel_connection_failed" in error_text or "tunnel connection failed" in error_text:
         return ZeroYieldReason.PROVIDER_TUNNEL_DENIED, None
@@ -263,9 +276,9 @@ def _classified_protection(
         return ZeroYieldReason.SOFT_403_WITH_CONTENT, None
     if status_code in {404, 410}:
         return ZeroYieldReason.STALE_URL, None
+    classified_kind = classify_error(exc) if exc is not None else FailureKind.UNKNOWN
     if response_body:
         from job_ftch.infrastructure.bypass.failure_signal import (
-            FailureKind,
             HeuristicFailureSignal,
         )
 
@@ -276,9 +289,37 @@ def _classified_protection(
         )
         if outcome.kind in {FailureKind.CAPTCHA, FailureKind.CHALLENGE}:
             return ZeroYieldReason.WAF_CHALLENGE, outcome.captcha_type
-    if status_code in {401, 403, 429, 498, 499}:
+        if classified_kind == FailureKind.UNKNOWN:
+            classified_kind = outcome.kind
+    if status_code == 429 or classified_kind == FailureKind.RATE_LIMIT:
+        return ZeroYieldReason.RATE_LIMITED, None
+    if status_code in {401, 403, 498, 499} or classified_kind in {
+        FailureKind.AUTH_REQUIRED,
+        FailureKind.BLOCKED,
+        FailureKind.BLOCKED_IP,
+        FailureKind.BLOCKED_FINGERPRINT,
+        FailureKind.BLOCKED_CHROMIUM_FINGERPRINT,
+        FailureKind.CAPTCHA,
+        FailureKind.CHALLENGE,
+        FailureKind.QRATOR_CHALLENGE,
+        FailureKind.SILENT_BLOCK,
+    }:
         return ZeroYieldReason.WAF_CHALLENGE, None
-    return ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT, None
+    if (isinstance(status_code, int) and status_code >= 500) or classified_kind in {
+        FailureKind.SERVER_ERROR,
+        FailureKind.PAYMENT_REQUIRED,
+    }:
+        return ZeroYieldReason.UPSTREAM_ERROR, None
+    if classified_kind in {
+        FailureKind.TIMEOUT,
+        FailureKind.DNS_ERROR,
+        FailureKind.CONNECT_ERROR,
+        FailureKind.TLS_ERROR,
+    }:
+        return ZeroYieldReason.TRANSPORT_ERROR, None
+    if classified_kind == FailureKind.PARSER_ERROR:
+        return ZeroYieldReason.PARSER_ERROR, None
+    return ZeroYieldReason.MONITOR_ERROR, None
 
 
 def _looks_like_spa_shell(html: str | None) -> bool:
@@ -724,14 +765,13 @@ class CareerSiteSource(Source["RawItem"]):
                 failure_kind=failure_kind,
             )
             self.stats.monitor_failure_without_escalation += 1
-            if status_code in {401, 403, 429, 498, 499} or _is_protected_source_error(exc):
-                self.stats.zero_reason, captcha_type = _classified_protection(
-                    exc,
-                    status_code=status_code,
-                    response_body=response_body,
-                )
-                if captcha_type and captcha_type not in self.stats.detected_captcha_types:
-                    self.stats.detected_captcha_types.append(captcha_type)
+            self.stats.zero_reason, captcha_type = _classified_failure(
+                exc,
+                status_code=status_code,
+                response_body=response_body,
+            )
+            if captcha_type and captcha_type not in self.stats.detected_captcha_types:
+                self.stats.detected_captcha_types.append(captcha_type)
             return False
 
         from job_ftch.infrastructure.bypass.failure_signal import (
@@ -774,7 +814,7 @@ class CareerSiteSource(Source["RawItem"]):
         if escalatable:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             body = getattr(getattr(exc, "response", None), "content", None)
-            self.stats.zero_reason, captcha_type = _classified_protection(
+            self.stats.zero_reason, captcha_type = _classified_failure(
                 exc,
                 status_code=status,
                 response_body=body,
@@ -925,6 +965,9 @@ class CareerSiteSource(Source["RawItem"]):
                         elif getattr(site_parser, "confirmed_empty_on_empty", False):
                             self.stats.zero_reason = ZeroYieldReason.CONFIRMED_EMPTY
                             self._parser_failure_is_terminal = True
+                        elif getattr(site_parser, "terminal_on_empty", False):
+                            self.stats.zero_reason = ZeroYieldReason.POLICY_NOT_SCRAPED
+                            self._parser_failure_is_terminal = True
                         return
                     else:
                         parsed = 0
@@ -961,9 +1004,7 @@ class CareerSiteSource(Source["RawItem"]):
                             # public listing data when unauthenticated.  A
                             # generic crawl after their dedicated parser adds
                             # noise and must not be mistaken for an empty site.
-                            self.stats.zero_reason = (
-                                self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
-                            )
+                            self.stats.zero_reason = ZeroYieldReason.POLICY_NOT_SCRAPED
                             self._parser_failure_is_terminal = True
                             return
                         break  # Parsed but found 0 items, break out of bypass loop
@@ -989,6 +1030,19 @@ class CareerSiteSource(Source["RawItem"]):
                             self.stats.freshness_filtered = freshness_filtered_before
                             self.stats.freshness_undated_passed = freshness_undated_before
                         continue
+                    if getattr(site_parser, "terminal_on_error", False):
+                        reason, _captcha_type = _classified_failure(
+                            exc,
+                            status_code=response.status_code if response is not None else None,
+                            response_body=body,
+                        )
+                        self.stats.zero_reason = (
+                            ZeroYieldReason.PARSER_ERROR
+                            if reason == ZeroYieldReason.MONITOR_ERROR
+                            else reason
+                        )
+                        self._parser_failure_is_terminal = True
+                        raise
                     if self.spec.site_parser:
                         # Pinned parser failures must remain visible to the
                         # audit; generic fallback would produce false health.
@@ -1031,6 +1085,13 @@ class CareerSiteSource(Source["RawItem"]):
                         "deadline",
                         "challenge_required",
                     }:
+                        self.stats.zero_reason = (
+                            ZeroYieldReason.WAF_CHALLENGE
+                            if parser_kind in {"auth_wall", "challenge_required"}
+                            else ZeroYieldReason.TRANSPORT_ERROR
+                            if parser_kind == "deadline"
+                            else ZeroYieldReason.PARSER_ERROR
+                        )
                         self._parser_failure_is_terminal = True
                         logger.warning(
                             "site_parser_failed_terminal",
@@ -1182,29 +1243,38 @@ class CareerSiteSource(Source["RawItem"]):
                     if response is not None or _is_protected_source_error(exc):
                         body = getattr(response, "content", None) if response is not None else None
                         status_code = response.status_code if response is not None else None
-                        self.stats.zero_reason, captcha_type = _classified_protection(
+                        self.stats.zero_reason, captcha_type = _classified_failure(
                             exc,
                             status_code=status_code,
                             response_body=body,
                         )
-                        if captcha_type and captcha_type not in self.stats.detected_captcha_types:
-                            self.stats.detected_captcha_types.append(captcha_type)
-                        self.stats.challenge_events.append(
-                            {
-                                "surface": "monitor_detector",
-                                "type": captcha_type or "challenge",
-                                "confidence": 0.92 if captcha_type else 0.74,
-                                "status_code": status_code,
-                            }
-                        )
-                        set_challenge_type = getattr(
-                            self.bypass_strategy,
-                            "set_observed_challenge_type",
-                            None,
-                        )
-                        if captcha_type and callable(set_challenge_type):
-                            with contextlib.suppress(Exception):
-                                set_challenge_type(captcha_type)
+                        if self.stats.zero_reason in {
+                            ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT,
+                            ZeroYieldReason.WAF_CHALLENGE,
+                            ZeroYieldReason.SOFT_403_WITH_CONTENT,
+                            ZeroYieldReason.RATE_LIMITED,
+                        }:
+                            if (
+                                captcha_type
+                                and captcha_type not in self.stats.detected_captcha_types
+                            ):
+                                self.stats.detected_captcha_types.append(captcha_type)
+                            self.stats.challenge_events.append(
+                                {
+                                    "surface": "monitor_detector",
+                                    "type": captcha_type or "challenge",
+                                    "confidence": 0.92 if captcha_type else 0.74,
+                                    "status_code": status_code,
+                                }
+                            )
+                            set_challenge_type = getattr(
+                                self.bypass_strategy,
+                                "set_observed_challenge_type",
+                                None,
+                            )
+                            if captcha_type and callable(set_challenge_type):
+                                with contextlib.suppress(Exception):
+                                    set_challenge_type(captcha_type)
                     monitors_to_try = ["dom", "api_sniffer"]
                     self.stats.recommended_monitors = list(monitors_to_try)
 
@@ -1394,10 +1464,10 @@ class CareerSiteSource(Source["RawItem"]):
                     body = response.content if response is not None else None
                     if await self._try_escalate_bypass(exc, response=response, response_body=body):
                         continue
-                    self.stats.zero_reason = (
-                        self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
-                    )
                     if _is_protected_source_error(exc):
+                        self.stats.zero_reason = (
+                            self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+                        )
                         # All available bypass tiers have rejected this listing.
                         # Trying the remaining generic monitors only repeats the
                         # protected request and turns a clear 403/429 outcome
@@ -1409,6 +1479,7 @@ class CareerSiteSource(Source["RawItem"]):
                             error=str(exc),
                         )
                         return
+                    self.stats.zero_reason = self.stats.zero_reason or ZeroYieldReason.MONITOR_ERROR
                     logger.warning("monitor_run_failed", name=current_monitor_name, error=str(exc))
                     break  # Try next monitor in chain
 
@@ -1541,7 +1612,7 @@ class CareerSiteSource(Source["RawItem"]):
                     yield item
                 attempt_items_emitted = self.stats.rich_emitted + self.stats.scraped - items_before
                 if attempt_items_emitted == 0 and current_monitor_name != monitors_to_try[-1]:
-                    if self.stats.zero_reason != ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT:
+                    if self.stats.zero_reason not in _TYPED_FAILURE_REASONS:
                         self.stats.zero_reason = ZeroYieldReason.ALL_SCRAPERS_FAILED
                     logger.info(
                         "monitor_yielded_no_valid_items_after_scraping_trying_next",
@@ -1591,7 +1662,7 @@ class CareerSiteSource(Source["RawItem"]):
                 # The final monitor found listing-like candidates but could
                 # not confirm a detail posting.  It is not evidence of an
                 # empty career site; preserve the extraction failure instead.
-                if self.stats.zero_reason != ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT:
+                if self.stats.zero_reason not in _TYPED_FAILURE_REASONS:
                     self.stats.zero_reason = ZeroYieldReason.ALL_SCRAPERS_FAILED
                 # This is the final monitor and this attempt produced no
                 # usable item.  Continuing the inner retry loop re-runs the
@@ -1606,7 +1677,7 @@ class CareerSiteSource(Source["RawItem"]):
             )
         elif self.stats.zero_reason not in {
             ZeroYieldReason.ALL_SCRAPERS_FAILED,
-            ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT,
+            *_TYPED_FAILURE_REASONS,
         }:
             self.stats.zero_reason = ZeroYieldReason.ALL_MONITORS_EXHAUSTED
         logger.info("career_site_fetch_exhausted_all_monitors", **self.stats.to_log_dict())
@@ -2488,7 +2559,8 @@ class CareerSiteSource(Source["RawItem"]):
         # request suppression only; it must not change a protected source into
         # ``all_scrapers_failed`` merely because it exposed fewer detail URLs
         # than the circuit-breaker threshold.
-        self.stats.zero_reason = self.stats.zero_reason or ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
+        if self.stats.zero_reason in {None, ZeroYieldReason.ALL_SCRAPERS_FAILED}:
+            self.stats.zero_reason = ZeroYieldReason.BLOCKED_NO_BYPASS_LEFT
         if (
             self.stats.detail_protection_failures
             < get_settings().career_site_protection_failure_limit

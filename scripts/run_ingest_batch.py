@@ -10,6 +10,7 @@ import contextlib
 import dataclasses
 import io
 import json
+import os
 import sys
 import threading
 import time
@@ -56,6 +57,20 @@ class _TimedProbeSource:
                 yield item
         finally:
             self.finished_at = time.monotonic()
+
+
+class _LiveProbe:
+    __slots__ = ("source", "source_result", "items")
+
+    def __init__(
+        self,
+        source: _TimedProbeSource,
+        source_result: SourceFetchResult,
+        items: list[dict[str, Any]],
+    ) -> None:
+        self.source = source
+        self.source_result = source_result
+        self.items = items
 
 
 def _parser_name(spec: CareerSiteSpec) -> str | None:
@@ -112,8 +127,6 @@ def _failure_bucket(
         and has_challenge_evidence
     ):
         return "waf_challenge"
-    if parser_name == "ProtectedBrowserDefaultsParser" and zero_reason == "blocked_no_bypass_left":
-        return "waf_challenge"
     if zero_reason == "parser_gap":
         return "parser_gap"
     if zero_reason == "provider_tunnel_denied":
@@ -123,10 +136,6 @@ def _failure_bucket(
     if source_result.terminal_outcome:
         return source_result.terminal_outcome
     if stats.get("zero_reason") == "blocked_no_bypass_left":
-        return "blocked_or_protected"
-    # LinkedIn is deliberately not scraped: an exhausted registered parser is
-    # an access-policy outcome, not evidence that a listing was absent.
-    if parser_name == "LinkedinParser":
         return "blocked_or_protected"
     if "429" in error:
         return "rate_limited"
@@ -167,7 +176,11 @@ def _probe_result(
 ) -> dict[str, Any]:
     raw_stats = getattr(source, "stats", {}) or {}
     stats = (
-        dataclasses.asdict(raw_stats) if dataclasses.is_dataclass(raw_stats) else dict(raw_stats)
+        dataclasses.asdict(raw_stats)
+        if dataclasses.is_dataclass(raw_stats)
+        else dict(raw_stats)
+        if isinstance(raw_stats, dict)
+        else vars(raw_stats)
     )
     bypass_obj = getattr(source, "bypass_strategy", None)
     final_tier = getattr(bypass_obj, "current_name", None)
@@ -274,6 +287,15 @@ def _probe_result(
                 "detected_captcha_types",
                 "challenge_events",
                 "monitor_failure_without_escalation",
+                "detail_attempted",
+                "detail_protection_failures",
+                "protection_circuit_open",
+                "requested_parser",
+                "actual_parser",
+                "parser_urls_discovered",
+                "detail_cards_extracted",
+                "monitor_attempts",
+                "successful_scraper",
             )
         },
         "selection": {"site_class": "not_probed", "recommended_monitors": []},
@@ -286,6 +308,7 @@ async def _probe_one(
     source_name: str,
     max_items: int,
     timeout_seconds: float,
+    live_probes: dict[str, _LiveProbe] | None = None,
 ) -> dict[str, Any]:
     """Probe one URL with an isolated source budget.
 
@@ -306,6 +329,8 @@ async def _probe_one(
         source_name=spec.source_name,
     )
     items: list[dict[str, Any]] = []
+    if live_probes is not None:
+        live_probes[url] = _LiveProbe(source, source_result, items)
     exc: BaseException | None = None
     started = time.monotonic()
 
@@ -353,7 +378,34 @@ async def _probe_one(
     )
 
 
-def _timeout_result(url: str, *, elapsed_seconds: float) -> dict[str, Any]:
+def _timeout_result(
+    url: str,
+    *,
+    elapsed_seconds: float,
+    live_probe: _LiveProbe | None = None,
+) -> dict[str, Any]:
+    if live_probe is not None:
+        source_result = dataclasses.replace(live_probe.source_result)
+        source_result.evicted = True
+        source_result.eviction_kind = "task_watchdog"
+        source_result.deadline_exceeded = True
+        source_result.hard_deadline_hit = True
+        source_result.partial = bool(live_probe.items)
+        source_result.failed = True
+        source_result.error = (
+            source_result.error or "TimeoutError: source task exceeded watchdog deadline"
+        )
+        _capture_source_stats(live_probe.source, source_result)
+        result = _probe_result(
+            url=url,
+            source=live_probe.source,
+            source_result=source_result,
+            items=list(live_probe.items),
+            elapsed=round(elapsed_seconds, 2),
+            overflow_workers_started=0,
+        )
+        result["eviction_kind"] = "task_watchdog"
+        return result
     return {
         "url": url,
         "parse_status": "parsed_failed",
@@ -391,8 +443,13 @@ def _timeout_result(url: str, *, elapsed_seconds: float) -> dict[str, Any]:
     }
 
 
-def _global_timeout_result(url: str, *, elapsed_seconds: float) -> dict[str, Any]:
-    result = _timeout_result(url, elapsed_seconds=elapsed_seconds)
+def _global_timeout_result(
+    url: str,
+    *,
+    elapsed_seconds: float,
+    live_probe: _LiveProbe | None = None,
+) -> dict[str, Any]:
+    result = _timeout_result(url, elapsed_seconds=elapsed_seconds, live_probe=live_probe)
     result.update(
         {
             "failure_bucket": "global_run_timeout",
@@ -615,6 +672,7 @@ async def main() -> int:
 
     task_started_at: dict[asyncio.Task[dict[str, Any]], float] = {}
     abandoned_tasks: set[asyncio.Task[dict[str, Any]]] = set()
+    live_probes: dict[str, _LiveProbe] = {}
 
     async def _bounded(url: str, index: int) -> dict[str, Any]:
         task = asyncio.current_task()
@@ -625,6 +683,7 @@ async def main() -> int:
             source_name=f"ingest_probe_{index}",
             max_items=args.max_items,
             timeout_seconds=args.timeout,
+            live_probes=live_probes,
         )
 
     url_index = {url: index for index, url in enumerate(urls)}
@@ -652,22 +711,22 @@ async def main() -> int:
         completed_count += 1
         stall_state["ts"] = time.monotonic()  # progress signal for the watchdog
         results_by_url[str(result["url"])] = result
+        live_probes.pop(str(result["url"]), None)
         _save_results()
         all_results = [results_by_url[url] for url in urls if url in results_by_url]
         ok_so_far = sum(1 for r in all_results if r["parse_status"] == "parsed_ok")
         print(f"  -> {completed_count}/{len(pending_urls)} new; {ok_so_far}/{len(all_results)} ok")
 
     def _abandon_overdue_task(task: asyncio.Task[dict[str, Any]]) -> dict[str, Any]:
-        from job_ftch.infrastructure.sources.browser_utils import terminate_browser_descendants
-
         url = url_by_task.pop(task)
         task.cancel()
         abandoned_tasks.add(task)
-        with contextlib.suppress(Exception):
-            terminate_browser_descendants(grace=1.0)
+        # Sibling sources are still running in this process.  Their browser
+        # descendants must not be killed just because this one timed out.
         return _timeout_result(
             url,
             elapsed_seconds=time.monotonic() - task_started_at.get(task, time.monotonic()),
+            live_probe=live_probes.get(url),
         )
 
     # Stall watchdog: if the event loop wedges on a hung/uncancellable browser
@@ -692,7 +751,17 @@ async def main() -> int:
                 )
                 with contextlib.suppress(Exception):
                     terminate_browser_descendants(grace=3.0)
-                stall_state["ts"] = time.monotonic()
+                progress_before_cleanup = stall_state["ts"]
+                if stall_stop.wait(max(0.1, args.hard_cancel_grace)):
+                    return
+                if stall_state["ts"] == progress_before_cleanup:
+                    print(
+                        "  !! event loop did not recover after browser teardown; "
+                        "forcing exit with incremental results preserved",
+                        flush=True,
+                    )
+                    sys.stderr.flush()
+                    os._exit(2)
 
     watchdog_thread = threading.Thread(
         target=_stall_watchdog, name="ingest-stall-watchdog", daemon=True
@@ -717,6 +786,7 @@ async def main() -> int:
                         url,
                         elapsed_seconds=time.monotonic()
                         - task_started_at.get(task, batch_started_at),
+                        live_probe=live_probes.get(url),
                     )
                 )
                 url_by_task.pop(task, None)
@@ -801,8 +871,6 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
-    import os
-
     from job_ftch.infrastructure.sources.browser_utils import terminate_browser_descendants
 
     _exit_code = 0
