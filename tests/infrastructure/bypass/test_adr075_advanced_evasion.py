@@ -219,6 +219,12 @@ class TestSessionMemory:
             assert memory2.state.visit_count == 5
             assert len(memory2.state.cookies) == 1
 
+    def test_default_storage_uses_runtime_directory(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
+        memory = SessionMemory("test_persona")
+        memory.save()
+        assert (tmp_path / ".runtime/session_memory/test_persona.json").is_file()
+
     def test_behavioral_profile_update(self):
         """Behavioral profile updates with exponential moving average."""
         memory = SessionMemory("test_persona")
