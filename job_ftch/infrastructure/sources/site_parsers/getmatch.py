@@ -645,8 +645,8 @@ class GetmatchParser:
     domain_pattern = _DOMAIN_PATTERN
     has_custom_parse = True
     supports_discover = False
-    supports_search = True
-    search_mode = "combined"
+    supports_search = False
+    search_mode = "none"
     # Authoritative empty UI is rare; SPA shell without cards is not empty.
     confirmed_empty_on_empty = True
     terminal_on_empty = False

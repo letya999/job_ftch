@@ -98,7 +98,7 @@ def test_source_without_search_parser_gets_runtime_keywords() -> None:
     assert out[0].monitor_config["_search_keywords"] == ROLES
 
 
-def test_unverified_assessment_still_applies_specific_builder(monkeypatch) -> None:
+def test_unverified_assessment_keeps_base_listing(monkeypatch) -> None:
     class Parser:
         supports_search = True
 
@@ -115,9 +115,8 @@ def test_unverified_assessment_still_applies_specific_builder(monkeypatch) -> No
         monitor_config={"_search_assessment": {"status": "unsupported", "executor": "none"}},
     )
     out = expand_career_site_specs([spec], ROLES)
-    assert out[0].url == "https://example.com/jobs?q=runtime-fallback"
+    assert out[0].url == "https://example.com/jobs"
     assert out[0].monitor_config["_search_keywords"] == ROLES
-    assert out[0].monitor_config["_search_runtime_executor"] == "specific_url"
 
 
 def test_per_keyword_clone_gets_unique_source_name() -> None:

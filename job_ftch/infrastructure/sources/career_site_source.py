@@ -1785,13 +1785,15 @@ class CareerSiteSource(Source["RawItem"]):
         self.stats.search_query_mode = (
             assessment.get("query_mode") if isinstance(assessment, dict) else None
         )
+        if self.stats.search_status != "verified":
+            return
         base_url = str(self.spec.monitor_config.get("_search_base_url") or self.spec.url)
         if self.spec.search_locked or not base_url:
             return
         if runtime_executor == "specific_url" and self.spec.url != base_url:
             self.stats.search_applied = True
             return
-        if executor in {"specific_url", "specific_api"} and self.spec.url != base_url:
+        if executor in {"specific_url", "specific_api"}:
             return
         if executor == "generic_browser":
             await self._apply_generic_browser_search(

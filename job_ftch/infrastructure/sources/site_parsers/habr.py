@@ -164,8 +164,8 @@ class HabrCareerParser:
     domain_pattern = r"^https?://career\.habr\.com/"
     has_custom_parse = True
     supports_discover = True
-    supports_search = True
-    search_mode = "combined"
+    supports_search = False
+    search_mode = "none"
 
     def build_search_urls(
         self,
