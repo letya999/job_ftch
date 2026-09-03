@@ -1,12 +1,9 @@
 """Site-specific parser for yandex.ru/jobs.
 
-Yandex Jobs is a Next.js SPA that loads vacancy data via a paginated REST API
-(/jobs/api/publications). The DOM shows only ~60 cards via infinite scroll, but
-the API returns 200+ results across 12+ cursor pages.
-
-Strategy: fetch full SSR detail pages first, then open the page in a browser to
-intercept subsequent /api/publications pages. API records are resolved back to
-their detail pages before emission, preserving the complete vacancy text.
+Yandex Jobs exposes a public REST API at ``/jobs/api/publications``. The
+``text=`` query actually narrows results (``q=`` / ``search=`` are ignored).
+HTTP API is the primary path; SSR listing and browser intercept remain
+fallbacks when the API is empty or unreachable.
 """
 
 from __future__ import annotations
@@ -16,7 +13,7 @@ import html
 import inspect
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urljoin, urlparse, urlunparse
 
 import structlog
 from selectolax.parser import HTMLParser
@@ -25,6 +22,12 @@ from job_ftch.application.registry import known_board_assessment_hint, register_
 from job_ftch.domain import SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
+from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    keywords_from_spec,
+    normalize_search_keywords,
+    text_matches_keywords,
+    with_query_params,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -141,7 +144,27 @@ def _item_from_detail_html(detail_url: str, html_text: str, source_name: str) ->
 )
 class YandexJobsParser:
     domain_pattern = r"yandex\.ru/jobs"
-    has_custom_parse = True  # Yandex is a SPA: requires a custom Playwright-based parse
+    has_custom_parse = True
+    supports_search = True
+    search_mode = "combined"
+
+    def build_search_urls(
+        self,
+        base_url: str,
+        keywords: Any,
+        *,
+        limit: int | None = None,
+    ) -> list[str]:
+        del limit
+        terms = normalize_search_keywords(keywords)
+        if not terms:
+            return []
+        parsed = urlparse(base_url)
+        path = (parsed.path or "").rstrip("/")
+        if path in {"", "/jobs"} or not path.endswith("/vacancies"):
+            parsed = parsed._replace(path="/jobs/vacancies")
+        listing = urlunparse(parsed._replace(query="", fragment=""))
+        return [with_query_params(listing, {"text": " OR ".join(terms)})]
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
@@ -163,7 +186,7 @@ class YandexJobsParser:
     def _browser_scroll_config(self) -> tuple[int, float, int, int]:
         manifest_entry = getattr(self, "_manifest_entry", None)
         browser = getattr(manifest_entry, "browser", None)
-        loops = getattr(browser, "scroll_loops", None) or 120
+        loops = getattr(browser, "scroll_loops", None) or 8
         pause_ms = getattr(browser, "scroll_pause_ms", None) or 1200
         scroll_px = getattr(browser, "scroll_px", None) or 3000
         stale_rounds = getattr(browser, "stale_rounds", None) or 4
@@ -176,6 +199,63 @@ class YandexJobsParser:
             or getattr(manifest_entry, "timeout_ms", None)
             or default_timeout_ms
         )
+
+    @staticmethod
+    def _search_text(url: str) -> str:
+        query = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+        return str(query.get("text") or "").strip()
+
+    async def _publications_from_api(
+        self,
+        client: Any,
+        listing_url: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        origin = urlparse(listing_url)
+        api_url = urlunparse(origin._replace(path=self._api_path(), query="", fragment=""))
+        page_size = min(max(limit, 1), 50)
+        text = self._search_text(listing_url)
+        collected: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for page in range(1, 6):
+            params = {"page_size": str(page_size)}
+            if page > 1:
+                params["page"] = str(page)
+            if text:
+                params["text"] = text
+            try:
+                response = await client.get(
+                    with_query_params(api_url, params),
+                    follow_redirects=True,
+                )
+                response.raise_for_status()
+                payload = response.json()
+            except Exception as exc:  # noqa: BLE001 - SSR/browser remain fallbacks
+                logger.debug("yandex.api_listing_failed", url=api_url, error=str(exc))
+                break
+            if not isinstance(payload, dict):
+                break
+            rows = (
+                payload.get("results") or payload.get("items") or payload.get("publications") or []
+            )
+            if not isinstance(rows, list) or not rows:
+                break
+            new_on_page = 0
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                row_id = str(row.get("id") or row.get("publication_id") or row.get("url") or "")
+                if row_id and row_id in seen:
+                    continue
+                if row_id:
+                    seen.add(row_id)
+                collected.append(row)
+                new_on_page += 1
+                if len(collected) >= limit:
+                    return collected[:limit]
+            if len(rows) < page_size or new_on_page == 0:
+                break
+        return collected[:limit]
 
     async def parse(
         self,
@@ -205,6 +285,28 @@ class YandexJobsParser:
         # with no vacancy links.  Normalise it before the initial SSR request.
         if listing_url.rstrip("/") in {"https://yandex.ru/jobs", "https://www.yandex.ru/jobs"}:
             listing_url = "https://yandex.ru/jobs/vacancies"
+
+        emitted = 0
+        emitted_urls: set[str] = set()
+        search_text = self._search_text(listing_url)
+        # ``text=`` already narrowed the API/listing. Re-filtering titles
+        # against that query drops valid cards (``Data Analyst`` vs ``ai``).
+        keywords = [] if search_text else keywords_from_spec(spec)
+        for payload in await self._publications_from_api(client, listing_url, limit):
+            api_item = _item_from_api(payload, listing_url, source_name)
+            if api_item is None or str(api_item.url) in emitted_urls:
+                continue
+            if keywords and not text_matches_keywords(api_item.text, keywords):
+                continue
+            yield api_item
+            emitted += 1
+            emitted_urls.add(str(api_item.url))
+            if emitted >= limit:
+                break
+        if emitted:
+            logger.info("yandex_parser_api_emitted", url=listing_url, emitted=emitted)
+            return
+
         try:
             listing_response = await client.get(listing_url, follow_redirects=True)
             listing_response.raise_for_status()
@@ -229,8 +331,6 @@ class YandexJobsParser:
                 )
                 ssr_urls = []
 
-        emitted = 0
-        emitted_urls: set[str] = set()
         for detail_url in ssr_urls:
             try:
                 detail_response = await client.get(detail_url, follow_redirects=True)
@@ -243,13 +343,18 @@ class YandexJobsParser:
             )
             if item is None:
                 continue
+            if keywords and not text_matches_keywords(item.text, keywords):
+                continue
             yield item
             emitted += 1
             emitted_urls.add(str(item.url))
             if emitted >= limit:
                 break
-        if emitted >= limit:
+        if emitted:
             logger.info("yandex_parser_ssr_emitted", url=listing_url, emitted=emitted)
+            return
+        if search_text:
+            logger.info("yandex_parser_empty_search", url=listing_url, emitted=emitted)
             return
 
         browser_config = {k: v for k, v in spec.monitor_config.items() if k in BROWSER_KEYS}

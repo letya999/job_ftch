@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import base64
 import binascii
+import html
 import json
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qsl, urljoin, urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import structlog
 from selectolax.lexbor import LexborHTMLParser
@@ -18,8 +19,13 @@ from job_ftch.infrastructure.network.ssrf_guard import check_ssrf
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    DEFAULT_LISTING_MAX_PAGES,
+    ListingPagination,
+    keywords_from_spec,
     normalize_search_keywords,
+    paginate_listing,
     safe_fetch,
+    text_matches_keywords,
     with_query_params,
 )
 
@@ -153,11 +159,7 @@ def _detail_urls(html: str, base_url: str, pattern: re.Pattern[str], limit: int)
 
 
 def _matches_target_roles(spec: CareerSiteSpec, text: str) -> bool:
-    roles = normalize_search_keywords(spec.monitor_config.get("_search_keywords"))
-    if not roles:
-        return True
-    haystack = text.casefold()
-    return any(all(token in haystack for token in role.casefold().split()) for role in roles)
+    return text_matches_keywords(text, keywords_from_spec(spec))
 
 
 def _agile_token_url(value: Any) -> str | None:
@@ -185,6 +187,8 @@ class HtmlAggregatorParser:
     supports_discover = False
     supports_search = False
     search_mode = "none"
+    follow_origin = True
+    confirmed_empty_on_empty = False
     detail_pattern = re.compile(r"$^", re.IGNORECASE)
     parser_name = "aggregator"
 
@@ -246,7 +250,7 @@ class HtmlAggregatorParser:
         origin_url = _external_url_from_html(html, final_aggregator_url)
         origin_final_url = None
         origin_body = ""
-        if origin_url:
+        if self.follow_origin and origin_url:
             try:
                 await check_ssrf(origin_url)
                 origin_response = await safe_fetch(client, origin_url)
@@ -281,94 +285,81 @@ class AgileFluentParser(HtmlAggregatorParser):
     domain_pattern = r"^https?://jobboard\.agilefluent\.ru(?:/|$)"
     parser_name = "agilefluent"
     supports_search = True
-    search_mode = "per_keyword"
+    search_mode = "combined"
+    follow_origin = False
+    confirmed_empty_on_empty = True
+    _API_URL = "https://jobboard.agilefluent.ru/api/jobs/search"
 
     def build_search_urls(
         self, base_url: str, keywords: Any, *, limit: int | None = None
     ) -> list[str]:
         del limit
-        return [
-            with_query_params(base_url, {"roles": term})
-            for term in normalize_search_keywords(keywords)
-        ]
-
-    @staticmethod
-    def _roles(spec: CareerSiteSpec) -> list[str]:
-        query = dict(parse_qsl(urlparse(spec.url).query, keep_blank_values=True))
-        role = query.get("roles")
-        if role:
-            return normalize_search_keywords([role])
-        return normalize_search_keywords(spec.monitor_config.get("_search_keywords"))
+        if not normalize_search_keywords(keywords):
+            return []
+        parsed = urlparse(base_url)
+        listing = urlunparse(parsed._replace(query="", fragment=""))
+        return [listing or "https://jobboard.agilefluent.ru/"]
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
         limit = spec.limit or 50
-        roles = self._roles(spec)
-        filters: dict[str, Any] = {"roles": roles} if roles else {}
-        try:
-            response = await client.post(
-                "https://jobboard.agilefluent.ru/api/jobs/search",
-                json={"filters": filters, "pagination": {"limit": limit, "page": 1}},
-                follow_redirects=True,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            rows = payload.get("data", []) if isinstance(payload, dict) else []
-            if not isinstance(rows, list):
-                rows = []
-        except Exception as exc:  # noqa: BLE001 - normal source fallback
-            logger.info("agilefluent_api_search_failed", error=str(exc))
-            return
-        for row in rows[:limit]:
-            if not isinstance(row, dict):
-                continue
-            job_id = row.get("id")
-            if job_id is None:
-                continue
-            detail = row
+        keywords = keywords_from_spec(spec)
+        page_size = min(50, max(limit, 1))
+        emitted = 0
+        seen: set[str] = set()
+        for page in range(1, DEFAULT_LISTING_MAX_PAGES + 1):
             try:
-                detail_response = await client.get(
-                    f"https://jobboard.agilefluent.ru/api/jobs/{job_id}", follow_redirects=True
+                response = await client.post(
+                    self._API_URL,
+                    json={"filters": {}, "pagination": {"limit": page_size, "page": page}},
+                    follow_redirects=True,
                 )
-                detail_response.raise_for_status()
-                detail_payload = detail_response.json()
-                if isinstance(detail_payload, dict):
-                    detail = {**row, **detail_payload}
-            except Exception as exc:  # noqa: BLE001 - listing payload is still useful
-                logger.debug("agilefluent_api_detail_failed", job_id=job_id, error=str(exc))
-            origin_url = _agile_token_url(detail.get("url"))
-            body = _clean_text(str(detail.get("description") or ""))
-            title = _clean_text(str(detail.get("title") or ""))
-            if not title:
-                continue
-            origin_body = ""
-            origin_final_url = None
-            if origin_url:
-                try:
-                    await check_ssrf(origin_url)
-                    origin_response = await safe_fetch(client, origin_url)
-                    origin_final_url = str(origin_response.url)
-                    if not _same_host(origin_final_url, spec.url):
-                        origin_title, origin_body = _page_text(str(origin_response.text))
-                        title = origin_title or title
-                except Exception as exc:  # noqa: BLE001 - preserve aggregator result
-                    logger.debug("agilefluent_origin_fetch_failed", job_id=job_id, error=str(exc))
-            canonical_url = origin_final_url or f"https://jobboard.agilefluent.ru/api/jobs/{job_id}"
-            yield build_raw_item(
-                source_kind=SourceKind.CAREER_SITE,
-                source_name=spec.source_name or self.parser_name,
-                external_id=str(job_id),
-                url=canonical_url,
-                text="\n".join(part for part in (title, body, origin_body) if part),
-                metadata={
-                    "adapter": self.parser_name,
-                    "parser": self.parser_name,
-                    "board_url": spec.url,
-                    "aggregator_url": f"https://jobboard.agilefluent.ru/api/jobs/{job_id}",
-                    "origin_url": origin_url,
-                    "detail_vacancy_confirmed": True,
-                    "origin_fetched": bool(origin_final_url),
-                },
-            )
+                response.raise_for_status()
+                payload = response.json()
+            except Exception as exc:  # noqa: BLE001 - normal source fallback
+                logger.info("agilefluent_api_search_failed", error=str(exc))
+                return
+            rows = payload.get("data", []) if isinstance(payload, dict) else []
+            if not isinstance(rows, list) or not rows:
+                return
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                job_id = row.get("id")
+                title = _clean_text(str(row.get("title") or ""))
+                if job_id is None or not title:
+                    continue
+                external_id = str(job_id)
+                if external_id in seen:
+                    continue
+                seen.add(external_id)
+                body = _clean_text(str(row.get("description") or ""))
+                company = _clean_text(str(row.get("companyName") or ""))
+                text = "\n".join(part for part in (title, company, body) if part)
+                if not text_matches_keywords(text, keywords):
+                    continue
+                aggregator_url = f"https://jobboard.agilefluent.ru/api/jobs/{job_id}"
+                yield build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=spec.source_name or self.parser_name,
+                    external_id=external_id,
+                    url=aggregator_url,
+                    text=text,
+                    metadata={
+                        "adapter": self.parser_name,
+                        "parser": self.parser_name,
+                        "board_url": spec.url,
+                        "aggregator_url": aggregator_url,
+                        "origin_url": _agile_token_url(row.get("url")),
+                        "detail_vacancy_confirmed": True,
+                        "origin_fetched": False,
+                    },
+                )
+                emitted += 1
+                if emitted >= limit:
+                    return
+            has_more = bool(payload.get("hasMore")) if isinstance(payload, dict) else False
+            if not has_more:
+                return
 
 
 class QuickOfferParser(HtmlAggregatorParser):
@@ -397,10 +388,309 @@ class DjinniAggregatorParser(HtmlAggregatorParser):
         ]
 
 
+_FOORILLA_JOBS = "https://foorilla.com/hiring/jobs/"
+_FOORILLA_HTMX_HEADERS = {
+    "HX-Request": "true",
+    "HX-Target": "job-list",
+    "HX-Current-URL": "https://foorilla.com/hiring/",
+    "Referer": "https://foorilla.com/hiring/",
+    "Accept": "text/html",
+}
+_FOORILLA_JOB_RE = re.compile(r"/hiring/jobs/([a-z0-9-]+)-(\d+)/?", re.IGNORECASE)
+_AIJOBS_COM_JOB_RE = re.compile(r"/jobs/(\d+)-([^/?#]+)/?", re.IGNORECASE)
+_AIJOBS_AI_JOB_RE = re.compile(r"/job/([^/?#]+)/?", re.IGNORECASE)
+
+
 class AIJobsParser(HtmlAggregatorParser):
-    domain_pattern = r"^https?://aijobs\.net(?:/|$)"
+    """aijobs.net redirects to foorilla.com; listing is an HTMX fragment."""
+
+    domain_pattern = r"^https?://(?:(?:www\.)?aijobs\.net|(?:www\.)?foorilla\.com)(?:/|$)"
     parser_name = "aijobs"
-    detail_pattern = re.compile(r"/job/[^/?#]+/?$", re.IGNORECASE)
+    supports_search = True
+    search_mode = "combined"
+    follow_origin = False
+    confirmed_empty_on_empty = True
+    detail_pattern = _FOORILLA_JOB_RE
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del base_url, limit
+        if not normalize_search_keywords(keywords):
+            return []
+        return [_FOORILLA_JOBS]
+
+    def _items_from_html(
+        self, html_text: str, board_url: str, source_name: str, keywords: list[str]
+    ) -> list[RawItem]:
+        del keywords
+        tree = LexborHTMLParser(html_text or "")
+        items: list[RawItem] = []
+        seen: set[str] = set()
+        for node in tree.css("[hx-get]"):
+            href = html.unescape(str(node.attributes.get("hx-get") or ""))
+            match = _FOORILLA_JOB_RE.search(href)
+            if match is None:
+                continue
+            url = urljoin("https://foorilla.com", match.group(0))
+            if url in seen:
+                continue
+            seen.add(url)
+            card = node
+            for _ in range(4):
+                parent = getattr(card, "parent", None)
+                if parent is None:
+                    break
+                card = parent
+                if "list-group-item" in str(card.attributes.get("class") or ""):
+                    break
+            text = _clean_text(html.unescape(card.text(separator="\n", strip=True)))
+            title = _clean_text(html.unescape(node.text(separator=" ", strip=True))) or text
+            if not title:
+                continue
+            items.append(
+                build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=source_name,
+                    external_id=match.group(2),
+                    url=url,
+                    text="\n".join(part for part in (title, text) if part),
+                    metadata={
+                        "adapter": self.parser_name,
+                        "parser": self.parser_name,
+                        "board_url": board_url,
+                        "detail_vacancy_confirmed": True,
+                        "origin_fetched": False,
+                    },
+                )
+            )
+        return items
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        keywords = keywords_from_spec(spec)
+        limit = spec.limit or 50
+        source_name = spec.source_name or self.parser_name
+        terms = keywords or [""]
+        seen: set[str] = set()
+        emitted = 0
+
+        async def fetch(url: str) -> str:
+            response = await client.get(
+                url, follow_redirects=True, headers=_FOORILLA_HTMX_HEADERS
+            )
+            if hasattr(response, "raise_for_status"):
+                response.raise_for_status()
+            return str(response.text)
+
+        def extract(html_text: str, url: str) -> list[RawItem]:
+            return self._items_from_html(html_text, url, source_name, keywords)
+
+        for term in terms:
+            start = (
+                with_query_params(_FOORILLA_JOBS, {"job_search": term}) if term else _FOORILLA_JOBS
+            )
+            page_items = await paginate_listing(
+                fetch,
+                extract,
+                start,
+                limit=limit,
+                pagination=ListingPagination(max_pages=DEFAULT_LISTING_MAX_PAGES),
+                identity=lambda item: item.url,
+            )
+            for item in page_items:
+                key = str(item.url)
+                if key in seen:
+                    continue
+                seen.add(key)
+                yield item
+                emitted += 1
+                if emitted >= limit:
+                    return
+
+
+class AIJobsComParser(HtmlAggregatorParser):
+    domain_pattern = r"^https?://(?:www\.)?aijobs\.com(?:/|$)"
+    parser_name = "aijobs_com"
+    supports_search = True
+    search_mode = "combined"
+    follow_origin = False
+    confirmed_empty_on_empty = True
+    detail_pattern = _AIJOBS_COM_JOB_RE
+    _LISTING = "https://www.aijobs.com/jobs"
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del base_url, limit
+        terms = normalize_search_keywords(keywords)
+        if not terms:
+            return []
+        return [with_query_params(self._LISTING, {"q": " OR ".join(terms)})]
+
+    def _items_from_html(
+        self, html_text: str, board_url: str, source_name: str, keywords: list[str]
+    ) -> list[RawItem]:
+        del keywords
+        tree = LexborHTMLParser(html_text or "")
+        items: list[RawItem] = []
+        seen: set[str] = set()
+        for anchor in tree.css("a[href]"):
+            href = str(anchor.attributes.get("href") or "")
+            match = _AIJOBS_COM_JOB_RE.search(href)
+            if match is None or "/apply" in href:
+                continue
+            url = urljoin(board_url, href.split("?", 1)[0])
+            if url in seen:
+                continue
+            seen.add(url)
+            title = _clean_text(anchor.text(separator=" ", strip=True))
+            if not title:
+                title = match.group(2).replace("-", " ")
+            items.append(
+                build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=source_name,
+                    external_id=match.group(1),
+                    url=url,
+                    text=title,
+                    metadata={
+                        "adapter": self.parser_name,
+                        "parser": self.parser_name,
+                        "board_url": board_url,
+                        "detail_vacancy_confirmed": True,
+                        "origin_fetched": False,
+                    },
+                )
+            )
+        return items
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        keywords = keywords_from_spec(spec)
+        limit = spec.limit or 50
+        source_name = spec.source_name or self.parser_name
+        start = spec.url if urlparse(spec.url).path.rstrip("/") else self._LISTING
+        if keywords and "q=" not in start:
+            start = with_query_params(self._LISTING, {"q": " OR ".join(keywords)})
+
+        async def fetch(url: str) -> str:
+            response = await safe_fetch(client, url)
+            return str(response.text)
+
+        def extract(html_text: str, url: str) -> list[RawItem]:
+            return self._items_from_html(html_text, url, source_name, keywords)
+
+        items = await paginate_listing(
+            fetch,
+            extract,
+            start,
+            limit=limit,
+            pagination=ListingPagination(max_pages=DEFAULT_LISTING_MAX_PAGES),
+            identity=lambda item: item.url,
+        )
+        if not items and keywords:
+            items = await paginate_listing(
+                fetch,
+                extract,
+                self._LISTING,
+                limit=limit,
+                pagination=ListingPagination(max_pages=DEFAULT_LISTING_MAX_PAGES),
+                identity=lambda item: item.url,
+            )
+        for item in items:
+            yield item
+
+
+class AIJobsAiParser(HtmlAggregatorParser):
+    domain_pattern = r"^https?://(?:www\.)?aijobs\.ai(?:/|$)"
+    parser_name = "aijobs_ai"
+    supports_search = True
+    search_mode = "combined"
+    follow_origin = False
+    confirmed_empty_on_empty = True
+    detail_pattern = _AIJOBS_AI_JOB_RE
+    _LISTING = "https://aijobs.ai/jobs"
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del base_url, limit
+        terms = normalize_search_keywords(keywords)
+        if not terms:
+            return []
+        return [with_query_params(self._LISTING, {"keyword": " OR ".join(terms)})]
+
+    def _items_from_html(
+        self, html_text: str, board_url: str, source_name: str, keywords: list[str]
+    ) -> list[RawItem]:
+        del keywords
+        tree = LexborHTMLParser(html_text or "")
+        items: list[RawItem] = []
+        seen: set[str] = set()
+        for anchor in tree.css("a[href]"):
+            href = str(anchor.attributes.get("href") or "")
+            parsed = urlparse(urljoin(board_url, href))
+            match = _AIJOBS_AI_JOB_RE.search(parsed.path)
+            if match is None:
+                continue
+            url = urlunparse(parsed._replace(query="", fragment=""))
+            if url in seen:
+                continue
+            seen.add(url)
+            title = _clean_text(anchor.text(separator=" ", strip=True))
+            if not title:
+                title = match.group(1).replace("-", " ")
+            items.append(
+                build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=source_name,
+                    external_id=match.group(1),
+                    url=url,
+                    text=title,
+                    metadata={
+                        "adapter": self.parser_name,
+                        "parser": self.parser_name,
+                        "board_url": board_url,
+                        "detail_vacancy_confirmed": True,
+                        "origin_fetched": False,
+                    },
+                )
+            )
+        return items
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        keywords = keywords_from_spec(spec)
+        limit = spec.limit or 50
+        source_name = spec.source_name or self.parser_name
+        start = spec.url if "/job" in urlparse(spec.url).path else self._LISTING
+        if keywords and "keyword=" not in start:
+            start = with_query_params(self._LISTING, {"keyword": " OR ".join(keywords)})
+
+        async def fetch(url: str) -> str:
+            response = await safe_fetch(client, url)
+            return str(response.text)
+
+        def extract(html_text: str, url: str) -> list[RawItem]:
+            return self._items_from_html(html_text, url, source_name, keywords)
+
+        items = await paginate_listing(
+            fetch,
+            extract,
+            start,
+            limit=limit,
+            pagination=ListingPagination(max_pages=DEFAULT_LISTING_MAX_PAGES),
+            identity=lambda item: item.url,
+        )
+        if not items and keywords:
+            items = await paginate_listing(
+                fetch,
+                extract,
+                self._LISTING,
+                limit=limit,
+                pagination=ListingPagination(max_pages=DEFAULT_LISTING_MAX_PAGES),
+                identity=lambda item: item.url,
+            )
+        for item in items:
+            yield item
 
 
 class AIEngineerParser(HtmlAggregatorParser):
@@ -441,12 +731,16 @@ def _register(name: str, parser: type[HtmlAggregatorParser]) -> None:
 _register("agilefluent", AgileFluentParser)
 _register("quick_offer", QuickOfferParser)
 _register("aijobs", AIJobsParser)
+_register("aijobs_com", AIJobsComParser)
+_register("aijobs_ai", AIJobsAiParser)
 _register("ai_engineer", AIEngineerParser)
 _register("remote_rocketship", RemoteRocketshipParser)
 
 
 __all__ = [
     "AIEngineerParser",
+    "AIJobsAiParser",
+    "AIJobsComParser",
     "AIJobsParser",
     "AgileFluentParser",
     "DjinniAggregatorParser",

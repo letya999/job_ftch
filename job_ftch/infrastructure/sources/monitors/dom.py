@@ -467,6 +467,7 @@ async def _paginate_urls(
     initial_urls: set[str],
     client: httpx.AsyncClient,
     url_matcher: re.Pattern[str] | None = None,
+    initial_html: str | None = None,
 ) -> set[str]:
     """Fetch additional pages of URLs via httpx (static pagination)."""
     urls = set(initial_urls)
@@ -475,6 +476,27 @@ async def _paginate_urls(
     start = pagination.get("start", 1)
     increment = pagination.get("increment", 1)
     max_pages = pagination.get("max_pages", 5)
+
+    if pagination.get("follow_rel_next"):
+        from job_ftch.infrastructure.sources.site_parsers.helpers import extract_next_listing_url
+
+        next_url = extract_next_listing_url(initial_html or "", board_url)
+        for _ in range(max_pages):
+            if not next_url or len(urls) >= MAX_URLS:
+                break
+            log.debug("dom.paginate", url=next_url)
+            try:
+                html = await fetch_page_text(next_url, client)
+            except Exception:  # noqa: BLE001 - extra pages must not fail the listing
+                break
+            if not html:
+                break
+            new_urls = _extract_links_static(html, next_url, url_matcher)
+            if not (new_urls - urls):
+                break
+            urls.update(new_urls)
+            next_url = extract_next_listing_url(html, next_url)
+        return urls
 
     if not (param_name or url_template):
         return urls
@@ -495,7 +517,10 @@ async def _paginate_urls(
             page_url = urlunparse(u)
 
         log.debug("dom.paginate", url=page_url)
-        html = await fetch_page_text(page_url, client)
+        try:
+            html = await fetch_page_text(page_url, client)
+        except Exception:  # noqa: BLE001 - extra pages must not fail the listing
+            break
         if not html:
             break
 
@@ -562,6 +587,7 @@ async def discover(
     pagination = config.get("pagination")
     expand_links = config.get("expand_links")
     all_urls: set[str] = set()
+    listing_html: str | None = None
 
     if render:
         try:
@@ -592,6 +618,7 @@ async def discover(
             if isinstance(prefetched_html, str) and prefetched_html
             else await fetch_page_text(board_url, client)
         )
+        listing_html = html
         if not html:
             log.warning("dom.fetch_failed", board_url=board_url)
             return set()
@@ -618,8 +645,23 @@ async def discover(
                 )
                 urls.update(await _expand_listing_urls(selected_listings, client, url_matcher))
 
+    if not pagination:
+        from job_ftch.infrastructure.sources.site_parsers.helpers import (
+            detect_listing_pagination,
+            pagination_monitor_config,
+        )
+
+        detected = detect_listing_pagination(listing_html, board_url) if listing_html else None
+        pagination = pagination_monitor_config(detected)
     if pagination:
-        urls = await _paginate_urls(board_url, pagination, urls, client, url_matcher)
+        urls = await _paginate_urls(
+            board_url,
+            pagination,
+            urls,
+            client,
+            url_matcher,
+            initial_html=listing_html,
+        )
 
     if expand_links:
         patterns = expand_links if isinstance(expand_links, list) else [expand_links]

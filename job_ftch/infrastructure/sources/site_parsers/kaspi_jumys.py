@@ -12,7 +12,14 @@ from job_ftch.application.registry import known_board_assessment_hint, register_
 from job_ftch.domain import SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
-from job_ftch.infrastructure.sources.site_parsers.helpers import safe_fetch
+from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    DEFAULT_LISTING_MAX_PAGES,
+    ListingPagination,
+    keywords_from_spec,
+    paginate_listing,
+    safe_fetch,
+    text_matches_keywords,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -43,18 +50,18 @@ class KaspiJumysParser:
         del url
         return "kaspi_jumys_ssr"
 
-    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
-        limit = spec.limit or getattr(getattr(self, "_manifest_entry", None), "limit", None) or 50
-        response = await safe_fetch(client, spec.url)
-        page = LexborHTMLParser(response.text)
+    def _items_from_html(
+        self, html: str, board_url: str, source_name: str, keywords: list[str]
+    ) -> list[RawItem]:
+        page = LexborHTMLParser(html)
+        items: list[RawItem] = []
         seen: set[str] = set()
-        emitted = 0
         for anchor in page.css("a[href]"):
             href = str(anchor.attributes.get("href") or "").strip()
             match = _DETAIL_RE.match(urlsplit(href).path)
             if match is None:
                 continue
-            parsed_url = urlsplit(urljoin(str(response.url or spec.url), href))
+            parsed_url = urlsplit(urljoin(board_url, href))
             url = urlunsplit((parsed_url.scheme, parsed_url.netloc, parsed_url.path, "", ""))
             if url in seen:
                 continue
@@ -71,22 +78,47 @@ class KaspiJumysParser:
             if not text:
                 continue
             title = _clean(anchor.text(strip=True)) or text.split(" ", 1)[0]
-            yield build_raw_item(
-                source_kind=SourceKind.CAREER_SITE,
-                source_name=spec.source_name or "kaspi_jumys_ssr",
-                external_id=match.group(1),
-                url=url,
-                text="\n".join(part for part in (title, text) if part),
-                metadata={
-                    "board_url": spec.url,
-                    "parser": "kaspi_jumys_ssr",
-                    "observation_kind": "vacancy_detail",
-                    "detail_vacancy_confirmed": True,
-                },
+            if not text_matches_keywords(f"{title}\n{text}\n{url}", keywords):
+                continue
+            items.append(
+                build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=source_name,
+                    external_id=match.group(1),
+                    url=url,
+                    text="\n".join(part for part in (title, text) if part),
+                    metadata={
+                        "board_url": board_url,
+                        "parser": "kaspi_jumys_ssr",
+                        "observation_kind": "vacancy_detail",
+                        "detail_vacancy_confirmed": True,
+                    },
+                )
             )
-            emitted += 1
-            if emitted >= limit:
-                return
+        return items
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        limit = spec.limit or getattr(getattr(self, "_manifest_entry", None), "limit", None) or 50
+        keywords = keywords_from_spec(spec)
+        source_name = spec.source_name or "kaspi_jumys_ssr"
+
+        async def fetch(url: str) -> str:
+            response = await safe_fetch(client, url)
+            return str(response.text)
+
+        def extract(html: str, url: str) -> list[RawItem]:
+            return self._items_from_html(html, url, source_name, keywords)
+
+        items = await paginate_listing(
+            fetch,
+            extract,
+            spec.url,
+            limit=limit,
+            pagination=ListingPagination(max_pages=DEFAULT_LISTING_MAX_PAGES),
+            identity=lambda item: item.url,
+        )
+        for item in items:
+            yield item
 
 
 register_site_parser(

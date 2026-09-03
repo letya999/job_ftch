@@ -14,15 +14,14 @@ from selectolax.parser import HTMLParser
 
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
 from job_ftch.domain import SourceKind
-from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
-    browser_scroll_collect_urls,
     extract_urls_with_limit,
+    keywords_from_spec,
     normalize_search_keywords,
-    resolve_browser_config,
     safe_fetch,
+    text_matches_keywords,
     with_query_params,
 )
 
@@ -160,12 +159,59 @@ def _item_from_detail_html(
     )
 
 
+def _items_from_listing_html(
+    html_text: str,
+    board_url: str,
+    source_name: str,
+    keywords: list[str],
+) -> list[RawItem]:
+    items: list[RawItem] = []
+    seen: set[str] = set()
+    page = HTMLParser(html_text)
+    for link in page.css("a.vacancy-card__title-link"):
+        href = str(link.attributes.get("href") or "").strip()
+        match = re.search(r"/vacancies/(\d+)", href)
+        if match is None:
+            continue
+        external_id = match.group(1)
+        if external_id in seen:
+            continue
+        seen.add(external_id)
+        title = " ".join(link.text(separator=" ", strip=True).split())
+        card = link.parent
+        while card is not None and "vacancy-card" not in str(card.attributes.get("class") or ""):
+            card = card.parent
+        extra = ""
+        if card is not None:
+            extra = " ".join(card.text(separator=" ", strip=True).split())
+        text = "\n".join(part for part in (title, extra) if part)
+        if not title or not text_matches_keywords(text, keywords):
+            continue
+        items.append(
+            build_raw_item(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=source_name,
+                external_id=external_id,
+                url=f"https://career.habr.com/vacancies/{external_id}",
+                text=text,
+                metadata={
+                    "board_url": board_url,
+                    "job_url": f"https://career.habr.com/vacancies/{external_id}",
+                    "parser": "site_habr_career",
+                    "detail_vacancy_confirmed": False,
+                },
+            )
+        )
+    return items
+
+
 class HabrCareerParser:
     domain_pattern = r"^https?://career\.habr\.com/"
     has_custom_parse = True
-    supports_discover = True
-    supports_search = False
-    search_mode = "none"
+    supports_discover = False
+    supports_search = True
+    search_mode = "combined"
+    confirmed_empty_on_empty = True
 
     def build_search_urls(
         self,
@@ -190,7 +236,11 @@ class HabrCareerParser:
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
-        return SiteRuntimeDefaults(url_filter=_URL_FILTER)
+        return SiteRuntimeDefaults(
+            url_filter=_URL_FILTER,
+            render=False,
+            include_if_detail_page=False,
+        )
 
     def parser_kind(self, url: str) -> str | None:
         del url
@@ -260,27 +310,7 @@ class HabrCareerParser:
                 if len(collected) >= limit:
                     return collected[:limit]
 
-        if collected:
-            return collected[:limit]
-
-        bypass_strategy = spec.monitor_config.get("_bypass_strategy")
-        browser_config = resolve_browser_config(spec, bypass_strategy)
-        browser = getattr(getattr(self, "_manifest_entry", None), "browser", None)
-        async with open_page(browser_config, bypass_strategy=bypass_strategy) as page:
-            await navigate(page, spec.url, browser_config)
-            current_url = getattr(page, "url", spec.url) or spec.url
-            if detail_re.search(current_url):
-                return [str(current_url).split("?", 1)[0]]
-            return await browser_scroll_collect_urls(
-                page,
-                current_url,
-                detail_re,
-                limit=limit,
-                scroll_loops=getattr(browser, "scroll_loops", None) or 8,
-                pause_sec=(getattr(browser, "scroll_pause_ms", None) or 500) / 1000.0,
-                scroll_px=getattr(browser, "scroll_px", None) or 2500,
-                stale_rounds=getattr(browser, "stale_rounds", None) or 3,
-            )
+        return collected[:limit]
 
     async def parse(
         self,
@@ -289,27 +319,28 @@ class HabrCareerParser:
     ) -> AsyncIterator[RawItem]:
         limit = self._limit(spec.limit)
         source_name = spec.source_name or "habr_career"
-        detail_urls = await self.discover(spec, client)
+        keywords = keywords_from_spec(spec)
         seen_ids: set[str] = set()
-        for detail_url in detail_urls[:limit]:
-            detail_id = re.search(r"/vacancies/(\d+)", detail_url)
-            final_id = detail_id.group(1) if detail_id else detail_url
-            if final_id in seen_ids:
-                continue
-            seen_ids.add(final_id)
+        emitted = 0
+        for page in range(1, self._page_count(limit) + 1):
+            listing_url = self._listing_page_url(spec.url, page)
             try:
-                response = await safe_fetch(client, detail_url)
+                response = await safe_fetch(client, listing_url)
             except Exception as exc:
-                logger.debug("habr.detail_fetch_failed", url=detail_url, error=str(exc))
-                continue
-            item = _item_from_detail_html(
-                str(response.url),
-                response.text,
-                source_name,
-                spec.url,
-            )
-            if item is not None:
+                logger.debug("habr.listing_fetch_failed", url=listing_url, error=str(exc))
+                return
+            for item in _items_from_listing_html(
+                str(response.text), spec.url, source_name, keywords
+            ):
+                if item.external_id in seen_ids:
+                    continue
+                seen_ids.add(item.external_id)
                 yield item
+                emitted += 1
+                if emitted >= limit:
+                    return
+            if emitted == 0 and page == 1:
+                return
 
     @property
     def __name__(self) -> str:

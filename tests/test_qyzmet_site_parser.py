@@ -21,3 +21,20 @@ def test_qyzmet_parser_emits_inline_ssr_vacancy_card() -> None:
     assert items[0].external_id == "21103262"
     assert str(items[0].url) == "https://qyzmet.kz/jobdesc?id=21103262&src=js"
     assert items[0].metadata["company"] == "Example Corp"
+
+
+def test_qyzmet_parser_accepts_redir_cards() -> None:
+    html = """
+    <article class="job" data-id="21413892">
+      <h2><a class="job-title" href="/redir?id=21413892">Продавец-консультант</a></h2>
+      <div class="job-data company">Все для новоселов</div>
+      <div class="desc">Обслуживать покупателей</div>
+    </article>
+    """
+    spec = CareerSiteSpec(url="https://qyzmet.kz/вакансии", source_name="qyzmet-test")
+
+    items = QyzmetParser._items_from_html(html, spec.url, spec)
+
+    assert len(items) == 1
+    assert items[0].external_id == "21413892"
+    assert str(items[0].url) == "https://qyzmet.kz/jobdesc?id=21413892"

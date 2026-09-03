@@ -1,18 +1,21 @@
 """Expand career-site sources after source assessment selects search behavior.
 
 A tenant lists aggregator sources as plain listing URLs (e.g.
-``https://geekjob.ru/vacancies``). Given the tenant's target roles, each source
-whose resolved site parser has a verified search recipe is rewritten into one
-(combined) or several (per-keyword) concrete search URLs so ingest starts from a
-pre-filtered result page instead of the whole board.
+``https://geekjob.ru/vacancies``). Target roles are first compacted into search
+queries (slash-split, distinctive AI/LLM terms, length cap). Each source whose
+resolved site parser advertises ``supports_search`` is rewritten into one
+(combined) or a few (per-keyword, capped) concrete search URLs.
 
-The assessment is attached to each prepared source before this function runs.
-Specific parser builders remain the fallback for callers without an assessment;
-assessed but unverified candidates stay at their original listing URL.
+A failed HTML-form assessment does not suppress a deterministic parser builder:
+GeekJob's JSON ``qs=`` and HH ``text=A OR B`` are different surfaces from
+``detect_search_form``. Unverified sources without a parser search stay on the
+original listing and still carry ``_search_keywords`` for the generic runtime
+path.
 """
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs, urlparse
 
@@ -25,6 +28,47 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
+# Per-keyword fan-out eats the 50-source run budget; keep it tiny.
+_PER_KEYWORD_FANOUT_CAP = 3
+_COMBINED_QUERY_CAP = 8
+_DISTINCTIVE_ROLE = re.compile(
+    r"\b(ai|llm|ml|mlops|genai|agent|machine learning)\b",
+    re.IGNORECASE,
+)
+
+
+def search_queries_from_target_roles(
+    target_roles: Sequence[str],
+    *,
+    cap: int = _COMBINED_QUERY_CAP,
+) -> list[str]:
+    """Turn profile target roles into concentrated search queries.
+
+    Splits ``A / B`` aliases, drops generic leftovers when distinctive AI/LLM
+    terms exist, and caps length so a combined ``OR`` query stays title-sized
+    instead of matching every "developer" on the board.
+    """
+    seen: set[str] = set()
+    distinctive: list[str] = []
+    generic: list[str] = []
+    for raw in target_roles or ():
+        if not isinstance(raw, str):
+            continue
+        for chunk in re.split(r"\s*/\s*", raw):
+            text = " ".join(chunk.split()).strip()
+            if not text:
+                continue
+            key = text.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            if _DISTINCTIVE_ROLE.search(text):
+                distinctive.append(text)
+            else:
+                generic.append(text)
+    chosen = distinctive or generic
+    return chosen[: max(cap, 0)]
+
 
 def expand_career_site_specs(
     specs: Sequence[SourceSpec],
@@ -34,7 +78,7 @@ def expand_career_site_specs(
     from job_ftch.application.registry import resolve_site_parser_for_spec
     from job_ftch.domain.source_spec import CareerSiteSpec
 
-    roles = [role for role in (target_roles or ()) if isinstance(role, str) and role.strip()]
+    roles = search_queries_from_target_roles(target_roles)
     if not roles:
         return list(specs)
 
@@ -48,46 +92,53 @@ def expand_career_site_specs(
             continue
         base_url = spec.url
         assessment = (getattr(spec, "monitor_config", {}) or {}).get("_search_assessment")
-        assessed_executor = assessment.get("executor") if isinstance(assessment, dict) else None
         assessed_status = assessment.get("status") if isinstance(assessment, dict) else None
-        if assessed_executor in {"generic_get", "generic_post", "generic_browser"}:
-            expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
-            continue
+        parser = resolve_site_parser_for_spec(spec)
+        # Parser search wins over a generic HTML-form recipe: X5 ``search=``
+        # and HH ``text=A OR B`` are different surfaces from ``detect_search_form``.
+        # A verified generic_get must not suppress those builders.
+        if parser is not None and getattr(parser, "supports_search", False):
+            try:
+                urls = list(parser.build_search_urls(spec.url, roles, limit=spec.limit))
+            except Exception as exc:  # noqa: BLE001 - never let expansion drop a source
+                logger.warning("search_expansion_failed", url=spec.url, error=str(exc))
+                urls = []
+            if urls:
+                mode = str(getattr(parser, "search_mode", "") or "")
+                if mode == "per_keyword" and len(urls) > _PER_KEYWORD_FANOUT_CAP:
+                    urls = urls[:_PER_KEYWORD_FANOUT_CAP]
+                for index, url in enumerate(urls):
+                    expanded.append(
+                        _clone_with_search_url(
+                            _attach_search_keywords(spec, roles, base_url=base_url),
+                            url,
+                            index,
+                            len(urls),
+                        )
+                    )
+                continue
         if assessed_status and assessed_status != "verified":
             expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
             continue
-        parser = resolve_site_parser_for_spec(spec)
-        if parser is None or not getattr(parser, "supports_search", False):
-            # Every career source carries the roles into runtime. A specific
-            # parser may still be used after the generic search executor finds
-            # a form or browser/API recipe.
-            expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
-            continue
-        try:
-            urls = list(parser.build_search_urls(spec.url, roles, limit=spec.limit))
-        except Exception as exc:  # noqa: BLE001 - never let expansion drop a source
-            logger.warning("search_expansion_failed", url=spec.url, error=str(exc))
-            expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
-            continue
-        if not urls:
-            expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
-            continue
-        for index, url in enumerate(urls):
-            expanded.append(
-                _clone_with_search_url(
-                    _attach_search_keywords(spec, roles, base_url=base_url),
-                    url,
-                    index,
-                    len(urls),
-                )
-            )
+        expanded.append(_attach_search_keywords(spec, roles, base_url=base_url))
     return expanded
 
 
 def _url_has_search_query(url: str) -> bool:
     query = parse_qs(urlparse(url).query)
     return any(
-        key in query for key in ("q", "query", "text", "search", "keyword", "keywords", "qs")
+        key in query
+        for key in (
+            "q",
+            "query",
+            "text",
+            "search",
+            "keyword",
+            "keywords",
+            "qs",
+            "job_search",
+            "roles",
+        )
     )
 
 

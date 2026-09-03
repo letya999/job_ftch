@@ -159,48 +159,77 @@ async def test_geekjob_parser_uses_search_api_for_role_query() -> None:
 
 
 @pytest.mark.asyncio
-async def test_geekjob_parser_uses_browser_fallback_for_lazy_listing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_geekjob_parser_emits_json_rows_without_browser() -> None:
     parser = GeekJobParser()
+
+    class _ApiResponse(_FakeResponse):
+        def json(self) -> dict[str, object]:
+            return {
+                "data": [
+                    {
+                        "id": "abc123",
+                        "position": "Tech Lead NLP / LLM",
+                        "company": {"name": "Team4You"},
+                        "city": "Москва",
+                    }
+                ]
+            }
+
+    class _ApiClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def get(
+            self, url: str, *, follow_redirects: bool = True, **kwargs: object
+        ) -> _ApiResponse:
+            del follow_redirects
+            self.calls.append((url, kwargs))
+            return _ApiResponse("", url)
+
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(
+                url="https://geekjob.ru/vacancies?qs=LLM",
+                source_name="geekjob_jobs",
+                limit=2,
+            ),
+            _ApiClient(),
+        )
+    ]
+
+    assert len(items) == 1
+    assert items[0].external_id == "abc123"
+    assert "Tech Lead NLP / LLM" in items[0].text
+    assert str(items[0].url).endswith("/vacancy/abc123")
+
+
+@pytest.mark.asyncio
+async def test_habr_parser_emits_listing_cards_without_detail_fetch() -> None:
+    parser = HabrCareerParser()
     client = _FakeClient(
         {
-            "https://geekjob.ru/vacancies": _FakeResponse(
-                "<html><body><div id='root'></div></body></html>",
-                "https://geekjob.ru/vacancies",
+            "https://career.habr.com/companies/rwb/vacancies": _FakeResponse(
+                '<a class="vacancy-card__title-link" href="/vacancies/1000160764">'
+                "Продуктовый аналитик</a>",
+                "https://career.habr.com/companies/rwb/vacancies",
             )
         }
     )
-
-    @asynccontextmanager
-    async def _fake_open_page(*args: object, **kwargs: object):
-        del args, kwargs
-        yield SimpleNamespace(url="https://geekjob.ru/vacancies")
-
-    async def _fake_navigate(page: object, url: str, config: dict[str, object]) -> None:
-        del page, url, config
-
-    async def _fake_scroll(*args: object, **kwargs: object) -> list[str]:
-        del args, kwargs
-        return ["https://geekjob.ru/jobs/648644"]
-
-    monkeypatch.setattr(
-        "job_ftch.infrastructure.sources.site_parsers.geekjob.open_page", _fake_open_page
-    )
-    monkeypatch.setattr(
-        "job_ftch.infrastructure.sources.site_parsers.geekjob.navigate", _fake_navigate
-    )
-    monkeypatch.setattr(
-        "job_ftch.infrastructure.sources.site_parsers.geekjob.browser_scroll_collect_urls",
-        _fake_scroll,
-    )
-
-    urls = await parser.discover(
-        CareerSiteSpec(url="https://geekjob.ru/vacancies", source_name="geekjob_jobs", limit=1),
-        client,
-    )
-
-    assert urls == ["https://geekjob.ru/jobs/648644"]
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(
+                url="https://career.habr.com/companies/rwb/vacancies",
+                source_name="rwb_habr",
+                limit=5,
+            ),
+            client,
+        )
+    ]
+    assert len(items) == 1
+    assert items[0].external_id == "1000160764"
+    assert "Продуктовый аналитик" in items[0].text
 
 
 @pytest.mark.asyncio

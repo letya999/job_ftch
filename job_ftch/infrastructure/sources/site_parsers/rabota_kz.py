@@ -1,10 +1,10 @@
-"""Parser for the rendered-in-HTML vacancy cards at astanahub.com."""
+"""HTTP listing parser for rabota.kz SPA cards."""
 
 from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urljoin, urlparse
 
 from selectolax.lexbor import LexborHTMLParser
 
@@ -28,81 +28,78 @@ if TYPE_CHECKING:
     from job_ftch.domain.models import RawItem
     from job_ftch.domain.source_spec import CareerSiteSpec
 
+_DETAIL_RE = re.compile(r"/job/list/([a-f0-9]{16,})(?:/)?$", re.IGNORECASE)
+_LISTING = "https://rabota.kz/job/list"
 
-class AstanaHubParser:
-    domain_pattern = r"^https?://(?:www\.)?astanahub\.com(?:/|$)"
+
+class RabotaKzParser:
+    domain_pattern = r"^https?://(?:www\.)?rabota\.kz(?:/|$)"
     has_custom_parse = True
+    supports_discover = False
     supports_search = True
     search_mode = "combined"
     confirmed_empty_on_empty = True
 
     def build_search_urls(
-        self,
-        base_url: str,
-        keywords: Any,
-        *,
-        limit: int | None = None,
+        self, base_url: str, keywords: Any, *, limit: int | None = None
     ) -> list[str]:
-        del limit
+        del base_url, limit
         terms = normalize_search_keywords(keywords)
         if not terms:
             return []
-        parsed = urlparse(base_url)
-        path = parsed.path or "/en/vacancy/"
-        if "/vacancy" not in path:
-            path = "/en/vacancy/"
-        listing = urlunparse(parsed._replace(path=path, query=""))
-        # Full role phrases in ``q=`` return zero live cards. Keep the opened
-        # listing and filter titles locally from profile roles.
-        return [with_query_params(listing, {"opened": "True"})]
+        return [with_query_params(_LISTING, {"search": " OR ".join(terms)})]
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
         return SiteRuntimeDefaults(
-            render=False, wait="domcontentloaded", include_if_detail_page=False
+            url_filter=r"rabota\.kz/job/list/[a-f0-9]+",
+            render=False,
+            include_if_detail_page=False,
         )
 
     def parser_kind(self, url: str) -> str | None:
         del url
-        return None
+        return "rabota_kz"
 
     def _items_from_html(
         self, html: str, board_url: str, source_name: str, keywords: list[str]
     ) -> list[RawItem]:
-        page = LexborHTMLParser(html)
         items: list[RawItem] = []
-        for card in page.css(".vacancy-item"):
-            text = "\n".join(
-                part.strip()
-                for part in card.text(separator="\n", strip=True).splitlines()
-                if part.strip()
-            )
-            onclick = card.attributes.get("onclick", "")
-            match = re.search(r"https?://[^'\"]+/vacancy/(\d+)", onclick or "")
-            if not match or len(text) < 20:
+        seen: set[str] = set()
+        for anchor in LexborHTMLParser(html).css("a[href]"):
+            href = str(anchor.attributes.get("href") or "").strip()
+            url = urljoin(board_url, href.split("?", 1)[0])
+            match = _DETAIL_RE.search(urlparse(url).path)
+            if match is None or url in seen:
                 continue
-            if not text_matches_keywords(text, keywords):
+            seen.add(url)
+            title = " ".join(anchor.text(separator=" ", strip=True).split())
+            if len(title) < 3 or title.casefold() in {"развернуть", "скрыть"}:
                 continue
-            url = match.group(0)
+            if not text_matches_keywords(f"{title}\n{url}", keywords):
+                continue
             items.append(
                 build_raw_item(
                     source_kind=SourceKind.CAREER_SITE,
                     source_name=source_name,
                     external_id=match.group(1),
                     url=url,
-                    text=text,
-                    metadata={"board_url": board_url, "parser": "astanahub"},
+                    text=title,
+                    metadata={"board_url": board_url, "parser": "rabota_kz"},
                 )
             )
         return items
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
         keywords = keywords_from_spec(spec)
-        limit = spec.limit or 50
-        source_name = spec.source_name or "astanahub"
+        listing = spec.url
+        if "/job/list" not in listing:
+            listing = _LISTING
+        source_name = spec.source_name or "rabota_kz"
 
         async def fetch(url: str) -> str:
             response = await client.get(url, follow_redirects=True)
+            response.raise_for_status()
             return str(response.text)
 
         def extract(html: str, url: str) -> list[RawItem]:
@@ -111,8 +108,8 @@ class AstanaHubParser:
         items = await paginate_listing(
             fetch,
             extract,
-            spec.url,
-            limit=limit,
+            listing,
+            limit=spec.limit or 50,
             pagination=ListingPagination(max_pages=DEFAULT_LISTING_MAX_PAGES),
             identity=lambda item: item.url,
         )
@@ -120,4 +117,4 @@ class AstanaHubParser:
             yield item
 
 
-register_site_parser("astanahub", domain_pattern=AstanaHubParser.domain_pattern)(AstanaHubParser)
+register_site_parser("rabota_kz", domain_pattern=RabotaKzParser.domain_pattern)(RabotaKzParser)

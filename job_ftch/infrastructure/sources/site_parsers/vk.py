@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
@@ -11,6 +12,7 @@ from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefault
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
     normalize_search_keywords,
     safe_fetch,
+    text_matches_keywords,
     with_query_params,
 )
 
@@ -36,7 +38,9 @@ class VkTeamParser:
         terms = normalize_search_keywords(keywords)
         if not terms:
             return []
-        return [with_query_params(base_url, {"query": " OR ".join(terms)})]
+        # Live search box writes ``search=``, which the SPA forwards as API
+        # ``title=``. ``query=`` is ignored by the page (unfiltered dump).
+        return [with_query_params(base_url, {"search": " OR ".join(terms)})]
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
@@ -60,22 +64,42 @@ class VkTeamParser:
             ),
             "",
         )
+        terms = normalize_search_keywords(re.split(r"\s+OR\s+|\s+or\s+", search)) if search else []
+        # ``title`` is a substring filter, not a boolean OR. Combined role
+        # phrases therefore have to be applied locally after listing pages.
+        api_title = terms[0] if len(terms) == 1 else ""
         limit = min(spec.limit or 50, 50)
-        params: dict[str, str | int] = {"limit": limit, "offset": 0}
-        if search:
-            params["title"] = search
-        api_url = urljoin(spec.url, "/career/api/v2/vacancies/") + "?" + urlencode(params)
-        response = await safe_fetch(client, api_url)
-        payload = json.loads(str(response.text))
-        results = payload.get("results", []) if isinstance(payload, dict) else []
         urls: list[str] = []
-        for item in results:
-            vacancy_id = item.get("id") if isinstance(item, dict) else None
-            if vacancy_id is None:
-                continue
-            urls.append(urljoin(spec.url, f"/vacancy/{vacancy_id}/"))
-            if len(urls) >= limit:
+        offset = 0
+        page_size = 50
+        while len(urls) < limit and offset < 200:
+            params: dict[str, str | int] = {"limit": page_size, "offset": offset}
+            if api_title:
+                params["title"] = api_title
+            api_url = urljoin(spec.url, "/career/api/v2/vacancies/") + "?" + urlencode(params)
+            try:
+                response = await safe_fetch(client, api_url)
+            except Exception:  # noqa: BLE001 - a partial page is still usable
                 break
+            payload = json.loads(str(response.text))
+            results = payload.get("results", []) if isinstance(payload, dict) else []
+            if not isinstance(results, list) or not results:
+                break
+            for item in results:
+                if not isinstance(item, dict):
+                    continue
+                vacancy_id = item.get("id")
+                if vacancy_id is None:
+                    continue
+                title = str(item.get("title") or item.get("name") or "")
+                if terms and title and not text_matches_keywords(title, terms):
+                    continue
+                urls.append(urljoin(spec.url, f"/vacancy/{vacancy_id}/"))
+                if len(urls) >= limit:
+                    break
+            if api_title:
+                break
+            offset += len(results)
         return urls
 
     @property
