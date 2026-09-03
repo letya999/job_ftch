@@ -68,6 +68,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_shot_sync_qdrant.py](test_shot_sync_qdrant.py)
 - [test_source_loading.py](test_source_loading.py)
 - [test_source_operations.py](test_source_operations.py)
+- [test_source_quality.py](test_source_quality.py)
 - [test_source_validator_ssrf.py](test_source_validator_ssrf.py)
 - [test_tenant_graph_runtime.py](test_tenant_graph_runtime.py)
 - [test_tenant_runner.py](test_tenant_runner.py)

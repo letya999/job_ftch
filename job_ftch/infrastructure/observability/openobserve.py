@@ -355,6 +355,13 @@ def record_runtime_state_metrics(
         "job_ftch.source.health.failure_streak": [],
         "job_ftch.source.health.last_success_age": [],
         "job_ftch.source.health.last_emitted": [],
+        "job_ftch.source.quality.reliable": [],
+        "job_ftch.source.quality.rich": [],
+        "job_ftch.source.quality.high_relevance": [],
+        "job_ftch.source.quality.ok_rate": [],
+        "job_ftch.source.quality.yield_rate": [],
+        "job_ftch.source.quality.relevant_rate": [],
+        "job_ftch.source.quality.window_runs": [],
     }
     for health in source_health:
         source_attrs = {
@@ -381,6 +388,27 @@ def record_runtime_state_metrics(
         )
         source_rows["job_ftch.source.health.last_emitted"].append(
             (float(health.last_emitted), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.reliable"].append(
+            (1.0 if health.quality_reliable else 0.0, source_attrs)
+        )
+        source_rows["job_ftch.source.quality.rich"].append(
+            (1.0 if health.quality_rich else 0.0, source_attrs)
+        )
+        source_rows["job_ftch.source.quality.high_relevance"].append(
+            (1.0 if health.quality_high_relevance else 0.0, source_attrs)
+        )
+        source_rows["job_ftch.source.quality.ok_rate"].append(
+            (float(health.quality_ok_rate), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.yield_rate"].append(
+            (float(health.quality_yield_rate), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.relevant_rate"].append(
+            (float(health.quality_relevant_rate), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.window_runs"].append(
+            (float(health.quality_window_runs), source_attrs)
         )
 
     scheduler_attrs = attrs

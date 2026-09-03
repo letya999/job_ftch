@@ -253,6 +253,13 @@ def _update_source_health_payload(
         last_error=None,
         last_error_at=None,
         last_error_kind=None,
+        quality_window_runs=previous.quality_window_runs if previous else 0,
+        quality_ok_rate=previous.quality_ok_rate if previous else 0.0,
+        quality_yield_rate=previous.quality_yield_rate if previous else 0.0,
+        quality_relevant_rate=previous.quality_relevant_rate if previous else 0.0,
+        quality_reliable=previous.quality_reliable if previous else False,
+        quality_rich=previous.quality_rich if previous else False,
+        quality_high_relevance=previous.quality_high_relevance if previous else False,
     )
 
 
@@ -2050,6 +2057,57 @@ class TenantRunner:
                     current_emitted=payload.last_emitted,
                     drift_ratio=payload.drift_ratio,
                 )
+        await self._apply_source_quality_window(runtime, summary)
+
+    async def _apply_source_quality_window(
+        self, runtime: TenantRuntime, summary: RunSummary
+    ) -> None:
+        from job_ftch.application.source_quality import (
+            QUALITY_WINDOW_RUNS,
+            canonical_source_key,
+            classify_source_quality,
+            quality_payload,
+        )
+
+        try:
+            histories = await runtime.store.list_run_summaries(limit=QUALITY_WINDOW_RUNS * 2)
+        except Exception as exc:  # noqa: BLE001 - window labels must not fail the run
+            logger.warning(
+                "source_quality_history_load_failed",
+                tenant_id=runtime.tenant.tenant_id,
+                error=str(exc),
+            )
+            histories = [summary]
+        stats = classify_source_quality(histories)
+        if not stats:
+            return
+        for health in await runtime.store.list_source_health():
+            row = stats.get(canonical_source_key(health.source_id, health.source_name))
+            if row is None:
+                continue
+            updated = health.model_copy(update=row.as_health_update())
+            await runtime.store.save_source_health(health.source_id, updated)
+        payload = quality_payload(stats.values())
+        try:
+            await runtime.store.set_run_state(
+                "source_quality",
+                json.dumps(payload, default=_json_default, ensure_ascii=False, sort_keys=True),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "source_quality_persist_failed",
+                tenant_id=runtime.tenant.tenant_id,
+                error=str(exc),
+            )
+        logger.info(
+            "source_quality_classified",
+            tenant_id=runtime.tenant.tenant_id,
+            window_runs=payload.get("window_runs"),
+            reliable=len(payload.get("reliable") or []),
+            rich=len(payload.get("rich") or []),
+            high_relevance=len(payload.get("high_relevance") or []),
+            watch=payload.get("watch") or [],
+        )
 
     async def refresh_runtime_state_metrics(self, tenant_id: str, summary: RunSummary) -> None:
         await self._record_runtime_state_metrics(self.get_runtime(tenant_id), summary)

@@ -91,5 +91,7 @@ def test_runtime_state_metrics_snapshot_exposes_source_and_publish_state(monkeyp
 
     assert _runtime_state_snapshots["job_ftch.source.health.degraded"][0][0] == 1.0
     assert _runtime_state_snapshots["job_ftch.source.health.failure_streak"][0][0] == 2.0
+    assert _runtime_state_snapshots["job_ftch.source.quality.reliable"][0][0] == 0.0
+    assert _runtime_state_snapshots["job_ftch.source.quality.high_relevance"][0][0] == 0.0
     assert _runtime_state_snapshots["job_ftch.bot.scheduler.publish_error_present"][0][0] == 1.0
     assert _runtime_state_snapshots["job_ftch.bot.scheduler.last_publish_sent"][0][0] == 7.0

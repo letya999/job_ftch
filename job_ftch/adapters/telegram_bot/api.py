@@ -146,6 +146,11 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
         for item in source_health
         if item.paused or item.degraded or item.status in {"failing", "paused", "degraded"}
     ]
+    watch_sources = [
+        item
+        for item in source_health
+        if item.quality_high_relevance or (item.quality_reliable and item.quality_rich)
+    ]
     scheduler_error = str(scheduler_state.get("bot_scheduler:last_error") or "").strip()
     publish_error = str(scheduler_state.get("bot_scheduler:last_publish_error") or "").strip()
     status = "degraded" if bad_sources or scheduler_error or publish_error else "ok"
@@ -166,6 +171,10 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
             "total": len(source_health),
             "degraded": len(bad_sources),
             "bad_source_ids": [item.source_id for item in bad_sources],
+            "reliable": sum(1 for item in source_health if item.quality_reliable),
+            "rich": sum(1 for item in source_health if item.quality_rich),
+            "high_relevance": sum(1 for item in source_health if item.quality_high_relevance),
+            "watch_source_ids": [item.source_id for item in watch_sources],
         },
         "scheduler": {
             "last_attempt_age_seconds": _age_seconds(
