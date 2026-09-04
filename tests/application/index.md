@@ -56,6 +56,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_resolver_queue.py](test_resolver_queue.py)
 - [test_run_budget.py](test_run_budget.py)
 - [test_run_data_reset.py](test_run_data_reset.py)
+- [test_run_stats.py](test_run_stats.py)
 - [test_runtime_lifecycle.py](test_runtime_lifecycle.py)
 - [test_runtime_ontology_priority.py](test_runtime_ontology_priority.py)
 - [test_runtime_settings_injection.py](test_runtime_settings_injection.py)

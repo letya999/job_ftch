@@ -1,0 +1,378 @@
+{
+  "version": 5,
+  "title": "job_ftch ingest",
+  "description": "Per-run conversion, latency, LLM cost, source statuses, and quality-label tables. Filter by source_run_id for one run.",
+  "variables": {
+    "list": [
+      {
+        "type": "query_values",
+        "name": "source_run_id",
+        "label": "Run",
+        "query_data": {
+          "stream_type": "logs",
+          "stream": "__LOGS_STREAM__",
+          "field": "source_run_id",
+          "max_record_size": 40,
+          "filter": []
+        },
+        "value": "",
+        "options": []
+      }
+    ],
+    "showDynamicFilters": true
+  },
+  "tabs": [
+    {
+      "tabId": "over-time",
+      "name": "По прогонам",
+      "panels": [
+        {
+          "id": "duration",
+          "type": "line",
+          "title": "Latency прогона (ms)",
+          "description": "Wall time pipeline_run_stats.duration_ms",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) AS x_axis, avg(duration_ms) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' GROUP BY x_axis ORDER BY x_axis",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [{"label": "Time", "alias": "x_axis", "column": "x_axis", "color": null, "aggregationFunction": null}],
+                "y": [{"label": "duration_ms", "alias": "y_axis", "column": "y_axis", "color": null, "aggregationFunction": "avg"}],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 0, "min": 0, "max": 100, "promql_legend": "", "layer_type": "line", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 0, "w": 24, "h": 10, "i": 1},
+          "config": {"show_legends": true, "unit": "milliseconds", "decimals": 0}
+        },
+        {
+          "id": "cost",
+          "type": "line",
+          "title": "LLM cost (USD)",
+          "description": "pipeline_run_stats.llm_cost_usd",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) AS x_axis, avg(llm_cost_usd) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' GROUP BY x_axis ORDER BY x_axis",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [{"label": "Time", "alias": "x_axis", "column": "x_axis", "color": null, "aggregationFunction": null}],
+                "y": [{"label": "usd", "alias": "y_axis", "column": "y_axis", "color": null, "aggregationFunction": "avg"}],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 0, "min": 0, "max": 100, "promql_legend": "", "layer_type": "line", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 24, "y": 0, "w": 24, "h": 10, "i": 2},
+          "config": {"show_legends": true, "unit": "currency", "unit_custom": "USD", "decimals": 4}
+        },
+        {
+          "id": "conversion",
+          "type": "line",
+          "title": "Конверсия extract / accept",
+          "description": "extracted/fetched и emitted/fetched",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) AS x_axis, avg(conversion_extract) AS extract_rate, avg(conversion_accept) AS accept_rate FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' GROUP BY x_axis ORDER BY x_axis",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [{"label": "Time", "alias": "x_axis", "column": "x_axis", "color": null, "aggregationFunction": null}],
+                "y": [
+                  {"label": "extract", "alias": "extract_rate", "column": "extract_rate", "color": null, "aggregationFunction": "avg"},
+                  {"label": "accept", "alias": "accept_rate", "column": "accept_rate", "color": null, "aggregationFunction": "avg"}
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 0, "min": 0, "max": 100, "promql_legend": "", "layer_type": "line", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 10, "w": 24, "h": 10, "i": 3},
+          "config": {"show_legends": true, "decimals": 3}
+        },
+        {
+          "id": "source-health-counts",
+          "type": "stacked",
+          "title": "Источники ok vs fail",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) AS x_axis, avg(ok_sources) AS ok_sources, avg(fail_sources) AS fail_sources FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' GROUP BY x_axis ORDER BY x_axis",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [{"label": "Time", "alias": "x_axis", "column": "x_axis", "color": null, "aggregationFunction": null}],
+                "y": [
+                  {"label": "ok", "alias": "ok_sources", "column": "ok_sources", "color": null, "aggregationFunction": "avg"},
+                  {"label": "fail", "alias": "fail_sources", "column": "fail_sources", "color": null, "aggregationFunction": "avg"}
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 0, "min": 0, "max": 100, "promql_legend": "", "layer_type": "bar", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 24, "y": 10, "w": 24, "h": 10, "i": 4},
+          "config": {"show_legends": true, "decimals": 0}
+        },
+        {
+          "id": "funnel",
+          "type": "line",
+          "title": "Воронка fetched / extracted / emitted",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) AS x_axis, avg(fetched) AS fetched, avg(extracted) AS extracted, avg(emitted) AS emitted FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' GROUP BY x_axis ORDER BY x_axis",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [{"label": "Time", "alias": "x_axis", "column": "x_axis", "color": null, "aggregationFunction": null}],
+                "y": [
+                  {"label": "fetched", "alias": "fetched", "column": "fetched", "color": null, "aggregationFunction": "avg"},
+                  {"label": "extracted", "alias": "extracted", "column": "extracted", "color": null, "aggregationFunction": "avg"},
+                  {"label": "emitted", "alias": "emitted", "column": "emitted", "color": null, "aggregationFunction": "avg"}
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 0, "min": 0, "max": 100, "promql_legend": "", "layer_type": "line", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 20, "w": 48, "h": 10, "i": 5},
+          "config": {"show_legends": true, "decimals": 0}
+        },
+        {
+          "id": "source-status-history",
+          "type": "table",
+          "title": "Динамика источников по прогонам",
+          "description": "История status, yielded и emitted для каждого source_key по прогонам (source_run_stats)",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT _timestamp, source_run_id, source_key, status, yielded, emitted FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' ORDER BY _timestamp DESC, source_key ASC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 500, "min": 0, "max": 100, "promql_legend": "", "layer_type": "scatter", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 30, "w": 48, "h": 12, "i": 13},
+          "config": {"show_legends": false, "decimals": 0}
+        }
+      ]
+    },
+    {
+      "tabId": "one-run",
+      "name": "Один прогон",
+      "panels": [
+        {
+          "id": "run-table",
+          "type": "table",
+          "title": "Источники прогона",
+          "description": "Выберите variable Run = source_run_id",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT source_key, source_kind, status, yielded, fetched, emitted, conversion_accept, llm_cost_usd, llm_latency_ms, quality_important, quality_reliable, quality_rich, quality_high_relevance, error FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' ORDER BY emitted DESC, yielded DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 500, "min": 0, "max": 100, "promql_legend": "", "layer_type": "scatter", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 0, "w": 48, "h": 16, "i": 6},
+          "config": {"show_legends": false, "decimals": 3}
+        },
+        {
+          "id": "status-pie",
+          "type": "pie",
+          "title": "Статусы источников в прогоне",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT status, count(*) AS sources FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' GROUP BY status ORDER BY sources DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [{"label": "status", "alias": "status", "column": "status", "color": null, "aggregationFunction": null}],
+                "y": [{"label": "sources", "alias": "sources", "column": "sources", "color": null, "aggregationFunction": "count", "treatAsNonTimeseries": true}],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 0, "min": 0, "max": 100, "promql_legend": "", "layer_type": "pie", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 16, "w": 24, "h": 12, "i": 7},
+          "config": {"show_legends": true, "decimals": 0}
+        },
+        {
+          "id": "kind-bar",
+          "type": "bar",
+          "title": "Типы источников: emitted",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT source_kind, sum(emitted) AS emitted, sum(yielded) AS yielded FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' GROUP BY source_kind ORDER BY emitted DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [{"label": "kind", "alias": "source_kind", "column": "source_kind", "color": null, "aggregationFunction": null}],
+                "y": [
+                  {"label": "emitted", "alias": "emitted", "column": "emitted", "color": null, "aggregationFunction": "sum", "treatAsNonTimeseries": true},
+                  {"label": "yielded", "alias": "yielded", "column": "yielded", "color": null, "aggregationFunction": "sum", "treatAsNonTimeseries": true}
+                ],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 0, "min": 0, "max": 100, "promql_legend": "", "layer_type": "bar", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 24, "y": 16, "w": 24, "h": 12, "i": 8},
+          "config": {"show_legends": true, "decimals": 0}
+        }
+      ]
+    },
+    {
+      "tabId": "labels",
+      "name": "Метки",
+      "panels": [
+        {
+          "id": "important-table",
+          "type": "table",
+          "title": "Ключевые (important, ставит человек)",
+          "description": "Как в выбранном прогоне (variable Run = source_run_id)",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT source_key, source_name, status, yielded, emitted, conversion_accept, quality_reliable, quality_rich, quality_high_relevance FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' AND (quality_important = true OR cast(quality_important as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 200, "min": 0, "max": 100, "promql_legend": "", "layer_type": "scatter", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 0, "w": 24, "h": 12, "i": 9},
+          "config": {"show_legends": false, "decimals": 3}
+        },
+        {
+          "id": "reliable-table",
+          "type": "table",
+          "title": "Надежные (reliable)",
+          "description": "Как в выбранном прогоне (variable Run = source_run_id)",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT source_key, source_name, status, yielded, emitted FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' AND (quality_reliable = true OR cast(quality_reliable as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 200, "min": 0, "max": 100, "promql_legend": "", "layer_type": "scatter", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 24, "y": 0, "w": 24, "h": 12, "i": 10},
+          "config": {"show_legends": false, "decimals": 0}
+        },
+        {
+          "id": "rich-table",
+          "type": "table",
+          "title": "Богатые (rich)",
+          "description": "Как в выбранном прогоне (variable Run = source_run_id)",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT source_key, source_name, status, yielded, emitted FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' AND (quality_rich = true OR cast(quality_rich as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 200, "min": 0, "max": 100, "promql_legend": "", "layer_type": "scatter", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 12, "w": 24, "h": 12, "i": 11},
+          "config": {"show_legends": false, "decimals": 0}
+        },
+        {
+          "id": "highrel-table",
+          "type": "table",
+          "title": "Высокоррелевантные (high_relevance)",
+          "description": "Как в выбранном прогоне (variable Run = source_run_id)",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT source_key, source_name, status, yielded, emitted, conversion_accept FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' AND (quality_high_relevance = true OR cast(quality_high_relevance as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 200, "min": 0, "max": 100, "promql_legend": "", "layer_type": "scatter", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 24, "y": 12, "w": 24, "h": 12, "i": 12},
+          "config": {"show_legends": false, "decimals": 3}
+        }
+      ]
+    }
+  ]
+}

@@ -115,6 +115,95 @@ class PostgreSQLStore(SQLStoreAdapter):
             payload_json = EXCLUDED.payload_json,
             updated_at = EXCLUDED.updated_at
     """
+    _SQL_OPERATOR_FLAG_GET = """
+        SELECT source_key, important, set_by, set_at, note
+        FROM jf_source_operator_flags
+        WHERE tenant_id = $1 AND source_key = $2
+    """
+    _SQL_OPERATOR_FLAG_UPSERT = """
+        INSERT INTO jf_source_operator_flags
+            (tenant_id, source_key, important, set_by, set_at, note)
+        VALUES ($1, $2, $3, $4, $5::timestamptz, $6)
+        ON CONFLICT (tenant_id, source_key) DO UPDATE SET
+            important = EXCLUDED.important,
+            set_by = EXCLUDED.set_by,
+            set_at = EXCLUDED.set_at,
+            note = EXCLUDED.note
+    """
+    _SQL_OPERATOR_FLAG_LIST = """
+        SELECT source_key, important, set_by, set_at, note
+        FROM jf_source_operator_flags
+        WHERE tenant_id = $1
+        ORDER BY source_key
+    """
+    _SQL_PIPELINE_RUN_STATS_UPSERT = """
+        INSERT INTO jf_pipeline_run_stats (
+            tenant_id, source_run_id, started_at, finished_at, duration_ms,
+            source_count, ok_sources, fail_sources, fetched, extracted, emitted,
+            review, rejected, dropped, failed, duplicates, llm_calls, llm_tokens_in,
+            llm_tokens_out, llm_latency_ms, llm_cost_usd, conversion_extract,
+            conversion_accept, extra_json
+        ) VALUES (
+            $1, $2, $3::timestamptz, $4::timestamptz, $5, $6, $7, $8, $9, $10, $11,
+            $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24::jsonb
+        )
+        ON CONFLICT (tenant_id, source_run_id) DO UPDATE SET
+            started_at = EXCLUDED.started_at,
+            finished_at = EXCLUDED.finished_at,
+            duration_ms = EXCLUDED.duration_ms,
+            source_count = EXCLUDED.source_count,
+            ok_sources = EXCLUDED.ok_sources,
+            fail_sources = EXCLUDED.fail_sources,
+            fetched = EXCLUDED.fetched,
+            extracted = EXCLUDED.extracted,
+            emitted = EXCLUDED.emitted,
+            review = EXCLUDED.review,
+            rejected = EXCLUDED.rejected,
+            dropped = EXCLUDED.dropped,
+            failed = EXCLUDED.failed,
+            duplicates = EXCLUDED.duplicates,
+            llm_calls = EXCLUDED.llm_calls,
+            llm_tokens_in = EXCLUDED.llm_tokens_in,
+            llm_tokens_out = EXCLUDED.llm_tokens_out,
+            llm_latency_ms = EXCLUDED.llm_latency_ms,
+            llm_cost_usd = EXCLUDED.llm_cost_usd,
+            conversion_extract = EXCLUDED.conversion_extract,
+            conversion_accept = EXCLUDED.conversion_accept,
+            extra_json = EXCLUDED.extra_json
+    """
+    _SQL_SOURCE_RUN_STATS_UPSERT = """
+        INSERT INTO jf_source_run_stats (
+            tenant_id, source_run_id, source_id, source_key, source_kind, source_name,
+            status, started_at, finished_at, yielded, fetched, extracted, emitted,
+            dropped, failed, duration_ms, llm_latency_ms, llm_cost_usd, conversion_accept,
+            quality_reliable, quality_rich, quality_high_relevance, quality_important, error
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9::timestamptz, $10, $11, $12,
+            $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+        )
+        ON CONFLICT (tenant_id, source_run_id, source_id) DO UPDATE SET
+            source_key = EXCLUDED.source_key,
+            source_kind = EXCLUDED.source_kind,
+            source_name = EXCLUDED.source_name,
+            status = EXCLUDED.status,
+            started_at = EXCLUDED.started_at,
+            finished_at = EXCLUDED.finished_at,
+            yielded = EXCLUDED.yielded,
+            fetched = EXCLUDED.fetched,
+            extracted = EXCLUDED.extracted,
+            emitted = EXCLUDED.emitted,
+            dropped = EXCLUDED.dropped,
+            failed = EXCLUDED.failed,
+            duration_ms = EXCLUDED.duration_ms,
+            llm_latency_ms = EXCLUDED.llm_latency_ms,
+            llm_cost_usd = EXCLUDED.llm_cost_usd,
+            conversion_accept = EXCLUDED.conversion_accept,
+            quality_reliable = EXCLUDED.quality_reliable,
+            quality_rich = EXCLUDED.quality_rich,
+            quality_high_relevance = EXCLUDED.quality_high_relevance,
+            quality_important = EXCLUDED.quality_important,
+            error = EXCLUDED.error
+    """
 
     def __init__(
         self,
@@ -162,6 +251,7 @@ class PostgreSQLStore(SQLStoreAdapter):
                 "011_ontology_graph_pg.sql",
                 "012_ontology_term_stats_pg.sql",
                 "013_compiled_ontology_pg.sql",
+                "014_run_stats_pg.sql",
             ):
                 path = migrations_dir / name
                 if not path.exists():

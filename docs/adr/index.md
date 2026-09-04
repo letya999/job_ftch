@@ -94,6 +94,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [083 — Operator sessions, challenge probes, captcha wait, parser pin](083-operator-sessions-challenge-parser-pin.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
 - [084 — Operator persistent/domain sessions, fingerprint probes, trace, extendable captcha, parser host override](084-operator-persistent-fingerprint-parser-override.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
 - [085 — Source-assessed career-site search recipes](085-source-assessment-search-recipe.md) - **Status**: ACCEPTED (Updated: 2026-09-01)
+- [086 — Human source labels and per-run ingest stats](086-source-quality-run-stats.md) - **Status**: ACCEPTED (Updated: 2026-09-04)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

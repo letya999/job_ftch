@@ -106,7 +106,7 @@ class OzonCareerParser:
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
         limit = spec.limit or 50
         keywords = keywords_from_spec(spec)
-        queries = distinctive_search_tokens(keywords) or [None]
+        queries: list[str | None] = [*distinctive_search_tokens(keywords)] or [None]
         emitted = 0
         seen: set[str] = set()
         page_size = min(50, max(limit, 1))

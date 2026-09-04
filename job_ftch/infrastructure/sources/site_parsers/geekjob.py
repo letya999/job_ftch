@@ -407,9 +407,10 @@ class GeekJobParser:
                 if not isinstance(row, dict):
                     continue
                 item = _item_from_api_row(row, source_name, spec.url)
-                if item is None or item.external_id in seen_ids:
+                item_id = str(item.external_id or item.url or "") if item else ""
+                if not item or not item_id or item_id in seen_ids:
                     continue
-                seen_ids.add(item.external_id)
+                seen_ids.add(item_id)
                 new_on_page += 1
                 if not text_matches_keywords(item.text, keywords):
                     continue

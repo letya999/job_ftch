@@ -260,6 +260,7 @@ def _update_source_health_payload(
         quality_reliable=previous.quality_reliable if previous else False,
         quality_rich=previous.quality_rich if previous else False,
         quality_high_relevance=previous.quality_high_relevance if previous else False,
+        quality_important=previous.quality_important if previous else False,
     )
 
 
@@ -2062,32 +2063,41 @@ class TenantRunner:
     async def _apply_source_quality_window(
         self, runtime: TenantRuntime, summary: RunSummary
     ) -> None:
+        from job_ftch.application.run_stats import build_pipeline_run_stats, build_source_run_stats
         from job_ftch.application.source_quality import (
             QUALITY_WINDOW_RUNS,
             canonical_source_key,
             classify_source_quality,
             quality_payload,
+            reset_health_quality_update,
         )
+        from job_ftch.infrastructure.observability.openobserve import record_run_stats_logs
 
+        tenant_id = runtime.tenant.tenant_id
         try:
             histories = await runtime.store.list_run_summaries(limit=QUALITY_WINDOW_RUNS * 2)
         except Exception as exc:  # noqa: BLE001 - window labels must not fail the run
             logger.warning(
                 "source_quality_history_load_failed",
-                tenant_id=runtime.tenant.tenant_id,
+                tenant_id=tenant_id,
                 error=str(exc),
             )
             histories = [summary]
         stats = classify_source_quality(histories)
-        if not stats:
-            return
+        important_map = await self._important_map(runtime)
+        window_runs = next((item.window_runs for item in stats.values()), 0)
         for health in await runtime.store.list_source_health():
-            row = stats.get(canonical_source_key(health.source_id, health.source_name))
-            if row is None:
-                continue
-            updated = health.model_copy(update=row.as_health_update())
+            key = canonical_source_key(health.source_id, health.source_name)
+            row = stats.get(key)
+            update: dict[str, object] = (
+                row.as_health_update()
+                if row is not None
+                else reset_health_quality_update(window_runs)
+            )
+            update["quality_important"] = bool(important_map.get(key, False))
+            updated = health.model_copy(update=update)
             await runtime.store.save_source_health(health.source_id, updated)
-        payload = quality_payload(stats.values())
+        payload = quality_payload(stats.values(), important=important_map)
         try:
             await runtime.store.set_run_state(
                 "source_quality",
@@ -2096,18 +2106,119 @@ class TenantRunner:
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "source_quality_persist_failed",
+                tenant_id=tenant_id,
+                error=str(exc),
+            )
+        reliable_sources = payload.get("reliable")
+        rich_sources = payload.get("rich")
+        high_rel_sources = payload.get("high_relevance")
+        important_sources = payload.get("important")
+        logger.info(
+            "source_quality_classified",
+            tenant_id=tenant_id,
+            window_runs=payload.get("window_runs"),
+            reliable=len(reliable_sources) if isinstance(reliable_sources, list) else 0,
+            rich=len(rich_sources) if isinstance(rich_sources, list) else 0,
+            high_relevance=len(high_rel_sources) if isinstance(high_rel_sources, list) else 0,
+            important=len(important_sources) if isinstance(important_sources, list) else 0,
+            watch=payload.get("watch") or [],
+        )
+        if summary.skipped_already_active or not summary.source_run_id:
+            return
+        pipeline_row = build_pipeline_run_stats(summary)
+        source_rows = build_source_run_stats(summary, quality=stats, important=important_map)
+        try:
+            await runtime.store.save_pipeline_run_stats(tenant_id, pipeline_row)
+            await runtime.store.save_source_run_stats(tenant_id, source_rows)
+        except Exception as exc:  # noqa: BLE001 - stats must not fail the run
+            logger.warning(
+                "run_stats_persist_failed",
+                tenant_id=tenant_id,
+                source_run_id=summary.source_run_id,
+                error=str(exc),
+            )
+        record_run_stats_logs(summary, pipeline_row, source_rows)
+
+    async def _important_map(self, runtime: TenantRuntime) -> dict[str, bool]:
+        try:
+            flags = await runtime.store.list_source_operator_flags(runtime.tenant.tenant_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "source_operator_flags_load_failed",
                 tenant_id=runtime.tenant.tenant_id,
                 error=str(exc),
             )
-        logger.info(
-            "source_quality_classified",
-            tenant_id=runtime.tenant.tenant_id,
-            window_runs=payload.get("window_runs"),
-            reliable=len(payload.get("reliable") or []),
-            rich=len(payload.get("rich") or []),
-            high_relevance=len(payload.get("high_relevance") or []),
-            watch=payload.get("watch") or [],
+            return {}
+        return {item.source_key: item.important for item in flags if item.important}
+
+    async def set_source_important(
+        self,
+        tenant_id: str,
+        source_id: str,
+        *,
+        important: bool,
+        set_by: str = "operator",
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        from job_ftch.application.source_quality import canonical_source_key
+        from job_ftch.domain.run_stats import SourceOperatorFlag
+
+        runtime = self.get_runtime(tenant_id)
+        key = canonical_source_key(source_id)
+        if key == "unknown":
+            msg = "source_id is required"
+            raise ValueError(msg)
+        flag = SourceOperatorFlag(
+            source_key=key,
+            important=important,
+            set_by=set_by,
+            set_at=datetime.now(UTC).isoformat(),
+            note=note,
         )
+        await runtime.store.set_source_operator_flag(tenant_id, flag)
+        for health in await runtime.store.list_source_health():
+            if canonical_source_key(health.source_id, health.source_name) != key:
+                continue
+            updated = health.model_copy(update={"quality_important": important})
+            await runtime.store.save_source_health(health.source_id, updated)
+        return await self.list_source_quality(tenant_id)
+
+    async def list_source_quality(self, tenant_id: str) -> dict[str, Any]:
+        from job_ftch.application.source_quality import canonical_source_key
+
+        health_rows = await self.get_runtime(tenant_id).store.list_source_health()
+        buckets: dict[str, list[dict[str, Any]]] = {
+            "important": [],
+            "reliable": [],
+            "rich": [],
+            "high_relevance": [],
+        }
+        seen: dict[str, set[str]] = {name: set() for name in buckets}
+        window_runs = 0
+        for item in health_rows:
+            key = canonical_source_key(item.source_id, item.source_name)
+            window_runs = max(window_runs, item.quality_window_runs)
+            mapping = (
+                ("important", item.quality_important),
+                ("reliable", item.quality_reliable),
+                ("rich", item.quality_rich),
+                ("high_relevance", item.quality_high_relevance),
+            )
+            for name, flagged in mapping:
+                if flagged and key not in seen[name]:
+                    seen[name].add(key)
+                    buckets[name].append(
+                        {
+                            "source_key": key,
+                            "source_id": item.source_id,
+                            "source_name": item.source_name,
+                            "status": item.status,
+                            "ok_rate": item.quality_ok_rate,
+                            "yield_rate": item.quality_yield_rate,
+                            "relevant_rate": item.quality_relevant_rate,
+                        }
+                    )
+        return {"tenant_id": tenant_id, "window_runs": window_runs, **buckets}
 
     async def refresh_runtime_state_metrics(self, tenant_id: str, summary: RunSummary) -> None:
         await self._record_runtime_state_metrics(self.get_runtime(tenant_id), summary)

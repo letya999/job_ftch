@@ -112,9 +112,10 @@ class InDriveCareerParser:
             response.raise_for_status()
             new_on_page = 0
             for item in self._items_from_html(response.text, spec.url, source_name, keywords):
-                if item.external_id in seen:
+                key = str(item.external_id or item.url or "")
+                if not key or key in seen:
                     continue
-                seen.add(item.external_id)
+                seen.add(key)
                 new_on_page += 1
                 yield item
                 emitted += 1

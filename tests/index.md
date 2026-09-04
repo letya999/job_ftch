@@ -109,6 +109,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_pointer_site_parser.py](test_pointer_site_parser.py)
 - [test_postgres_store.py](test_postgres_store.py)
 - [test_processed_ttl.py](test_processed_ttl.py)
+- [test_prod_remaining_board_repairs.py](test_prod_remaining_board_repairs.py)
 - [test_profile_examples.py](test_profile_examples.py)
 - [test_profile_from_resume.py](test_profile_from_resume.py)
 - [test_profile_inputs_embedding_reset.py](test_profile_inputs_embedding_reset.py)

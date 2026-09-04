@@ -146,11 +146,7 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
         for item in source_health
         if item.paused or item.degraded or item.status in {"failing", "paused", "degraded"}
     ]
-    watch_sources = [
-        item
-        for item in source_health
-        if item.quality_high_relevance or (item.quality_reliable and item.quality_rich)
-    ]
+    watch_sources = [item for item in source_health if item.quality_important]
     scheduler_error = str(scheduler_state.get("bot_scheduler:last_error") or "").strip()
     publish_error = str(scheduler_state.get("bot_scheduler:last_publish_error") or "").strip()
     status = "degraded" if bad_sources or scheduler_error or publish_error else "ok"
@@ -174,6 +170,7 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
             "reliable": sum(1 for item in source_health if item.quality_reliable),
             "rich": sum(1 for item in source_health if item.quality_rich),
             "high_relevance": sum(1 for item in source_health if item.quality_high_relevance),
+            "important": sum(1 for item in source_health if item.quality_important),
             "watch_source_ids": [item.source_id for item in watch_sources],
         },
         "scheduler": {
@@ -562,6 +559,51 @@ def create_app(
             )
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/pipeline/sources/{tenant_id}/important")
+    @limiter.limit("10/minute")
+    async def set_pipeline_source_important(
+        request: Request,
+        tenant_id: str,
+        payload: dict[str, Any],
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        source_id = payload.get("source_id")
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise HTTPException(status_code=400, detail="source_id is required.")
+        important = payload.get("important", True)
+        if not isinstance(important, bool):
+            raise HTTPException(status_code=400, detail="important must be a boolean.")
+        note = payload.get("note")
+        if note is not None and not isinstance(note, str):
+            raise HTTPException(status_code=400, detail="note must be a string.")
+        try:
+            return await runner.set_source_important(
+                tenant_id,
+                source_id.strip(),
+                important=important,
+                set_by="api",
+                note=note,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/pipeline/sources/{tenant_id}/quality")
+    @limiter.limit("10/minute")
+    async def pipeline_source_quality(
+        request: Request,
+        tenant_id: str,
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        return await runner.list_source_quality(tenant_id)
 
     @app.post("/pipeline/sources/{tenant_id}/disable")
     @limiter.limit("5/minute")

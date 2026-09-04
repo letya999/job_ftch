@@ -10,7 +10,7 @@ This directory contains ADRs for `job_ftch`.
 ## Immutable history
 
 > Note: ADR number 021 is used by two files (career-site monitor/scraper split and
-> module boundary enforcement). Do not reuse 021 for new ADRs; the next free number is 081.
+> module boundary enforcement). Do not reuse 021 for new ADRs; the next free number is 087.
 
 Do not rewrite existing ADR files.
 
@@ -131,3 +131,12 @@ Do not rewrite existing ADR files.
 72. [072-career-site-deadline-and-global-work-budgets.md](072-career-site-deadline-and-global-work-budgets.md) — Career-site deadline and global work budgets
 73. [073-nodriver-agpl-license-risk.md](073-nodriver-agpl-license-risk.md) — Nodriver AGPL-3.0 deployment obligations
 74. [074-adaptive-route-state-graph.md](074-adaptive-route-state-graph.md) — Adaptive route-state graph and single execution context
+
+### 081-086
+
+81. [081-operator-browser-listing-probe.md](081-operator-browser-listing-probe.md) — Operator browser listing probe
+82. [082-operator-bypass-pin-and-sweep.md](082-operator-bypass-pin-and-sweep.md) — Operator bypass pin and sweep
+83. [083-operator-sessions-challenge-parser-pin.md](083-operator-sessions-challenge-parser-pin.md) — Operator sessions, challenge, parser pin
+84. [084-operator-persistent-fingerprint-parser-override.md](084-operator-persistent-fingerprint-parser-override.md) — Operator persistent fingerprint / parser override
+85. [085-source-assessment-search-recipe.md](085-source-assessment-search-recipe.md) — Source-assessed career-site search recipes
+86. [086-source-quality-run-stats.md](086-source-quality-run-stats.md) — Human source labels and per-run ingest stats

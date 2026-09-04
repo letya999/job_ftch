@@ -332,9 +332,10 @@ class HabrCareerParser:
             for item in _items_from_listing_html(
                 str(response.text), spec.url, source_name, keywords
             ):
-                if item.external_id in seen_ids:
+                item_id = str(item.external_id or item.url or "")
+                if not item_id or item_id in seen_ids:
                     continue
-                seen_ids.add(item.external_id)
+                seen_ids.add(item_id)
                 yield item
                 emitted += 1
                 if emitted >= limit:

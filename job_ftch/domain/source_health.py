@@ -40,5 +40,6 @@ class SourceHealth(BaseModel):
     quality_reliable: bool = False
     quality_rich: bool = False
     quality_high_relevance: bool = False
+    quality_important: bool = False
 
     model_config = ConfigDict(extra="forbid")

@@ -8,24 +8,32 @@ A source is:
 - ``high_relevance`` when at least every second attempted run also emits an
   accepted candidate (the relevance funnel, not raw yield).
 
-Keyword-fanout clones (``*_kwN``) collapse onto the parent source so HireHi /
-GeekJob search URLs do not look like 12 independent boards.
+``important`` is **not** classified here. Operators pin it on
+``jf_source_operator_flags`` (MCP / HTTP). Keyword-fanout clones (``*_kwN``)
+collapse onto the parent source so HireHi / GeekJob search URLs do not look
+like 12 independent boards.
+
+Labels are observational. They persist on ``SourceHealth`` and show up in
+``/health`` and OpenObserve. Only human ``important`` fills
+``watch_source_ids``; the three computed labels do not. Labels do not change
+fetch order, retries, or accept/reject.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Sequence
 
     from job_ftch.application.pipeline import RunSummary
 
 QUALITY_WINDOW_RUNS = 20
 _KW_SUFFIX = re.compile(r"_kw\d+$")
-_FAIL_STATUSES = frozenset(
+FAIL_STATUSES = frozenset(
     {
         "protected",
         "waf_challenge",
@@ -55,6 +63,7 @@ class SourceQualityStats:
     yield_hits: int
     relevant_hits: int
     yield_sum: int
+    emitted_sum: int
     ok_rate: float
     yield_rate: float
     relevant_rate: float
@@ -75,6 +84,19 @@ class SourceQualityStats:
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+def reset_health_quality_update(window_runs: int = 0) -> dict[str, object]:
+    """Zero out computed quality rates and flags for a source absent from the window."""
+    return {
+        "quality_window_runs": window_runs,
+        "quality_ok_rate": 0.0,
+        "quality_yield_rate": 0.0,
+        "quality_relevant_rate": 0.0,
+        "quality_reliable": False,
+        "quality_rich": False,
+        "quality_high_relevance": False,
+    }
 
 
 def canonical_source_key(source_id: str | None, source_name: str | None = None) -> str:
@@ -113,6 +135,7 @@ def classify_source_quality(
     yield_hits: dict[str, int] = {}
     relevant_hits: dict[str, int] = {}
     yield_sum: dict[str, int] = {}
+    emitted_sum: dict[str, int] = {}
 
     for summary in runs:
         per_run_yield: dict[str, int] = {}
@@ -130,7 +153,7 @@ def classify_source_quality(
             yielded = int(outcome.get("yielded") or 0)
             per_run_yield[key] = per_run_yield.get(key, 0) + yielded
             status = str(outcome.get("status") or "unknown")
-            if status in _FAIL_STATUSES:
+            if status in FAIL_STATUSES:
                 per_run_fail[key] = True
             else:
                 per_run_ok[key] = True
@@ -143,9 +166,11 @@ def classify_source_quality(
                 ok[key] = ok.get(key, 0) + 1
             run_yield = per_run_yield.get(key, 0)
             yield_sum[key] = yield_sum.get(key, 0) + run_yield
+            run_emitted = emitted_by_key.get(key, 0)
+            emitted_sum[key] = emitted_sum.get(key, 0) + run_emitted
             if run_yield > 0:
                 yield_hits[key] = yield_hits.get(key, 0) + 1
-            if emitted_by_key.get(key, 0) > 0:
+            if run_emitted > 0:
                 relevant_hits[key] = relevant_hits.get(key, 0) + 1
 
     out: dict[str, SourceQualityStats] = {}
@@ -168,6 +193,7 @@ def classify_source_quality(
             yield_hits=y_hits,
             relevant_hits=r_hits,
             yield_sum=yield_sum.get(key, 0),
+            emitted_sum=emitted_sum.get(key, 0),
             ok_rate=round(ok_rate, 4),
             yield_rate=round(y_rate, 4),
             relevant_rate=round(r_rate, 4),
@@ -186,17 +212,22 @@ def _emitted_by_key(by_source_id: Mapping[str, object]) -> dict[str, int]:
     return totals
 
 
-def quality_payload(stats: Iterable[SourceQualityStats]) -> dict[str, object]:
+def quality_payload(
+    stats: Iterable[SourceQualityStats],
+    *,
+    important: Collection[str] | Mapping[str, bool] = (),
+) -> dict[str, object]:
     rows = [item.as_dict() for item in stats]
+    if isinstance(important, Mapping):
+        important_keys = sorted({str(k) for k, v in important.items() if v and k})
+    else:
+        important_keys = sorted({str(key) for key in important if key})
     return {
         "window_runs": next((item.window_runs for item in stats), 0),
         "reliable": [item.source_key for item in stats if item.reliable],
         "rich": [item.source_key for item in stats if item.rich],
         "high_relevance": [item.source_key for item in stats if item.high_relevance],
-        "watch": [
-            item.source_key
-            for item in stats
-            if item.high_relevance or (item.reliable and item.rich)
-        ],
+        "important": important_keys,
+        "watch": important_keys,
         "sources": rows,
     }

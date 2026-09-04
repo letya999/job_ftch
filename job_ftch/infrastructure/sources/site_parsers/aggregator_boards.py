@@ -475,9 +475,7 @@ class AIJobsParser(HtmlAggregatorParser):
         emitted = 0
 
         async def fetch(url: str) -> str:
-            response = await client.get(
-                url, follow_redirects=True, headers=_FOORILLA_HTMX_HEADERS
-            )
+            response = await client.get(url, follow_redirects=True, headers=_FOORILLA_HTMX_HEADERS)
             if hasattr(response, "raise_for_status"):
                 response.raise_for_status()
             return str(response.text)

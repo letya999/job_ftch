@@ -140,9 +140,10 @@ class SuperJobRuParser:
                 raise BrowserChallengeError(url=str(getattr(response, "url", page_url) or page_url))
             new_on_page = 0
             for item in self._items_from_html(html, spec.url, source_name, keywords):
-                if item.url in seen:
+                url_str = str(item.url or "")
+                if not url_str or url_str in seen:
                     continue
-                seen.add(item.url)
+                seen.add(url_str)
                 new_on_page += 1
                 yield item
                 emitted += 1

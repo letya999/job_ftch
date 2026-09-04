@@ -74,12 +74,14 @@ def test_search_builders_keep_target_role_on_supported_aggregators() -> None:
     assert AIJobsParser().build_search_urls("https://aijobs.net/", ["LLM Engineer"]) == [
         "https://foorilla.com/hiring/jobs/"
     ]
-    assert "q=LLM+Engineer" in AIJobsComParser().build_search_urls(
-        "https://www.aijobs.com/jobs", ["LLM Engineer"]
-    )[0]
-    assert "keyword=LLM+Engineer" in AIJobsAiParser().build_search_urls(
-        "https://aijobs.ai/jobs", ["LLM Engineer"]
-    )[0]
+    assert (
+        "q=LLM+Engineer"
+        in AIJobsComParser().build_search_urls("https://www.aijobs.com/jobs", ["LLM Engineer"])[0]
+    )
+    assert (
+        "keyword=LLM+Engineer"
+        in AIJobsAiParser().build_search_urls("https://aijobs.ai/jobs", ["LLM Engineer"])[0]
+    )
     assert (
         QuickOfferParser().build_search_urls("https://quick-offer.ru/jobs", ["AI Engineer"]) == []
     )

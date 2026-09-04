@@ -347,7 +347,7 @@ class AlfaBankParser:
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
         limit = spec.limit or 50
         keywords = keywords_from_spec(spec)
-        queries = distinctive_search_tokens(keywords) or [None]
+        queries: list[str | None] = [*distinctive_search_tokens(keywords)] or [None]
         page_size = min(50, max(limit, 1))
         seen: set[str] = set()
         emitted = 0

@@ -394,8 +394,8 @@ def detect_listing_pagination(
             continue
         found = dict(parse_qsl(candidate.query, keep_blank_values=True))
         for key in _PAGE_PARAM_NAMES:
-            raw = found.get(key)
-            if raw and raw.isdigit() and int(raw) > 1:
+            page_val = found.get(key)
+            if page_val and page_val.isdigit() and int(page_val) > 1:
                 return ListingPagination(kind="page", param=key, start=1)
         for key in _OFFSET_PARAM_NAMES:
             if found.get(key):
