@@ -173,7 +173,7 @@ def test_mcp_adapter_registers_tool_and_resource(
 
     assert server.name == "job_ftch"
     # TenantMCPServer surface: 18 operator tools, 1 resource
-    assert registered["tools"] == 18
+    assert registered["tools"] == 20
     assert registered["resources"] == 1
     uris = cast("list[str]", registered["uris"])
     assert uris == ["config://{tenant_id}"]

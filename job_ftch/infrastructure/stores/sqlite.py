@@ -106,6 +106,89 @@ class SQLiteStore(SQLStoreAdapter):
             payload_json=excluded.payload_json,
             updated_at=excluded.updated_at
     """
+    _SQL_OPERATOR_FLAG_GET = """
+        SELECT source_key, important, set_by, set_at, note
+        FROM jf_source_operator_flags
+        WHERE tenant_id = ? AND source_key = ?
+    """
+    _SQL_OPERATOR_FLAG_UPSERT = """
+        INSERT INTO jf_source_operator_flags
+            (tenant_id, source_key, important, set_by, set_at, note)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id, source_key) DO UPDATE SET
+            important=excluded.important,
+            set_by=excluded.set_by,
+            set_at=excluded.set_at,
+            note=excluded.note
+    """
+    _SQL_OPERATOR_FLAG_LIST = """
+        SELECT source_key, important, set_by, set_at, note
+        FROM jf_source_operator_flags
+        WHERE tenant_id = ?
+        ORDER BY source_key
+    """
+    _SQL_PIPELINE_RUN_STATS_UPSERT = """
+        INSERT INTO jf_pipeline_run_stats (
+            tenant_id, source_run_id, started_at, finished_at, duration_ms,
+            source_count, ok_sources, fail_sources, fetched, extracted, emitted,
+            review, rejected, dropped, failed, duplicates, llm_calls, llm_tokens_in,
+            llm_tokens_out, llm_latency_ms, llm_cost_usd, conversion_extract,
+            conversion_accept, extra_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id, source_run_id) DO UPDATE SET
+            started_at=excluded.started_at,
+            finished_at=excluded.finished_at,
+            duration_ms=excluded.duration_ms,
+            source_count=excluded.source_count,
+            ok_sources=excluded.ok_sources,
+            fail_sources=excluded.fail_sources,
+            fetched=excluded.fetched,
+            extracted=excluded.extracted,
+            emitted=excluded.emitted,
+            review=excluded.review,
+            rejected=excluded.rejected,
+            dropped=excluded.dropped,
+            failed=excluded.failed,
+            duplicates=excluded.duplicates,
+            llm_calls=excluded.llm_calls,
+            llm_tokens_in=excluded.llm_tokens_in,
+            llm_tokens_out=excluded.llm_tokens_out,
+            llm_latency_ms=excluded.llm_latency_ms,
+            llm_cost_usd=excluded.llm_cost_usd,
+            conversion_extract=excluded.conversion_extract,
+            conversion_accept=excluded.conversion_accept,
+            extra_json=excluded.extra_json
+    """
+    _SQL_SOURCE_RUN_STATS_UPSERT = """
+        INSERT INTO jf_source_run_stats (
+            tenant_id, source_run_id, source_id, source_key, source_kind, source_name,
+            status, started_at, finished_at, yielded, fetched, extracted, emitted,
+            dropped, failed, duration_ms, llm_latency_ms, llm_cost_usd, conversion_accept,
+            quality_reliable, quality_rich, quality_high_relevance, quality_important, error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(tenant_id, source_run_id, source_id) DO UPDATE SET
+            source_key=excluded.source_key,
+            source_kind=excluded.source_kind,
+            source_name=excluded.source_name,
+            status=excluded.status,
+            started_at=excluded.started_at,
+            finished_at=excluded.finished_at,
+            yielded=excluded.yielded,
+            fetched=excluded.fetched,
+            extracted=excluded.extracted,
+            emitted=excluded.emitted,
+            dropped=excluded.dropped,
+            failed=excluded.failed,
+            duration_ms=excluded.duration_ms,
+            llm_latency_ms=excluded.llm_latency_ms,
+            llm_cost_usd=excluded.llm_cost_usd,
+            conversion_accept=excluded.conversion_accept,
+            quality_reliable=excluded.quality_reliable,
+            quality_rich=excluded.quality_rich,
+            quality_high_relevance=excluded.quality_high_relevance,
+            quality_important=excluded.quality_important,
+            error=excluded.error
+    """
 
     def __init__(
         self,
@@ -145,6 +228,7 @@ class SQLiteStore(SQLStoreAdapter):
             "011_ontology_graph.sql",
             "012_ontology_term_stats.sql",
             "013_compiled_ontology.sql",
+            "014_run_stats.sql",
         ):
             path = migrations_dir / name
             if not path.exists():

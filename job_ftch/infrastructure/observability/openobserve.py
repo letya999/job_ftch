@@ -11,15 +11,18 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from opentelemetry import metrics
 from opentelemetry.metrics import Observation
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from job_ftch.application.pipeline import RunSummary
     from job_ftch.config import Settings
     from job_ftch.domain import SourceHealth
+    from job_ftch.domain.run_stats import PipelineRunStats, SourceRunStatsRow
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +45,28 @@ _CORRELATION_FIELDS = frozenset(
         "source_kind",
         "source_name",
         "node_id",
+        "source_key",
+        "status",
+        "duration_ms",
+        "llm_cost_usd",
+        "llm_latency_ms",
+        "conversion_extract",
+        "conversion_accept",
+        "fetched",
+        "extracted",
+        "emitted",
+        "review",
+        "rejected",
+        "dropped",
+        "failed",
+        "source_count",
+        "ok_sources",
+        "fail_sources",
+        "yielded",
+        "quality_reliable",
+        "quality_rich",
+        "quality_high_relevance",
+        "quality_important",
     }
 )
 
@@ -92,6 +117,10 @@ class _ContextAttributesFilter(logging.Filter):
                 event = payload.get("event")
                 if isinstance(event, str) and event:
                     record.event = event
+                for key in _CORRELATION_FIELDS:
+                    value = payload.get(key)
+                    if isinstance(value, (str, int, float, bool)):
+                        setattr(record, key, value)
         return True
 
 
@@ -170,12 +199,75 @@ def configure_openobserve(settings: Settings) -> bool:
     _register_runtime_state_gauges(metrics.get_meter("job_ftch.runtime"))
     atexit.register(shutdown_openobserve)
     logger.info("OpenObserve operational telemetry configured at %s", base)
+    try:
+        upsert_openobserve_dashboards(settings)
+    except Exception:
+        logger.warning("OpenObserve dashboard upsert failed", exc_info=True)
     return True
+
+
+def upsert_openobserve_dashboards(settings: Settings) -> None:
+    """Best-effort import of shipped ingest dashboards. Never raises to callers."""
+    import urllib.error
+    import urllib.request
+
+    if not (
+        settings.openobserve_url and settings.openobserve_username and settings.openobserve_password
+    ):
+        return
+    here = Path(__file__).resolve().parent / "dashboards"
+    repo = Path(__file__).resolve().parents[3] / "deploy" / "observability" / "dashboards"
+    path = here if here.is_dir() else repo
+    if not path.is_dir():
+        return
+    base = _resolve_openobserve_url(settings.openobserve_url)
+    org = quote(settings.openobserve_org.strip() or "default", safe="")
+    secret = settings.openobserve_password.get_secret_value()
+    auth = base64.b64encode(f"{settings.openobserve_username}:{secret}".encode()).decode()
+    stream = settings.openobserve_logs_stream or "job_ftch_ingest"
+    timeout = max(float(settings.openobserve_timeout_seconds), 5.0)
+    for dashboard_file in sorted(path.glob("*.json")):
+        body = dashboard_file.read_text(encoding="utf-8").replace("__LOGS_STREAM__", stream)
+        request = urllib.request.Request(
+            f"{base}/api/{org}/dashboards",
+            data=body.encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Basic {auth}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 -- _resolve_openobserve_url restricts schemes
+                logger.info(
+                    "OpenObserve dashboard upserted",
+                    extra={"dashboard": dashboard_file.name, "status": response.status},
+                )
+        except urllib.error.HTTPError as exc:
+            if exc.code in {409, 400}:
+                logger.info(
+                    "OpenObserve dashboard already present or rejected",
+                    extra={"dashboard": dashboard_file.name, "status": exc.code},
+                )
+                continue
+            logger.warning(
+                "OpenObserve dashboard upsert HTTP error",
+                extra={"dashboard": dashboard_file.name, "status": exc.code},
+            )
+        except urllib.error.URLError:
+            logger.warning(
+                "OpenObserve dashboard upsert unreachable",
+                extra={"dashboard": dashboard_file.name},
+            )
 
 
 def _resolve_openobserve_url(url: str) -> str:
     """Use the Docker gateway only in Docker; host scripts use localhost."""
     base = url.strip().rstrip("/")
+    parsed = urlsplit(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        msg = "OpenObserve URL must use http or https."
+        raise ValueError(msg)
     running_in_container = Path("/.dockerenv").exists() or os.environ.get(
         "CONTAINER", ""
     ).lower() in {"docker", "podman"}
@@ -226,6 +318,17 @@ def record_run_metrics(summary: RunSummary) -> None:
         1 if summary.llm_cost_is_complete else 0,
         {**attrs, "pricing_version": summary.llm_cost_pricing_version or "unknown"},
     )
+    fetched = max(int(summary.fetched or 0), 0)
+    _runtime_state_snapshots["job_ftch.ingest.conversion.extract"] = [
+        ((summary.extracted / fetched) if fetched else 0.0, attrs)
+    ]
+    _runtime_state_snapshots["job_ftch.ingest.conversion.accept"] = [
+        ((summary.emitted / fetched) if fetched else 0.0, attrs)
+    ]
+    _runtime_state_snapshots["job_ftch.ingest.run.duration"] = [(_duration_seconds(summary), attrs)]
+    _runtime_state_snapshots["job_ftch.ingest.run.cost"] = [
+        (float(summary.llm_cost_usd or 0.0), attrs)
+    ]
 
     for node_id, node_stats in summary.graph_node_metrics.items():
         node_attrs = {**attrs, "graph_hash": summary.graph_hash or "unknown", "node_id": node_id}
@@ -306,6 +409,33 @@ def record_run_metrics(summary: RunSummary) -> None:
     force_flush_openobserve()
 
 
+def record_run_stats_logs(
+    summary: RunSummary,
+    pipeline_row: PipelineRunStats,
+    source_rows: Sequence[SourceRunStatsRow],
+) -> None:
+    """Emit one pipeline row and one row per source as searchable log events."""
+    import structlog
+
+    log = structlog.get_logger("job_ftch.run_stats")
+    pipeline_payload = pipeline_row.model_dump(exclude={"extra_json"})
+    log.info(
+        "pipeline_run_stats",
+        tenant_id=summary.tenant_id or "unknown",
+        graph_hash=summary.graph_hash or "unknown",
+        **pipeline_payload,
+    )
+    for row in source_rows:
+        log.info(
+            "source_run_stats",
+            tenant_id=summary.tenant_id or "unknown",
+            graph_hash=summary.graph_hash or "unknown",
+            **row.model_dump(),
+        )
+    if _configured:
+        force_flush_openobserve()
+
+
 def record_bot_delivery_metrics(
     summary: RunSummary,
     *,
@@ -355,6 +485,14 @@ def record_runtime_state_metrics(
         "job_ftch.source.health.failure_streak": [],
         "job_ftch.source.health.last_success_age": [],
         "job_ftch.source.health.last_emitted": [],
+        "job_ftch.source.quality.reliable": [],
+        "job_ftch.source.quality.rich": [],
+        "job_ftch.source.quality.high_relevance": [],
+        "job_ftch.source.quality.important": [],
+        "job_ftch.source.quality.ok_rate": [],
+        "job_ftch.source.quality.yield_rate": [],
+        "job_ftch.source.quality.relevant_rate": [],
+        "job_ftch.source.quality.window_runs": [],
     }
     for health in source_health:
         source_attrs = {
@@ -381,6 +519,30 @@ def record_runtime_state_metrics(
         )
         source_rows["job_ftch.source.health.last_emitted"].append(
             (float(health.last_emitted), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.reliable"].append(
+            (1.0 if health.quality_reliable else 0.0, source_attrs)
+        )
+        source_rows["job_ftch.source.quality.rich"].append(
+            (1.0 if health.quality_rich else 0.0, source_attrs)
+        )
+        source_rows["job_ftch.source.quality.high_relevance"].append(
+            (1.0 if health.quality_high_relevance else 0.0, source_attrs)
+        )
+        source_rows["job_ftch.source.quality.important"].append(
+            (1.0 if health.quality_important else 0.0, source_attrs)
+        )
+        source_rows["job_ftch.source.quality.ok_rate"].append(
+            (float(health.quality_ok_rate), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.yield_rate"].append(
+            (float(health.quality_yield_rate), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.relevant_rate"].append(
+            (float(health.quality_relevant_rate), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.window_runs"].append(
+            (float(health.quality_window_runs), source_attrs)
         )
 
     scheduler_attrs = attrs
@@ -478,6 +640,18 @@ def _register_runtime_state_gauges(meter: Any) -> None:
         ("job_ftch.source.health.failure_streak", "failures"),
         ("job_ftch.source.health.last_success_age", "s"),
         ("job_ftch.source.health.last_emitted", "items"),
+        ("job_ftch.source.quality.reliable", "1"),
+        ("job_ftch.source.quality.rich", "1"),
+        ("job_ftch.source.quality.high_relevance", "1"),
+        ("job_ftch.source.quality.important", "1"),
+        ("job_ftch.source.quality.ok_rate", "1"),
+        ("job_ftch.source.quality.yield_rate", "1"),
+        ("job_ftch.source.quality.relevant_rate", "1"),
+        ("job_ftch.source.quality.window_runs", "runs"),
+        ("job_ftch.ingest.conversion.extract", "1"),
+        ("job_ftch.ingest.conversion.accept", "1"),
+        ("job_ftch.ingest.run.duration", "s"),
+        ("job_ftch.ingest.run.cost", "USD"),
         ("job_ftch.runtime.last_run_finished_age", "s"),
         ("job_ftch.runtime.last_run_failed", "1"),
         ("job_ftch.bot.scheduler.last_attempt_age", "s"),

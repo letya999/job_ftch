@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TypeVar, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
     from datetime import datetime as _DateTime
 
     from job_ftch.domain import (
@@ -18,10 +18,13 @@ if TYPE_CHECKING:
         ObservationLedgerEntry,
         OntologyTermStat,
         OutboxRecord,
+        PipelineRunStats,
         QuarantinedRawItem,
         RememberedDedupKey,
         ShotOntologyGraph,
         SkillTag,
+        SourceOperatorFlag,
+        SourceRunStatsRow,
     )
     from job_ftch.domain.site_models import MonitorResult, ScrapedPostingPayload
     from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
@@ -262,6 +265,25 @@ class Store(Protocol):
         state: SourceIngestState,
     ) -> None:
         """Persist bootstrap/incremental ingest state for this source."""
+
+    async def get_source_operator_flag(
+        self, tenant_id: str, source_key: str
+    ) -> SourceOperatorFlag | None:
+        """Return the operator-set flag row for this canonical source key."""
+
+    async def set_source_operator_flag(self, tenant_id: str, flag: SourceOperatorFlag) -> None:
+        """Upsert the operator-set important flag for a canonical source key."""
+
+    async def list_source_operator_flags(self, tenant_id: str) -> tuple[SourceOperatorFlag, ...]:
+        """List operator-set flags for a tenant."""
+
+    async def save_pipeline_run_stats(self, tenant_id: str, row: PipelineRunStats) -> None:
+        """Upsert one pipeline-run stats row."""
+
+    async def save_source_run_stats(
+        self, tenant_id: str, rows: Sequence[SourceRunStatsRow]
+    ) -> None:
+        """Upsert per-source stats for one pipeline run."""
 
 
 @runtime_checkable

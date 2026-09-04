@@ -1,9 +1,10 @@
 """Site parser for getmatch.ru IT vacancies.
 
-Getmatch listing pages are a Next.js SPA. Public listing APIs return
-``Login required`` (auth wall). Vacancy discovery therefore uses the public
-sitemap of detail URLs. Detail pages are server-rendered HTML with stable
-selectors (h1, company, salary, locations, description).
+Getmatch listing pages are a Next.js SPA with no free-text search box.
+Keyword ``?query=`` is stripped client-side. Discovery uses public
+``/api/offers`` with offset pagination, then sitemap. Target roles from the
+profile stay on ``_search_keywords`` and are applied locally. Detail pages
+are server-rendered HTML.
 
 Fetcher stays thin: this module only extracts candidates/drafts from supplied
 HTML/API/sitemap artifacts. Challenge/auth/layout outcomes are raised as
@@ -13,6 +14,7 @@ explainable local errors (or mapped onto existing challenge exceptions).
 from __future__ import annotations
 
 import html
+import json
 import re
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -28,7 +30,9 @@ from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeErro
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    keywords_from_spec,
     normalize_search_keywords,
+    text_matches_keywords,
     with_query_params,
 )
 
@@ -98,6 +102,7 @@ _DETAIL_SHELL_MARKERS: tuple[str, ...] = (
     "b-location",
 )
 _DEFAULT_SITEMAP_URL = "https://getmatch.ru/sitemap.xml"
+_OFFERS_API_URL = "https://getmatch.ru/api/offers"
 _DEFAULT_BOARD_URL = "https://getmatch.ru/vacancies"
 
 GetmatchFailureKind = Literal[
@@ -272,6 +277,48 @@ def extract_vacancy_urls_from_sitemap(
         scored.append((int(external_id), canonical))
     scored.sort(key=lambda row: row[0], reverse=True)
     return [url for _, url in scored[:limit]]
+
+
+def extract_vacancy_urls_from_offers(
+    payload: Any,
+    *,
+    limit: int,
+    seen: set[str] | None = None,
+) -> list[str]:
+    """Extract canonical vacancy URLs from a public ``/api/offers`` payload."""
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(payload, dict):
+        return []
+    rows = payload.get("offers")
+    if not isinstance(rows, list):
+        return []
+    seen_ids = seen if seen is not None else set()
+    urls: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        raw_url = row.get("url")
+        if not isinstance(raw_url, str) or not raw_url.strip():
+            vacancy_id = row.get("id")
+            if isinstance(vacancy_id, (int, str)) and str(vacancy_id).strip():
+                raw_url = f"/vacancies/{vacancy_id}"
+            else:
+                continue
+        canonical = canonicalize_vacancy_url(raw_url)
+        if canonical is None:
+            continue
+        external_id = vacancy_id_from_url(canonical)
+        if external_id is None or external_id in seen_ids:
+            continue
+        seen_ids.add(external_id)
+        urls.append(canonical)
+        if len(urls) >= limit:
+            break
+    return urls
 
 
 def classify_getmatch_payload(
@@ -561,18 +608,7 @@ def item_from_detail_html(
 
 
 def _keywords_from_spec(spec: CareerSiteSpec) -> list[str]:
-    parsed = urlparse(spec.url)
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    for key in ("query", "q", "search", "text", "qs"):
-        value = query.get(key)
-        if isinstance(value, str) and value.strip():
-            # Preserve multi-word roles. Getmatch has no public server-side
-            # search endpoint; its sitemap slug is the deterministic local
-            # search surface, so splitting on whitespace made `AI engineer`
-            # degenerate into the far too broad token `AI`.
-            return normalize_search_keywords(re.split(r"\s+OR\s+|\s+or\s+", value))
-    roles = getattr(spec, "target_roles", None) or ()
-    return normalize_search_keywords(roles)
+    return keywords_from_spec(spec)
 
 
 def _raise_for_kind(kind: GetmatchPageKind, *, url: str, message: str) -> None:
@@ -633,9 +669,10 @@ def _classify_response(
         item_level_dates=True,
         requires_full_snapshot=False,
         rationale=(
-            "Getmatch public listing APIs require login and listing pages are SPA shells; "
-            "the dedicated parser discovers via the public sitemap and extracts server-rendered "
-            "detail HTML fields."
+            "Getmatch listing pages are SPA shells with no free-text search; "
+            "the dedicated parser discovers via public /api/offers with offset "
+            "pagination and falls back to the sitemap, then extracts server-rendered "
+            "detail HTML. Target roles are applied locally."
         ),
     ),
 )
@@ -645,8 +682,8 @@ class GetmatchParser:
     domain_pattern = _DOMAIN_PATTERN
     has_custom_parse = True
     supports_discover = False
-    supports_search = False
-    search_mode = "none"
+    supports_search = True
+    search_mode = "combined"
     # Authoritative empty UI is rare; SPA shell without cards is not empty.
     confirmed_empty_on_empty = True
     terminal_on_empty = False
@@ -677,12 +714,11 @@ class GetmatchParser:
         parsed = urlparse(base_url)
         if not (parsed.path or "").startswith("/vacancies"):
             parsed = parsed._replace(path="/vacancies")
-        return [
-            with_query_params(
-                urlunparse(parsed),
-                {"query": " OR ".join(terms)},
-            )
-        ]
+        listing = urlunparse(parsed._replace(query=""))
+        # Live search box does not exist; `?query=` is stripped. Keep the
+        # listing URL; target roles are applied locally after paginated
+        # /api/offers (and sitemap) discovery.
+        return [listing]
 
     def _limit(self, spec_limit: int | None) -> int:
         if spec_limit is not None:
@@ -701,8 +737,57 @@ class GetmatchParser:
         scheme = parsed.scheme or "https"
         return f"{scheme}://{host}/sitemap.xml"
 
+    async def _discover_via_offers_api(
+        self, spec: CareerSiteSpec, client: Any, keywords: Sequence[str] | None = None
+    ) -> list[str]:
+        query = dict(parse_qsl(urlparse(spec.url or "").query, keep_blank_values=True))
+        sphere = str(query.get("sp") or "").strip()
+        limit = self._limit(spec.limit)
+        seen: set[str] = set()
+        urls: list[str] = []
+        offset = 0
+        page_size = min(50, max(limit, 1))
+        max_offset = 500
+        while len(urls) < limit and offset <= max_offset:
+            params: dict[str, str] = {}
+            if sphere:
+                params["sp"] = sphere
+            params.update(
+                {
+                    "sa": "any",
+                    "pa": "all",
+                    "offset": str(offset),
+                    "limit": str(page_size),
+                }
+            )
+            api_url = with_query_params(_OFFERS_API_URL, params)
+            try:
+                response = await _get(client, api_url)
+            except Exception as exc:
+                logger.debug("getmatch.offers_api_failed", url=api_url, error=str(exc))
+                break
+            text = _response_text(response)
+            if any(marker in text.casefold() for marker in _AUTH_MARKERS):
+                logger.debug("getmatch.offers_api_auth_wall", url=api_url)
+                break
+            page_urls = extract_vacancy_urls_from_offers(
+                text, limit=max(limit, page_size), seen=seen
+            )
+            if not page_urls:
+                break
+            for url in page_urls:
+                if keywords and not text_matches_keywords(url, keywords):
+                    continue
+                urls.append(url)
+                if len(urls) >= limit:
+                    break
+            if len(page_urls) < page_size:
+                break
+            offset += page_size
+        return urls[:limit]
+
     async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
-        """Return canonical detail URLs (listing HTML first, then sitemap)."""
+        """Return canonical detail URLs (API, listing HTML, then sitemap)."""
         limit = self._limit(spec.limit)
         keywords = _keywords_from_spec(spec)
         board_url = spec.url or _DEFAULT_BOARD_URL
@@ -713,6 +798,10 @@ class GetmatchParser:
         direct = canonicalize_vacancy_url(board_url)
         if direct is not None:
             return [direct]
+
+        api_urls = await self._discover_via_offers_api(spec, client, keywords)
+        if api_urls:
+            return api_urls[:limit]
 
         try:
             listing_response = await _get(client, board_url)
@@ -744,14 +833,17 @@ class GetmatchParser:
                 # Still attempt sitemap before failing hard.
                 logger.info("getmatch.listing_layout_changed_fallback_sitemap", url=board_url)
             else:
-                urls.extend(
-                    extract_vacancy_urls_from_html(
-                        listing_html,
-                        str(getattr(listing_response, "url", board_url) or board_url),
-                        limit=limit,
-                        seen=seen,
-                    )
+                listing_urls = extract_vacancy_urls_from_html(
+                    listing_html,
+                    str(getattr(listing_response, "url", board_url) or board_url),
+                    limit=limit,
+                    seen=seen,
                 )
+                if keywords:
+                    listing_urls = [
+                        url for url in listing_urls if text_matches_keywords(url, keywords)
+                    ]
+                urls.extend(listing_urls)
                 if urls:
                     return urls[:limit]
 

@@ -30,13 +30,16 @@ from job_ftch.domain import (
     ManagedCandidateProfile,
     ObservationLedgerEntry,
     OutboxRecord,
+    PipelineRunStats,
     RuntimeSourceRecord,
     SourceHealth,
+    SourceOperatorFlag,
+    SourceRunStatsRow,
 )
 
 if TYPE_CHECKING:
     import builtins
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from job_ftch.application.contracts import DedupReservation, Store, StoreConnector
     from job_ftch.domain.search_session import SearchSession
@@ -306,6 +309,40 @@ class TenantStore:
             msg = f"tenant_id mismatch: {tenant_id} != {self._tenant_id}"
             raise ValueError(msg)
         await self._store.save_source_ingest_state(self._tenant_id, state)
+
+    async def get_source_operator_flag(
+        self, tenant_id: str, source_key: str
+    ) -> SourceOperatorFlag | None:
+        if tenant_id != self._tenant_id:
+            msg = f"tenant_id mismatch: {tenant_id} != {self._tenant_id}"
+            raise ValueError(msg)
+        return await self._store.get_source_operator_flag(self._tenant_id, source_key)
+
+    async def set_source_operator_flag(self, tenant_id: str, flag: SourceOperatorFlag) -> None:
+        if tenant_id != self._tenant_id:
+            msg = f"tenant_id mismatch: {tenant_id} != {self._tenant_id}"
+            raise ValueError(msg)
+        await self._store.set_source_operator_flag(self._tenant_id, flag)
+
+    async def list_source_operator_flags(self, tenant_id: str) -> tuple[SourceOperatorFlag, ...]:
+        if tenant_id != self._tenant_id:
+            msg = f"tenant_id mismatch: {tenant_id} != {self._tenant_id}"
+            raise ValueError(msg)
+        return await self._store.list_source_operator_flags(self._tenant_id)
+
+    async def save_pipeline_run_stats(self, tenant_id: str, row: PipelineRunStats) -> None:
+        if tenant_id != self._tenant_id:
+            msg = f"tenant_id mismatch: {tenant_id} != {self._tenant_id}"
+            raise ValueError(msg)
+        await self._store.save_pipeline_run_stats(self._tenant_id, row)
+
+    async def save_source_run_stats(
+        self, tenant_id: str, rows: Sequence[SourceRunStatsRow]
+    ) -> None:
+        if tenant_id != self._tenant_id:
+            msg = f"tenant_id mismatch: {tenant_id} != {self._tenant_id}"
+            raise ValueError(msg)
+        await self._store.save_source_run_stats(self._tenant_id, rows)
 
     async def has_processed(self, item_id: str) -> bool:
         connector = cast("StoreConnector", self._store)

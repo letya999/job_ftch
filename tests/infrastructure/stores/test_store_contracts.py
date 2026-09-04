@@ -13,9 +13,12 @@ import pytest
 from job_ftch.domain import (
     DedupKeyKind,
     ObservationLedgerEntry,
+    PipelineRunStats,
     RawItem,
     RememberedDedupKey,
     SourceKind,
+    SourceOperatorFlag,
+    SourceRunStatsRow,
     content_hash_for_raw_item,
 )
 from job_ftch.domain.source_assessment import (
@@ -222,6 +225,79 @@ async def test_source_ingest_state_round_trip(factory: Callable[[], object]) -> 
     loaded = await store.get_source_ingest_state("tenant-a", state.source_id)  # type: ignore[union-attr]
     assert loaded == state
     assert await store.get_source_ingest_state("tenant-b", state.source_id) is None  # type: ignore[union-attr]
+    close = getattr(store, "close", None)
+    if callable(close):
+        await close()
+
+
+@pytest.mark.parametrize("factory", STORE_FACTORIES)
+@pytest.mark.integration
+async def test_operator_flags_and_run_stats_round_trip(factory: Callable[[], object]) -> None:
+    store = factory()
+    flag = SourceOperatorFlag(
+        source_key="hh_ru",
+        important=True,
+        set_by="test",
+        set_at="2026-09-04T12:00:00+00:00",
+        note="pin",
+    )
+    await store.set_source_operator_flag("tenant-a", flag)  # type: ignore[union-attr]
+    loaded = await store.get_source_operator_flag("tenant-a", "hh_ru")  # type: ignore[union-attr]
+    assert loaded is not None
+    assert loaded.important is True
+    assert loaded.note == "pin"
+    listed = await store.list_source_operator_flags("tenant-a")  # type: ignore[union-attr]
+    assert [item.source_key for item in listed] == ["hh_ru"]
+    assert await store.get_source_operator_flag("tenant-b", "hh_ru") is None  # type: ignore[union-attr]
+
+    run = PipelineRunStats(
+        source_run_id="run-1",
+        started_at="2026-09-04T12:00:00+00:00",
+        finished_at="2026-09-04T12:10:00+00:00",
+        duration_ms=600000,
+        source_count=1,
+        fetched=100,
+        extracted=20,
+        emitted=5,
+        conversion_extract=0.2,
+        conversion_accept=0.05,
+        extra_json="{}",
+    )
+    await store.save_pipeline_run_stats("tenant-a", run)  # type: ignore[union-attr]
+    source_row = SourceRunStatsRow(
+        source_run_id="run-1",
+        source_id="career_site:hh_ru",
+        source_key="hh_ru",
+        source_kind="career_site",
+        source_name="hh_ru",
+        status="parsed_ok",
+        started_at="2026-09-04T12:00:00+00:00",
+        finished_at="2026-09-04T12:10:00+00:00",
+        yielded=30,
+        fetched=30,
+        emitted=5,
+        quality_important=True,
+        quality_reliable=True,
+    )
+    await store.save_source_run_stats("tenant-a", [source_row])  # type: ignore[union-attr]
+    await store.save_source_run_stats("tenant-a", [])  # type: ignore[union-attr]
+
+    # Unpin flag
+    unpin_flag = SourceOperatorFlag(
+        source_key="hh_ru",
+        important=False,
+        set_by="test_unpin",
+        set_at="2026-09-04T12:05:00+00:00",
+        note="unpin",
+    )
+    await store.set_source_operator_flag("tenant-a", unpin_flag)  # type: ignore[union-attr]
+    loaded_unpin = await store.get_source_operator_flag("tenant-a", "hh_ru")  # type: ignore[union-attr]
+    assert loaded_unpin is not None
+    assert loaded_unpin.important is False
+    assert loaded_unpin.note == "unpin"
+    listed_unpin = await store.list_source_operator_flags("tenant-a")  # type: ignore[union-attr]
+    assert [item.source_key for item in listed_unpin if item.important] == []
+
     close = getattr(store, "close", None)
     if callable(close):
         await close()

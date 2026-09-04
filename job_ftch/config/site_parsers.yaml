@@ -63,7 +63,19 @@ parsers:
     has_custom_parse: true
     supports_discover: false
   - name: aijobs
-    domain_pattern: "^https?://aijobs\\.net(?:/|$)"
+    domain_pattern: "^https?://(?:(?:www\\.)?aijobs\\.net|(?:www\\.)?foorilla\\.com)(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+  - name: aijobs_com
+    domain_pattern: "^https?://(?:www\\.)?aijobs\\.com(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+  - name: aijobs_ai
+    domain_pattern: "^https?://(?:www\\.)?aijobs\\.ai(?:/|$)"
+    has_custom_parse: true
+    supports_discover: false
+  - name: beeline_ru
+    domain_pattern: "^https?://(?:www\\.)?jobs?\\.beeline\\.ru(?:/|$)"
     has_custom_parse: true
     supports_discover: false
   - name: ai_engineer
@@ -91,7 +103,8 @@ parsers:
   - name: habr_career
     domain_pattern: "^https?://career\\.habr\\.com/"
     has_custom_parse: true
-    supports_discover: true
+    supports_discover: false
+    render: false
     url_filter: "career\\.habr\\.com/vacancies/\\d{5,}"
     detail_pattern: "((?:https?://career\\.habr\\.com)?/vacancies/\\d+(?:[^\\\"' <]*)?)"
     limit: 50
@@ -136,7 +149,8 @@ parsers:
   - name: geekjob
     domain_pattern: "(?:www\\.)?geekjob\\.ru(?:/|$)"
     has_custom_parse: true
-    supports_discover: true
+    supports_discover: false
+    render: false
     url_filter: "geekjob\\.ru/(?:vacancy/[a-z0-9-]+/?|jobs/\\d+/?$)"
     detail_pattern: "https?://(?:www\\.)?geekjob\\.ru/(?:vacancy/[a-z0-9-]+/?|jobs/\\d+/?)(?:\\?[^\\\"' <]*)?"
     limit: 50
@@ -217,10 +231,10 @@ parsers:
   - name: kaspi
     domain_pattern: "(?:www\\.)?job\\.kaspi\\.kz(?:/|$)"
     has_custom_parse: true
-    supports_discover: true
+    supports_discover: false
     parser_kind: "kaspi"
-    render: true
-    wait: "networkidle"
+    render: false
+    wait: "domcontentloaded"
     include_if_detail_page: false
     detail_pattern: "/vacancy/[^/]+"
     limit: 50
@@ -272,11 +286,11 @@ parsers:
     domain_pattern: "^https?://(?:job|career)\\.ozon\\.ru(?:/|$)"
     has_custom_parse: true
     supports_discover: false
-    render: true
+    render: false
     wait: "domcontentloaded"
     include_if_detail_page: false
   - name: protected_browser_defaults
-    domain_pattern: "^https?://(?:himalayas\\.app|(?:www\\.)?foody\\.com\\.cy|(?:www\\.)?fishingbooker\\.com|theprotocol\\.it|(?:www\\.)?pracuj\\.pl|(?:www\\.)?cypruswork\\.com|jobs\\.ashbyhq\\.com|job\\.beeline\\.ru)(?:/|$)"
+    domain_pattern: "^https?://(?:himalayas\\.app|(?:www\\.)?foody\\.com\\.cy|(?:www\\.)?fishingbooker\\.com|theprotocol\\.it|(?:www\\.)?pracuj\\.pl|(?:www\\.)?cypruswork\\.com|jobs\\.ashbyhq\\.com)(?:/|$)"
     has_custom_parse: false
     supports_discover: false
     render: true
@@ -295,10 +309,8 @@ parsers:
       settle_seconds: 5
       captcha_authorized_domains:
         - jobs.ashbyhq.com
-        - job.beeline.ru
       proxy_rescue_allow_domains:
         - jobs.ashbyhq.com
-        - job.beeline.ru
   - name: rabota_by
     domain_pattern: "^https?://([a-z0-9-]+\\.)?rabota\\.by(?:/|$)"
     has_custom_parse: true
@@ -346,9 +358,9 @@ parsers:
   - name: t2_career
     domain_pattern: "^https?://(?:careers\\.)?t2\\.ru(?:/|$)"
     has_custom_parse: true
-    supports_discover: true
+    supports_discover: false
     parser_kind: "t2_career"
-    render: true
+    render: false
     wait: "domcontentloaded"
     include_if_detail_page: false
     detail_pattern: "/vacancy/\\d+(?:[/?#]|$)"

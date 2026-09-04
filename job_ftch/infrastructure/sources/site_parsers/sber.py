@@ -69,21 +69,38 @@ class SberParser:
     async def parse(self, spec: CareerSiteSpec, client: Any) -> Any:
         limit = spec.limit or getattr(getattr(self, "_manifest_entry", None), "limit", None) or 50
         query = parse_qs(urlparse(spec.url).query).get("query", [""])[0]
-        params: dict[str, int | str] = {"skip": 0, "take": min(int(limit), 50)}
-        if query:
-            params["searchString"] = query
-        response = await safe_fetch(client, f"{self._API_URL}?{urlencode(params)}")
-        payload = response.json()
-        vacancies = (
-            payload.get("data", {}).get("vacancies", []) if isinstance(payload, dict) else []
-        )
         source_name = spec.source_name or source_spec_name(spec)
-        for vacancy in vacancies[: int(limit)]:
-            if not isinstance(vacancy, dict):
-                continue
-            item = self._to_raw_item(vacancy, source_name)
-            if item is not None:
+        take = min(int(limit), 50)
+        skip = 0
+        emitted = 0
+        seen: set[str] = set()
+        while emitted < int(limit) and skip < 500:
+            params: dict[str, int | str] = {"skip": skip, "take": take}
+            if query:
+                params["searchString"] = query
+            response = await safe_fetch(client, f"{self._API_URL}?{urlencode(params)}")
+            payload = response.json()
+            vacancies = (
+                payload.get("data", {}).get("vacancies", []) if isinstance(payload, dict) else []
+            )
+            if not isinstance(vacancies, list) or not vacancies:
+                break
+            new_on_page = 0
+            for vacancy in vacancies:
+                if not isinstance(vacancy, dict):
+                    continue
+                item = self._to_raw_item(vacancy, source_name)
+                if item is None or item.external_id in seen:
+                    continue
+                seen.add(str(item.external_id))
                 yield item
+                emitted += 1
+                new_on_page += 1
+                if emitted >= int(limit):
+                    return
+            if len(vacancies) < take or new_on_page == 0:
+                break
+            skip += take
 
     @staticmethod
     def _to_raw_item(vacancy: dict[str, Any], source_name: str) -> Any:

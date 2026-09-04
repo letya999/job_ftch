@@ -12,10 +12,15 @@ from job_ftch.domain import (
     ObservationLedgerEntry,
     OutboxRecord,
     OutboxState,
+    PipelineRunStats,
     RememberedDedupKey,
+    SourceOperatorFlag,
+    SourceRunStatsRow,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from job_ftch.application.contracts import DedupReservation
     from job_ftch.config import Settings
     from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
@@ -67,6 +72,9 @@ class InMemoryStore:
         self._sets: dict[str, OrderedDict[str, None]] = {}
         self._source_assessments: dict[tuple[str, str], SourceAssessmentResult] = {}
         self._source_ingest_states: dict[tuple[str, str], SourceIngestState] = {}
+        self._operator_flags: dict[tuple[str, str], SourceOperatorFlag] = {}
+        self._pipeline_run_stats: dict[tuple[str, str], PipelineRunStats] = {}
+        self._source_run_stats: dict[tuple[str, str, str], SourceRunStatsRow] = {}
         # ADR-031: per-tenant/source snapshot state.
         # Key: "snap_runs:{tenant}\x00{source}" → OrderedDict[run_id, (run_seq, {stable_id: item_hash})]
         self._snapshot_runs: dict[str, OrderedDict[str, tuple[int, dict[str, str]]]] = {}
@@ -479,6 +487,30 @@ class InMemoryStore:
         state: SourceIngestState,
     ) -> None:
         self._source_ingest_states[(tenant_id, state.source_id)] = state
+
+    async def get_source_operator_flag(
+        self, tenant_id: str, source_key: str
+    ) -> SourceOperatorFlag | None:
+        return self._operator_flags.get((tenant_id, source_key))
+
+    async def set_source_operator_flag(self, tenant_id: str, flag: SourceOperatorFlag) -> None:
+        self._operator_flags[(tenant_id, flag.source_key)] = flag
+
+    async def list_source_operator_flags(self, tenant_id: str) -> tuple[SourceOperatorFlag, ...]:
+        return tuple(
+            flag
+            for (item_tenant, _), flag in sorted(self._operator_flags.items())
+            if item_tenant == tenant_id
+        )
+
+    async def save_pipeline_run_stats(self, tenant_id: str, row: PipelineRunStats) -> None:
+        self._pipeline_run_stats[(tenant_id, row.source_run_id)] = row
+
+    async def save_source_run_stats(
+        self, tenant_id: str, rows: Sequence[SourceRunStatsRow]
+    ) -> None:
+        for item in rows:
+            self._source_run_stats[(tenant_id, item.source_run_id, item.source_id)] = item
 
 
 @register_store("memory")

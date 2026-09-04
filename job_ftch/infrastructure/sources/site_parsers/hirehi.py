@@ -20,12 +20,23 @@ class HireHiParser:
 
     domain_pattern = r"^https?://(?:www\.)?hirehi\.ru(?:/|$)"
     has_custom_parse = False
-    supports_search = False
-    search_mode = "none"
+    supports_search = True
+    search_mode = "per_keyword"
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
-        return SiteRuntimeDefaults(url_filter=_URL_FILTER, include_if_detail_page=True)
+        return SiteRuntimeDefaults(
+            url_filter=_URL_FILTER,
+            include_if_detail_page=True,
+            extra={
+                "pagination": {
+                    "param_name": "page",
+                    "start": 2,
+                    "increment": 1,
+                    "max_pages": 5,
+                }
+            },
+        )
 
     def parser_kind(self, url: str) -> str | None:
         del url

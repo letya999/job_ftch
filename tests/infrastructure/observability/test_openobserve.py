@@ -11,9 +11,18 @@ from job_ftch.infrastructure.observability.openobserve import (
     _ContextAttributesFilter,
     _counter_mapping,
     _counter_value,
+    _resolve_openobserve_url,
     _runtime_state_snapshots,
     record_runtime_state_metrics,
 )
+
+
+def test_openobserve_url_rejects_non_http_schemes() -> None:
+    import pytest
+
+    assert _resolve_openobserve_url("https://observe.example/") == "https://observe.example"
+    with pytest.raises(ValueError, match="http or https"):
+        _resolve_openobserve_url("file:///tmp/dashboard")
 
 
 def test_context_filter_promotes_only_safe_correlation_fields() -> None:
@@ -91,5 +100,8 @@ def test_runtime_state_metrics_snapshot_exposes_source_and_publish_state(monkeyp
 
     assert _runtime_state_snapshots["job_ftch.source.health.degraded"][0][0] == 1.0
     assert _runtime_state_snapshots["job_ftch.source.health.failure_streak"][0][0] == 2.0
+    assert _runtime_state_snapshots["job_ftch.source.quality.reliable"][0][0] == 0.0
+    assert _runtime_state_snapshots["job_ftch.source.quality.high_relevance"][0][0] == 0.0
+    assert _runtime_state_snapshots["job_ftch.source.quality.important"][0][0] == 0.0
     assert _runtime_state_snapshots["job_ftch.bot.scheduler.publish_error_present"][0][0] == 1.0
     assert _runtime_state_snapshots["job_ftch.bot.scheduler.last_publish_sent"][0][0] == 7.0

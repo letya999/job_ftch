@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 from job_ftch.application.search_expansion import (
     _clone_with_search_url,
     expand_career_site_specs,
+    search_queries_from_target_roles,
 )
 from job_ftch.domain.source_spec import CareerSiteSpec, TelegramChannelSpec
 
@@ -72,19 +73,30 @@ def test_vk_and_sber_expand_to_combined_query() -> None:
     assert len(out) == 2
     vk_query = parse_qs(urlparse(out[0].url).query)
     sber_query = parse_qs(urlparse(out[1].url).query)
-    assert vk_query["query"] == ["AI engineer OR LLM engineer"]
+    assert vk_query["search"] == ["AI engineer OR LLM engineer"]
     assert sber_query["query"] == ["AI engineer OR LLM engineer"]
     assert out[0].source_name == "vk_careers"
     assert out[1].source_name == "rabota_sber_ru"
 
 
-def test_superjob_keeps_url_and_gets_search_keywords() -> None:
+def test_tbank_expands_to_it_listing_with_profile_roles() -> None:
+    specs = [CareerSiteSpec(url="https://www.tbank.ru/career/", source_name="tbank")]
+    out = expand_career_site_specs(specs, ROLES)
+    assert len(out) == 1
+    parsed = urlparse(out[0].url)
+    assert parsed.path.rstrip("/") == "/career/vacancies/it"
+    assert "profession" not in parse_qs(parsed.query)
+    assert out[0].monitor_config["_search_keywords"] == ROLES
+
+
+def test_superjob_expands_to_keywords_query() -> None:
     specs = [
         CareerSiteSpec(url="https://www.superjob.ru/vacancy/search/", source_name="superjob_ru")
     ]
     out = expand_career_site_specs(specs, ROLES)
     assert len(out) == 1
-    assert out[0].url == "https://www.superjob.ru/vacancy/search/"
+    query = parse_qs(urlparse(out[0].url).query)
+    assert query["keywords"] == ["AI engineer OR LLM engineer"]
     assert out[0].monitor_config["_search_keywords"] == ROLES
 
 
@@ -98,9 +110,10 @@ def test_source_without_search_parser_gets_runtime_keywords() -> None:
     assert out[0].monitor_config["_search_keywords"] == ROLES
 
 
-def test_unverified_assessment_keeps_base_listing(monkeypatch) -> None:
+def test_unverified_assessment_still_uses_parser_search(monkeypatch) -> None:
     class Parser:
         supports_search = True
+        search_mode = "combined"
 
         def build_search_urls(self, url, keywords, *, limit=None):
             del keywords, limit
@@ -115,8 +128,117 @@ def test_unverified_assessment_keeps_base_listing(monkeypatch) -> None:
         monitor_config={"_search_assessment": {"status": "unsupported", "executor": "none"}},
     )
     out = expand_career_site_specs([spec], ROLES)
+    assert out[0].url == "https://example.com/jobs?q=runtime-fallback"
+    assert out[0].monitor_config["_search_keywords"] == ROLES
+
+
+def test_unverified_assessment_without_parser_search_keeps_listing(monkeypatch) -> None:
+    class Parser:
+        supports_search = False
+
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser_for_spec", lambda _spec: Parser()
+    )
+    spec = CareerSiteSpec(
+        url="https://example.com/jobs",
+        source_name="example",
+        monitor_config={"_search_assessment": {"status": "unsupported", "executor": "none"}},
+    )
+    out = expand_career_site_specs([spec], ROLES)
     assert out[0].url == "https://example.com/jobs"
     assert out[0].monitor_config["_search_keywords"] == ROLES
+
+
+def test_search_queries_split_slash_and_drop_generic() -> None:
+    queries = search_queries_from_target_roles(
+        [
+            "LLM Engineer",
+            "Vibe Coder / AI Product Builder",
+            "fullstack developer",
+            "product management",
+        ]
+    )
+    assert "LLM Engineer" in queries
+    assert "AI Product Builder" in queries
+    assert "Vibe Coder" not in queries
+    assert "fullstack developer" not in queries
+    assert "product management" not in queries
+
+
+def test_per_keyword_fanout_is_capped(monkeypatch) -> None:
+    class Parser:
+        supports_search = True
+        search_mode = "per_keyword"
+
+        def build_search_urls(self, url, keywords, *, limit=None):
+            del limit
+            return [f"{url}?qs={term}" for term in keywords]
+
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser_for_spec", lambda _spec: Parser()
+    )
+    spec = CareerSiteSpec(url="https://geekjob.ru/vacancies", source_name="geekjob")
+    roles = [
+        "LLM Engineer",
+        "AI Automation Engineer",
+        "Agentic AI Engineer",
+        "AI Product Engineer",
+        "AI Architect",
+    ]
+    out = expand_career_site_specs([spec], roles)
+    assert len(out) == 3
+    assert [item.source_name for item in out] == ["geekjob_kw1", "geekjob_kw2", "geekjob_kw3"]
+
+
+def test_parser_search_wins_over_verified_generic_get(monkeypatch) -> None:
+    class Parser:
+        supports_search = True
+        search_mode = "combined"
+
+        def build_search_urls(self, url, keywords, *, limit=None):
+            del keywords, limit
+            return [f"{url}?search=from-parser"]
+
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser_for_spec", lambda _spec: Parser()
+    )
+    spec = CareerSiteSpec(
+        url="https://rabota.x5.ru/vacancies",
+        source_name="x5",
+        monitor_config={
+            "_search_assessment": {
+                "status": "verified",
+                "executor": "generic_get",
+                "query_param": "search",
+            }
+        },
+    )
+    out = expand_career_site_specs([spec], ROLES)
+    assert out[0].url == "https://rabota.x5.ru/vacancies?search=from-parser"
+
+
+def test_getmatch_and_yandex_expand_to_combined_query() -> None:
+    specs = [
+        CareerSiteSpec(url="https://getmatch.ru/vacancies", source_name="getmatch"),
+        CareerSiteSpec(url="https://yandex.ru/jobs/vacancies", source_name="yandex_jobs"),
+        CareerSiteSpec(url="https://hirehi.ru/", source_name="hirehi_ru"),
+    ]
+    out = expand_career_site_specs(specs, ROLES)
+    assert urlparse(out[0].url).path.startswith("/vacancies")
+    assert "sp" not in parse_qs(urlparse(out[0].url).query)
+    assert out[0].monitor_config["_search_keywords"] == ROLES
+    assert parse_qs(urlparse(out[1].url).query)["text"] == ["AI engineer OR LLM engineer"]
+    assert len([item for item in out if item.source_name.startswith("hirehi_ru")]) == len(ROLES)
+
+
+def test_habr_expands_to_combined_or_query() -> None:
+    specs = [CareerSiteSpec(url="https://career.habr.com/vacancies", source_name="habr_career")]
+    out = expand_career_site_specs(specs, ROLES)
+    assert len(out) == 1
+    query = parse_qs(urlparse(out[0].url).query)
+    assert query["q"] == ["AI engineer OR LLM engineer"]
+    assert query["type"] == ["all"]
+    assert out[0].source_name == "habr_career"
 
 
 def test_per_keyword_clone_gets_unique_source_name() -> None:

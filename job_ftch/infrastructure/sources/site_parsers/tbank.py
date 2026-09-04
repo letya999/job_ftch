@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import structlog
 from selectolax.parser import HTMLParser
@@ -13,9 +13,14 @@ from job_ftch.application.registry import known_board_assessment_hint, register_
 from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    ListingPagination,
     browser_scroll_collect_urls,
+    keywords_from_spec,
+    normalize_search_keywords,
+    paginate_listing,
     resolve_browser_config,
     safe_fetch,
+    text_matches_keywords,
 )
 from job_ftch.infrastructure.sources.url_scoring import score_job_url
 
@@ -92,6 +97,34 @@ class TbankCareerParser:
     domain_pattern = r"^https?://(?:www\.)?tbank\.ru/career"
     has_custom_parse = True
     supports_discover = True
+    supports_search = True
+    search_mode = "combined"
+
+    def build_search_urls(
+        self,
+        base_url: str,
+        keywords: Any,
+        *,
+        limit: int | None = None,
+    ) -> list[str]:
+        del limit
+        terms = normalize_search_keywords(keywords)
+        if not terms:
+            return []
+        parsed = urlparse(base_url)
+        listing = urlunparse(
+            (
+                parsed.scheme or "https",
+                parsed.netloc or "www.tbank.ru",
+                "/career/vacancies/it/",
+                "",
+                "",
+                "",
+            )
+        )
+        # No free-text search box. Keep the IT listing; target roles stay on
+        # monitor_config["_search_keywords"] and are applied locally.
+        return [listing]
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
@@ -164,10 +197,13 @@ class TbankCareerParser:
         expand_patterns = self._expand_patterns()
         collected: list[str] = []
         seen: set[str] = set()
+        keywords = keywords_from_spec(spec)
 
         def _merge(urls: list[str]) -> None:
             for url in urls:
                 if url in seen:
+                    continue
+                if keywords and not text_matches_keywords(url, keywords):
                     continue
                 seen.add(url)
                 collected.append(url)
@@ -175,8 +211,22 @@ class TbankCareerParser:
                     return
 
         try:
-            response = await safe_fetch(client, spec.url)
-            current_url = str(getattr(response, "url", spec.url) or spec.url)
+
+            async def fetch(url: str) -> str:
+                response = await safe_fetch(client, url)
+                return str(response.text)
+
+            def extract(html: str, url: str) -> list[str]:
+                return _extract_detail_urls(
+                    html,
+                    url,
+                    limit=limit,
+                    detail_re=detail_re,
+                    listing_re=listing_re,
+                )
+
+            first = await safe_fetch(client, spec.url)
+            current_url = str(getattr(first, "url", spec.url) or spec.url)
             current_url_candidates = _extract_detail_urls_from_hrefs(
                 [current_url],
                 current_url,
@@ -186,18 +236,17 @@ class TbankCareerParser:
             )
             if current_url_candidates:
                 return current_url_candidates
-            _merge(
-                _extract_detail_urls(
-                    str(response.text),
-                    current_url,
-                    limit=limit,
-                    detail_re=detail_re,
-                    listing_re=listing_re,
-                )
+            paged = await paginate_listing(
+                fetch,
+                extract,
+                spec.url,
+                limit=limit,
+                pagination=ListingPagination(),
             )
+            _merge(paged)
             if len(collected) >= limit:
                 return collected[:limit]
-            tree = HTMLParser(str(response.text))
+            tree = HTMLParser(str(first.text))
             expand_urls = []
             for anchor in tree.css("a[href]"):
                 href = str(anchor.attributes.get("href", "") or "")

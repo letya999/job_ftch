@@ -221,6 +221,23 @@ class MinimalStore:
     ) -> None:
         return None
 
+    async def get_source_operator_flag(self, tenant_id: str, source_key: str) -> None:
+        del tenant_id, source_key
+        return None
+
+    async def set_source_operator_flag(self, tenant_id: str, flag: object) -> None:
+        del tenant_id, flag
+
+    async def list_source_operator_flags(self, tenant_id: str) -> tuple[()]:
+        del tenant_id
+        return ()
+
+    async def save_pipeline_run_stats(self, tenant_id: str, row: object) -> None:
+        del tenant_id, row
+
+    async def save_source_run_stats(self, tenant_id: str, rows: object) -> None:
+        del tenant_id, rows
+
 
 class MinimalLLMProvider:
     async def extract(self, text: str, schema: type[Any]) -> Any:

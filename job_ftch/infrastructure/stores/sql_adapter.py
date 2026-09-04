@@ -7,6 +7,8 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from job_ftch.application.contracts import DedupReservation
 
 from job_ftch.domain import (
@@ -16,6 +18,7 @@ from job_ftch.domain import (
     OutboxState,
     RememberedDedupKey,
 )
+from job_ftch.domain.run_stats import PipelineRunStats, SourceOperatorFlag, SourceRunStatsRow
 from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
 
 
@@ -27,6 +30,27 @@ def _ns(source_kind: str | None, source_name: str | None, key: str) -> str:
 
 def _processed_timestamp_key(item_id: str) -> str:
     return f"processed_at:{item_id}"
+
+
+def _as_flag(value: bool) -> bool:
+    return bool(value)
+
+
+def _as_iso(value: object) -> str:
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return str(isoformat())
+    return str(value)
+
+
+def _flag_from_row(row: tuple[object, ...]) -> SourceOperatorFlag:
+    return SourceOperatorFlag(
+        source_key=str(row[0]),
+        important=bool(row[1]),
+        set_by=str(row[2] or "operator"),
+        set_at=_as_iso(row[3]),
+        note=str(row[4]) if row[4] is not None else None,
+    )
 
 
 def _is_processed_timestamp_fresh(raw_value: str | None, ttl_hours: int | None) -> bool:
@@ -77,6 +101,11 @@ class SQLStoreAdapter(abc.ABC):
     _SQL_SOURCE_ASSESSMENT_UPSERT: str
     _SQL_SOURCE_INGEST_STATE_GET: str
     _SQL_SOURCE_INGEST_STATE_UPSERT: str
+    _SQL_OPERATOR_FLAG_GET: str
+    _SQL_OPERATOR_FLAG_UPSERT: str
+    _SQL_OPERATOR_FLAG_LIST: str
+    _SQL_PIPELINE_RUN_STATS_UPSERT: str
+    _SQL_SOURCE_RUN_STATS_UPSERT: str
 
     def __init__(self, *, processed_item_ttl_hours: int | None = 24) -> None:
         self._processed_item_ttl_hours = processed_item_ttl_hours
@@ -468,3 +497,95 @@ class SQLStoreAdapter(abc.ABC):
                 state.updated_at,
             ),
         )
+
+    async def get_source_operator_flag(
+        self, tenant_id: str, source_key: str
+    ) -> SourceOperatorFlag | None:
+        row = await self._fetchone(self._SQL_OPERATOR_FLAG_GET, (tenant_id, source_key))
+        if row is None:
+            return None
+        return _flag_from_row(row)
+
+    async def set_source_operator_flag(self, tenant_id: str, flag: SourceOperatorFlag) -> None:
+        await self._execute(
+            self._SQL_OPERATOR_FLAG_UPSERT,
+            (
+                tenant_id,
+                flag.source_key,
+                _as_flag(flag.important),
+                flag.set_by,
+                flag.set_at,
+                flag.note,
+            ),
+        )
+
+    async def list_source_operator_flags(self, tenant_id: str) -> tuple[SourceOperatorFlag, ...]:
+        rows = await self._fetchall(self._SQL_OPERATOR_FLAG_LIST, (tenant_id,))
+        return tuple(_flag_from_row(row) for row in rows)
+
+    async def save_pipeline_run_stats(self, tenant_id: str, row: PipelineRunStats) -> None:
+        await self._execute(
+            self._SQL_PIPELINE_RUN_STATS_UPSERT,
+            (
+                tenant_id,
+                row.source_run_id,
+                row.started_at,
+                row.finished_at,
+                row.duration_ms,
+                row.source_count,
+                row.ok_sources,
+                row.fail_sources,
+                row.fetched,
+                row.extracted,
+                row.emitted,
+                row.review,
+                row.rejected,
+                row.dropped,
+                row.failed,
+                row.duplicates,
+                row.llm_calls,
+                row.llm_tokens_in,
+                row.llm_tokens_out,
+                row.llm_latency_ms,
+                row.llm_cost_usd,
+                row.conversion_extract,
+                row.conversion_accept,
+                row.extra_json,
+            ),
+        )
+
+    async def save_source_run_stats(
+        self, tenant_id: str, rows: Sequence[SourceRunStatsRow]
+    ) -> None:
+        if not rows:
+            return
+        params = tuple(
+            (
+                tenant_id,
+                item.source_run_id,
+                item.source_id,
+                item.source_key,
+                item.source_kind,
+                item.source_name,
+                item.status,
+                item.started_at,
+                item.finished_at,
+                item.yielded,
+                item.fetched,
+                item.extracted,
+                item.emitted,
+                item.dropped,
+                item.failed,
+                item.duration_ms,
+                item.llm_latency_ms,
+                item.llm_cost_usd,
+                item.conversion_accept,
+                _as_flag(item.quality_reliable),
+                _as_flag(item.quality_rich),
+                _as_flag(item.quality_high_relevance),
+                _as_flag(item.quality_important),
+                item.error,
+            )
+            for item in rows
+        )
+        await self._execute_batch(self._SQL_SOURCE_RUN_STATS_UPSERT, params)

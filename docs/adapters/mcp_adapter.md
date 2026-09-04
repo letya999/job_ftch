@@ -1,7 +1,7 @@
 ---
 title: "MCP adapter"
 description: "FastMCP tenant server exposing pipeline tools and job resources."
-updated: 2026-08-21
+updated: 2026-09-04
 ---
 # MCP adapter
 
@@ -47,7 +47,7 @@ loads tenant runtime/ontology and can take ~20s before the first tool response.
 ## Operator tools
 
 `JOB_FTCH_MCP_SURFACE=all|mass|personal` (default `all`) selects the catalog.
-`all` is 18 tools, `mass` is 14, `personal` is 12. Shared tools exist on every
+`all` is 20 tools, `mass` is 16, `personal` is 14. Shared tools exist on every
 surface. Application services stay; only MCP registration shrinks. Tests keep a
 forbidden-name list so extra names are not registered.
 
@@ -61,6 +61,8 @@ forbidden-name list so extra names are not registered.
 | `doctor()` | written diagnosis of extras, browsers, proxies, captcha, CLIProxy; `get_runtime` is the structured subset |
 | `get_sources(tenant_id)` | sources with health, assessment, and recommended_route |
 | `update_source(tenant_id, action=add\|update\|remove, ...)` | add / patch enabled+limit / remove (config/base delete → `unsupported`) |
+| `set_source_important(tenant_id, source_id, important=true, note=null)` | pin/unpin a source as operator-important |
+| `list_source_quality(tenant_id)` | current important / reliable / rich / high_relevance lists |
 | `get_jobs(tenant_id, query=null, job_id=null, limit=20, include_lineage=false)` | latest, search, or one job |
 | `update_shot(..., action=list\|add\|remove\|clear\|compile)` | shots. `list`/`clear` default to all kinds; `add`/`remove` require `kind`+`label` |
 

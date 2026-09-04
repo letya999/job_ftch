@@ -1,59 +1,94 @@
-"""Browser discovery for the official T2 vacancy board."""
+"""Public T2 hiring is a landing page; HH employer 4219 is the listing."""
 
 from __future__ import annotations
 
+import html
 import re
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse, urlunparse
 
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
-from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
-from job_ftch.infrastructure.sources.site_parsers.helpers import (
-    browser_scroll_collect_urls,
-    resolve_browser_config,
-)
+from job_ftch.infrastructure.sources.site_parsers.helpers import normalize_search_keywords
+from job_ftch.infrastructure.sources.site_parsers.hh import HhParser
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from job_ftch.domain.models import RawItem
     from job_ftch.domain.source_spec import CareerSiteSpec
 
-_LISTING_URL = "https://t2.ru/about/career/vacancies"
-_DETAIL_RE = re.compile(r"/vacancy/(\d+)(?:[/?#]|$)", re.IGNORECASE)
+_T2_HH_EMPLOYER_ID = "4219"
+_T2_HH_URL = f"https://hh.ru/search/vacancy?employer_id={_T2_HH_EMPLOYER_ID}"
+_HH_EMPLOYER_RE = re.compile(
+    r"https://(?:[a-z0-9-]+\.)?hh\.ru/employer/\d+[^\"' <]*",
+    re.IGNORECASE,
+)
+
+
+def _extract_hh_employer_url(page: str) -> str | None:
+    match = _HH_EMPLOYER_RE.search(html.unescape(page).replace(r"\u0026", "&"))
+    return match.group(0).rstrip("\\") if match else None
 
 
 class T2CareerParser:
     domain_pattern = r"^https?://(?:careers\.)?t2\.ru(?:/|$)"
     has_custom_parse = True
-    supports_discover = True
+    supports_discover = False
+    supports_search = True
+    search_mode = "combined"
+    confirmed_empty_on_empty = True
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del limit
+        if not normalize_search_keywords(keywords):
+            return []
+        # Keep the T2 host so this parser stays selected. HH is queried inside
+        # ``parse``; rewriting to hh.ru would dispatch HhParser and lose
+        # ``confirmed_empty_on_empty``.
+        parsed = urlparse(base_url)
+        listing = urlunparse(parsed._replace(query="", fragment=""))
+        return [listing or "https://careers.t2.ru/"]
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
         return SiteRuntimeDefaults(
-            render=True, wait="domcontentloaded", include_if_detail_page=False
+            render=False,
+            wait="domcontentloaded",
+            include_if_detail_page=False,
+            extra={
+                "proxy_rescue_allow_domains": [
+                    "hh.ru",
+                    "careers.t2.ru",
+                    "t2.ru",
+                ],
+            },
         )
 
     def parser_kind(self, url: str) -> str | None:
         del url
         return "t2_career"
 
-    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
-        del client
-        manifest_entry = getattr(self, "_manifest_entry", None)
-        browser = getattr(manifest_entry, "browser", None)
-        limit = spec.limit or getattr(manifest_entry, "limit", None) or 50
-        bypass_strategy = spec.monitor_config.get("_bypass_strategy")
-        browser_config = resolve_browser_config(spec, bypass_strategy)
-        async with open_page(browser_config, bypass_strategy=bypass_strategy) as page:
-            await navigate(page, _LISTING_URL, browser_config)
-            current_url = getattr(page, "url", _LISTING_URL) or _LISTING_URL
-            return await browser_scroll_collect_urls(
-                page,
-                current_url,
-                _DETAIL_RE,
-                limit=limit,
-                scroll_loops=getattr(browser, "scroll_loops", None) or 6,
-                pause_sec=(getattr(browser, "scroll_pause_ms", None) or 700) / 1000.0,
-                scroll_px=getattr(browser, "scroll_px", None) or 2500,
-            )
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        employer_url = _T2_HH_URL
+        try:
+            response = await client.get(spec.url, follow_redirects=True)
+            response.raise_for_status()
+            extracted = _extract_hh_employer_url(response.text)
+            if extracted:
+                employer_url = extracted
+        except Exception:  # noqa: BLE001 - HH employer 4219 is the known listing
+            pass
+        delegated = spec.model_copy(update={"url": employer_url})
+        async for item in HhParser().parse(delegated, client):
+            metadata = dict(item.metadata or {})
+            metadata["parser"] = "t2_hh"
+            metadata.setdefault("company", "T2")
+            metadata["company_authoritative"] = True
+            metadata["fallback"] = "hh_employer"
+            yield item.model_copy(update={"metadata": metadata})
 
     @property
     def __name__(self) -> str:
@@ -68,6 +103,6 @@ register_site_parser(
         "site_parser:t2.ru",
         has_stable_id=True,
         has_stable_url=True,
-        rationale="Official T2 vacancy board exposes stable vacancy detail URLs through a browser-rendered listing.",
+        rationale="careers.t2.ru is a landing page; public vacancies live on HH employer 4219.",
     ),
 )(T2CareerParser)

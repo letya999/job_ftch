@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from job_ftch.infrastructure.sources.site_parsers.getmatch import (
     canonicalize_vacancy_url,
     classify_getmatch_payload,
     extract_vacancy_urls_from_html,
+    extract_vacancy_urls_from_offers,
     extract_vacancy_urls_from_sitemap,
     item_from_detail_html,
     public_failure_code_for,
@@ -114,6 +116,17 @@ def test_getmatch_preserves_phrase_queries_when_reading_url() -> None:
     spec = CareerSiteSpec(
         url="https://getmatch.ru/vacancies?query=AI+engineer+OR+LLM+engineer",
         source_name="getmatch",
+    )
+    assert _keywords_from_spec(spec) == ["AI engineer", "LLM engineer"]
+
+
+def test_getmatch_keywords_from_monitor_config() -> None:
+    from job_ftch.infrastructure.sources.site_parsers.getmatch import _keywords_from_spec
+
+    spec = CareerSiteSpec(
+        url="https://getmatch.ru/vacancies",
+        source_name="getmatch",
+        monitor_config={"_search_keywords": ["AI engineer", "LLM engineer"]},
     )
     assert _keywords_from_spec(spec) == ["AI engineer", "LLM engineer"]
 
@@ -507,8 +520,62 @@ def test_build_search_urls_are_runtime_configurable() -> None:
     )
     assert len(urls) == 1
     assert urls[0].startswith("https://getmatch.ru/vacancies")
-    assert "query=" in urls[0]
-    assert "AI" in urls[0] or "engineer" in urls[0]
+    assert "sp=" not in urls[0]
+    assert "query=" not in urls[0]
+
+
+def test_extract_vacancy_urls_from_offers_payload() -> None:
+    payload = {
+        "meta": {"total": 2, "offset": 0, "limit": 2},
+        "offers": [
+            {"id": 35602, "url": "/vacancies/35602-team-lead-data-science-ml-promo-i"},
+            {"id": 34714, "url": "/vacancies/34714-senior-ai-ml-engineer-llm-agents"},
+            {"id": 34714, "url": "/vacancies/34714-senior-ai-ml-engineer-llm-agents"},
+        ],
+    }
+    urls = extract_vacancy_urls_from_offers(payload, limit=10)
+    assert urls == [
+        "https://getmatch.ru/vacancies/35602-team-lead-data-science-ml-promo-i",
+        "https://getmatch.ru/vacancies/34714-senior-ai-ml-engineer-llm-agents",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_parser_discovers_via_offers_api_when_sphere_is_set() -> None:
+    detail = _read("site_parsers", "getmatch", "detail.html")
+    offers = {
+        "meta": {"total": 1, "offset": 0, "limit": 50},
+        "offers": [
+            {
+                "id": 35178,
+                "position": "Senior AI Engineer",
+                "url": "/vacancies/35178-senior-ai-engineer-ai-agenty",
+            }
+        ],
+    }
+    api_url = "https://getmatch.ru/api/offers?sp=data_science&sa=any&pa=all&offset=0&limit=3"
+    client = _FakeClient(
+        {
+            api_url: _FakeResponse(
+                json.dumps(offers),
+                api_url,
+                headers={"content-type": "application/json"},
+            ),
+            "https://getmatch.ru/vacancies/35178-senior-ai-engineer-ai-agenty": _FakeResponse(
+                detail,
+                "https://getmatch.ru/vacancies/35178-senior-ai-engineer-ai-agenty",
+            ),
+        }
+    )
+    spec = CareerSiteSpec(
+        url="https://getmatch.ru/vacancies?sp=data_science",
+        source_name="getmatch",
+        limit=3,
+    )
+    items = [item async for item in GetmatchParser().parse(spec, client)]
+    assert len(items) == 1
+    assert items[0].external_id == "35178"
+    assert client.calls[0].startswith("https://getmatch.ru/api/offers")
 
 
 def test_runtime_defaults_do_not_hardcode_core_host_switch() -> None:

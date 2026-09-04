@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
 from job_ftch.domain.site_models import DiscoveredPostingPayload, MonitorResult
-from job_ftch.infrastructure.sources.monitors.ashby import can_handle
 from job_ftch.infrastructure.sources.monitors.ashby import discover as ashby_discover
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_utils import payload_to_raw_item
@@ -54,10 +53,11 @@ class HiggsfieldParser:
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
         monitor_config = dict(spec.monitor_config)
-        detected = await can_handle(spec.url, client)
-        token = (detected or {}).get("token")
-        if token:
-            monitor_config["token"] = token
+        # careers.higgsfield.kz redirects to jobs.ashbyhq.com/higgsfieldai.
+        # Skip can_handle on the custom domain — a hung redirect used to fall
+        # through to the generic browser path.
+        token = str(monitor_config.get("token") or "").strip() or "higgsfieldai"
+        monitor_config["token"] = token
         ashby_spec = spec.model_copy(update={"monitor_config": monitor_config})
         result = await ashby_discover(ashby_spec, client)
         if isinstance(result, MonitorResult) and result.metadata_updates.get("confirmed_empty"):

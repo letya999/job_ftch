@@ -12,14 +12,26 @@ from job_ftch.infrastructure.sources.site_parsers.yandex import (
 
 
 class _FakeResponse:
-    def __init__(self, text: str, url: str, status_code: int = 200) -> None:
+    def __init__(
+        self,
+        text: str,
+        url: str,
+        status_code: int = 200,
+        payload: dict[str, object] | None = None,
+    ) -> None:
         self.text = text
         self.url = url
         self.status_code = status_code
+        self._payload = payload
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise RuntimeError(f"http {self.status_code}")
+
+    def json(self) -> dict[str, object]:
+        if self._payload is None:
+            raise RuntimeError("not json")
+        return self._payload
 
 
 class _FakeClient:
@@ -169,3 +181,39 @@ async def test_yandex_parser_normalizes_jobs_root_to_vacancy_listing() -> None:
 
     assert len(items) == 1
     assert str(items[0].url) == "https://yandex.ru/jobs/vacancies/data-analyst-123"
+
+
+@pytest.mark.asyncio
+async def test_yandex_parser_prefers_http_publications_api() -> None:
+    parser = YandexJobsParser()
+    client = _FakeClient(
+        {
+            "https://yandex.ru/jobs/api/publications?page_size=2&text=LLM": _FakeResponse(
+                "",
+                "https://yandex.ru/jobs/api/publications?page_size=2&text=LLM",
+                payload={
+                    "results": [
+                        {
+                            "id": 15322,
+                            "title": "Старший LLM-разработчик",
+                            "publication_slug_url": "/jobs/vacancies/llm-dev-15322",
+                        }
+                    ]
+                },
+            )
+        }
+    )
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(
+                url="https://yandex.ru/jobs/vacancies?text=LLM",
+                source_name="yandex_jobs",
+                limit=2,
+            ),
+            client,
+        )
+    ]
+    assert len(items) == 1
+    assert items[0].external_id == "15322"
+    assert "LLM" in items[0].text
