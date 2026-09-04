@@ -211,9 +211,6 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["job_ftch"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"job_ftch/infrastructure/observability/dashboards/job_ftch_ingest.json" = "job_ftch/infrastructure/observability/dashboards/job_ftch_ingest.json"
-
 [tool.ruff]
 target-version = "py312"
 line-length = 100
