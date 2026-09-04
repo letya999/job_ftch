@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from structlog.contextvars import bind_contextvars, reset_contextvars
 
@@ -23,6 +25,16 @@ def test_openobserve_url_rejects_non_http_schemes() -> None:
     assert _resolve_openobserve_url("https://observe.example/") == "https://observe.example"
     with pytest.raises(ValueError, match="http or https"):
         _resolve_openobserve_url("file:///tmp/dashboard")
+
+
+def test_openobserve_dashboard_copies_match_and_panels_have_descriptions() -> None:
+    root = Path(__file__).parents[3]
+    packaged = root / "job_ftch/infrastructure/observability/dashboards/job_ftch_ingest.json"
+    deploy = root / "deploy/observability/dashboards/job_ftch_ingest.json"
+
+    assert packaged.read_bytes() == deploy.read_bytes()
+    dashboard = json.loads(packaged.read_text(encoding="utf-8"))
+    assert all(panel.get("description") for tab in dashboard["tabs"] for panel in tab["panels"])
 
 
 def test_context_filter_promotes_only_safe_correlation_fields() -> None:

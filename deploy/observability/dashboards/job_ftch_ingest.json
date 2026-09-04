@@ -108,6 +108,7 @@
           "id": "source-health-counts",
           "type": "stacked",
           "title": "Источники ok vs fail",
+          "description": "Среднее число успешных и проблемных источников по прогонам",
           "queryType": "sql",
           "queries": [
             {
@@ -135,6 +136,7 @@
           "id": "funnel",
           "type": "line",
           "title": "Воронка fetched / extracted / emitted",
+          "description": "Динамика основных этапов воронки по прогонам",
           "queryType": "sql",
           "queries": [
             {
@@ -219,6 +221,7 @@
           "id": "status-pie",
           "type": "pie",
           "title": "Статусы источников в прогоне",
+          "description": "Распределение статусов источников в выбранном прогоне",
           "queryType": "sql",
           "queries": [
             {
@@ -243,6 +246,7 @@
           "id": "kind-bar",
           "type": "bar",
           "title": "Типы источников: emitted",
+          "description": "Yield и emitted по типам источников в выбранном прогоне",
           "queryType": "sql",
           "queries": [
             {
