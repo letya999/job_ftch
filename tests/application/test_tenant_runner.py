@@ -58,6 +58,34 @@ def _isolated_base_settings() -> Settings:
     )
 
 
+@pytest.mark.asyncio
+async def test_disabled_tenant_persists_terminal_run_summary() -> None:
+    settings = _isolated_base_settings().model_copy(
+        update={
+            "store_backend": "memory",
+            "job_group_store_backend": "memory",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "llm_backend": "heuristic",
+        }
+    )
+    tenant = TenantConfig(
+        tenant_id="disabled-lane",
+        display_name="Disabled lane",
+        enabled=False,
+    )
+    runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    try:
+        summary = await runner.run_tenant("disabled-lane", trigger="schedule")
+        stored = await runner.get_run(summary.source_run_id or "", tenant_id="disabled-lane")
+        assert summary.trigger == "schedule"
+        assert stored is not None
+        assert stored.config_fingerprint == summary.config_fingerprint
+        assert stored.source_outcomes == []
+    finally:
+        await runner.close()
+
+
 @pytest.fixture(autouse=True)
 def _isolate_default_tenant_outputs(
     monkeypatch: pytest.MonkeyPatch,
@@ -382,6 +410,38 @@ async def test_tenant_store_source_health_rolls_back_on_index_failure(
 
     assert await store.get_source_health("career_site:example") is None
     assert await store.list_source_health() == []
+
+
+@pytest.mark.asyncio
+async def test_tenant_store_prunes_stale_source_health_alias_without_touching_active() -> None:
+    from job_ftch.application.tenant_runner import TenantStore
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+
+    backing = InMemoryStore()
+    store = TenantStore("tenant1", backing)
+    health = SourceHealth(
+        source_id="career_site:active",
+        source_kind="career_site",
+        source_name="active",
+        last_run_at="2026-09-07T00:00:00+00:00",
+        last_success_at="2026-09-07T00:00:00+00:00",
+        failure_streak=0,
+        success_count=1,
+        last_fetched=1,
+        last_emitted=1,
+        last_failed=0,
+        last_quarantined=0,
+        baseline_emitted=1.0,
+        drift_ratio=0.0,
+        degraded=False,
+        status="healthy",
+    )
+    stale = health.model_copy(update={"source_id": "telegram_channel:s", "source_kind": "telegram"})
+    await store.save_source_health(health.source_id, health)
+    await store.save_source_health(stale.source_id, stale)
+
+    assert await store.prune_source_health({health.source_id}) == ("telegram_channel:s",)
+    assert [item.source_id for item in await store.list_source_health()] == [health.source_id]
 
 
 @pytest.mark.asyncio

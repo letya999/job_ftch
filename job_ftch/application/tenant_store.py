@@ -39,7 +39,7 @@ from job_ftch.domain import (
 
 if TYPE_CHECKING:
     import builtins
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Mapping, Sequence, Set
 
     from job_ftch.application.contracts import DedupReservation, Store, StoreConnector
     from job_ftch.domain.search_session import SearchSession
@@ -130,9 +130,11 @@ class TenantStore:
         store: Store,
         *,
         processed_item_ttl_hours: int | None = 24,
+        operational_outcome_max_runs: int | None = 20,
     ) -> None:
         self._tenant_id = tenant_id
         self._store = store
+        self._operational_outcome_max_runs = operational_outcome_max_runs
         self._processed_item_ttl_hours = processed_item_ttl_hours
 
     def _key(self, key: str) -> str:
@@ -365,6 +367,17 @@ class TenantStore:
         del tenant_id
         return await self._store.get_observation(stable_id, content_hash, tenant_id=self._tenant_id)
 
+    async def list_observations(
+        self, *, tenant_id: str | None = None, limit: int = 1000
+    ) -> tuple[ObservationLedgerEntry, ...]:
+        if tenant_id is not None and tenant_id != self._tenant_id:
+            raise ValueError(f"tenant_id mismatch: {tenant_id} != {self._tenant_id}")
+        reader = cast("Any", self._store)
+        return cast(
+            "tuple[ObservationLedgerEntry, ...]",
+            await reader.list_observations(tenant_id=self._tenant_id, limit=limit),
+        )
+
     async def mark_processed(self, item_id: str) -> None:
         connector = cast("StoreConnector", self._store)
         await connector.set_add(self._key("processed"), item_id)
@@ -540,6 +553,32 @@ class TenantStore:
             if payload is not None:
                 payloads.append(payload)
         return payloads
+
+    async def prune_source_health(self, configured_source_ids: Set[str]) -> tuple[str, ...]:
+        """Remove health aliases no longer present in tenant configuration.
+
+        Run history and raw observations remain untouched; only the current
+        health index is reconciled so old aliases cannot masquerade as active
+        sources in health/API views.
+        """
+        connector = cast("StoreConnector", self._store)
+        index_key = self._key("source_health_ids")
+        source_ids = await connector.set_members(index_key)
+        stale = tuple(sorted(source_ids - set(configured_source_ids)))
+        if not stale:
+            return ()
+        for source_id in stale:
+            await connector.delete(self._key(_source_health_key(source_id)))
+        await connector.clear_set(index_key)
+        for source_id in sorted(source_ids - set(stale)):
+            if await connector.get(self._key(_source_health_key(source_id))) is not None:
+                await connector.set_add(index_key, source_id)
+        logger.info(
+            "source_health_pruned",
+            tenant_id=self._tenant_id,
+            source_ids=list(stale),
+        )
+        return stale
 
     async def get_runtime_source(self, source_id: str) -> RuntimeSourceRecord | None:
         connector = cast("StoreConnector", self._store)
@@ -890,6 +929,7 @@ class TenantStore:
         body["source_run_id"] = run_id
         body["tenant_id"] = self._tenant_id
         body["lane"] = normalized_lane
+        body.setdefault("recorded_at", datetime.now(UTC).isoformat())
         entry_id = uuid4().hex[:16]
         body["outcome_id"] = entry_id
         entry_key = self._key(f"outcome:{normalized_lane}:{run_id}:{entry_id}")
@@ -915,10 +955,11 @@ class TenantStore:
         runs = [str(item) for item in order if str(item).strip()]
         if run_id not in runs:
             runs.append(run_id)
-        max_runs = 20
-        while len(runs) > max_runs:
-            old_run = runs.pop(0)
-            await self._purge_outcome_run(normalized_lane, old_run)
+        max_runs = self._operational_outcome_max_runs
+        if max_runs is not None:
+            while len(runs) > max_runs:
+                old_run = runs.pop(0)
+                await self._purge_outcome_run(normalized_lane, old_run)
         await connector.set(order_key, json.dumps(runs, ensure_ascii=False))
 
     async def list_operational_outcomes(

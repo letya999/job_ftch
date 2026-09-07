@@ -6,6 +6,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 
 ## Files On This Level
 
+- [test_fastapi_tenant_api.py](test_fastapi_tenant_api.py)
 - [test_local_mcp_browser_probe.py](test_local_mcp_browser_probe.py)
 - [test_local_mcp_sources.py](test_local_mcp_sources.py)
 - [test_mcp_product_surface.py](test_mcp_product_surface.py)

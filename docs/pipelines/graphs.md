@@ -7,13 +7,15 @@ updated: 2026-07-26
 
 # Pipeline Graphs
 
-Generated: 2026-07-29T14:51:01.113953+00:00
-Total graphs: 48
+Generated: 2026-09-06T18:53:05.970074+00:00
+Total graphs: 50
 
 | File | Name | Version | Hash | Nodes |
 |------|------|---------|------|-------|
 | asis_legacy_best.yaml | asis_legacy_best | 1.0.0 | d9b44f811820 | 29 |
 | current_compat.yaml | current_compat | 1.0.0 | de13d93b26a8 | 7 |
+| demo_engineering.yaml | demo_applied_ai_engineering | 1.0.0 | 4497cf1de803 | 30 |
+| demo_product_pm.yaml | demo_ai_product_program | 1.0.0 | b36503508541 | 29 |
 | evidence_v2.yaml | precision_first_v2 | 2.1.0 | e3f9929a704c | 29 |
 | evidence_v2_compact.yaml | precision_first_v2_compact | 2.2.0 | f89972473c96 | 29 |
 | evidence_v2_compact_postaccept.yaml | precision_first_v2_compact_postaccept | 2.4.1 | b19e5148f3c8 | 29 |
@@ -76,6 +78,20 @@ Total graphs: 48
 - Version: 1.0.0
 - Hash: `de13d93b26a86629a6ca498901b37bc8418312144ec4868bc010319f4ef6f630`
 - Execution order: sanitize -> snapshot -> context -> ontology -> extraction -> normalization -> decision
+
+### demo_engineering.yaml
+
+- Name: demo_applied_ai_engineering
+- Version: 1.0.0
+- Hash: `4497cf1de8037f4b88fe49700f04a49725456c1e8fb0af9006af0fc01fcce447`
+- Execution order: sanitize -> source_context -> ontology -> segmentation -> garbage -> post_type -> hard_constraints -> dedup -> tfidf_logreg_prefilter -> semantic -> raw_jobness -> completeness -> extraction -> extraction_validation -> normalization -> skills -> location -> compensation -> lifecycle -> jobness -> profile_match -> lexical -> risk -> quality -> validation -> evidence -> relevance_judge -> decision -> aggregation -> enrichment
+
+### demo_product_pm.yaml
+
+- Name: demo_ai_product_program
+- Version: 1.0.0
+- Hash: `b36503508541e6cf831852f092a15ef402bb1fbdfc8e04193e048b428838cccf`
+- Execution order: sanitize -> source_context -> ontology -> segmentation -> garbage -> post_type -> hard_constraints -> dedup -> semantic -> raw_jobness -> completeness -> extraction -> extraction_validation -> normalization -> skills -> location -> compensation -> lifecycle -> jobness -> profile_match -> lexical -> risk -> quality -> validation -> evidence -> relevance_judge -> decision -> aggregation -> enrichment
 
 ### evidence_v2.yaml
 

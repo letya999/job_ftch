@@ -92,9 +92,6 @@ class Settings(BaseSettings):
         default=True,
         validation_alias="ADAPTIVE_ENABLED",
     )
-    langfuse_host: str | None = None
-    langfuse_public_key: str | None = None
-    langfuse_secret_key: SecretStr | None = None
     otel_service_name: str = "job_ftch"
     telemetry_service_name: str = "job_ftch"
     telemetry_console_exporter: bool = False
@@ -104,9 +101,16 @@ class Settings(BaseSettings):
     openobserve_username: str | None = None
     openobserve_password: SecretStr | None = None
     openobserve_logs_stream: str = "job_ftch_ingest"
+    openobserve_llm_stream: str = "job_ftch_openai"
     openobserve_timeout_seconds: float = Field(default=5.0, gt=0.0, le=60.0)
     openobserve_metric_export_interval_ms: int = Field(default=10_000, ge=1_000, le=300_000)
+    api_token: SecretStr | None = None
+    api_tenant_allowlist: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    webhook_url: str | None = None
+    webhook_secret: SecretStr | None = None
+    webhook_timeout_seconds: float = Field(default=10.0, gt=0.0, le=120.0)
     pipeline_max_items_per_run: int | None = Field(default=None, gt=0)
+    pipeline_replay_mode: bool = False
     source_fetch_concurrency: int = Field(default=8, gt=0, le=50)
     source_fetch_concurrency_adaptive: bool = True
     source_preparation_concurrency: int = Field(default=4, gt=0, le=50)
@@ -119,6 +123,7 @@ class Settings(BaseSettings):
     dry_run: bool = False
     tenant_id: str = "default"
     tenant_display_name: str | None = None
+    tenant_enabled: bool = True
     auth_file_path: Path | None = None
     sources_file_path: Path | None = None
     site_parsers_manifest_path: Path | None = None
@@ -505,6 +510,7 @@ class Settings(BaseSettings):
         "proxy_rescue_allow_domains",
         "proxy_rescue_deny_domains",
         "captcha_authorized_domains",
+        "api_tenant_allowlist",
         mode="before",
     )
     @classmethod
@@ -551,7 +557,6 @@ class Settings(BaseSettings):
         "telegram_api_hash",
         "telegram_proxy_password",
         "openai_api_key",
-        "langfuse_secret_key",
         "qdrant_api_key",
         "store_dsn",
     )

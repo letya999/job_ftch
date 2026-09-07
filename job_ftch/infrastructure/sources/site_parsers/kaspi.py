@@ -37,6 +37,7 @@ class KaspiParser:
     supports_search = True
     search_mode = "combined"
     confirmed_empty_on_empty = True
+    terminal_on_error = True
 
     def build_search_urls(
         self,

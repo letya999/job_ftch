@@ -8,7 +8,7 @@ search_language: russian
 pipeline_max_items_per_run:
 telemetry_service_name: job_ftch
 telemetry_console_exporter: false
-tracing_enabled: true
+tracing_enabled: false
 tracing_capture_payloads: false
 openobserve_enabled: true
 

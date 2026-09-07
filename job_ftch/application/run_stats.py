@@ -6,7 +6,11 @@ import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from job_ftch.application.source_quality import FAIL_STATUSES, canonical_source_key
+from job_ftch.application.source_quality import (
+    FAIL_STATUSES,
+    canonical_source_key,
+    source_status_category,
+)
 from job_ftch.domain.run_stats import PipelineRunStats, SourceRunStatsRow
 
 if TYPE_CHECKING:
@@ -16,12 +20,12 @@ if TYPE_CHECKING:
     from job_ftch.application.source_quality import SourceQualityStats
 
 
-def _iso(value: datetime | None) -> str | None:
+def _timestamp(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
-    return value.isoformat()
+    return value
 
 
 def _duration_ms(summary: RunSummary) -> int:
@@ -46,21 +50,28 @@ def build_pipeline_run_stats(summary: RunSummary) -> PipelineRunStats:
     outcomes = [item for item in (summary.source_outcomes or []) if isinstance(item, dict)]
     fail_sources = 0
     ok_sources = 0
+    category_counts: dict[str, int] = {}
     seen: set[str] = set()
     for outcome in outcomes:
         key = canonical_source_key(
             str(outcome.get("source_id") or ""),
             str(outcome.get("source_name") or ""),
         )
-        if key in seen or key == "unknown":
+        if key == "unknown":
+            continue
+        status = str(outcome.get("status") or "unknown")
+        category = source_status_category(status, str(outcome.get("error") or ""))
+        category_counts[category] = category_counts.get(category, 0) + 1
+        if key in seen:
             continue
         seen.add(key)
-        status = str(outcome.get("status") or "unknown")
         if status in FAIL_STATUSES:
             fail_sources += 1
         else:
             ok_sources += 1
     extra = {
+        "trigger": summary.trigger,
+        "config_fingerprint": summary.config_fingerprint,
         "by_source_kind": {
             kind: {
                 "fetched": stats.fetched,
@@ -71,11 +82,12 @@ def build_pipeline_run_stats(summary: RunSummary) -> PipelineRunStats:
             for kind, stats in summary.by_source_kind.items()
         },
         "drop_reasons": dict(summary.drop_reasons),
+        "source_outcome_categories": category_counts,
     }
     return PipelineRunStats(
         source_run_id=str(summary.source_run_id or ""),
-        started_at=_iso(summary.started_at) or datetime.now(UTC).isoformat(),
-        finished_at=_iso(summary.finished_at),
+        started_at=_timestamp(summary.started_at) or datetime.now(UTC),
+        finished_at=_timestamp(summary.finished_at),
         duration_ms=_duration_ms(summary),
         source_count=len(seen),
         ok_sources=ok_sources,
@@ -108,8 +120,8 @@ def build_source_run_stats(
     quality = quality or {}
     important = important or {}
     by_id = summary.by_source_id or {}
-    started = _iso(summary.started_at) or datetime.now(UTC).isoformat()
-    finished = _iso(summary.finished_at)
+    started = _timestamp(summary.started_at) or datetime.now(UTC)
+    finished = _timestamp(summary.finished_at)
     rows: dict[str, SourceRunStatsRow] = {}
     for outcome in summary.source_outcomes or []:
         if not isinstance(outcome, dict):

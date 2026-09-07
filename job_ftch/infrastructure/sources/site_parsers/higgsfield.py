@@ -35,6 +35,7 @@ class HiggsfieldParser:
     domain_pattern = r"^https?://careers\.higgsfield\.kz(?:/|$)"
     has_custom_parse = True
     confirmed_empty_on_empty = True
+    terminal_on_error = True
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url

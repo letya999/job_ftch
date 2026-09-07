@@ -536,37 +536,35 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     publish_channel = None
                     publish_user_id = None
 
-                if not publish_channel:
-                    continue
-
-                if not publish_user_id:
+                if publish_channel and not publish_user_id:
                     logger.warning(
                         "scheduler_publish_owner_missing",
                         tenant_id=tenant_id,
                         channel=publish_channel,
                     )
-                    continue
+                    publish_channel = None
 
-                try:
-                    has_profile = await runner.has_candidate_profile_data(
-                        tenant_id, str(publish_user_id)
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "scheduler_profile_check_failed",
-                        tenant_id=tenant_id,
-                        user_id=str(publish_user_id),
-                        error=str(exc),
-                    )
-                    continue
-                if not has_profile:
-                    logger.info(
-                        "scheduler_skipped_unconfigured_profile",
-                        tenant_id=tenant_id,
-                        user_id=str(publish_user_id),
-                        channel=publish_channel,
-                    )
-                    continue
+                if publish_channel and publish_user_id:
+                    try:
+                        has_profile = await runner.has_candidate_profile_data(
+                            tenant_id, str(publish_user_id)
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "scheduler_profile_check_failed",
+                            tenant_id=tenant_id,
+                            user_id=str(publish_user_id),
+                            error=str(exc),
+                        )
+                        continue
+                    if not has_profile:
+                        logger.info(
+                            "scheduler_skipped_unconfigured_profile",
+                            tenant_id=tenant_id,
+                            user_id=str(publish_user_id),
+                            channel=publish_channel,
+                        )
+                        continue
 
                 if str(tenant_id) in _active_runs:
                     logger.info(
@@ -576,7 +574,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     )
                     continue
 
-                if pending_publish:
+                if pending_publish and publish_channel and publish_user_id:
                     last_publish_attempt = _parse_scheduler_timestamp(
                         await _maybe_await(
                             store.get_run_state("bot_scheduler:last_publish_attempt_at")
@@ -678,6 +676,33 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         run_error="tenant already has an active run",
                     )
                     logger.info("scheduler_skipped_locked_tenant", tenant_id=tenant_id)
+                    continue
+                if not publish_channel:
+                    await update_scheduler_slot(
+                        store,
+                        scheduler_slot_id,
+                        run_state="succeeded",
+                        run_id=str(getattr(run_result, "source_run_id", "") or ""),
+                        run_finished_at=datetime.now(UTC).isoformat(),
+                        publish_state="skipped",
+                        publish_reason="no_delivery_target",
+                    )
+                    await _maybe_await(
+                        runner.get_runtime(tenant_id).store.set_run_state(
+                            "bot_scheduler:last_success_at", datetime.now(UTC).isoformat()
+                        )
+                    )
+                    await _maybe_await(
+                        runner.get_runtime(tenant_id).store.set_run_state(
+                            "bot_scheduler:last_run_emitted",
+                            str(getattr(run_result, "emitted", 0)),
+                        )
+                    )
+                    logger.info(
+                        "scheduler_ingest_complete_without_delivery",
+                        tenant_id=tenant_id,
+                        emitted=getattr(run_result, "emitted", 0),
+                    )
                     continue
                 try:
                     run_finished_at = datetime.now(UTC).isoformat()

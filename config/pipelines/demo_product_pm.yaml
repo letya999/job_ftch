@@ -1,0 +1,18 @@
+extends: evidence_v2_compact_postaccept.yaml
+name: demo_ai_product_program
+version: "1.0.0"
+metadata:
+  purpose: local_fixture_ai_product_program_lane
+  production_default: false
+nodes:
+  - id: semantic
+    params:
+      dense_margin_threshold: 0.0
+  - id: relevance_judge
+    params:
+      call_policy: threshold
+      classification_mode: compact_evidence
+      low_threshold: 0.15
+      high_threshold: 0.45
+      max_ambiguity_resolutions: 8
+      max_precision_confirmations: 8

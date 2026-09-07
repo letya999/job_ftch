@@ -89,27 +89,34 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             )
             if not self._schema_initialized:
                 async with self._pool.acquire() as conn:
-                    await conn.execute("""
-                        CREATE TABLE IF NOT EXISTS jf_migrations (
-                            filename TEXT PRIMARY KEY,
-                            applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                        )
-                    """)
-                    migrations_dir = Path(__file__).parent / "migrations"
-                    for path in sorted(migrations_dir.glob("*.sql")):
-                        if "sqlite" in path.name:
-                            continue
-                        filename = path.name
-                        row = await conn.fetchrow(
-                            "SELECT filename FROM jf_migrations WHERE filename = $1", filename
-                        )
-                        if not row:
-                            with open(path, encoding="utf-8") as f:
-                                sql = f.read()
-                            await conn.execute(sql)
-                            await conn.execute(
-                                "INSERT INTO jf_migrations (filename) VALUES ($1)", filename
+                    lock_key = "job_ftch:job_schema"
+                    await conn.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", lock_key)
+                    try:
+                        await conn.execute("""
+                            CREATE TABLE IF NOT EXISTS jf_migrations (
+                                filename TEXT PRIMARY KEY,
+                                applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                             )
+                        """)
+                        migrations_dir = Path(__file__).parent / "migrations"
+                        for path in sorted(migrations_dir.glob("*.sql")):
+                            if "sqlite" in path.name:
+                                continue
+                            filename = path.name
+                            row = await conn.fetchrow(
+                                "SELECT filename FROM jf_migrations WHERE filename = $1", filename
+                            )
+                            if not row:
+                                with open(path, encoding="utf-8") as f:
+                                    sql = f.read()
+                                await conn.execute(sql)
+                                await conn.execute(
+                                    "INSERT INTO jf_migrations (filename) VALUES ($1)", filename
+                                )
+                    finally:
+                        await conn.execute(
+                            "SELECT pg_advisory_unlock(hashtextextended($1, 0))", lock_key
+                        )
 
                 self._schema_initialized = True
         return self._pool

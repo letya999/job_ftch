@@ -14,7 +14,7 @@ signals are related, but owned by different runtime paths.
 | ------ | --------------- |
 | Structured logs | `structlog` wiring and runtime env |
 | OpenTelemetry | `opentelemetry-*` dependencies and tracing settings |
-| Langfuse | `docs/adr/043-langfuse-observability.md` |
+| OpenObserve logs and metrics | `job_ftch/infrastructure/observability/openobserve.py` |
 | Compose env | `deploy/observability/.env*.example` |
 | Runtime verification | `scripts/verify_observability_run.py` |
 

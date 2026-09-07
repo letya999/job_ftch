@@ -50,6 +50,7 @@ class PostgreSQLStore(SQLStoreAdapter):
     _SQL_DEDUP_CLAIM_OWNER = "SELECT owner_id FROM jf_dedup_claims WHERE claim_key = $1"
     _SQL_DEDUP_CLAIM_RELEASE = "DELETE FROM jf_dedup_claims WHERE claim_key = $1 AND owner_id = $2"
     _SQL_OBSERVATION_GET = "SELECT payload_json::text FROM jf_observations WHERE tenant_id = $1 AND stable_id = $2 AND content_hash = $3"
+    _SQL_OBSERVATION_LIST = "SELECT payload_json::text FROM jf_observations WHERE tenant_id = $1 ORDER BY (payload_json->>'observed_at')::timestamptz, stable_id, content_hash LIMIT $2"
     _SQL_OBSERVATION_MAX_VERSION = (
         "SELECT MAX(content_version) FROM jf_observations WHERE tenant_id = $1 AND stable_id = $2"
     )
@@ -237,26 +238,31 @@ class PostgreSQLStore(SQLStoreAdapter):
     async def _initialize(self) -> None:
         migrations_dir = Path(__file__).parent / "migrations"
         async with self._pool.acquire() as conn:  # type: ignore[union-attr]
-            for name in (
-                "001_initial_schema_pg.sql",
-                "002_source_snapshots_pg.sql",
-                "003_ontology_pg.sql",
-                "004_source_assessment_pg.sql",
-                "005_observation_ledger_pg.sql",
-                "006_dedup_claims_pg.sql",
-                "007_outbox_pg.sql",
-                "008_ontology_provenance_pg.sql",
-                "009_ontology_occurrences_pg.sql",
-                "010_outbox_tenant_pg.sql",
-                "011_ontology_graph_pg.sql",
-                "012_ontology_term_stats_pg.sql",
-                "013_compiled_ontology_pg.sql",
-                "014_run_stats_pg.sql",
-            ):
-                path = migrations_dir / name
-                if not path.exists():
-                    continue
-                await conn.execute(path.read_text())
+            lock_key = "job_ftch:store_schema"
+            await conn.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", lock_key)
+            try:
+                for name in (
+                    "001_initial_schema_pg.sql",
+                    "002_source_snapshots_pg.sql",
+                    "003_ontology_pg.sql",
+                    "004_source_assessment_pg.sql",
+                    "005_observation_ledger_pg.sql",
+                    "006_dedup_claims_pg.sql",
+                    "007_outbox_pg.sql",
+                    "008_ontology_provenance_pg.sql",
+                    "009_ontology_occurrences_pg.sql",
+                    "010_outbox_tenant_pg.sql",
+                    "011_ontology_graph_pg.sql",
+                    "012_ontology_term_stats_pg.sql",
+                    "013_compiled_ontology_pg.sql",
+                    "014_run_stats_pg.sql",
+                ):
+                    path = migrations_dir / name
+                    if not path.exists():
+                        continue
+                    await conn.execute(path.read_text())
+            finally:
+                await conn.execute("SELECT pg_advisory_unlock(hashtextextended($1, 0))", lock_key)
 
     async def _execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
         pool = await self._ensure_initialized()

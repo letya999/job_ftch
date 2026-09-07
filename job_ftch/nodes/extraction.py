@@ -873,21 +873,21 @@ class ExtractionNode:
         tracer = trace.get_tracer("job_ftch.nodes")
 
         with tracer.start_as_current_span("extraction.generation") as span:
-            span.set_attribute("langfuse.observation.type", "generation")
+            span.set_attribute("job_ftch.llm.observation.type", "generation")
             if hasattr(self._llm, "_model"):
                 span.set_attribute("gen_ai.request.model", self._llm._model)
             elif hasattr(self._llm, "model_id"):
                 span.set_attribute("gen_ai.request.model", self._llm.model_id)
 
             if self._capture_payloads:
-                span.set_attribute("langfuse.observation.input", text)
+                span.set_attribute("job_ftch.llm.observation.input", text)
 
             try:
                 schema = CoreExtractedJobFields if self._scope == "core" else ExtractedJobFields
                 result = await self._llm.extract(text, schema)
                 if self._capture_payloads:
                     span.set_attribute(
-                        "langfuse.observation.output",
+                        "job_ftch.llm.observation.output",
                         result.model_dump_json()
                         if hasattr(result, "model_dump_json")
                         else str(result),

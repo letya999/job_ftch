@@ -70,6 +70,8 @@ def collect_llm_usage() -> Iterator[LLMUsageLedger]:
 
 def record_provider_usage(*, model: str, usage: object, latency_ms: int) -> None:
     """Record an OpenAI-compatible ``usage`` object when a run is active."""
+    import structlog
+
     ledger = _ACTIVE_LEDGER.get()
     if ledger is None or usage is None:
         return
@@ -80,8 +82,25 @@ def record_provider_usage(*, model: str, usage: object, latency_ms: int) -> None
     # A response without usage is not billable evidence and must not make the
     # run look complete.
     if tokens_in is None or tokens_out is None:
+        structlog.get_logger("job_ftch.llm").warning(
+            "openai_call_usage_missing",
+            provider="openai",
+            model=model,
+            latency_ms=max(latency_ms, 0),
+            status="success_unknown_usage",
+        )
         ledger.unknown_pricing_models.add(model)
         return
+    structlog.get_logger("job_ftch.llm").info(
+        "openai_call",
+        provider="openai",
+        model=model,
+        status="success",
+        latency_ms=max(latency_ms, 0),
+        tokens_in=max(tokens_in, 0),
+        cached_tokens_in=max(cached_tokens_in or 0, 0),
+        tokens_out=max(tokens_out, 0),
+    )
     ledger.record(
         model=model,
         tokens_in=tokens_in,

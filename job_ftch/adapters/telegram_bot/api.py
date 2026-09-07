@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import structlog
+from pydantic import SecretStr
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from job_ftch.adapters.fastapi.adapter import create_app as create_private_api_app
 from job_ftch.adapters.telegram_bot.config import load_bot_config
 from job_ftch.adapters.telegram_bot.main import build_bot, build_dispatcher
 from job_ftch.adapters.telegram_bot.public_jobs import mount_public_job_routes
@@ -274,10 +276,27 @@ def create_app(
     mount_public_source_routes(app, runner, limiter=limiter)
     mount_public_job_routes(app, runner, limiter=limiter)
 
+    # Keep the pull API on the bot process so CareerGo/Hermes can use one
+    # authenticated endpoint.  Bearer auth uses the bridge key when no
+    # dedicated JOB_FTCH_API_TOKEN is configured; no private route is public.
+    private_settings = settings.model_copy(
+        update={
+            "api_token": settings.api_token
+            or (SecretStr(bot_config.bridge_api_key) if bot_config.bridge_api_key else None),
+            "api_tenant_allowlist": settings.api_tenant_allowlist or list(runner.tenant_ids()),
+        }
+    )
+    private_app = create_private_api_app(runner=runner, settings=private_settings)
+    app.router.routes.extend(
+        route
+        for route in private_app.router.routes
+        if getattr(route, "path", "").startswith("/v1/")
+    )
+
     @app.post("/pipeline/run")
     @limiter.limit("5/minute")
     async def pipeline_run(
-        request: Any,
+        request: Request,
         payload: dict[str, Any] | None = None,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
@@ -298,7 +317,7 @@ def create_app(
     @app.get("/pipeline/status/{tenant_id}")
     @limiter.limit("10/minute")
     async def pipeline_status(
-        request: Any,
+        request: Request,
         tenant_id: str,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any] | None:
@@ -311,7 +330,7 @@ def create_app(
     @app.get("/pipeline/browser-capabilities")
     @limiter.limit("10/minute")
     async def pipeline_browser_capabilities(
-        request: Any,
+        request: Request,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
         """Read-only browser/bypass capability inventory (no execution)."""
@@ -328,7 +347,7 @@ def create_app(
     @app.get("/pipeline/browser-routes")
     @limiter.limit("10/minute")
     async def pipeline_browser_routes(
-        request: Any,
+        request: Request,
         tenant_id: str | None = None,
         source_id: str | None = None,
         bypass: str | None = None,
@@ -353,7 +372,7 @@ def create_app(
     @app.post("/pipeline/search-sessions")
     @limiter.limit("5/minute")
     async def create_search_session(
-        request: Any,
+        request: Request,
         payload: dict[str, Any],
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
@@ -386,7 +405,7 @@ def create_app(
     @app.post("/pipeline/search-sessions/{session_id}/plan")
     @limiter.limit("5/minute")
     async def plan_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
@@ -402,7 +421,7 @@ def create_app(
     @app.post("/pipeline/search-sessions/{session_id}/approve")
     @limiter.limit("5/minute")
     async def approve_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         payload: dict[str, Any],
         x_api_key: str | None = Header(default=None),
@@ -433,7 +452,7 @@ def create_app(
     @app.post("/pipeline/search-sessions/{session_id}/run")
     @limiter.limit("3/minute")
     async def run_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         payload: dict[str, Any] | None = None,
         x_api_key: str | None = Header(default=None),
@@ -454,7 +473,7 @@ def create_app(
     @app.get("/pipeline/search-sessions/{session_id}")
     @limiter.limit("10/minute")
     async def get_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
@@ -470,7 +489,7 @@ def create_app(
     @app.get("/pipeline/search-sessions/{session_id}/results")
     @limiter.limit("10/minute")
     async def list_search_session_results(
-        request: Any,
+        request: Request,
         session_id: str,
         limit: int = 20,
         x_api_key: str | None = Header(default=None),
@@ -485,7 +504,7 @@ def create_app(
     @app.get("/pipeline/search-sessions/{session_id}/explain")
     @limiter.limit("10/minute")
     async def explain_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         source_id: str | None = None,
         job_id: str | None = None,
@@ -507,7 +526,7 @@ def create_app(
     @app.post("/pipeline/search-sessions/{session_id}/cancel")
     @limiter.limit("5/minute")
     async def cancel_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
@@ -523,7 +542,7 @@ def create_app(
     @app.get("/pipeline/sources/{tenant_id}")
     @limiter.limit("10/minute")
     async def pipeline_sources(
-        request: Any,
+        request: Request,
         tenant_id: str,
         x_api_key: str | None = Header(default=None),
     ) -> list[dict[str, Any]]:
@@ -535,7 +554,7 @@ def create_app(
     @app.post("/pipeline/sources/{tenant_id}")
     @limiter.limit("5/minute")
     async def add_pipeline_source(
-        request: Any,
+        request: Request,
         tenant_id: str,
         payload: dict[str, Any],
         x_api_key: str | None = Header(default=None),
@@ -608,7 +627,7 @@ def create_app(
     @app.post("/pipeline/sources/{tenant_id}/disable")
     @limiter.limit("5/minute")
     async def disable_pipeline_source(
-        request: Any,
+        request: Request,
         tenant_id: str,
         payload: dict[str, Any],
         x_api_key: str | None = Header(default=None),
@@ -627,7 +646,7 @@ def create_app(
     @app.get("/profiles/{tenant_id}/{user_id}")
     @limiter.limit("20/minute")
     async def list_profiles(
-        request: Any,
+        request: Request,
         tenant_id: str,
         user_id: str,
         x_api_key: str | None = Header(default=None),
@@ -640,7 +659,7 @@ def create_app(
     @app.post("/profiles/{tenant_id}/{user_id}")
     @limiter.limit("10/minute")
     async def save_profile(
-        request: Any,
+        request: Request,
         tenant_id: str,
         user_id: str,
         payload: dict[str, Any],
@@ -673,7 +692,7 @@ def create_app(
     @app.post("/profiles/{tenant_id}/{user_id}/activate")
     @limiter.limit("10/minute")
     async def activate_profile(
-        request: Any,
+        request: Request,
         tenant_id: str,
         user_id: str,
         payload: dict[str, Any],
@@ -693,7 +712,7 @@ def create_app(
     @app.get("/jobs/search")
     @limiter.limit("30/minute")
     async def search_jobs(
-        request: Any,
+        request: Request,
         q: str,
         tenant_id: str | None = None,
         user_id: str | None = None,

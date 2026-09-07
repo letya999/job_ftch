@@ -328,6 +328,17 @@ class CompositeSource:
                         result.yielded += 1
                         yield _with_canonical_source_name(item, source_name)
             except TimeoutError:
+                logger.warning(
+                    "source_hard_deadline_exceeded",
+                    extra={
+                        "source_id": source_id,
+                        "source_kind": source_kind,
+                        "source_name": source_name,
+                        "yielded": result.yielded,
+                        "hard_deadline_seconds": self._hard_deadline_seconds,
+                        "autoheal_pending": True,
+                    },
+                )
                 result.evicted = True
                 result.eviction_kind = "hard_deadline"
                 result.deadline_exceeded = True
@@ -384,6 +395,17 @@ class CompositeSource:
                         result.yielded += 1
                         await queue.put(_with_canonical_source_name(item, source_name))
             except TimeoutError:
+                logger.warning(
+                    "source_hard_deadline_exceeded",
+                    extra={
+                        "source_id": source_id,
+                        "source_kind": source_kind,
+                        "source_name": source_name,
+                        "yielded": result.yielded,
+                        "hard_deadline_seconds": self._hard_deadline_seconds,
+                        "autoheal_pending": True,
+                    },
+                )
                 result.evicted = True
                 result.eviction_kind = "hard_deadline"
                 result.deadline_exceeded = True
@@ -508,6 +530,18 @@ class CompositeSource:
                         await result_queue.put(item)
             except TimeoutError:
                 if hard_deadline:
+                    source_id, source_kind, source_name = _source_identity(state.source)
+                    logger.warning(
+                        "source_hard_deadline_exceeded",
+                        extra={
+                            "source_id": source_id,
+                            "source_kind": source_kind,
+                            "source_name": source_name,
+                            "yielded": state.result.yielded,
+                            "hard_deadline_seconds": self._hard_deadline_seconds,
+                            "autoheal_pending": True,
+                        },
+                    )
                     failed_before = state.result.failed
                     state.result.evicted = True
                     state.result.eviction_kind = "hard_deadline"

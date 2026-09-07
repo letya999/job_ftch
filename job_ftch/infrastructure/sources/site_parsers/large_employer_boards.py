@@ -71,6 +71,7 @@ async def _parse_detail_board(
     href_pattern: re.Pattern[str],
     parser_name: str,
     company: str | None = None,
+    fetch_details: bool = True,
 ) -> AsyncIterator[RawItem]:
     async def fetch(url: str) -> str:
         response = await client.get(url, follow_redirects=True)
@@ -97,12 +98,14 @@ async def _parse_detail_board(
             continue
         match = href_pattern.search(url)
         external_id = match.group(1) if match and match.lastindex else url
-        try:
-            detail_response = await client.get(url, follow_redirects=True)
-            detail_response.raise_for_status()
-            detail = _extract_detail_text(detail_response.text)
-        except (OSError, RuntimeError, ValueError):
-            detail = ""
+        detail = ""
+        if fetch_details:
+            try:
+                detail_response = await client.get(url, follow_redirects=True)
+                detail_response.raise_for_status()
+                detail = _extract_detail_text(detail_response.text)
+            except (OSError, RuntimeError, ValueError):
+                detail = ""
         if detail and detail.casefold() not in text.casefold():
             text = f"{text}\n{detail}"
         try:
@@ -206,7 +209,11 @@ class YadroParser:
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
-        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+        return SiteRuntimeDefaults(
+            render=False,
+            wait="domcontentloaded",
+            extra={"skip_ssl": True},
+        )
 
     def parser_kind(self, url: str) -> str | None:
         del url
@@ -318,6 +325,7 @@ class AlfaBankParser:
     supports_search = True
     search_mode = "combined"
     confirmed_empty_on_empty = True
+    terminal_on_error = True
     _API_URL = "https://job.alfabank.ru/api/vacancies"
     _LISTING_URL = "https://job.alfabank.ru/vacancies"
 

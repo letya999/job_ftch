@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import random
 import uuid
@@ -53,6 +54,7 @@ from job_ftch.domain import (
     JobLineage,
     JobRecord,
     ManagedCandidateProfile,
+    ObservationLedgerEntry,
     RuntimeSourceRecord,
     SourceHealth,
     TenantConfig,
@@ -78,7 +80,7 @@ class OperatorSessionAttachError(Exception):
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import AsyncIterator, Sequence
 
     from job_ftch.application.contracts import (
         BgeMThreeProviderPort,
@@ -89,6 +91,7 @@ if TYPE_CHECKING:
         Store,
         VectorBackend,
     )
+    from job_ftch.domain.models import RawItem
     from job_ftch.domain.public_source_registry import PublicSourceRegistry
     from job_ftch.domain.source_spec import SourceSpec
     from job_ftch.nodes.snapshot_filter import SnapshotFilterNode
@@ -96,6 +99,18 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 _DEFAULT_LATEST_JOBS_POOL = 200
 _PROFILE_AWARE_LATEST_JOBS_POOL = 1000
+
+
+class _ReplaySource:
+    kind = "replay"
+    source_name = "observation_ledger"
+
+    def __init__(self, entries: Sequence[ObservationLedgerEntry]) -> None:
+        self._entries = tuple(entries)
+
+    async def fetch(self) -> AsyncIterator[RawItem]:
+        for entry in self._entries:
+            yield entry.raw_item
 
 
 def _json_default(value: object) -> object:
@@ -149,6 +164,12 @@ def _source_health_key(source_id: str) -> str:
 
 def _runtime_source_key(source_id: str) -> str:
     return f"runtime_source:{source_id}"
+
+
+def _tenant_config_fingerprint(runtime: TenantRuntime) -> str:
+    payload = runtime.tenant.model_dump(mode="json", exclude={"auth_provider"})
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _source_disabled_key(source_id: str) -> str:
@@ -596,7 +617,11 @@ class TenantRunner:
             tenant_settings = tenant_to_settings(tenant, settings_template)
             auth = resolve_auth_provider(tenant.auth_provider, settings=tenant_settings)
             base_store = cast("Store", create_store(tenant_settings))
-            tenant_store = TenantStore(tenant.tenant_id, base_store)
+            tenant_store = TenantStore(
+                tenant.tenant_id,
+                base_store,
+                operational_outcome_max_runs=tenant.retention_runs,
+            )
             job_group_store = cast("JobGroupStore", create_job_group_store(tenant_settings))
             llm = cast("LLMProvider", create_llm(tenant_settings))
             embedding_provider = None
@@ -653,9 +678,13 @@ class TenantRunner:
                 catalog=catalog,
                 bgem3_provider=tenant_bgem3_provider,
             )
-            output_sink, main_sink, review_sink, posting_sink = build_output_sinks(tenant_settings)
-            rejected_counted, rejected_sink = build_rejected_sink(tenant_settings)
-            builder = PipelineBuilder()
+            output_sink, main_sink, review_sink, posting_sink = build_output_sinks(
+                tenant_settings, store=tenant_store
+            )
+            rejected_counted, rejected_sink = build_rejected_sink(
+                tenant_settings, store=tenant_store
+            )
+            builder = PipelineBuilder(settings=tenant_settings)
             builder.sources(tenant.sources)
             builder.auth(auth)
             builder.store(tenant_store)
@@ -751,6 +780,10 @@ class TenantRunner:
             raise KeyError(msg)
         return runtime
 
+    def tenant_run_is_active(self, tenant_id: str) -> bool:
+        runtime = self.get_runtime(tenant_id)
+        return _tenant_locks.tenant_run_is_active(runtime.settings, tenant_id)
+
     async def _ensure_runtime_sources_loaded(self, runtime: TenantRuntime) -> None:
         if runtime.sources_loaded:
             return
@@ -791,7 +824,9 @@ class TenantRunner:
                 pass
 
         if updated:
-            output_sink, main_sink, review_sink, posting_sink = build_output_sinks(runtime.settings)
+            output_sink, main_sink, review_sink, posting_sink = build_output_sinks(
+                runtime.settings, store=runtime.store
+            )
             runtime.builder.clear_sinks().sink(output_sink)
             runtime.builder.with_delivery_targets(
                 build_delivery_targets(runtime.settings, posting_sink)
@@ -988,6 +1023,7 @@ class TenantRunner:
         relevance_prompts: dict[str, str | None] | None = None,
         personal_mode: bool = False,
         personal_max_items: int | None = None,
+        replay_mode: bool = False,
     ) -> tuple[PipelineBuilder, SnapshotFilterNode | None]:
         # Load the live ontology from the Postgres/SQLite store
         # so the builder has both the static fixtures seed and
@@ -1145,15 +1181,19 @@ class TenantRunner:
             nodes = [GraphPipelineStage(executor)]
         output_sink, main_sink, review_sink, posting_sink = build_output_sinks(
             runtime.settings,
+            store=runtime.store,
             max_output_items=personal_max_items if personal_mode else None,
         )
-        rejected_counted, rejected_sink = build_rejected_sink(runtime.settings)
-        if _snapshot_filter is None and not personal_mode:
+        rejected_counted, rejected_sink = build_rejected_sink(runtime.settings, store=runtime.store)
+        if _snapshot_filter is None and not personal_mode and not replay_mode:
             msg = "build_nodes() must return SnapshotFilterNode when run_id is set"
             raise RuntimeError(msg)
         snapshot_filter = _snapshot_filter
+        if replay_mode:
+            snapshot_filter = None
 
-        builder = PipelineBuilder()
+        builder_settings = runtime.settings.model_copy(update={"pipeline_replay_mode": replay_mode})
+        builder = PipelineBuilder(settings=builder_settings)
         builder.sources(effective_sources)
         builder.auth(runtime.auth_provider)
         builder.store(runtime.store)
@@ -1563,10 +1603,58 @@ class TenantRunner:
 
         self._apply_runtime_sources(runtime)
 
+    async def _persist_terminal_summary(
+        self,
+        runtime: TenantRuntime,
+        summary: RunSummary,
+    ) -> None:
+        """Persist a run that ended before the pipeline builder was dispatched."""
+        if not summary.source_run_id:
+            return
+        from job_ftch.application.run_stats import build_pipeline_run_stats, build_source_run_stats
+        from job_ftch.infrastructure.observability.openobserve import (
+            record_run_metrics,
+            record_run_stats_logs,
+        )
+        from job_ftch.infrastructure.observability.otel_setup import record_final_run_trace
+
+        record_final_run_trace(summary)
+        record_run_metrics(summary)
+        try:
+            await runtime.store.set_run_state(
+                "pipeline.run_summary",
+                json.dumps(
+                    summary.as_dict(), default=_json_default, ensure_ascii=False, sort_keys=True
+                ),
+            )
+            await runtime.store.save_run_summary(summary)
+            pipeline_row = build_pipeline_run_stats(summary)
+            source_rows = build_source_run_stats(summary)
+            await runtime.store.save_pipeline_run_stats(runtime.tenant.tenant_id, pipeline_row)
+            await runtime.store.save_source_run_stats(runtime.tenant.tenant_id, source_rows)
+            record_run_stats_logs(summary, pipeline_row, source_rows)
+        except Exception as exc:  # noqa: BLE001 - observability must not change run result
+            logger.warning(
+                "tenant_terminal_summary_persist_failed",
+                tenant_id=runtime.tenant.tenant_id,
+                run_id=summary.source_run_id,
+                error=str(exc),
+            )
+        try:
+            await self.refresh_runtime_state_metrics(runtime.tenant.tenant_id, summary)
+        except Exception as exc:  # noqa: BLE001 - metrics are best-effort
+            logger.warning(
+                "tenant_terminal_runtime_metrics_failed",
+                tenant_id=runtime.tenant.tenant_id,
+                run_id=summary.source_run_id,
+                error=str(exc),
+            )
+
     async def run_tenant(
         self,
         tenant_id: str,
         *,
+        run_id: str | None = None,
         max_items: int | None = None,
         user_id: str | None = None,
         source_ids: Sequence[str] | None = None,
@@ -1575,9 +1663,10 @@ class TenantRunner:
         ignore_schedule_gates: bool = False,
         operator_session_id: str | None = None,
         personal_mode: bool = False,
+        trigger: str = "manual",
     ) -> RunSummary:
         """Run acquisition and policy under one correlated trace/run id."""
-        run_id = uuid.uuid4().hex
+        run_id = run_id or uuid.uuid4().hex
         context_tokens = bind_contextvars(tenant_id=tenant_id, source_run_id=run_id)
         tracer = trace.get_tracer("job_ftch.tenant_runner")
         attach_token = None
@@ -1587,6 +1676,80 @@ class TenantRunner:
                 span.set_attribute("job_ftch.source_run_id", run_id)
                 span.set_attribute("job_ftch.tenant_id", tenant_id)
                 runtime = self.get_runtime(tenant_id)
+                config_fingerprint = _tenant_config_fingerprint(runtime)
+                if not runtime.tenant.enabled:
+                    summary = RunSummary(
+                        tenant_id=tenant_id,
+                        source_run_id=run_id,
+                        finished_at=datetime.now(UTC),
+                        trigger=trigger,
+                        config_fingerprint=config_fingerprint,
+                        source_outcomes=[
+                            {
+                                "source_id": source_spec_identifier(spec),
+                                "source_kind": str(getattr(spec, "type", "unknown")),
+                                "source_name": source_spec_name(spec),
+                                "status": "disabled",
+                                "completion_state": "disabled",
+                            }
+                            for spec in runtime.tenant.sources
+                        ],
+                    )
+                    await self._persist_terminal_summary(runtime, summary)
+                    return summary
+                if trigger == "schedule" and runtime.tenant.schedule is not None:
+                    interval = runtime.tenant.schedule.interval_seconds
+                    try:
+                        previous = await runtime.store.list_run_summaries(limit=20)
+                    except Exception as exc:  # noqa: BLE001 - a missing marker must not block ingest
+                        logger.warning(
+                            "tenant_schedule_history_read_failed",
+                            tenant_id=tenant_id,
+                            error=str(exc),
+                        )
+                        previous = []
+                    last_finished = next(
+                        (
+                            item.finished_at
+                            for item in previous
+                            if not (
+                                item.source_outcomes
+                                and all(
+                                    str(outcome.get("status")) == "not_due"
+                                    for outcome in item.source_outcomes
+                                    if isinstance(outcome, dict)
+                                )
+                            )
+                        ),
+                        None,
+                    )
+                    if last_finished is not None and last_finished.tzinfo is None:
+                        last_finished = last_finished.replace(tzinfo=UTC)
+                    if (
+                        interval
+                        and last_finished is not None
+                        and (datetime.now(UTC) - last_finished.astimezone(UTC)).total_seconds()
+                        < interval
+                    ):
+                        summary = RunSummary(
+                            tenant_id=tenant_id,
+                            source_run_id=run_id,
+                            finished_at=datetime.now(UTC),
+                            trigger=trigger,
+                            config_fingerprint=config_fingerprint,
+                            source_outcomes=[
+                                {
+                                    "source_id": source_spec_identifier(spec),
+                                    "source_kind": str(getattr(spec, "type", "unknown")),
+                                    "source_name": source_spec_name(spec),
+                                    "status": "not_due",
+                                    "completion_state": "skipped",
+                                }
+                                for spec in runtime.tenant.sources
+                            ],
+                        )
+                        await self._persist_terminal_summary(runtime, summary)
+                        return summary
                 if operator_session_id:
                     from job_ftch.infrastructure.sources.browser_utils import (
                         attach_operator_page,
@@ -1613,6 +1776,8 @@ class TenantRunner:
                             ignore_schedule_gates=ignore_schedule_gates,
                             lock_already_held=True,
                             personal_mode=personal_mode,
+                            trigger=trigger,
+                            config_fingerprint=config_fingerprint,
                         )
                 except TenantRunAlreadyActiveError:
                     logger.info("tenant_run_skipped_already_active", tenant_id=tenant_id)
@@ -1631,6 +1796,8 @@ class TenantRunner:
                     summary.finished_at = datetime.now(UTC)
                     summary.failed = 1
                     summary.drop_reasons["lock_error"] = 1
+                summary.trigger = trigger
+                summary.config_fingerprint = config_fingerprint
                 span.set_attribute(
                     "job_ftch.skipped_already_active", summary.skipped_already_active
                 )
@@ -1661,6 +1828,8 @@ class TenantRunner:
         ignore_schedule_gates: bool = False,
         lock_already_held: bool = False,
         personal_mode: bool = False,
+        trigger: str = "manual",
+        config_fingerprint: str | None = None,
     ) -> RunSummary:
         runtime = self.get_runtime(tenant_id)
         await self._ensure_runtime_sources_loaded(runtime)
@@ -1698,15 +1867,23 @@ class TenantRunner:
         # Filter for unique specs by ID (handling overlaps between base and runtime)
         seen_specs: set[str] = set()
         unique_specs: list[SourceSpec] = []
+        preflight_outcomes: list[dict[str, object]] = []
         for spec in all_specs:
             sid = source_spec_identifier(spec)
-            if (
-                sid in seen_specs
-                or sid in runtime.disabled_source_ids
-                or (requested_source_ids and sid not in requested_source_ids)
-            ):
+            if sid in seen_specs or (requested_source_ids and sid not in requested_source_ids):
                 continue
             seen_specs.add(sid)
+            if sid in runtime.disabled_source_ids:
+                preflight_outcomes.append(
+                    {
+                        "source_id": sid,
+                        "source_kind": str(getattr(spec, "type", "unknown")),
+                        "source_name": source_spec_name(spec),
+                        "status": "disabled",
+                        "completion_state": "disabled",
+                    }
+                )
+                continue
             unique_specs.append(spec)
 
         if bypass_override or parser_override:
@@ -1739,11 +1916,29 @@ class TenantRunner:
                     if last_run.tzinfo is None:
                         last_run = last_run.replace(tzinfo=UTC)
                     wait_time = (now - last_run).total_seconds()
-                    if wait_time < spec.rate_limit_min_interval_seconds:
+                    source_interval = max(
+                        float(spec.rate_limit_min_interval_seconds or 0.0),
+                        float(spec.interval_seconds or 0.0),
+                    )
+                    if wait_time < source_interval:
                         logger.info(
                             "source_rate_limited",
                             source_id=sid,
-                            wait_remaining=spec.rate_limit_min_interval_seconds - wait_time,
+                            wait_remaining=source_interval - wait_time,
+                        )
+                        preflight_outcomes.append(
+                            {
+                                "source_id": sid,
+                                "source_kind": str(getattr(spec, "type", "unknown")),
+                                "source_name": source_spec_name(spec),
+                                "status": (
+                                    "not_due"
+                                    if spec.interval_seconds
+                                    and wait_time < float(spec.interval_seconds)
+                                    else "rate_limited"
+                                ),
+                                "completion_state": "skipped",
+                            }
                         )
                         continue
                 except (ValueError, TypeError):
@@ -1808,7 +2003,11 @@ class TenantRunner:
             summary = RunSummary()
             summary.tenant_id = tenant_id
             summary.source_run_id = run_id
+            summary.trigger = trigger
+            summary.config_fingerprint = config_fingerprint
+            summary.source_outcomes = preflight_outcomes
             summary.finish()
+            await self._persist_terminal_summary(runtime, summary)
             return summary
 
         # Task 4: Jitter before dispatching
@@ -1860,6 +2059,8 @@ class TenantRunner:
                 summary.llm_cost_is_complete = usage.cost_is_complete
                 summary.llm_cost_pricing_version = pricing_version()
                 summary.llm_cost_unknown_models = sorted(usage.unknown_pricing_models)
+                if preflight_outcomes:
+                    summary.source_outcomes = preflight_outcomes + list(summary.source_outcomes)
         except TenantRunAlreadyActiveError:
             logger.info("tenant_run_skipped_already_active", tenant_id=tenant_id)
             summary = RunSummary()
@@ -1900,7 +2101,7 @@ class TenantRunner:
             failed=summary.failed,
             source_partial=summary.source_partial,
             source_failures=summary.source_failures,
-            source_outcomes=summary.source_outcomes,
+            source_outcome_count=len(summary.source_outcomes),
             llm_requests=summary.llm_usage_requests,
             llm_cost_usd=summary.llm_cost_usd,
             llm_cost_is_complete=summary.llm_cost_is_complete,
@@ -1978,6 +2179,23 @@ class TenantRunner:
         return summary
 
     async def _update_source_health(self, runtime: TenantRuntime, summary: RunSummary) -> None:
+        configured_source_ids = {
+            source_spec_identifier(spec) for spec in runtime.base_sources
+        } | set(runtime.runtime_sources)
+        configured_source_ids.update(str(source_id) for source_id in summary.by_source_id)
+        configured_source_ids.update(
+            str(outcome.get("source_id"))
+            for outcome in summary.source_outcomes
+            if outcome.get("source_id")
+        )
+        try:
+            await runtime.store.prune_source_health(configured_source_ids)
+        except Exception as exc:  # noqa: BLE001 - stale health must not fail ingest
+            logger.warning(
+                "source_health_prune_failed",
+                tenant_id=runtime.tenant.tenant_id,
+                error=str(exc),
+            )
         finished_at = summary.finished_at or datetime.now()
         started_at = summary.started_at
         failure_by_id = {
@@ -2186,7 +2404,30 @@ class TenantRunner:
     async def list_source_quality(self, tenant_id: str) -> dict[str, Any]:
         from job_ftch.application.source_quality import canonical_source_key
 
-        health_rows = await self.get_runtime(tenant_id).store.list_source_health()
+        runtime = self.get_runtime(tenant_id)
+        await self._ensure_runtime_sources_loaded(runtime)
+        configured_ids = {source_spec_identifier(spec) for spec in runtime.base_sources} | set(
+            runtime.runtime_sources
+        )
+        configured_names = {source_spec_name(spec) for spec in runtime.base_sources}
+        configured_names.update(
+            source_spec_name(record.spec) for record in runtime.runtime_sources.values()
+        )
+        configured_kinds = {str(getattr(spec, "type", "")) for spec in runtime.base_sources} | {
+            str(getattr(record.spec, "type", "")) for record in runtime.runtime_sources.values()
+        }
+        health_rows = [
+            item
+            for item in await runtime.store.list_source_health()
+            if item.source_id in configured_ids
+            or (
+                item.source_name in configured_names
+                and (
+                    item.source_kind in configured_kinds
+                    or (item.source_kind == "debug" and "local_fixture" in configured_kinds)
+                )
+            )
+        ]
         buckets: dict[str, list[dict[str, Any]]] = {
             "important": [],
             "reliable": [],
@@ -2239,9 +2480,31 @@ class TenantRunner:
             "bot_scheduler:last_publish_sent",
         )
         scheduler_state = {key: await _read_runtime_state(runtime, key) for key in scheduler_keys}
+        configured_ids = {source_spec_identifier(spec) for spec in runtime.base_sources} | set(
+            runtime.runtime_sources
+        )
+        configured_names = {source_spec_name(spec) for spec in runtime.base_sources}
+        configured_names.update(
+            source_spec_name(record.spec) for record in runtime.runtime_sources.values()
+        )
+        configured_kinds = {str(getattr(spec, "type", "")) for spec in runtime.base_sources} | {
+            str(getattr(record.spec, "type", "")) for record in runtime.runtime_sources.values()
+        }
+        health_rows = [
+            item
+            for item in await runtime.store.list_source_health()
+            if item.source_id in configured_ids
+            or (
+                item.source_name in configured_names
+                and (
+                    item.source_kind in configured_kinds
+                    or (item.source_kind == "debug" and "local_fixture" in configured_kinds)
+                )
+            )
+        ]
         record_runtime_state_metrics(
             summary,
-            source_health=await runtime.store.list_source_health(),
+            source_health=health_rows,
             scheduler_state=scheduler_state,
         )
 
@@ -2251,17 +2514,20 @@ class TenantRunner:
         concurrency: int = 4,
         max_items: int | None = None,
         user_id: str | None = None,
+        trigger: str = "manual",
     ) -> list[RunSummary]:
         semaphore = asyncio.Semaphore(max(concurrency, 1))
 
         async def run_one(tenant_id: str) -> RunSummary | None:
             async with semaphore:
                 try:
-                    return await self.run_tenant(
-                        tenant_id,
-                        max_items=max_items,
-                        user_id=user_id,
-                    )
+                    kwargs: dict[str, Any] = {
+                        "max_items": max_items,
+                        "user_id": user_id,
+                    }
+                    if trigger != "manual":
+                        kwargs["trigger"] = trigger
+                    return await self.run_tenant(tenant_id, **kwargs)
                 except Exception as exc:
                     logger.error(
                         "tenant_run_failed",
@@ -2273,6 +2539,78 @@ class TenantRunner:
 
         results = await asyncio.gather(*(run_one(tid) for tid in self.tenant_ids()))
         return [summary for summary in results if summary is not None]
+
+    async def replay_tenant(
+        self,
+        tenant_id: str,
+        *,
+        limit: int = 1000,
+        run_id: str | None = None,
+    ) -> RunSummary:
+        run_id = run_id or uuid.uuid4().hex
+        context_tokens = bind_contextvars(tenant_id=tenant_id, source_run_id=run_id)
+        try:
+            return await self._replay_tenant_bound(tenant_id, limit=limit, run_id=run_id)
+        finally:
+            reset_contextvars(**context_tokens)
+
+    async def _replay_tenant_bound(
+        self,
+        tenant_id: str,
+        *,
+        limit: int,
+        run_id: str,
+    ) -> RunSummary:
+        """Process stored raw observations through the current tenant graph."""
+        runtime = self.get_runtime(tenant_id)
+        if not runtime.tenant.enabled:
+            raise ValueError(f"Tenant {tenant_id!r} is disabled")
+        entries = await runtime.store.list_observations(tenant_id=tenant_id, limit=limit)
+        async with _tenant_run_lock(runtime.settings, tenant_id):
+            catalog, relevance_prompts = await self._build_runtime_catalog(runtime)
+            builder, _ = await self._build_runtime_builder(
+                runtime,
+                effective_sources=[],
+                catalog=catalog,
+                run_id=run_id,
+                relevance_prompts=relevance_prompts,
+                replay_mode=True,
+            )
+            builder.with_runtime_source(_ReplaySource(entries))
+            with collect_llm_usage() as usage:
+                summary = await builder.run_async(max_items=limit)
+            summary.llm_usage_requests = usage.requests
+            summary.llm_tokens_in = usage.tokens_in
+            summary.llm_cached_tokens_in = usage.cached_tokens_in
+            summary.llm_tokens_out = usage.tokens_out
+            summary.llm_latency_ms = usage.latency_ms
+            summary.llm_cost_usd = usage.cost_usd
+            summary.llm_cost_is_complete = usage.cost_is_complete
+            summary.llm_cost_pricing_version = pricing_version()
+            summary.llm_cost_unknown_models = sorted(usage.unknown_pricing_models)
+            summary.trigger = "replay"
+            summary.config_fingerprint = _tenant_config_fingerprint(runtime)
+        summary.tenant_id = tenant_id
+        await runtime.store.set_run_state(
+            "pipeline.run_summary",
+            json.dumps(
+                summary.as_dict(), default=_json_default, ensure_ascii=False, sort_keys=True
+            ),
+        )
+        await runtime.store.save_run_summary(summary)
+        from job_ftch.application.run_stats import build_pipeline_run_stats, build_source_run_stats
+        from job_ftch.infrastructure.observability.openobserve import (
+            record_run_metrics,
+            record_run_stats_logs,
+        )
+
+        pipeline_row = build_pipeline_run_stats(summary)
+        source_rows = build_source_run_stats(summary)
+        await runtime.store.save_pipeline_run_stats(tenant_id, pipeline_row)
+        await runtime.store.save_source_run_stats(tenant_id, source_rows)
+        record_run_metrics(summary)
+        record_run_stats_logs(summary, pipeline_row, source_rows)
+        return summary
 
     async def get_status(self, tenant_id: str) -> RunSummary | None:
         runtime = self.get_runtime(tenant_id)
@@ -2302,15 +2640,75 @@ class TenantRunner:
         return result
 
     async def list_source_health(self, tenant_id: str) -> list[dict[str, Any]]:
-        health_models = await self.get_runtime(tenant_id).store.list_source_health()
+        runtime = self.get_runtime(tenant_id)
+        await self._ensure_runtime_sources_loaded(runtime)
+        configured_ids = {source_spec_identifier(spec) for spec in runtime.base_sources} | set(
+            runtime.runtime_sources
+        )
+        configured_names = {source_spec_name(spec) for spec in runtime.base_sources}
+        configured_names.update(
+            source_spec_name(record.spec) for record in runtime.runtime_sources.values()
+        )
+        configured_kinds = {str(getattr(spec, "type", "")) for spec in runtime.base_sources} | {
+            str(getattr(record.spec, "type", "")) for record in runtime.runtime_sources.values()
+        }
+        health_models = [
+            item
+            for item in await runtime.store.list_source_health()
+            if item.source_id in configured_ids
+            or (
+                item.source_name in configured_names
+                and (
+                    item.source_kind in configured_kinds
+                    or (item.source_kind == "debug" and "local_fixture" in configured_kinds)
+                )
+            )
+        ]
         return [h.model_dump(mode="json") for h in health_models]
 
     async def list_sources(self, tenant_id: str) -> list[dict[str, Any]]:
+        from job_ftch.application.source_quality import canonical_source_key
+
         runtime = self.get_runtime(tenant_id)
         await self._ensure_runtime_sources_loaded(runtime)
-        health_models = await runtime.store.list_source_health()
+        configured_ids = {source_spec_identifier(spec) for spec in runtime.base_sources} | set(
+            runtime.runtime_sources
+        )
+        configured_names = {source_spec_name(spec) for spec in runtime.base_sources}
+        configured_names.update(
+            source_spec_name(record.spec) for record in runtime.runtime_sources.values()
+        )
+        configured_kinds = {str(getattr(spec, "type", "")) for spec in runtime.base_sources} | {
+            str(getattr(record.spec, "type", "")) for record in runtime.runtime_sources.values()
+        }
+        health_models = [
+            item
+            for item in await runtime.store.list_source_health()
+            if item.source_id in configured_ids
+            or (
+                item.source_name in configured_names
+                and (
+                    item.source_kind in configured_kinds
+                    or (item.source_kind == "debug" and "local_fixture" in configured_kinds)
+                )
+            )
+        ]
         health_by_id = {h.source_id: h for h in health_models}
         health_by_name = {h.source_name: h for h in health_models}
+        health_by_key: dict[str, SourceHealth] = {}
+        for health in health_models:
+            key = canonical_source_key(health.source_id, health.source_name)
+            current = health_by_key.get(key)
+            if current is None or (health.last_run_at or "") > (current.last_run_at or ""):
+                health_by_key[key] = health
+
+        def health_for(source_id: str, source_name: str) -> SourceHealth | None:
+            return (
+                health_by_key.get(canonical_source_key(source_id, source_name))
+                or health_by_id.get(source_id)
+                or health_by_name.get(source_name)
+            )
+
         payloads: list[dict[str, Any]] = []
         for spec in runtime.base_sources:
             source_id = source_spec_identifier(spec)
@@ -2322,7 +2720,7 @@ class TenantRunner:
                         spec,
                         origin="config",
                         enabled=source_id not in runtime.disabled_source_ids,
-                        health=health_by_id.get(source_id) or health_by_name.get(source_name),
+                        health=health_for(source_id, source_name),
                     ),
                 )
             )
@@ -2339,7 +2737,7 @@ class TenantRunner:
                         record.spec,
                         origin=record.origin,
                         enabled=record.enabled and source_id not in runtime.disabled_source_ids,
-                        health=health_by_id.get(source_id) or health_by_name.get(source_name),
+                        health=health_for(source_id, source_name),
                     ),
                 )
             )
@@ -2960,6 +3358,40 @@ class TenantRunner:
         if min_score is not None:
             jobs = [job for job in jobs if (job.best_score or 0.0) >= min_score]
         return jobs[:limit]
+
+    async def list_jobs(
+        self,
+        tenant_id: str,
+        *,
+        since: datetime | None = None,
+    ) -> list[JobRecord]:
+        """List persisted job records for pull consumers in stable time order."""
+        runtime = self.get_runtime(tenant_id)
+        total = await runtime.job_backend.count_jobs()
+        if total <= 0:
+            return []
+        jobs = await runtime.job_backend.list_jobs(total, 0)
+        if since is not None:
+            cutoff = since if since.tzinfo is not None else since.replace(tzinfo=UTC)
+            jobs = [
+                job
+                for job in jobs
+                if job.fetched_at is None
+                or (
+                    job.fetched_at
+                    if job.fetched_at.tzinfo is not None
+                    else job.fetched_at.replace(tzinfo=UTC)
+                )
+                >= cutoff
+            ]
+
+        def sort_key(job: JobRecord) -> tuple[datetime, str]:
+            stamp = job.fetched_at or datetime(1970, 1, 1, tzinfo=UTC)
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=UTC)
+            return stamp.astimezone(UTC), str(job.job_id or job.stable_id)
+
+        return sorted(jobs, key=sort_key)
 
     def default_tenant_id(self) -> str:
         ids = self.tenant_ids()

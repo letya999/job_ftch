@@ -1,0 +1,4 @@
+[
+  {"source_kind":"career_site","source_name":"devex_board","external_id":"dx-001","url":"https://jobs.example.test/dx-001","text":"Developer Experience Engineer\nShip Python and TypeScript CLIs, GitHub Actions and internal platform tooling.","metadata":{"company":"Build Better","location":"Remote"}},
+  {"source_kind":"telegram_channel","source_name":"devex_digest","external_id":"dx-002","url":"https://t.me/devex_digest/2","text":"Internal Tools Engineer\nUse Rust and documentation to shorten developer setup and test feedback loops.","metadata":{"company":"Toolsmiths"}}
+]

@@ -7,7 +7,7 @@ import pytest
 
 from job_ftch.adapters.telegram_bot.api import _tenant_health
 from job_ftch.application.pipeline import RunSummary
-from job_ftch.domain import SourceHealth
+from job_ftch.domain import SourceHealth, TenantInfo
 
 
 class _Store:
@@ -58,6 +58,20 @@ class _Runner:
     def get_runtime(self, tenant_id: str) -> SimpleNamespace:
         assert tenant_id == "ai_jobs"
         return SimpleNamespace(store=self.store)
+
+    def tenant_ids(self) -> list[str]:
+        return ["ai_jobs"]
+
+    async def list_tenants(self) -> list[TenantInfo]:
+        return [TenantInfo(tenant_id="ai_jobs", display_name="AI jobs", source_count=1)]
+
+    async def list_runs(self, *, tenant_id: str, limit: int) -> list[RunSummary]:
+        del tenant_id, limit
+        return []
+
+    async def get_run(self, run_id: str, *, tenant_id: str) -> None:
+        del run_id, tenant_id
+        return None
 
     async def get_status(self, tenant_id: str) -> RunSummary:
         assert tenant_id == "ai_jobs"
@@ -162,6 +176,18 @@ def test_api_pipeline_sources_important_and_quality(monkeypatch: pytest.MonkeyPa
     app = create_app(runner=runner)  # type: ignore[arg-type]
     client = TestClient(app)
     headers = {"x-api-key": "test-bridge-key"}
+
+    status = client.get("/pipeline/status/ai_jobs", headers=headers)
+    assert status.status_code == 200
+    assert status.json()["source_run_id"] == "run-123"
+    assert client.get("/pipeline/status/ai_jobs").status_code == 403
+
+    private = client.get(
+        "/v1/tenants",
+        headers={"Authorization": "Bearer test-bridge-key"},
+    )
+    assert private.status_code == 200
+    assert private.json()["tenants"][0]["tenant_id"] == "ai_jobs"
 
     # 1. 403 when missing or wrong API key
     res = client.post(

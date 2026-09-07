@@ -1,0 +1,4 @@
+[
+  {"source_kind":"career_site","source_name":"robotics_board","external_id":"rb-001","url":"https://jobs.example.test/rb-001","text":"Robotics Software Engineer\nBuild C++ and ROS perception pipelines for autonomous devices.","metadata":{"company":"Edge Motion","location":"Germany"}},
+  {"source_kind":"telegram_channel","source_name":"robotics_digest","external_id":"rb-002","url":"https://t.me/robotics_digest/2","text":"Edge AI Engineer\nDeploy OpenCV and CUDA models on embedded Linux with measured latency.","metadata":{"company":"Vision Forge"}}
+]

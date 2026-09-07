@@ -25,7 +25,7 @@ def record_item_decision_trace(
     drop_reason: str | None = None,
     drop_stage: str | None = None,
 ) -> None:
-    """Record one fetched/candidate item decision as a Langfuse-visible OTel span.
+    """Record one fetched/candidate item decision as an OTel span.
 
     The payload intentionally avoids raw vacancy text and full ontology payloads.
     It carries stable IDs and compact diagnostics needed to join external labels

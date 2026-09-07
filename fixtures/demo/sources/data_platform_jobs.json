@@ -1,0 +1,4 @@
+[
+  {"source_kind":"career_site","source_name":"data_platform_board","external_id":"dp-001","url":"https://jobs.example.test/dp-001","text":"Data Platform Engineer\nBuild Python and SQL data products with Spark, Kafka and Airflow.","metadata":{"company":"Streamline Labs","location":"Remote"}},
+  {"source_kind":"telegram_channel","source_name":"data_platform_digest","external_id":"dp-002","url":"https://t.me/data_platform_digest/2","text":"Analytics Engineer\nOwn dbt models, warehouse quality and reliable metrics for product teams.","metadata":{"company":"Metric North"}}
+]

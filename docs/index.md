@@ -15,10 +15,12 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [ontology index](ontology/index.md)
 - [operations index](operations/index.md)
 - [pipelines index](pipelines/index.md)
+- [plans index](plans/index.md)
 - [plugin_template index](plugin_template/index.md)
 - [process index](process/index.md)
 - [recipes index](recipes/index.md)
 - [sources index](sources/index.md)
+- [specs index](specs/index.md)
 
 ## Files On This Level
 

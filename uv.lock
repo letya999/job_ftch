@@ -413,15 +413,6 @@ wheels = [
 ]
 
 [[package]]
-name = "backoff"
-version = "2.2.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/47/d7/5bbeb12c44d7c4f2fb5b56abce497eb5ed9f34d85701de869acedd602619/backoff-2.2.1.tar.gz", hash = "sha256:03f829f5bb1923180821643f8753b0502c3b682293992485b0eef2807afa5cba", size = 17001, upload-time = "2022-10-05T19:19:32.061Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/73/b6e24bd22e6720ca8ee9a85a0c4a2971af8497d8f3193fa05390cbd46e09/backoff-2.2.1-py3-none-any.whl", hash = "sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8", size = 15148, upload-time = "2022-10-05T19:19:30.546Z" },
-]
-
-[[package]]
 name = "bandit"
 version = "1.9.4"
 source = { registry = "https://pypi.org/simple" }
@@ -2238,7 +2229,6 @@ all = [
     { name = "huggingface-hub" },
     { name = "instructor" },
     { name = "jmespath" },
-    { name = "langfuse" },
     { name = "lingua-language-detector" },
     { name = "nodriver" },
     { name = "openai" },
@@ -2313,9 +2303,6 @@ faststream = [
 ]
 feeds = [
     { name = "feedparser" },
-]
-langfuse = [
-    { name = "langfuse" },
 ]
 language = [
     { name = "lingua-language-detector" },
@@ -2479,8 +2466,6 @@ requires-dist = [
     { name = "instructor", marker = "extra == 'openai'", specifier = ">=1.4" },
     { name = "jmespath", marker = "extra == 'all'", specifier = ">=1.0" },
     { name = "jmespath", marker = "extra == 'site-scrapers'", specifier = ">=1.0" },
-    { name = "langfuse", marker = "extra == 'all'", specifier = ">=2.0" },
-    { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=2.0" },
     { name = "lingua-language-detector", marker = "extra == 'all'", specifier = ">=2.0" },
     { name = "lingua-language-detector", marker = "extra == 'language'", specifier = ">=2.0" },
     { name = "lxml", marker = "extra == 'extraction'", specifier = ">=5.2" },
@@ -2546,7 +2531,7 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'all'", specifier = ">=12.0" },
     { name = "websockets", marker = "extra == 'realtime'", specifier = ">=12.0" },
 ]
-provides-extras = ["browser", "camoufox", "nodriver", "parity-lab", "stealth", "tls-client", "openai", "telegram", "dagster", "faststream", "api", "mcp", "local-mcp", "bot", "fastembed", "sqlite", "postgres", "embeddings", "qdrant", "pgvector", "ollama", "feeds", "site-scrapers", "resilience", "extraction", "realtime", "resume", "language", "translation", "reranker", "bgem3", "tracing", "langfuse", "all"]
+provides-extras = ["browser", "camoufox", "nodriver", "parity-lab", "stealth", "tls-client", "openai", "telegram", "dagster", "faststream", "api", "mcp", "local-mcp", "bot", "fastembed", "sqlite", "postgres", "embeddings", "qdrant", "pgvector", "ollama", "feeds", "site-scrapers", "resilience", "extraction", "realtime", "resume", "language", "translation", "reranker", "bgem3", "tracing", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2676,25 +2661,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/43/4b/674af6ef2f97d56f0ab5153bf0bfa28ccb6c3ed4d1babf4305449668807b/keyring-25.7.0.tar.gz", hash = "sha256:fe01bd85eb3f8fb3dd0405defdeac9a5b4f6f0439edbb3149577f244a2e8245b", size = 63516, upload-time = "2025-11-16T16:26:09.482Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/db/e655086b7f3a705df045bf0933bdd9c2f79bb3c97bfef1384598bb79a217/keyring-25.7.0-py3-none-any.whl", hash = "sha256:be4a0b195f149690c166e850609a477c532ddbfbaed96a404d4e43f8d5e2689f", size = 39160, upload-time = "2025-11-16T16:26:08.402Z" },
-]
-
-[[package]]
-name = "langfuse"
-version = "4.9.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "backoff" },
-    { name = "httpx" },
-    { name = "opentelemetry-api" },
-    { name = "opentelemetry-exporter-otlp-proto-http" },
-    { name = "opentelemetry-sdk" },
-    { name = "packaging" },
-    { name = "pydantic" },
-    { name = "wrapt" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/77/69/4c339bb7cfb4909db340c9b40852bd268fd2bfd93c526e7ac95b7dd725bb/langfuse-4.9.0.tar.gz", hash = "sha256:244d8309cd75d663f29c399f5691e3f04c4a2838e0cc947704e123bdc7233040", size = 339189, upload-time = "2026-06-16T08:44:38.744Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/f0/65735b14e792007381e1e9cf17b4dbd1355be056507c06517e75040102aa/langfuse-4.9.0-py3-none-any.whl", hash = "sha256:ac03eaf7ee6f5fb18036284445833cae92248ae240f3c6068b83d408afb57fe1", size = 599170, upload-time = "2026-06-16T08:44:37.387Z" },
 ]
 
 [[package]]

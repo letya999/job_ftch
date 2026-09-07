@@ -26,6 +26,8 @@ import asyncio
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 
+import structlog
+
 try:
     import instructor
 
@@ -44,6 +46,8 @@ except ImportError:
 
 from job_ftch.application.llm_usage import record_provider_usage
 from job_ftch.application.registry import register_llm
+
+logger = structlog.get_logger("job_ftch.llm")
 
 if TYPE_CHECKING:
     from job_ftch.config import Settings
@@ -255,7 +259,16 @@ class OpenAIInstructorLLMProvider:
                         **request_kwargs,
                     )
                     break
-                except Exception:
+                except Exception as exc:
+                    logger.warning(
+                        "openai_call_retry" if attempt < attempts - 1 else "openai_call_failed",
+                        provider="openai",
+                        model=self._model,
+                        attempt=attempt + 1,
+                        retries=max(attempts - 1, 0),
+                        error_type=type(exc).__name__,
+                        latency_ms=round((monotonic() - started) * 1000),
+                    )
                     if attempt >= attempts - 1:
                         raise
                     await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
@@ -274,16 +287,28 @@ class OpenAIInstructorLLMProvider:
         temperature: float = 0.2,
     ) -> str:
         started = monotonic()
-        async with asyncio.timeout(self._operation_timeout_seconds):
-            response = await self._raw_client.chat.completions.create(
+        try:
+            async with asyncio.timeout(self._operation_timeout_seconds):
+                response = await self._raw_client.chat.completions.create(
+                    model=self._model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=temperature,
+                    **_completion_token_limit_kwargs(self._model, _GENERATE_MAX_TOKENS),
+                )
+        except Exception as exc:
+            logger.warning(
+                "openai_call_failed",
+                provider="openai",
                 model=self._model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=temperature,
-                **_completion_token_limit_kwargs(self._model, _GENERATE_MAX_TOKENS),
+                attempt=1,
+                retries=self._max_retries,
+                error_type=type(exc).__name__,
+                latency_ms=round((monotonic() - started) * 1000),
             )
+            raise
         record_provider_usage(
             model=self._model,
             usage=getattr(response, "usage", None),

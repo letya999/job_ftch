@@ -1,0 +1,38 @@
+tenant_id: real_ai_engineering
+display_name: Real — Applied AI and ML Engineering
+enabled: true
+source_backend: career_site
+sources:
+  - type: career_site
+    url: https://hh.ru/search/vacancy
+    source_name: hh_ru_ai_engineering
+    limit: 30
+    interval_seconds: 900
+  - type: career_site
+    url: https://career.habr.com/vacancies
+    source_name: habr_career_ai_engineering
+    limit: 30
+    interval_seconds: 900
+schedule:
+  interval_seconds: 900
+  ingest_mode: polling
+profile_path: real_demo/profiles/ai_engineering.yaml
+pipeline_recipe_path: config/pipelines/evidence_v2_compact_prefilter.yaml
+llm_backend: heuristic
+allow_tenant_model_override: true
+embedding_enabled: false
+store_backend: postgres
+job_group_store_backend: postgres
+job_backend: postgres
+search_backend: postgres
+search_language: russian
+store_fallback_on_error: false
+output: {backend: json_file, path: "artifacts/real_demo/{tenant_id}/jobs.json", jsonl: false}
+review_output: {backend: json_file, path: "artifacts/real_demo/{tenant_id}/review.jsonl", jsonl: true}
+rejected_output: {backend: json_file, path: "artifacts/real_demo/{tenant_id}/rejected.jsonl", jsonl: true}
+quarantine_output: {backend: json_file, path: "artifacts/real_demo/{tenant_id}/quarantine.jsonl", jsonl: true}
+notify_mode: digest
+posting_backend: none
+pipeline_max_items_per_run: 60
+source_fetch_concurrency: 2
+pipeline_item_concurrency: 2

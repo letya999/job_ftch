@@ -58,7 +58,6 @@ services:
       JOB_FTCH_STORE_DSN: postgresql://${POSTGRES_USER:-job_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-job_ftch}
       JOB_FTCH_QDRANT_URL: http://qdrant:6333
       JOB_FTCH_CONFIGS_DIR: /app/job_ftch/adapters/telegram_bot/config/tenants
-      JOB_FTCH_LANGFUSE_HOST: http://host.docker.internal:3001
       JOB_FTCH_OPENOBSERVE_URL: http://openobserve:5080
       HF_HUB_DISABLE_PROGRESS_BARS: "1"
       HF_HUB_VERBOSITY: error

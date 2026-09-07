@@ -335,6 +335,15 @@ def _load_tenant_runner(settings: Settings) -> TenantRunner:
     return TenantRunner.from_tenants(load_tenants(settings.configs_dir), base_settings=settings)
 
 
+def _configure_runtime_observability(settings: Settings) -> None:
+    """Configure logs and OpenObserve before any pipeline tenant work starts."""
+    from job_ftch.application.logging import configure_logging
+    from job_ftch.infrastructure.observability import configure_observability
+
+    configure_logging(settings.log_level)
+    configure_observability(settings)
+
+
 def _merge_run_summaries(summaries: list[RunSummary]) -> RunSummary:
     """Merge a sequence of RunSummary objects into one aggregated summary."""
     merged = RunSummary()
@@ -435,6 +444,7 @@ def _merge_run_summaries(summaries: list[RunSummary]) -> RunSummary:
 
 
 async def _run_scheduler(settings: Settings) -> None:
+    _configure_runtime_observability(settings)
     if settings.configs_dir is None:
         scheduler = Scheduler(settings, run_pipeline_from_settings)
         await scheduler.run_forever()
@@ -443,7 +453,7 @@ async def _run_scheduler(settings: Settings) -> None:
     runner = _load_tenant_runner(settings)
 
     async def run_all_tenants(_: Settings) -> RunSummary:
-        summaries = await runner.run_all()
+        summaries = await runner.run_all(trigger="schedule")
         return _merge_run_summaries(summaries)
 
     scheduler = Scheduler(settings, run_all_tenants)
@@ -591,6 +601,7 @@ def main(argv: list[str] | None = None) -> int:
     settings = build_settings(args)
 
     if args.command == "run":
+        _configure_runtime_observability(settings)
         return _cmd_run_modern(settings, args)
     if args.command == "validate":
         return _cmd_validate(args)
@@ -620,9 +631,11 @@ def main(argv: list[str] | None = None) -> int:
         asyncio.run(_run_scheduler(settings))
         return 0
     if args.command == "pipeline":
+        _configure_runtime_observability(settings)
         asyncio.run(run_pipeline_from_settings(settings))
         return 0
     # No subcommand: legacy one-shot pipeline with the bare flags.
+    _configure_runtime_observability(settings)
     asyncio.run(run_pipeline_from_settings(settings))
     return 0
 

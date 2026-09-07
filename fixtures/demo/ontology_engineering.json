@@ -1,0 +1,18 @@
+{
+  "profile_description": "Applied AI engineer focused on reliable Python, LLM and retrieval platforms.",
+  "positive_keywords": [
+    {"term": "Python", "weight": 5},
+    {"term": "LLM", "weight": 5},
+    {"term": "RAG", "weight": 4},
+    {"term": "FastAPI", "weight": 3},
+    {"term": "evaluation", "weight": 3}
+  ],
+  "negative_keywords": [
+    {"term": "sales quota", "weight": 5},
+    {"term": "manual QA", "weight": 4}
+  ],
+  "anti_patterns": ["pure sales", "manual QA"],
+  "skills": ["Python", "LLM", "RAG", "FastAPI", "Docker"],
+  "positive_examples": ["production RAG service", "LLM platform reliability"],
+  "negative_examples": ["quota-carrying sales role"]
+}

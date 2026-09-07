@@ -1,0 +1,18 @@
+[
+  {
+    "source_kind": "career_site",
+    "source_name": "demo_product_edge",
+    "external_id": "pm-004",
+    "url": "https://jobs.example.test/pm-004",
+    "text": "Senior Backend Engineer\nImplement Python services and database migrations. No roadmap, discovery or product ownership.",
+    "metadata": {"company": "Code Forge", "location": "Remote"}
+  },
+  {
+    "source_kind": "career_site",
+    "source_name": "demo_product_edge",
+    "external_id": "pm-005",
+    "url": "https://jobs.example.test/pm-005",
+    "text": "AI Product Operations Lead\nCoordinate roadmap reviews, launch readiness and stakeholder alignment for an AI product portfolio.",
+    "metadata": {"company": "Orbit Labs", "location": "Europe"}
+  }
+]

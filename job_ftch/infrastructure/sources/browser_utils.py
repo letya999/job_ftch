@@ -81,7 +81,7 @@ BROWSER_KEYS = frozenset(
     }
 )
 
-_BROWSER_CLEANUP_TIMEOUT_SECONDS = 2.0
+_BROWSER_CLEANUP_TIMEOUT_SECONDS = 5.0
 _BROWSER_CLEANUP_CANCEL_DRAIN_SECONDS = 0.05
 _BROWSER_DRIVER_STALE_SECONDS = 180
 _BROWSER_TERMINATE_GRACE_SECONDS = 5.0
@@ -370,7 +370,7 @@ async def _cleanup_browser_stack(page: Any, context: Any, browser: Any | None = 
     loop = asyncio.get_running_loop()
     total_budget = _BROWSER_CLEANUP_TIMEOUT_SECONDS
     deadline = loop.time() + total_budget
-    step_cap = max(0.001, min(0.5, total_budget / 4))
+    step_cap = max(0.001, min(1.25, total_budget / 4))
     closed_ok = True
 
     async def _step(awaitable: Any, *, label: str, cap: float | None = None) -> bool:

@@ -711,6 +711,17 @@ class RemoteRocketshipParser(HtmlAggregatorParser):
             include_if_detail_page=False,
         )
 
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        # The former generic /jobs/ listing now returns 404, while the
+        # category pages remain live.  Keep the source and its intent by
+        # routing the tenant's AI search to the current category surface.
+        if urlparse(spec.url).path.rstrip("/") == "/jobs":
+            spec = spec.model_copy(
+                update={"url": "https://www.remoterocketship.com/jobs/ai-engineer/"}
+            )
+        async for item in super().parse(spec, client):
+            yield item
+
 
 def _register(name: str, parser: type[HtmlAggregatorParser]) -> None:
     register_site_parser(

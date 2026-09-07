@@ -67,6 +67,14 @@ class _FailingSink(_RecordingSink):
         raise RuntimeError("sink is down")
 
 
+class _FailingWebhook:
+    target_id = "webhook:test"
+
+    async def deliver_envelope(self, envelope: DeliveryEnvelope, item: JobRecord) -> None:
+        del envelope, item
+        raise RuntimeError("receiver is down")
+
+
 def _job() -> JobRecord:
     return JobRecord(
         raw_item_id="raw-1",
@@ -184,6 +192,33 @@ async def test_partial_delivery_retry_does_not_repeat_primary_sink() -> None:
         await pipeline._emit_outbox_targets(job, retry_records)
 
     assert primary_sink.items == [job]
+
+
+@pytest.mark.asyncio
+async def test_webhook_failure_leaves_outbox_pending_without_failing_ingest() -> None:
+    store = InMemoryStore()
+    job = _job()
+    primary_sink = _RecordingSink()
+    pipeline = Pipeline(
+        source=_EmptySource(),
+        sanitize_node=SanitizeNode(),
+        nodes=[],
+        sink=primary_sink,
+        store=store,
+        delivery_targets=[_FailingWebhook()],
+    )
+    raw = RawItem(
+        source_kind=SourceKind.DEBUG,
+        source_name="test",
+        external_id="raw-1",
+        text="role",
+    )
+
+    records = await pipeline._enqueue_outbox(raw, job)
+    await pipeline._emit_outbox_targets(job, records)
+
+    assert primary_sink.items == [job]
+    assert len(await store.list_pending_outbox()) == 1
 
 
 @pytest.mark.asyncio

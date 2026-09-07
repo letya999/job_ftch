@@ -15,6 +15,7 @@ from job_ftch.infrastructure.sources.site_parsers.large_employer_boards import (
     TochkaCareerParser,
 )
 from job_ftch.infrastructure.sources.site_parsers.ozon import OzonCareerParser
+from job_ftch.infrastructure.sources.site_parsers.publicis import PublicisCareerParser
 from job_ftch.infrastructure.sources.site_parsers.tele2_kz import _extract_hh_employer_url
 
 
@@ -83,6 +84,52 @@ def test_ozon_career_defaults_stay_http_only() -> None:
     spec = apply_runtime_defaults(CareerSiteSpec(url="https://career.ozon.ru/"))
     assert spec.monitor_config.get("render") is False
     assert getattr(OzonCareerParser(), "confirmed_empty_on_empty", False) is True
+
+
+@pytest.mark.asyncio
+async def test_publicis_uses_jibe_api_without_detail_scrape() -> None:
+    class _Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "jobs": [
+                    {
+                        "data": {
+                            "req_id": "140399",
+                            "title": "Senior AI Engineer",
+                            "description": "Build AI systems.",
+                            "hiring_organization": "Publicis Groupe",
+                            "meta_data": {
+                                "canonical_url": "https://careers.publicisgroupe.com/jobs/140399"
+                            },
+                        }
+                    }
+                ]
+            }
+
+    class _Client:
+        async def get(self, url: str, **kwargs: object) -> _Response:
+            assert url.endswith("/api/jobs")
+            assert kwargs["params"] == {"limit": 1, "page": 1, "keywords": "AI"}
+            return _Response()
+
+    items = [
+        item
+        async for item in PublicisCareerParser().parse(
+            CareerSiteSpec(
+                url="https://careers.publicisgroupe.com/jobs",
+                source_name="publicis",
+                limit=1,
+                monitor_config={"_search_keywords": ["AI"]},
+            ),
+            _Client(),
+        )
+    ]
+    assert len(items) == 1
+    assert items[0].external_id == "140399"
+    assert items[0].metadata["parser"] == "publicis_jibe_api"
 
 
 @pytest.mark.asyncio

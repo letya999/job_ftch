@@ -65,8 +65,7 @@ updated: 2026-08-03
 | `[camoufox]` | `camoufox` | Firefox anti-detect tier |
 | `[nodriver]` | `nodriver` | CDP-native browser tier |
 | `[parity_lab]` | `cryptography`, `httpx[http2]`, `hypercorn[h3]`, `maxminddb`, `starlette` | Local-only browser/network parity lab |
-| `[tracing]` | OTLP HTTP exporter | OpenObserve/Langfuse export |
-| `[langfuse]` | `langfuse` | Eval/trace client |
+| `[tracing]` | OTLP HTTP exporter | OpenObserve export |
 | `[resilience]` | `tenacity` | Explicit retry helpers |
 | `[ollama]` | `httpx` | Ollama-compatible LLM path |
 

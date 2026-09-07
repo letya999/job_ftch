@@ -38,6 +38,7 @@ class T2CareerParser:
     supports_search = True
     search_mode = "combined"
     confirmed_empty_on_empty = True
+    terminal_on_error = True
 
     def build_search_urls(
         self, base_url: str, keywords: Any, *, limit: int | None = None
@@ -72,15 +73,10 @@ class T2CareerParser:
         return "t2_career"
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        # The public page is only a landing page; the stable HH employer board
+        # is the authoritative listing. Avoid spending the source deadline on
+        # a redirect that is not needed for ingestion.
         employer_url = _T2_HH_URL
-        try:
-            response = await client.get(spec.url, follow_redirects=True)
-            response.raise_for_status()
-            extracted = _extract_hh_employer_url(response.text)
-            if extracted:
-                employer_url = extracted
-        except Exception:  # noqa: BLE001 - HH employer 4219 is the known listing
-            pass
         delegated = spec.model_copy(update={"url": employer_url})
         async for item in HhParser().parse(delegated, client):
             metadata = dict(item.metadata or {})

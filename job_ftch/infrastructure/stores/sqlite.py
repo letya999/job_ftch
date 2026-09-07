@@ -45,6 +45,7 @@ class SQLiteStore(SQLStoreAdapter):
     _SQL_DEDUP_CLAIM_OWNER = "SELECT owner_id FROM jf_dedup_claims WHERE claim_key = ?"
     _SQL_DEDUP_CLAIM_RELEASE = "DELETE FROM jf_dedup_claims WHERE claim_key = ? AND owner_id = ?"
     _SQL_OBSERVATION_GET = "SELECT payload_json FROM jf_observations WHERE tenant_id = ? AND stable_id = ? AND content_hash = ?"
+    _SQL_OBSERVATION_LIST = "SELECT payload_json FROM jf_observations WHERE tenant_id = ? ORDER BY json_extract(payload_json, '$.observed_at'), stable_id, content_hash LIMIT ?"
     _SQL_OBSERVATION_MAX_VERSION = (
         "SELECT MAX(content_version) FROM jf_observations WHERE tenant_id = ? AND stable_id = ?"
     )

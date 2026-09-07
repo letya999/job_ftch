@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime  # noqa: TC003
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -17,8 +19,8 @@ class SourceOperatorFlag(BaseModel):
 
 class PipelineRunStats(BaseModel):
     source_run_id: str
-    started_at: str
-    finished_at: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
     duration_ms: int = 0
     source_count: int = 0
     ok_sources: int = 0
@@ -50,8 +52,8 @@ class SourceRunStatsRow(BaseModel):
     source_kind: str
     source_name: str
     status: str
-    started_at: str
-    finished_at: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
     yielded: int = 0
     fetched: int = 0
     extracted: int = 0

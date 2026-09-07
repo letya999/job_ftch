@@ -73,10 +73,13 @@ def _normalize_telegram_entity(value: str) -> str | None:
         return domain.removeprefix("@") or None
     if stripped.startswith("https://t.me/") or stripped.startswith("http://t.me/"):
         parsed = urlsplit(stripped)
-        path = parsed.path.strip("/")
+        path_parts = [part for part in parsed.path.split("/") if part]
+        if path_parts and path_parts[0].casefold() == "s":
+            path_parts.pop(0)
+        path = path_parts[0] if path_parts else ""
         if not path:
             return None
-        return path.split("/", maxsplit=1)[0].removeprefix("@") or None
+        return path.removeprefix("@").strip() or None
     return stripped.removeprefix("@") or None
 
 

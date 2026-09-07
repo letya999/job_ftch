@@ -52,6 +52,48 @@ FAIL_STATUSES = frozenset(
     }
 )
 
+SOURCE_OUTCOME_CATEGORIES = frozenset(
+    {
+        "ok",
+        "policy_not_scraped",
+        "hard_failure",
+        "partial",
+        "unconfirmed_empty",
+        "transport_error",
+    }
+)
+
+
+def source_status_category(status: str | None, error: str | None = None) -> str:
+    """Map a source outcome to the small set used by operational metrics.
+
+    Keep the raw status/error untouched in run history; this is only the
+    stable aggregation dimension used by dashboards and alerts.
+    """
+    normalized = str(status or "").strip().casefold()
+    detail = str(error or "").strip().casefold()
+    if normalized == "policy_not_scraped":
+        return "policy_not_scraped"
+    if normalized in {"partial", "partial_with_items"}:
+        return "partial"
+    if normalized == "unconfirmed_empty":
+        return "unconfirmed_empty"
+    if normalized == "transport_error" or any(
+        token in detail
+        for token in (
+            "transporterror",
+            "transport error",
+            "connecterror",
+            "connecttimeout",
+            "networkerror",
+            "connection refused",
+        )
+    ):
+        return "transport_error"
+    if normalized in FAIL_STATUSES or "source_hard_deadline_exceeded" in detail:
+        return "hard_failure"
+    return "ok"
+
 
 @dataclass(frozen=True, slots=True)
 class SourceQualityStats:

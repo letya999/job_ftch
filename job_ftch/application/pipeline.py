@@ -188,6 +188,8 @@ class RunSummary(StatsBase):
     # that found nothing, and adapters report "nothing found" for work that
     # never happened.
     skipped_already_active: bool = False
+    trigger: str = "manual"
+    config_fingerprint: str | None = None
 
     def finish(self) -> RunSummary:
         self.finished_at = datetime.now(UTC)
@@ -461,7 +463,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
             candidate_sink_attempted=summary.emitted,
             dropped=summary.dropped,
             failed=summary.failed,
-            source_outcomes=summary.source_outcomes,
+            source_outcome_count=len(summary.source_outcomes),
         )
         return summary
 
@@ -610,7 +612,11 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 # workers could all pass it at the limit and overshoot the cap.
                 if isinstance(item, RawItem):
                     await self._record_observation(item)
-                if processed_key is not None and await self._store.has_processed(processed_key):
+                if (
+                    processed_key is not None
+                    and not bool(getattr(settings, "pipeline_replay_mode", False))
+                    and await self._store.has_processed(processed_key)
+                ):
                     result["outcome"] = "already_processed"
                     item_span.set_attribute("job_ftch.result", "already_processed")
                     return result
@@ -1187,7 +1193,18 @@ class Pipeline[PipelineInput, PipelineOutput]:
         for record in targets:
             if record.state is OutboxState.DELIVERED:
                 continue
-            await self._deliver_outbox_record(record, fallback_item=delivery)
+            try:
+                await self._deliver_outbox_record(record, fallback_item=delivery)
+            except Exception as exc:
+                if record.sink_name.startswith("webhook:"):
+                    self._logger.warning(
+                        "webhook_delivery_deferred",
+                        sink_name=record.sink_name,
+                        idempotency_key=record.idempotency_key,
+                        error=str(exc),
+                    )
+                    continue
+                raise
             await self._store.mark_outbox_delivered(record.idempotency_key)
 
     async def _deliver_outbox_record(self, record: OutboxRecord, *, fallback_item: object) -> None:

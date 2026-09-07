@@ -95,7 +95,6 @@ bgem3 = [
     "huggingface-hub>=1.24,<2",
 ]
 tracing = ["opentelemetry-exporter-otlp-proto-http>=1.27"]
-langfuse = ["langfuse>=2.0"]
 all = [
     "aiosqlite>=0.20",
     "asyncpg>=0.31.0",
@@ -135,7 +134,6 @@ all = [
     "ctranslate2>=4.0",
     "sentencepiece>=0.1.99",
     "PyYAML>=6.0",
-    "langfuse>=2.0",
     "tenacity>=8.2",
     "trafilatura>=1.8",
     "extruct>=0.16",

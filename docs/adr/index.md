@@ -95,6 +95,9 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [084 — Operator persistent/domain sessions, fingerprint probes, trace, extendable captcha, parser host override](084-operator-persistent-fingerprint-parser-override.md) - **Status**: ACCEPTED (Updated: 2026-08-19)
 - [085 — Source-assessed career-site search recipes](085-source-assessment-search-recipe.md) - **Status**: ACCEPTED (Updated: 2026-09-01)
 - [086 — Human source labels and per-run ingest stats](086-source-quality-run-stats.md) - **Status**: ACCEPTED (Updated: 2026-09-04)
+- [087 — Autonomous tenant search lanes](087-autonomous-tenant-search-lanes.md) - Tenant is the unit of isolated scheduling, configuration, execution and storage. (Updated: 2026-09-06)
+- [088 — Private pull API and optional webhook delivery](088-private-pull-api-and-webhook-delivery.md) - Stored tenant data is exposed through an authenticated generic API; webhooks are optional acceleration. (Updated: 2026-09-06)
+- [089 — OpenAI observability in OpenObserve](089-openai-observability-in-openobserve.md) - OpenAI operational telemetry is separated from ingest logs without adding LangFuse or another backend. (Updated: 2026-09-06)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

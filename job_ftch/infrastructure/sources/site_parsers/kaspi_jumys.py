@@ -39,6 +39,7 @@ class KaspiJumysParser:
     has_custom_parse = True
     supports_discover = False
     confirmed_empty_on_empty = True
+    terminal_on_error = True
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url

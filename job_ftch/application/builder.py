@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from contextlib import suppress
 from dataclasses import dataclass
 from hashlib import sha256
@@ -697,6 +698,13 @@ def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = No
         {
             "tenant_id": tenant_id,
             "tenant_display_name": tenant.display_name,
+            "tenant_enabled": tenant.enabled,
+            "webhook_url": tenant.webhook_url or base.get("webhook_url"),
+            "webhook_secret": (
+                os.environ.get(tenant.webhook_secret_env, "")
+                if tenant.webhook_secret_env
+                else base.get("webhook_secret")
+            ),
             "source_backend": tenant.source_backend,
             "sink_backend": (
                 tenant.output.backend or tenant.sink_backend or base.get("sink_backend")
@@ -750,7 +758,21 @@ def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = No
                 else base.get("pipeline_item_concurrency_adaptive")
             ),
             "pipeline_max_text_length": tenant.pipeline_max_text_length,
-            "filter_profile_path": tenant.filter_profile_path,
+            "filter_profile_path": (
+                tenant.profile_path or tenant.filter_profile_path or base.get("filter_profile_path")
+            ),
+            "derived_ontology_path": str(tenant.ontology_path)
+            if tenant.ontology_path is not None
+            else base.get("derived_ontology_path"),
+            "pipeline_graph_path": tenant.pipeline_recipe_path or base.get("pipeline_graph_path"),
+            # A tenant-owned recipe is a deliberate graph choice.  The shared
+            # runtime hash protects the default recipe only; applying it to a
+            # different tenant graph would reject valid per-tenant pipelines.
+            "pipeline_graph_expected_hash": (
+                base.get("pipeline_graph_expected_hash")
+                if tenant.pipeline_recipe_path is None
+                else None
+            ),
             "schedule_interval_seconds": (
                 tenant.schedule.interval_seconds if tenant.schedule is not None else None
             ),
@@ -1994,13 +2016,30 @@ def build_output_sinks(
 def build_delivery_targets(
     settings: Settings, posting_sink: CountedSink[JobRecord] | None
 ) -> tuple[DeliveryTarget[JobRecord], ...]:
-    if posting_sink is None:
-        return ()
+    targets: list[DeliveryTarget[JobRecord]] = []
     from job_ftch.application.delivery import SinkDeliveryTarget
 
-    destination = settings.telegram_publish_entity or str(settings.posting_settings().output_path)
-    fingerprint = sha256(destination.encode()).hexdigest()[:16]
-    return (SinkDeliveryTarget(f"posting:{settings.posting_backend}:{fingerprint}", posting_sink),)
+    if posting_sink is not None:
+        destination = settings.telegram_publish_entity or str(
+            settings.posting_settings().output_path
+        )
+        fingerprint = sha256(destination.encode()).hexdigest()[:16]
+        targets.append(
+            SinkDeliveryTarget(f"posting:{settings.posting_backend}:{fingerprint}", posting_sink)
+        )
+    if settings.webhook_url and not settings.webhook_secret:
+        raise ValueError("webhook_secret is required when webhook_url is configured")
+    if settings.webhook_url and settings.webhook_secret:
+        from job_ftch.infrastructure.delivery.webhook import WebhookDeliveryTarget
+
+        targets.append(
+            WebhookDeliveryTarget(
+                settings.webhook_url,
+                settings.webhook_secret.get_secret_value(),
+                timeout_seconds=settings.webhook_timeout_seconds,
+            )
+        )
+    return tuple(targets)
 
 
 async def build_store(settings: Settings) -> Store:

@@ -286,6 +286,21 @@ class InMemoryStore:
         raw = await self.get(f"observation:{tenant_id}:{stable_id}:{content_hash}")
         return ObservationLedgerEntry.model_validate_json(raw) if raw else None
 
+    async def list_observations(
+        self, *, tenant_id: str = "default", limit: int = 1000
+    ) -> tuple[ObservationLedgerEntry, ...]:
+        prefix = f"observation:{tenant_id}:"
+        entries: list[ObservationLedgerEntry] = []
+        for key, raw in self._kv.items():
+            if not key.startswith(prefix):
+                continue
+            try:
+                entries.append(ObservationLedgerEntry.model_validate_json(raw))
+            except (TypeError, ValueError):
+                continue
+        entries.sort(key=lambda item: (item.observed_at, item.observation_id))
+        return tuple(entries[: max(int(limit), 0)])
+
     async def has_processed(self, item_id: str) -> bool:
         timestamp = await self.get(_processed_timestamp_key(item_id))
         if timestamp is not None:

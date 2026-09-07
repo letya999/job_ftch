@@ -9,6 +9,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [auth index](auth/index.md)
 - [backends index](backends/index.md)
 - [bypass index](bypass/index.md)
+- [delivery index](delivery/index.md)
 - [llm index](llm/index.md)
 - [observability index](observability/index.md)
 - [ontology index](ontology/index.md)

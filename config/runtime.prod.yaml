@@ -18,8 +18,9 @@ pipeline_item_concurrency_adaptive: false
 source_soft_deadline_seconds: 60.0
 source_hard_deadline_seconds: 180.0
 
-# Production pipeline traces go to Langfuse when its credentials are present.
-tracing_enabled: true
+# Tracing has no production exporter. Operational logs and metrics go to
+# OpenObserve; do not configure a second trace destination in this image.
+tracing_enabled: false
 tracing_capture_payloads: false
 openobserve_enabled: true
 

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from job_ftch.application.pipeline import RunSummary, SourceRunStats
 from job_ftch.application.run_stats import build_pipeline_run_stats, build_source_run_stats
-from job_ftch.application.source_quality import SourceQualityStats
+from job_ftch.application.source_quality import SourceQualityStats, source_status_category
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.config import Settings
 from job_ftch.domain import TenantConfig
@@ -81,6 +82,16 @@ def test_build_pipeline_and_source_run_stats() -> None:
     assert by_key["hh_ru"].emitted == 5
     assert by_key["superjob_ru"].quality_important is False
     assert by_key["superjob_ru"].status == "waf_challenge"
+    extra = json.loads(pipeline.extra_json)
+    assert extra["source_outcome_categories"] == {"hard_failure": 1, "ok": 1}
+
+
+def test_source_status_category_keeps_transport_and_partial_distinct() -> None:
+    assert source_status_category("policy_not_scraped") == "policy_not_scraped"
+    assert source_status_category("partial_with_items") == "partial"
+    assert source_status_category("unconfirmed_empty") == "unconfirmed_empty"
+    assert source_status_category("source_error", "ConnectTimeout") == "transport_error"
+    assert source_status_category("deadline_exceeded") == "hard_failure"
 
 
 @pytest.mark.asyncio

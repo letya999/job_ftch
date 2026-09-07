@@ -92,6 +92,7 @@ class SQLStoreAdapter(abc.ABC):
     _SQL_OBSERVATION_MAX_VERSION: str
     _SQL_OBSERVATION_INSERT: str
     _SQL_OBSERVATION_GET: str
+    _SQL_OBSERVATION_LIST: str
     _SQL_SNAPSHOT_INSERT: str
     _SQL_SNAPSHOT_LAST_RUN_HASHES: str
     _SQL_SNAPSHOT_LAST_RUN_IDS: str
@@ -284,6 +285,19 @@ class SQLStoreAdapter(abc.ABC):
             (tenant_id, stable_id, content_hash),
         )
         return ObservationLedgerEntry.model_validate_json(str(row[0])) if row else None
+
+    async def list_observations(
+        self, *, tenant_id: str = "default", limit: int = 1000
+    ) -> tuple[ObservationLedgerEntry, ...]:
+        rows = await self._fetchall(self._SQL_OBSERVATION_LIST, (tenant_id, max(int(limit), 0)))
+        entries: list[ObservationLedgerEntry] = []
+        for row in rows:
+            try:
+                entries.append(ObservationLedgerEntry.model_validate_json(str(row[0])))
+            except (TypeError, ValueError):
+                continue
+        entries.sort(key=lambda item: (item.observed_at, item.observation_id))
+        return tuple(entries)
 
     async def has_processed(self, item_id: str) -> bool:
         timestamp = await self.get(_processed_timestamp_key(item_id))

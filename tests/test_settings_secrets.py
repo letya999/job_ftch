@@ -4,14 +4,13 @@ from __future__ import annotations
 
 
 def test_settings_secret_fields_are_secret_str() -> None:
-    """The 5 sensitive fields are typed SecretStr, not plain str."""
+    """The sensitive fields are typed SecretStr, not plain str."""
     from job_ftch.config import Settings
 
     fields = (
         "openai_api_key",
         "telegram_api_hash",
         "telegram_proxy_password",
-        "langfuse_secret_key",
         "qdrant_api_key",
     )
     for name in fields:

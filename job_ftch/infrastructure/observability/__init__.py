@@ -6,7 +6,7 @@ from job_ftch.infrastructure.observability.otel_setup import configure_tracing, 
 
 
 def configure_observability(settings: Settings) -> None:
-    """Configure isolated destinations: Langfuse traces and OpenObserve ops."""
+    """Configure operational telemetry without an external trace exporter."""
     configure_tracing(settings)
     configure_openobserve(settings)
 
