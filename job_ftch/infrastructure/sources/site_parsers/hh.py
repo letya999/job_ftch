@@ -59,7 +59,6 @@ _URL_FILTER = (
     r"(?:[a-z0-9-]+\.)?(?:hh\.(?:ru|kz|uz|by)|hh1\.az|headhunter\.kg|rabota\.by)/vacancy/\d+"
 )
 _LISTING_TIMESTAMP_RE = re.compile(r'"publicationTime"\s*:\s*\{[^}]*"@timestamp"\s*:\s*(\d+)')
-_MAX_DETAIL_REQUESTS = 10
 _PROXY_DOMAINS = [
     "hh.ru",
     "hh.kz",
@@ -473,9 +472,14 @@ class HhParser:
                 logger.debug("hh.browser_discover_failed", url=spec.url, error=str(exc))
 
         seen_final_ids: set[str] = set()
+        detail_limit = spec.detail_limit
+        if detail_limit is None:
+            from job_ftch.config import get_settings
+
+            detail_limit = get_settings().career_site_default_detail_limit
         detail_requests = 0
         for detail_url in collected_urls[:limit]:
-            if detail_requests >= _MAX_DETAIL_REQUESTS:
+            if detail_limit is not None and detail_requests >= detail_limit:
                 snapshot = listing_snapshots.get(_detail_identity(detail_url))
                 if snapshot:
                     yield _item_from_listing(detail_url, *snapshot, source_name, spec.url)

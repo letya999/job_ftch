@@ -217,3 +217,39 @@ async def test_yandex_parser_prefers_http_publications_api() -> None:
     assert len(items) == 1
     assert items[0].external_id == "15322"
     assert "LLM" in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_yandex_parser_passes_runtime_search_keywords_to_api() -> None:
+    parser = YandexJobsParser()
+    client = _FakeClient(
+        {
+            "https://yandex.ru/jobs/api/publications?page_size=1&text=LLM+Engineer": _FakeResponse(
+                "",
+                "https://yandex.ru/jobs/api/publications?page_size=1&text=LLM+Engineer",
+                payload={
+                    "results": [
+                        {
+                            "id": 42,
+                            "title": "LLM Engineer",
+                            "publication_slug_url": "/jobs/vacancies/llm-engineer-42",
+                        }
+                    ]
+                },
+            )
+        }
+    )
+
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(
+                url="https://yandex.ru/jobs/vacancies",
+                limit=1,
+                monitor_config={"_search_keywords": ["LLM Engineer"]},
+            ),
+            client,
+        )
+    ]
+
+    assert [item.external_id for item in items] == ["42"]

@@ -7,6 +7,7 @@ or API surfaces can render the same run signal consistently.
 
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -156,13 +157,14 @@ def render_runtime_run_report_text(report: RuntimeRunReport) -> str:
     text = "\n".join(funnel_parts)
     if report.notable_drop_reasons:
         reasons_str = ", ".join(
-            f"{reason.replace('_', ' ')}: {count}"
+            f"{html.escape(reason.replace('_', ' '), quote=True)}: {count}"
             for reason, count in report.notable_drop_reasons.items()
         )
         text += f"\n<i>Причины дропа: {reasons_str}</i>"
     if report.source_failures:
         problem_lines = [
-            f"{item.get('source_name') or item.get('source_id')}: {item.get('error')}"
+            f"{html.escape(str(item.get('source_name') or item.get('source_id') or ''), quote=True)}: "
+            f"{html.escape(str(item.get('error') or ''), quote=True)}"
             for item in report.source_failures
         ]
         text += "\n<i>Проблемные источники: " + "; ".join(problem_lines) + "</i>"

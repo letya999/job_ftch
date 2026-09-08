@@ -45,6 +45,7 @@ from job_ftch.application.vacancy_feedback import is_feedback_enabled
 
 if TYPE_CHECKING:
     from job_ftch.adapters.telegram_bot.config import TelegramBotConfig
+    from job_ftch.application.contracts import Store
     from job_ftch.application.tenant_runner import TenantRunner
 
 logger = structlog.get_logger(__name__)
@@ -287,6 +288,7 @@ async def _recover_pending_scheduler_publish(
 async def _send_scheduler_run_report(
     bot: Bot,
     *,
+    store: Store,
     tenant_id: str,
     publish_user_id: object,
     run_result: object,
@@ -298,6 +300,14 @@ async def _send_scheduler_run_report(
     user_chat_id = str(publish_user_id).strip()
     if not user_chat_id:
         return
+    try:
+        await _maybe_await(
+            store.set_run_state(
+                "bot_scheduler:last_owner_report_attempt_at", datetime.now(UTC).isoformat()
+            )
+        )
+    except Exception as exc:
+        logger.warning("scheduler_owner_report_state_failed", tenant_id=tenant_id, error=str(exc))
     report = build_runtime_run_report(run_result, duration_seconds=duration_seconds)
     footer = render_runtime_run_footer(report)
     text = f"✅ Автозапуск готов  {footer}\n\n{render_runtime_run_report_text(report)}"
@@ -310,12 +320,34 @@ async def _send_scheduler_run_report(
     try:
         await bot.send_message(user_chat_id, text, parse_mode="HTML")
     except Exception as exc:
+        try:
+            await _maybe_await(
+                store.set_run_state("bot_scheduler:last_owner_report_error", str(exc))
+            )
+        except Exception as state_exc:
+            logger.warning(
+                "scheduler_owner_report_state_failed",
+                tenant_id=tenant_id,
+                error=str(state_exc),
+            )
         logger.warning(
             "scheduler_owner_report_failed",
             tenant_id=tenant_id,
             user_id=user_chat_id,
             error=str(exc),
         )
+    else:
+        try:
+            await _maybe_await(
+                store.set_run_state(
+                    "bot_scheduler:last_owner_report_success_at", datetime.now(UTC).isoformat()
+                )
+            )
+            await _maybe_await(store.set_run_state("bot_scheduler:last_owner_report_error", ""))
+        except Exception as exc:
+            logger.warning(
+                "scheduler_owner_report_state_failed", tenant_id=tenant_id, error=str(exc)
+            )
 
 
 async def _send_scheduler_failure_report(
@@ -997,6 +1029,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         )
                     await _send_scheduler_run_report(
                         bot,
+                        store=store,
                         tenant_id=tenant_id,
                         publish_user_id=publish_user_id,
                         run_result=run_result,

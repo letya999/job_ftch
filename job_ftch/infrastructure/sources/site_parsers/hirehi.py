@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import html
 import json
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from selectolax.lexbor import LexborHTMLParser
 
@@ -25,6 +26,17 @@ if TYPE_CHECKING:
     from job_ftch.domain.source_spec import CareerSiteSpec
 
 _URL_FILTER = r"hirehi\.ru/[a-z0-9-]+/[a-z0-9-]+-\d+/?$"
+
+
+def _job_posting(html_text: str) -> dict[str, Any] | None:
+    for script in LexborHTMLParser(html_text).css('script[type="application/ld+json"]'):
+        try:
+            value = json.loads(script.text())
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict) and value.get("@type") == "JobPosting":
+            return value
+    return None
 
 
 class HireHiParser:
@@ -56,47 +68,74 @@ class HireHiParser:
         return None
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
-        response = await client.get(spec.url, follow_redirects=True)
-        response.raise_for_status()
-        base_url = str(getattr(response, "url", spec.url) or spec.url)
         limit = spec.limit or 50
         detail_re = re.compile(_URL_FILTER, re.IGNORECASE)
         seen: set[str] = set()
-        for node in LexborHTMLParser(str(response.text)).css('script[type="application/ld+json"]'):
-            try:
-                payload = json.loads(node.text())
-            except (TypeError, json.JSONDecodeError):
-                continue
-            elements = payload.get("itemListElement", []) if isinstance(payload, dict) else []
-            if not isinstance(elements, list):
-                continue
-            for element in elements:
-                if not isinstance(element, dict):
+        page = 1
+        while len(seen) < limit:
+            parsed = urlparse(spec.url)
+            query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+            if page > 1:
+                query["page"] = str(page)
+            page_url = urlunparse(parsed._replace(query=urlencode(query)))
+            response = await client.get(page_url, follow_redirects=True)
+            response.raise_for_status()
+            base_url = str(getattr(response, "url", page_url) or page_url)
+            found = 0
+            for node in LexborHTMLParser(str(response.text)).css(
+                'script[type="application/ld+json"]'
+            ):
+                try:
+                    payload = json.loads(node.text())
+                except (TypeError, json.JSONDecodeError):
                     continue
-                item = element.get("item") if isinstance(element.get("item"), dict) else element
-                if not isinstance(item, dict):
+                elements = payload.get("itemListElement", []) if isinstance(payload, dict) else []
+                if not isinstance(elements, list):
                     continue
-                url = urljoin(base_url, str(item.get("url") or ""))
-                if not detail_re.search(url) or url in seen:
-                    continue
-                title = str(item.get("name") or "").strip()
-                if not title:
-                    continue
-                seen.add(url)
-                yield build_raw_item(
-                    source_kind=SourceKind.CAREER_SITE,
-                    source_name=spec.source_name or "hirehi",
-                    external_id=url.rstrip("/").rsplit("/", 1)[-1],
-                    url=url,
-                    text=title,
-                    metadata={
-                        "parser": "hirehi",
-                        "board_url": spec.url,
-                        "detail_vacancy_confirmed": True,
-                    },
-                )
-                if len(seen) >= limit:
-                    return
+                for element in elements:
+                    if not isinstance(element, dict):
+                        continue
+                    item = element.get("item") if isinstance(element.get("item"), dict) else element
+                    if not isinstance(item, dict):
+                        continue
+                    url = urljoin(base_url, str(item.get("url") or ""))
+                    if not detail_re.search(url) or url in seen:
+                        continue
+                    seen.add(url)
+                    found += 1
+                    try:
+                        detail = await client.get(url, follow_redirects=True)
+                        detail.raise_for_status()
+                        posting = _job_posting(str(detail.text))
+                    except Exception:  # noqa: BLE001 - preserve the listing fallback
+                        posting = None
+                    title = str((posting or item).get("title") or item.get("name") or "").strip()
+                    description = " ".join(
+                        LexborHTMLParser(
+                            f"<div>{html.unescape(str((posting or {}).get('description') or ''))}</div>"
+                        )
+                        .text(separator=" ", strip=True)
+                        .split()
+                    )
+                    if not title:
+                        continue
+                    yield build_raw_item(
+                        source_kind=SourceKind.CAREER_SITE,
+                        source_name=spec.source_name or "hirehi",
+                        external_id=url.rstrip("/").rsplit("/", 1)[-1],
+                        url=url,
+                        text="\n".join(part for part in (title, description) if part),
+                        metadata={
+                            "parser": "hirehi",
+                            "board_url": spec.url,
+                            "detail_vacancy_confirmed": posting is not None,
+                        },
+                    )
+                    if len(seen) >= limit:
+                        return
+            if found == 0:
+                return
+            page += 1
 
     def build_search_urls(
         self,

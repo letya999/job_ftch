@@ -306,7 +306,8 @@ class AgileFluentParser(HtmlAggregatorParser):
         page_size = min(50, max(limit, 1))
         emitted = 0
         seen: set[str] = set()
-        for page in range(1, DEFAULT_LISTING_MAX_PAGES + 1):
+        page = 1
+        while True:
             try:
                 response = await client.post(
                     self._API_URL,
@@ -360,6 +361,9 @@ class AgileFluentParser(HtmlAggregatorParser):
             has_more = bool(payload.get("hasMore")) if isinstance(payload, dict) else False
             if not has_more:
                 return
+            if not rows:
+                return
+            page += 1
 
 
 class QuickOfferParser(HtmlAggregatorParser):

@@ -322,6 +322,12 @@ class HabrCareerParser:
         keywords = keywords_from_spec(spec)
         seen_ids: set[str] = set()
         emitted = 0
+        detail_limit = spec.detail_limit
+        if detail_limit is None:
+            from job_ftch.config import get_settings
+
+            detail_limit = get_settings().career_site_default_detail_limit
+        detail_requests = 0
         for page in range(1, self._page_count(limit) + 1):
             listing_url = self._listing_page_url(spec.url, page)
             try:
@@ -336,7 +342,20 @@ class HabrCareerParser:
                 if not item_id or item_id in seen_ids:
                     continue
                 seen_ids.add(item_id)
-                yield item
+                detail_item = None
+                if detail_limit is None or detail_requests < detail_limit:
+                    detail_requests += 1
+                    try:
+                        detail_response = await safe_fetch(client, str(item.url))
+                        detail_item = _item_from_detail_html(
+                            str(getattr(detail_response, "url", item.url) or item.url),
+                            str(detail_response.text),
+                            source_name,
+                            spec.url,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - keep the listing fallback
+                        logger.debug("habr.detail_fetch_failed", url=str(item.url), error=str(exc))
+                yield detail_item or item
                 emitted += 1
                 if emitted >= limit:
                     return

@@ -10,6 +10,17 @@ from job_ftch.infrastructure.sources.site_parsers.hirehi import HireHiParser
 
 class _Client:
     async def get(self, url: str, **_: object) -> SimpleNamespace:
+        if "/development/" in url:
+            return SimpleNamespace(
+                url=url,
+                text=(
+                    '<script type="application/ld+json">'
+                    '{"@type":"JobPosting","title":"AI Engineer",'
+                    '"description":"<p>Build production AI systems.</p>"}'
+                    "</script>"
+                ),
+                raise_for_status=lambda: None,
+            )
         return SimpleNamespace(
             url=url,
             text=(
@@ -35,3 +46,4 @@ async def test_hirehi_parser_reads_current_json_ld_listing() -> None:
 
     assert len(items) == 1
     assert str(items[0].url) == "https://hirehi.ru/development/ai-engineer-in-banking-87396"
+    assert "Build production AI systems." in items[0].text

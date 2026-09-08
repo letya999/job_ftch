@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse, urlunparse
@@ -158,6 +159,36 @@ class KaspiParser:
             identity=lambda item: item.url,
         )
         for item in items:
+            try:
+                response = await safe_fetch(client, str(item.url))
+                posting = next(
+                    (
+                        value
+                        for node in LexborHTMLParser(str(response.text)).css(
+                            'script[type="application/ld+json"]'
+                        )
+                        if isinstance((value := json.loads(node.text())), dict)
+                        and value.get("@type") == "JobPosting"
+                    ),
+                    None,
+                )
+                description = ""
+                if posting:
+                    description = " ".join(
+                        LexborHTMLParser(f"<div>{posting.get('description') or ''}</div>")
+                        .text(separator=" ", strip=True)
+                        .split()
+                    )
+                if description and description.casefold() not in item.text.casefold():
+                    yield item.model_copy(
+                        update={
+                            "text": f"{item.text}\n{description}",
+                            "metadata": {**item.metadata, "detail_vacancy_confirmed": True},
+                        }
+                    )
+                    continue
+            except Exception:  # noqa: BLE001 - preserve useful listing evidence
+                pass
             yield item
 
     @property

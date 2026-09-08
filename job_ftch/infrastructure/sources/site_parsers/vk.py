@@ -7,7 +7,11 @@ import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
+from selectolax.lexbor import LexborHTMLParser
+
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
+from job_ftch.domain import SourceKind
+from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
     normalize_search_keywords,
@@ -17,6 +21,9 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from job_ftch.domain.models import RawItem
     from job_ftch.domain.source_spec import CareerSiteSpec
 
 
@@ -101,6 +108,32 @@ class VkTeamParser:
                 break
             offset += len(results)
         return urls
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        for url in await self.discover(spec, client):
+            try:
+                response = await safe_fetch(client, url)
+            except Exception:  # noqa: BLE001 - let the generic path recover on empty
+                continue
+            article = LexborHTMLParser(str(response.text)).css_first(".article")
+            text = " ".join(article.text(separator=" ", strip=True).split()) if article else ""
+            if not text:
+                continue
+            vacancy_id = url.rstrip("/").rsplit("/", 1)[-1]
+            yield build_raw_item(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=spec.source_name or "vk_team",
+                external_id=vacancy_id,
+                url=url,
+                text=text,
+                metadata={
+                    "board_url": spec.url,
+                    "parser": "vk_team",
+                    "company": "VK",
+                    "company_authoritative": True,
+                    "detail_vacancy_confirmed": True,
+                },
+            )
 
     @property
     def __name__(self) -> str:

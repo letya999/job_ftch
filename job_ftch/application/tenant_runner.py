@@ -934,6 +934,15 @@ class TenantRunner:
             "last_publish_skipped_reason": await _read_runtime_state(
                 runtime, "bot_scheduler:last_publish_skipped_reason"
             ),
+            "last_owner_report_attempt_at": await _read_runtime_state(
+                runtime, "bot_scheduler:last_owner_report_attempt_at"
+            ),
+            "last_owner_report_success_at": await _read_runtime_state(
+                runtime, "bot_scheduler:last_owner_report_success_at"
+            ),
+            "last_owner_report_error": await _read_runtime_state(
+                runtime, "bot_scheduler:last_owner_report_error"
+            ),
         }
 
     async def update_posting_config(self, tenant_id: str, channel: str) -> None:

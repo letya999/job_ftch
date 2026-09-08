@@ -364,23 +364,34 @@ class HirifyParser:
         client: Any,
         html: str,
     ) -> list[dict[str, Any]]:
-        response = await fetch_with_retry(
-            client,
-            self._api_url(html),
-            params=self._query_for_spec(spec),
-            headers={
-                "Accept": "application/json, text/plain, */*",
-                "Referer": spec.url,
-                "Origin": "https://hirify.me",
-            },
-            follow_redirects=True,
-        )
-        if response.status_code == 429:
-            raise HirifyRateLimitedError("429 Too many requests from hirify api")
-        response.raise_for_status()
-        payload = response.json()
-        data = payload.get("data") if isinstance(payload, dict) else None
-        return [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
+        rows: list[dict[str, Any]] = []
+        page = 1
+        limit = spec.limit or 50
+        while len(rows) < limit:
+            response = await fetch_with_retry(
+                client,
+                self._api_url(html),
+                params={**self._query_for_spec(spec), "page": str(page)},
+                headers={
+                    "Accept": "application/json, text/plain, */*",
+                    "Referer": spec.url,
+                    "Origin": "https://hirify.me",
+                },
+                follow_redirects=True,
+            )
+            if response.status_code == 429:
+                raise HirifyRateLimitedError("429 Too many requests from hirify api")
+            response.raise_for_status()
+            payload = response.json()
+            data = payload.get("data") if isinstance(payload, dict) else None
+            page_rows = (
+                [row for row in data if isinstance(row, dict)] if isinstance(data, list) else []
+            )
+            rows.extend(page_rows)
+            if not page_rows or not payload.get("next_page_url"):
+                break
+            page += 1
+        return rows[:limit]
 
     async def _fetch_detail_body(
         self,

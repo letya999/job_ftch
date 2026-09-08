@@ -11,6 +11,7 @@ from job_ftch.infrastructure.sources.monitors.greenhouse import can_handle as gr
 from job_ftch.infrastructure.sources.monitors.lever import can_handle as lever_can_handle
 from job_ftch.infrastructure.sources.site_parsers.geekjob import GeekJobParser
 from job_ftch.infrastructure.sources.site_parsers.habr import HabrCareerParser
+from job_ftch.infrastructure.sources.site_parsers.kaspi import KaspiParser
 from job_ftch.infrastructure.sources.site_parsers.rabota import RabotaByParser
 from job_ftch.infrastructure.sources.site_parsers.sber import SberParser, _sber_slug
 from job_ftch.infrastructure.sources.site_parsers.tbank import (
@@ -205,7 +206,7 @@ async def test_geekjob_parser_emits_json_rows_without_browser() -> None:
 
 
 @pytest.mark.asyncio
-async def test_habr_parser_emits_listing_cards_without_detail_fetch() -> None:
+async def test_habr_parser_fetches_full_detail() -> None:
     parser = HabrCareerParser()
     client = _FakeClient(
         {
@@ -213,7 +214,14 @@ async def test_habr_parser_emits_listing_cards_without_detail_fetch() -> None:
                 '<a class="vacancy-card__title-link" href="/vacancies/1000160764">'
                 "Продуктовый аналитик</a>",
                 "https://career.habr.com/companies/rwb/vacancies",
-            )
+            ),
+            "https://career.habr.com/vacancies/1000160764": _FakeResponse(
+                '<script type="application/ld+json">'
+                '{"@type":"JobPosting","title":"Продуктовый аналитик",'
+                '"description":"<p>Полное описание обязанностей вакансии.</p>"}'
+                "</script>",
+                "https://career.habr.com/vacancies/1000160764",
+            ),
         }
     )
     items = [
@@ -229,7 +237,34 @@ async def test_habr_parser_emits_listing_cards_without_detail_fetch() -> None:
     ]
     assert len(items) == 1
     assert items[0].external_id == "1000160764"
-    assert "Продуктовый аналитик" in items[0].text
+    assert "Полное описание обязанностей вакансии." in items[0].text
+    assert items[0].metadata["detail_vacancy_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_kaspi_parser_enriches_listing_from_jobposting_detail() -> None:
+    listing_url = "https://job.kaspi.kz/search"
+    detail_url = "https://job.kaspi.kz/vacancy/ai-engineer"
+    client = _FakeClient(
+        {
+            listing_url: _FakeResponse(
+                '<a href="/vacancy/ai-engineer">AI Engineer</a>', listing_url
+            ),
+            detail_url: _FakeResponse(
+                '<script type="application/ld+json">'
+                '{"@type":"JobPosting","description":"<p>Полные требования вакансии.</p>"}'
+                "</script>",
+                detail_url,
+            ),
+        }
+    )
+
+    items = [
+        item async for item in KaspiParser().parse(CareerSiteSpec(url=listing_url, limit=1), client)
+    ]
+
+    assert "Полные требования вакансии." in items[0].text
+    assert items[0].metadata["detail_vacancy_confirmed"] is True
 
 
 @pytest.mark.asyncio
@@ -469,6 +504,32 @@ async def test_vk_parser_uses_public_api_and_preserves_search_query() -> None:
         "https://team.vk.company/vacancy/52146/",
         "https://team.vk.company/vacancy/51999/",
     ]
+
+
+@pytest.mark.asyncio
+async def test_vk_parser_reads_full_detail_article() -> None:
+    api_url = "https://team.vk.company/career/api/v2/vacancies/?limit=50&offset=0"
+    detail_url = "https://team.vk.company/vacancy/52146/"
+    client = _FakeClient(
+        {
+            api_url: _FakeResponse('{"results": [{"id": 52146}]}', api_url),
+            detail_url: _FakeResponse(
+                '<div class="article"><h1>AI Engineer</h1><p>Полное описание задач и требований.</p></div>',
+                detail_url,
+            ),
+        }
+    )
+
+    items = [
+        item
+        async for item in VkTeamParser().parse(
+            CareerSiteSpec(url="https://team.vk.company/vacancy/", limit=1), client
+        )
+    ]
+
+    assert len(items) == 1
+    assert "Полное описание задач и требований." in items[0].text
+    assert items[0].metadata["detail_vacancy_confirmed"] is True
 
 
 @pytest.mark.asyncio

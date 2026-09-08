@@ -133,6 +133,9 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
                 "bot_scheduler:last_publish_error",
                 "bot_scheduler:last_publish_sent",
                 "bot_scheduler:pending_publish_since",
+                "bot_scheduler:last_owner_report_attempt_at",
+                "bot_scheduler:last_owner_report_success_at",
+                "bot_scheduler:last_owner_report_error",
             )
         }
     except Exception as exc:
@@ -151,7 +154,14 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
     watch_sources = [item for item in source_health if item.quality_important]
     scheduler_error = str(scheduler_state.get("bot_scheduler:last_error") or "").strip()
     publish_error = str(scheduler_state.get("bot_scheduler:last_publish_error") or "").strip()
-    status = "degraded" if bad_sources or scheduler_error or publish_error else "ok"
+    owner_report_error = str(
+        scheduler_state.get("bot_scheduler:last_owner_report_error") or ""
+    ).strip()
+    status = (
+        "degraded"
+        if bad_sources or scheduler_error or publish_error or owner_report_error
+        else "ok"
+    )
     last_finished = summary.finished_at.isoformat() if summary and summary.finished_at else None
     return {
         "tenant_id": tenant_id,
@@ -194,6 +204,13 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
             "pending_age_seconds": _age_seconds(
                 scheduler_state.get("bot_scheduler:pending_publish_since")
             ),
+        },
+        "owner_report": {
+            "last_attempt_at": scheduler_state.get("bot_scheduler:last_owner_report_attempt_at")
+            or None,
+            "last_success_at": scheduler_state.get("bot_scheduler:last_owner_report_success_at")
+            or None,
+            "last_error": owner_report_error or None,
         },
     }
 

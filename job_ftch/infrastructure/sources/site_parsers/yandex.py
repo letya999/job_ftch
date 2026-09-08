@@ -210,11 +210,12 @@ class YandexJobsParser:
         client: Any,
         listing_url: str,
         limit: int,
+        search_text: str = "",
     ) -> list[dict[str, Any]]:
         origin = urlparse(listing_url)
         api_url = urlunparse(origin._replace(path=self._api_path(), query="", fragment=""))
         page_size = min(max(limit, 1), 50)
-        text = self._search_text(listing_url)
+        text = search_text or self._search_text(listing_url)
         collected: list[dict[str, Any]] = []
         seen: set[str] = set()
         for page in range(1, 6):
@@ -288,11 +289,15 @@ class YandexJobsParser:
 
         emitted = 0
         emitted_urls: set[str] = set()
-        search_text = self._search_text(listing_url)
+        search_text = self._search_text(listing_url) or " OR ".join(
+            normalize_search_keywords(keywords_from_spec(spec))
+        )
         # ``text=`` already narrowed the API/listing. Re-filtering titles
         # against that query drops valid cards (``Data Analyst`` vs ``ai``).
         keywords = [] if search_text else keywords_from_spec(spec)
-        for payload in await self._publications_from_api(client, listing_url, limit):
+        for payload in await self._publications_from_api(
+            client, listing_url, limit, search_text=search_text
+        ):
             api_item = _item_from_api(payload, listing_url, source_name)
             if api_item is None or str(api_item.url) in emitted_urls:
                 continue

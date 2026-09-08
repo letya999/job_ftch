@@ -154,6 +154,32 @@ async def test_body_comes_from_the_per_vacancy_endpoint() -> None:
 
 
 @pytest.mark.asyncio
+async def test_listing_api_paginates_until_limit() -> None:
+    class Client(_ApiClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pages: list[str] = []
+
+        async def get(self, url: str, **kwargs: object) -> object:
+            if url.endswith("/api/vacancies"):
+                page = str(kwargs.get("params", {}).get("page"))  # type: ignore[union-attr]
+                self.pages.append(page)
+                row = {**_LISTING_ROW, "id": 668117 + int(page), "slug": f"role-{page}"}
+                return _JsonResponse(
+                    {"data": [row], "next_page_url": "next" if page == "1" else None}, url
+                )
+            return await super().get(url, **kwargs)
+
+    client = Client()
+    spec = _spec().model_copy(update={"limit": 2})
+
+    items = [item async for item in HirifyParser().parse(spec, client)]
+
+    assert client.pages == ["1", "2"]
+    assert len(items) == 2
+
+
+@pytest.mark.asyncio
 async def test_search_api_still_runs_when_listing_page_is_unavailable() -> None:
     class _ApiOnlyClient(_ApiClient):
         async def get(self, url: str, **kwargs: object) -> object:

@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 import pytest
 
-import job_ftch.infrastructure.sources.site_parsers.hh as hh_module
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.site_parsers.hh import (
     HhParser,
@@ -210,8 +209,7 @@ async def test_hh_parser_routes_detail_captcha_to_bypass() -> None:
 
 
 @pytest.mark.asyncio
-async def test_hh_parser_caps_detail_requests(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hh_module, "_MAX_DETAIL_REQUESTS", 1)
+async def test_hh_parser_respects_configured_detail_limit() -> None:
     listing_url = "https://hh.ru/search/vacancy?text=ai"
     first_url = "https://hh.ru/vacancy/1"
     second_url = "https://hh.ru/vacancy/2"
@@ -230,7 +228,7 @@ async def test_hh_parser_caps_detail_requests(monkeypatch: pytest.MonkeyPatch) -
     items = [
         item
         async for item in HhParser().parse(
-            CareerSiteSpec(url=listing_url, source_name="hh", limit=2), client
+            CareerSiteSpec(url=listing_url, source_name="hh", limit=2, detail_limit=1), client
         )
     ]
 

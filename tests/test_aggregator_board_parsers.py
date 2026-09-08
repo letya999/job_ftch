@@ -169,6 +169,33 @@ async def test_agilefluent_uses_api_rows_without_following_origin() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agilefluent_keeps_paging_past_five_pages() -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.pages: list[int] = []
+
+        async def post(self, url: str, *, json: dict[str, object], **_: object) -> _JsonResponse:
+            page = int(json["pagination"]["page"])  # type: ignore[index]
+            self.pages.append(page)
+            row = {"id": page, "title": "Backend Engineer", "description": "Backend"}
+            if page == 6:
+                row = {"id": page, "title": "AI Engineer", "description": "Full AI role"}
+            return _JsonResponse("", url, payload={"data": [row], "hasMore": page < 6})
+
+    client = Client()
+    spec = CareerSiteSpec(
+        url="https://jobboard.agilefluent.ru/",
+        limit=1,
+        monitor_config={"_search_keywords": ["AI Engineer"]},
+    )
+
+    items = [item async for item in AgileFluentParser().parse(spec, client)]
+
+    assert client.pages == [1, 2, 3, 4, 5, 6]
+    assert [item.external_id for item in items] == ["6"]
+
+
+@pytest.mark.asyncio
 async def test_foorilla_parses_htmx_job_cards() -> None:
     listing = """
     <li class="list-group-item">
