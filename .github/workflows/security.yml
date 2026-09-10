@@ -21,6 +21,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .repo-safety/gitleaks.toml
       - name: TruffleHog
-        uses: trufflesecurity/trufflehog@2b75fd2307181da49bb79cd95cdf117e125a3bc7 # main
+        uses: trufflesecurity/trufflehog@4b7d1d3a6827691637eff750b6482042e06462d0 # main
         with:
           extra_args: --results=verified,unknown --exclude-paths=.repo-safety/trufflehog-exclude.txt
