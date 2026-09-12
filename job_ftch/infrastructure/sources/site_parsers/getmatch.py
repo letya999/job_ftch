@@ -284,6 +284,7 @@ def extract_vacancy_urls_from_offers(
     *,
     limit: int,
     seen: set[str] | None = None,
+    keywords: Sequence[str] = (),
 ) -> list[str]:
     """Extract canonical vacancy URLs from a public ``/api/offers`` payload."""
     if isinstance(payload, str):
@@ -315,6 +316,8 @@ def extract_vacancy_urls_from_offers(
         if external_id is None or external_id in seen_ids:
             continue
         seen_ids.add(external_id)
+        if keywords and not text_matches_keywords(json.dumps(row, ensure_ascii=False), keywords):
+            continue
         urls.append(canonical)
         if len(urls) >= limit:
             break
@@ -477,7 +480,9 @@ def item_from_detail_html(
             url=detail_url,
         )
 
-    canonical = canonicalize_vacancy_url(detail_url) or detail_url
+    canonical = canonicalize_vacancy_url(detail_url)
+    if canonical is None:
+        return None
     external_id = vacancy_id_from_url(canonical) or canonical
     tree = HTMLParser(html_text or "")
 
@@ -551,8 +556,10 @@ def item_from_detail_html(
             company_name = _strip_text(company_match.group(1))
 
     description = ""
-    desc_node = tree.css_first(".b-vacancy-description") or tree.css_first(
-        ".b-vacancy-description.markdown"
+    desc_node = (
+        tree.css_first(".b-vacancy-description")
+        or tree.css_first(".b-vacancy-description.markdown")
+        or tree.css_first(".markdown")
     )
     if desc_node is not None:
         description = _strip_text(desc_node.text(separator=" "))
@@ -595,13 +602,20 @@ def item_from_detail_html(
             "job_url": canonical,
             "title": title or None,
             "company": company_name,
+            "company_authoritative": bool(company_name),
             "locations": locations or None,
             "work_modes": work_modes or None,
             "base_salary_text": salary,
             "apply_url": canonical,
             "parser": "site_getmatch",
             "adapter": "getmatch",
-            "detail_vacancy_confirmed": True,
+            "detail_vacancy_confirmed": bool(desc_node is not None and description),
+            "source_description_html": desc_node.html if desc_node is not None else None,
+            "detail_completeness_reason": (
+                "detail_dom_extracted"
+                if desc_node is not None and description
+                else "announcement_only"
+            ),
             "archived": archived or None,
         },
     )
@@ -770,18 +784,17 @@ class GetmatchParser:
             if any(marker in text.casefold() for marker in _AUTH_MARKERS):
                 logger.debug("getmatch.offers_api_auth_wall", url=api_url)
                 break
+            inventory = extract_vacancy_urls_from_offers(text, limit=page_size)
             page_urls = extract_vacancy_urls_from_offers(
-                text, limit=max(limit, page_size), seen=seen
+                text, limit=max(limit, page_size), seen=seen, keywords=keywords or ()
             )
-            if not page_urls:
+            if not inventory:
                 break
             for url in page_urls:
-                if keywords and not text_matches_keywords(url, keywords):
-                    continue
                 urls.append(url)
                 if len(urls) >= limit:
                     break
-            if len(page_urls) < page_size:
+            if len(inventory) < page_size:
                 break
             offset += page_size
         return urls[:limit]

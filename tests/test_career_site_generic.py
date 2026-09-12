@@ -328,8 +328,8 @@ def test_extract_regex_urls_preserves_host_like_paths():
     }
 
 
-def test_generic_detail_candidate_allows_external_teamtailor_ats_jobs():
-    assert _is_valid_detail_candidate(
+def test_generic_detail_candidate_requires_evidence_for_external_teamtailor_jobs():
+    assert not _is_valid_detail_candidate(
         "https://webbfontainegroup.teamtailor.com/jobs/6485764-senior-devops-engineer",
         "https://webbfontaine.com/about-us/careers",
     )

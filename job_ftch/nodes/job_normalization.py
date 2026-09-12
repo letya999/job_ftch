@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from job_ftch.application.contracts import TypeChangingNode
-from job_ftch.application.geo import normalize_geo_sources
+from job_ftch.application.geo import normalize_geo_chunk, normalize_geo_sources
 from job_ftch.domain import (
     JobDraft,
     JobRecord,
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 _PREFIX_RE = re.compile(r"^(hiring|vacancy|opening|role|ищем|вакансия)\s*[:\-]\s*", re.IGNORECASE)
 _COMP_SPLIT_RE = re.compile(r"\s+(?:at|@|-)\s+", re.IGNORECASE)
-_CURRENCY_PATTERN = r"USD|EUR|GBP|RUB|RUR|KZT|руб(?:лей|ля|\.)?|р\.|\$|€|£|₽"
+_CURRENCY_PATTERN = r"USD|EUR|GBP|RUB|RUR|KZT|CAD|AUD|CHF|PLN|UZS|KGS|AMD|GEL|AZN|TJS|BYN|тенге|руб(?:лей|ля|\.)?|р\.|\$|€|£|₽|₸"
 _AMOUNT_PATTERN = r"\d(?:[\d\s.,]*\d)?\s*(?:k|к|тыс(?:яч)?\.?|млн\.?)?"
 _SALARY_PREFIX_RE = re.compile(
     rf"(?P<currency>{_CURRENCY_PATTERN})\s*(?P<direction>от|до|from|up\s+to)?\s*"
@@ -31,11 +31,6 @@ _SALARY_SUFFIX_RE = re.compile(
     rf"(?P<direction>от|до|from|up\s+to)?\s*(?P<min>{_AMOUNT_PATTERN})"
     rf"(?:\s*(?:-|to|до|–|—)\s*(?P<max>{_AMOUNT_PATTERN}))?"
     rf"\s*(?P<currency>{_CURRENCY_PATTERN})",
-    re.IGNORECASE,
-)
-_BARE_SALARY_RE = re.compile(
-    rf"(?P<direction>от|до|from|up\s+to)?\s*(?P<min>{_AMOUNT_PATTERN})"
-    rf"(?:\s*(?:-|to|до|–|—)\s*(?P<max>{_AMOUNT_PATTERN}))?",
     re.IGNORECASE,
 )
 _SALARY_CONTEXT_RE = re.compile(
@@ -116,6 +111,8 @@ def _normalize_currency(value: str) -> str:
         "€": "EUR",
         "£": "GBP",
         "₽": "RUB",
+        "₸": "KZT",
+        "тенге": "KZT",
         "rur": "RUB",
         "руб": "RUB",
         "руб.": "RUB",
@@ -139,16 +136,6 @@ def _compensation_bounds(match: re.Match[str]) -> tuple[int | None, int | None] 
     return minimum, maximum
 
 
-def _bare_salary_is_plausible(value: str, match: re.Match[str]) -> bool:
-    amount = match.group("min") or ""
-    has_compact_unit = bool(re.search(r"(?:k|к|тыс(?:яч)?\.?|млн\.?)$", amount.strip(), re.I))
-    remainder = value[match.end("min") :].lstrip().casefold()
-    if re.match(r"(?:tokens?|токен(?:ов|а)?|requests?)\b", remainder):
-        return False
-    context = value[max(0, match.start() - 80) : match.end() + 80]
-    return bool(has_compact_unit or _SALARY_CONTEXT_RE.search(context))
-
-
 def _currency_amount_is_salary(value: str, match: re.Match[str]) -> bool:
     context = value[max(0, match.start() - 100) : match.end() + 100]
     return not (_NON_SALARY_CONTEXT_RE.search(context) and not _SALARY_CONTEXT_RE.search(context))
@@ -165,14 +152,8 @@ def _parse_compensation_text(value: str) -> tuple[str, int | None, int | None] |
             minimum, maximum = bounds
             return _normalize_currency(match.group("currency")), minimum, maximum
 
-    match = _BARE_SALARY_RE.search(value)
-    if match is None or not _bare_salary_is_plausible(value, match):
-        return None
-    bounds = _compensation_bounds(match)
-    if bounds is None:
-        return None
-    minimum, maximum = bounds
-    return "RUB", minimum, maximum
+    # A number or Russian wording does not establish currency.
+    return None
 
 
 class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
@@ -255,9 +236,13 @@ class LocationWorkModeNormalizationNode:
             )
         )
         location = geo.display
-        city = item.city or geo.city or location
+        city = geo.city or (
+            normalize_geo_chunk(item.city)
+            if item.city and normalize_geo_chunk(item.city) != geo.country
+            else None
+        )
         country = geo.country or item.country
-        region = item.region or location
+        region = (normalize_geo_chunk(item.region) if item.region else None) or location
         normalization_steps: list[str] = []
         if location != item.location:
             normalization_steps.append("location:normalized")
@@ -300,10 +285,10 @@ class CompensationParsingNode:
         base_salary = item.metadata.get("base_salary")
         if isinstance(base_salary, dict):
             try:
-                currency = str(base_salary.get("currency") or "USD")
-                currency = _normalize_currency(
-                    currency[:3].upper() if len(currency) >= 3 else "USD"
-                )
+                currency = str(base_salary.get("currency") or "").strip()
+                if not currency:
+                    raise ValueError("Structured salary has no currency evidence")
+                currency = _normalize_currency(currency)
 
                 minimum = base_salary.get("min")
                 maximum = base_salary.get("max")
@@ -320,7 +305,9 @@ class CompensationParsingNode:
                     if minimum is not None and maximum is not None and minimum > maximum:
                         minimum, maximum = maximum, minimum
 
-                    raw_period = str(base_salary.get("period") or "unknown").lower()
+                    raw_period = str(
+                        base_salary.get("period") or base_salary.get("unit") or "unknown"
+                    ).lower()
 
                     from job_ftch.domain import CompensationPeriod, CompensationRange
 
@@ -356,9 +343,11 @@ class CompensationParsingNode:
         salary_source = "\n".join(
             part for part in (item.title, item.description, str(metadata_salary or "")) if part
         )
-        parsed = _parse_compensation_text(salary_source)
+        parsed = _parse_compensation_text(str(metadata_salary or "")) or _parse_compensation_text(
+            salary_source
+        )
         if parsed is None:
-            if item.compensation is not None and not metadata_salary:
+            if item.compensation is not None:
                 # LLMs sometimes turn unrelated numbers such as "от 3 лет"
                 # into a salary. Keep compensation only when the posting or
                 # parser metadata provides salary evidence.
@@ -366,12 +355,37 @@ class CompensationParsingNode:
             return item
         currency, minimum, maximum = parsed
 
-        from job_ftch.domain import CompensationRange
+        from job_ftch.domain import CompensationPeriod, CompensationRange
 
+        salary_evidence = re.sub(
+            r"[\u200b-\u200f\ufeff]", "", str(metadata_salary or "")
+        ).casefold()
+        period = CompensationPeriod.UNKNOWN
+        for unit, pattern in (
+            (CompensationPeriod.MONTH, r"/\s*(?:month|мес)|per\s+month|в\s+месяц"),
+            (CompensationPeriod.YEAR, r"/\s*(?:year|год)|per\s+year|в\s+год"),
+            (CompensationPeriod.HOUR, r"/\s*(?:hour|час)|per\s+hour|в\s+час"),
+            (CompensationPeriod.DAY, r"/\s*(?:day|день)|per\s+day|в\s+день"),
+            (CompensationPeriod.WEEK, r"/\s*(?:week|нед)|per\s+week|в\s+неделю"),
+        ):
+            if re.search(pattern, salary_evidence):
+                period = unit
+                break
+        gross = None
+        if re.search(r"\bgross\b|до\s+вычета\s+налог", salary_evidence):
+            gross = True
+        elif re.search(r"\bnet\b|на\s+руки|после\s+вычета\s+налог", salary_evidence):
+            gross = False
+        previous = item.compensation
+        if previous and (previous.currency, previous.min_amount, previous.max_amount) == parsed:
+            period = period if period is not CompensationPeriod.UNKNOWN else previous.period
+            gross = gross if gross is not None else previous.gross
         compensation = CompensationRange(
             currency=currency,
             min_amount=minimum,
             max_amount=maximum,
+            period=period,
+            gross=gross,
         )
         return item.model_copy(
             update={

@@ -5,19 +5,21 @@ from __future__ import annotations
 import html
 import json
 import re
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from selectolax.lexbor import LexborHTMLParser
 
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
-from job_ftch.domain import SourceKind
-from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
+from job_ftch.domain.site_models import DiscoveredPostingPayload
+from job_ftch.infrastructure.sources.scrapers.json_ld import parse_html
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
     normalize_search_keywords,
     with_query_params,
 )
+from job_ftch.infrastructure.sources.site_utils import payload_to_raw_item
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -99,16 +101,30 @@ class HireHiParser:
                     if not isinstance(item, dict):
                         continue
                     url = urljoin(base_url, str(item.get("url") or ""))
-                    if not detail_re.search(url) or url in seen:
+                    if (
+                        not re.match(self.domain_pattern, url, re.IGNORECASE)
+                        or not detail_re.search(url)
+                        or url in seen
+                    ):
                         continue
                     seen.add(url)
                     found += 1
                     try:
                         detail = await client.get(url, follow_redirects=True)
                         detail.raise_for_status()
+                        final_url = str(getattr(detail, "url", url) or url)
+                        if (
+                            not re.match(self.domain_pattern, final_url, re.IGNORECASE)
+                            or not detail_re.search(final_url)
+                            or urlparse(final_url).path.rstrip("/")
+                            != urlparse(url).path.rstrip("/")
+                        ):
+                            continue
                         posting = _job_posting(str(detail.text))
-                    except Exception:  # noqa: BLE001 - preserve the listing fallback
+                        scraped = parse_html(str(detail.text), url=url) if posting else None
+                    except Exception:  # noqa: BLE001 - isolate unavailable detail pages
                         posting = None
+                        scraped = None
                     title = str((posting or item).get("title") or item.get("name") or "").strip()
                     description = " ".join(
                         LexborHTMLParser(
@@ -119,17 +135,36 @@ class HireHiParser:
                     )
                     if not title:
                         continue
-                    yield build_raw_item(
-                        source_kind=SourceKind.CAREER_SITE,
-                        source_name=spec.source_name or "hirehi",
-                        external_id=url.rstrip("/").rsplit("/", 1)[-1],
-                        url=url,
-                        text="\n".join(part for part in (title, description) if part),
-                        metadata={
-                            "parser": "hirehi",
-                            "board_url": spec.url,
-                            "detail_vacancy_confirmed": posting is not None,
-                        },
+                    if scraped is None or not description:
+                        continue
+                    # HireHi's schema emits a default country even for foreign jobs.
+                    # Preserve it as raw evidence, not as an authoritative location.
+                    original_locations = scraped.locations
+                    job_locations = (posting or {}).get("jobLocation")
+                    if isinstance(job_locations, dict):
+                        job_locations = [job_locations]
+                    place_names = []
+                    for place in job_locations if isinstance(job_locations, list) else []:
+                        address = place.get("address") if isinstance(place, dict) else None
+                        if isinstance(address, dict):
+                            parts = [address.get(k) for k in ("addressLocality", "addressRegion")]
+                            name = ", ".join(p for p in parts if isinstance(p, str) and p.strip())
+                            if name:
+                                place_names.append(name)
+                    scraped.locations = place_names or None
+                    scraped.title = title
+                    scraped.description = description
+                    scraped.metadata = {
+                        **(scraped.metadata or {}),
+                        "parser": "hirehi",
+                        "board_url": spec.url,
+                        "source_locations_schema": original_locations,
+                        "country_authoritative": False,
+                    }
+                    yield payload_to_raw_item(
+                        DiscoveredPostingPayload(url=url, **asdict(scraped)),
+                        spec,
+                        spec.source_name or "hirehi",
                     )
                     if len(seen) >= limit:
                         return

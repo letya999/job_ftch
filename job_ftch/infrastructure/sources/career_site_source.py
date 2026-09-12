@@ -435,23 +435,10 @@ def _rank_detail_urls(urls: list[str] | set[str], board_url: str) -> list[str]:
 def _is_valid_detail_candidate(url: str, board_url: str) -> bool:
     from urllib.parse import urlsplit, urlunsplit
 
-    is_ats = any(
-        ats in url
-        for ats in (
-            "jobs.smartrecruiters.com",
-            "lever.co",
-            "greenhouse.io",
-            "workday.com",
-            "myworkdayjobs.com",
-            "breezy.hr",
-            "workable.com",
-            "teamtailor.com",
-        )
-    )
-    if not is_same_site_family(url, board_url=board_url) and not is_ats:
+    # An ATS provider is not proof of affiliation with this source.
+    # Site-specific parsers can explicitly establish external posting identity.
+    if not is_same_site_family(url, board_url=board_url):
         return False
-    if is_ats:
-        return True
     candidate_parts = urlsplit(url)
     board_parts = urlsplit(board_url)
     candidate_document = (
@@ -467,13 +454,27 @@ def _is_valid_detail_candidate(url: str, board_url: str) -> bool:
     if candidate_document == board_document:
         return bool(_DETAIL_URL_RE.search(board_url))
     # DOM and sitemap monitors can surface arbitrary same-site links.  Keep
-    # ATS locators above untouched, but require a strong detail signal before
+    # require a strong detail signal before
     # allocating the shared detail budget to a generic URL (e.g. reject
     # /andersen-offices/poland-krakow discovered from a careers page).
     return (
         is_probable_job_url(url, board_url=board_url)
         and score_job_url(url, board_url=board_url) >= _SITEMAP_DETAIL_SCORE_MINIMUM
     )
+
+
+def _has_vacancy_page_evidence(payload: ScrapedPostingPayload) -> bool:
+    metadata = payload.metadata or {}
+    if metadata.get("page_type") == "job_posting":
+        return True
+    text = html_lib.unescape(re.sub(r"<[^>]+>", " ", payload.description or "")).casefold()
+    # This proves page type, not completeness. A job URL and a long body do not.
+    groups = (
+        ("responsibilities", "обязанност", "what you'll do", "what you will do"),
+        ("requirements", "qualifications", "требован", "must have", "must-have"),
+        ("apply for", "apply now", "отклик", "we offer", "мы предлагаем"),
+    )
+    return sum(any(token in text for token in group) for group in groups) >= 2
 
 
 def _is_filtered_listing_url(url: str) -> bool:
@@ -562,6 +563,8 @@ class CareerSiteSource(Source["RawItem"]):
         own_http_client: bool = False,
     ) -> None:
         self.spec = apply_runtime_defaults(spec)
+        self._source_origin_url = spec.url
+        self._ownership_url = spec.url
         self.http = http_client
         self._base_http = http_client
         self._own_http_client = own_http_client
@@ -1196,6 +1199,8 @@ class CareerSiteSource(Source["RawItem"]):
                         canonical_url,
                     ) = await get_ordered_monitors(self.spec.url, _fp_client)
                     if canonical_url and canonical_url != self.spec.url:
+                        if is_same_site_family(self.spec.url, board_url=self._ownership_url):
+                            self._ownership_url = canonical_url
                         logger.info(
                             "url_canonicalized_after_redirect",
                             original=self.spec.url,
@@ -2071,9 +2076,20 @@ class CareerSiteSource(Source["RawItem"]):
         """
         candidates: list[DiscoveredCandidate] = []
 
+        owned_urls = {
+            url
+            for url in result.urls
+            if is_same_site_family(url, board_url=self._ownership_url)
+            or url in self._trusted_parser_urls
+        }
+        if owned_urls != result.urls:
+            self.stats.source_partial = True
+            self.stats.truncated = True
+            self.stats.zero_reason = ZeroYieldReason.PARSER_GAP
+
         rich_urls: set[str] = set()
         for url, payload in (result.payloads_by_url or {}).items():
-            if url not in result.urls:
+            if url not in owned_urls:
                 continue
             if not self._passes_freshness_cutoff(payload.date_posted):
                 continue
@@ -2085,13 +2101,19 @@ class CareerSiteSource(Source["RawItem"]):
             candidates.append(
                 DiscoveredCandidate(
                     url=url,
-                    rich_payload=payload,
+                    rich_payload=(
+                        payload
+                        if (payload.description or "").strip()
+                        and len(payload.description or "") >= 300
+                        and payload.metadata.get("content_kind") not in {"announcement", "excerpt"}
+                        else None
+                    ),
                     completeness=completeness,
                 )
             )
             rich_urls.add(url)
 
-        urls_to_scrape = result.urls - rich_urls
+        urls_to_scrape = owned_urls - rich_urls
         if not urls_to_scrape and self._should_scrape_source_url():
             urls_to_scrape = {self.spec.url}
         if monitor_name == "sitemap":
@@ -2230,7 +2252,7 @@ class CareerSiteSource(Source["RawItem"]):
         if (
             url not in self._trusted_parser_urls
             and not explicitly_included_self
-            and not _is_valid_detail_candidate(url, self.spec.url)
+            and not _is_valid_detail_candidate(url, self._ownership_url)
         ):
             logger.debug("detail_candidate_rejected", url=url, board_url=self.spec.url)
             return None
@@ -2243,13 +2265,20 @@ class CareerSiteSource(Source["RawItem"]):
             return None
         if not (scrape_result.title or scrape_result.description):
             return None
-        if not scrape_result.description and url not in self._trusted_parser_urls:
+        if not (scrape_result.description or "").strip():
             # A generic scraper can recover a page title from arbitrary
             # editorial, marketing, or tag pages.  Without a description it
             # carries no evidence that the page is a vacancy, so do not emit a
             # false positive.  Parser-discovered URLs remain exempt because a
             # site-specific parser already established their posting identity.
             logger.debug("detail_candidate_rejected_title_only", url=url)
+            return None
+        if (
+            url not in self._trusted_parser_urls
+            and not explicitly_included_self
+            and not _has_vacancy_page_evidence(scrape_result)
+        ):
+            logger.debug("detail_candidate_rejected_page_type", url=url)
             return None
         if not self._passes_freshness_cutoff(scrape_result.date_posted):
             return None
@@ -2264,7 +2293,13 @@ class CareerSiteSource(Source["RawItem"]):
             base_salary=scrape_result.base_salary,
             language=scrape_result.language,
             extras=scrape_result.extras,
-            metadata={**(scrape_result.metadata or {}), "detail_vacancy_confirmed": True},
+            metadata={
+                **(scrape_result.metadata or {}),
+                "source_origin_url": self._source_origin_url,
+                "detail_vacancy_confirmed": bool(
+                    (scrape_result.metadata or {}).get("detail_vacancy_confirmed", False)
+                ),
+            },
         )
         return payload_to_raw_item(full_payload, self.spec, source_name)
 
@@ -2373,6 +2408,7 @@ class CareerSiteSource(Source["RawItem"]):
     ) -> ScrapedPostingPayload | None:
         """Try each scraper in *scraper_chain* with *prefetched_html* until one succeeds."""
         title_only_fallback: ScrapedPostingPayload | None = None
+        partial_fallback: ScrapedPostingPayload | None = None
         for i, scraper_name in enumerate(scraper_chain):
             try:
                 typed_payload, prefetched_html = await run_scraper_attempt(
@@ -2385,6 +2421,36 @@ class CareerSiteSource(Source["RawItem"]):
                     resolver=resolve_scraper,
                 )
                 if typed_payload and (typed_payload.description or "").strip():
+                    plain_body = html_lib.unescape(
+                        re.sub(r"<[^>]+>", " ", typed_payload.description or "")
+                    ).strip()
+                    if len(plain_body) < 300:
+                        if partial_fallback is None:
+                            partial_fallback = typed_payload
+                        continue
+                    if partial_fallback is not None:
+                        # Keep structured fields when DOM/maintext supplies the full body.
+                        typed_payload = replace(
+                            typed_payload,
+                            **{
+                                name: getattr(typed_payload, name)
+                                or getattr(partial_fallback, name)
+                                for name in (
+                                    "title",
+                                    "locations",
+                                    "employment_type",
+                                    "job_location_type",
+                                    "date_posted",
+                                    "base_salary",
+                                    "language",
+                                    "extras",
+                                )
+                            },
+                            metadata={
+                                **(partial_fallback.metadata or {}),
+                                **(typed_payload.metadata or {}),
+                            },
+                        )
                     self.stats.successful_scraper = scraper_name
                     if i > 0 or count_first_as_fallback:
                         self.stats.scrape_fallback_used += 1
@@ -2394,6 +2460,15 @@ class CareerSiteSource(Source["RawItem"]):
             except Exception as exc:
                 logger.debug(log_event, name=scraper_name, url=url, error=str(exc))
                 continue
+        if partial_fallback is not None:
+            return replace(
+                partial_fallback,
+                metadata={
+                    **(partial_fallback.metadata or {}),
+                    "detail_vacancy_confirmed": False,
+                    "detail_completeness_reason": "short_body_not_independently_verified",
+                },
+            )
         return title_only_fallback
 
     async def _scrape_with_fallback(

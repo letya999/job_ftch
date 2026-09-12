@@ -181,8 +181,8 @@ def _extract_salary(posting: dict[str, Any]) -> dict[str, Any] | None:
         inner_unit = normalize_salary_unit(value.get("unitText"))
         return {
             "currency": currency,
-            "min": value.get("minValue"),
-            "max": value.get("maxValue"),
+            "min": value.get("minValue", value.get("value")),
+            "max": value.get("maxValue", value.get("value")),
             "unit": inner_unit or outer_unit,
         }
     elif isinstance(value, (int, float)):
@@ -206,6 +206,10 @@ def _text_or_list(val: Any) -> list[str] | None:
 
 def _parse_posting(posting: dict[str, Any]) -> ScrapedPostingPayload:
     extras: dict[str, Any] = {}
+    employer = posting.get("hiringOrganization")
+    company = employer.get("name") if isinstance(employer, dict) else employer
+    if isinstance(company, dict):
+        company = company.get("@value") or company.get("name")
     skills = _text_or_list(posting.get("skills"))
     if skills:
         extras["skills"] = skills
@@ -227,6 +231,16 @@ def _parse_posting(posting: dict[str, Any]) -> ScrapedPostingPayload:
         date_posted=posting.get("datePosted"),
         base_salary=_extract_salary(posting),
         extras=extras or None,
+        metadata={
+            "page_type": "job_posting",
+            "detail_vacancy_confirmed": False,
+            "detail_completeness_reason": "structured_description_not_independently_verified",
+            **(
+                {"company": company, "company_authoritative": True}
+                if isinstance(company, str) and company.strip()
+                else {}
+            ),
+        },
     )
 
 
@@ -299,7 +313,8 @@ def _extruct_fallback(html: str, url: str) -> ScrapedPostingPayload | None:
     description = og_map.get("og:description") or og_map.get("description")
     if title and description and len(str(description)) >= 120:
         logger.debug("jsonld.extruct_opengraph_hit", url=url)
-        return ScrapedPostingPayload(title=str(title), description=str(description))
+        # OpenGraph is an announcement, not a body: continue detail acquisition.
+        return ScrapedPostingPayload(title=str(title))
 
     return None
 
