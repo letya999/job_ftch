@@ -2449,6 +2449,7 @@ class CareerSiteSource(Source["RawItem"]):
         """Try each scraper in *scraper_chain* with *prefetched_html* until one succeeds."""
         title_only_fallback: ScrapedPostingPayload | None = None
         partial_fallback: ScrapedPostingPayload | None = None
+        partial_fallback_index: int | None = None
         for i, scraper_name in enumerate(scraper_chain):
             try:
                 typed_payload, prefetched_html = await run_scraper_attempt(
@@ -2467,6 +2468,7 @@ class CareerSiteSource(Source["RawItem"]):
                     if len(plain_body) < 300:
                         if partial_fallback is None:
                             partial_fallback = typed_payload
+                            partial_fallback_index = i
                         continue
                     if partial_fallback is not None:
                         # Keep structured fields when DOM/maintext supplies the full body.
@@ -2501,6 +2503,9 @@ class CareerSiteSource(Source["RawItem"]):
                 logger.debug(log_event, name=scraper_name, url=url, error=str(exc))
                 continue
         if partial_fallback is not None:
+            self.stats.successful_scraper = scraper_chain[partial_fallback_index or 0]
+            if (partial_fallback_index or 0) > 0 or count_first_as_fallback:
+                self.stats.scrape_fallback_used += 1
             return replace(
                 partial_fallback,
                 metadata={

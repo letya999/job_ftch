@@ -72,14 +72,13 @@ class TestJsonLdParseHtml:
         assert result.title is not None
         assert "ML Engineer" in (result.title or "")
 
-    def test_opengraph_fallback_with_long_description(self) -> None:
+    def test_opengraph_fallback_keeps_title_without_announcement(self) -> None:
         pytest.importorskip("extruct")
 
         result = parse_html(_OPENGRAPH_HTML, url="https://example.com/job/3")
         assert result is not None
         assert result.title == "DevOps Engineer"
-        assert result.description is not None
-        assert len(result.description) >= 120
+        assert result.description is None
 
     def test_opengraph_article_is_not_a_vacancy(self) -> None:
         pytest.importorskip("extruct")

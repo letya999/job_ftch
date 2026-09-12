@@ -356,9 +356,24 @@ def test_slow_retry_queue_contains_only_deadline_limited_urls(tmp_path: Path) ->
 
     assert module.yaml.safe_load(queue_path.read_text(encoding="utf-8")) == {
         "urls": [
-            "https://slow.test/jobs",
-            "https://partial.test/jobs",
-            "https://zero-item-deadline.test/jobs",
+            {
+                "url": "https://slow.test/jobs",
+                "attempt": 1,
+                "previous_elapsed_seconds": None,
+                "previous_failure_bucket": None,
+            },
+            {
+                "url": "https://partial.test/jobs",
+                "attempt": 1,
+                "previous_elapsed_seconds": None,
+                "previous_failure_bucket": None,
+            },
+            {
+                "url": "https://zero-item-deadline.test/jobs",
+                "attempt": 1,
+                "previous_elapsed_seconds": None,
+                "previous_failure_bucket": "deadline_exceeded",
+            },
         ]
     }
 
