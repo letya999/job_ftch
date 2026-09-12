@@ -4,6 +4,7 @@ import pytest
 
 from job_ftch.application.geo import normalize_geo_sources
 from job_ftch.infrastructure.sources.career_site_source import (
+    _ats_tenant_prefix,
     _has_vacancy_page_evidence,
     _is_valid_detail_candidate,
 )
@@ -118,6 +119,26 @@ def test_ats_host_is_not_source_ownership_evidence():
     assert not _is_valid_detail_candidate(
         "https://evil.example/jobs/123?redirect=greenhouse.io", "https://remote.com/careers"
     )
+
+
+def test_external_ats_binding_is_limited_to_confirmed_tenant():
+    assert _ats_tenant_prefix("https://boards.greenhouse.io/jetbrains/jobs/123") == "/jetbrains"
+    assert _ats_tenant_prefix("https://boards.greenhouse.io/jetbrains") == "/jetbrains"
+    assert _ats_tenant_prefix("https://webbfontainegroup.teamtailor.com/jobs/123") is None
+    assert _ats_tenant_prefix("https://jobs.lever.co/acme/123") == "/acme"
+
+
+def test_external_ats_candidate_requires_confirmed_teamtailor_host():
+    from unittest.mock import MagicMock
+
+    from job_ftch.domain.source_spec import CareerSiteSpec
+    from job_ftch.infrastructure.sources.career_site_source import CareerSiteSource
+
+    source = CareerSiteSource(CareerSiteSpec(url="https://example.com/careers"), MagicMock(), MagicMock())
+    source._ownership_url = "https://webbfontainegroup.teamtailor.com/jobs/123"
+    source._ats_tenant_host = "webbfontainegroup.teamtailor.com"
+    assert source._is_owned_candidate_url("https://webbfontainegroup.teamtailor.com/jobs/456")
+    assert not source._is_owned_candidate_url("https://other.teamtailor.com/jobs/456")
 
 
 def test_long_marketing_text_is_not_vacancy_page_evidence():

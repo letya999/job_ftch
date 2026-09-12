@@ -324,6 +324,18 @@ def extract_vacancy_urls_from_offers(
     return urls
 
 
+def _offers_total(payload: Any) -> int | None:
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("meta"), dict):
+        return None
+    total = payload["meta"].get("total")
+    return int(total) if isinstance(total, int) and total >= 0 else None
+
+
 def classify_getmatch_payload(
     body: str,
     *,
@@ -761,7 +773,10 @@ class GetmatchParser:
         urls: list[str] = []
         offset = 0
         page_size = min(50, max(limit, 1))
-        max_offset = 500
+        # The API exposes the inventory size. A fixed 500-offset ceiling
+        # silently lost matching roles when the target was sparse in the
+        # newest slice. Keep a large safety ceiling only for malformed APIs.
+        max_offset = 10_000
         while len(urls) < limit and offset <= max_offset:
             params: dict[str, str] = {}
             if sphere:
@@ -785,6 +800,7 @@ class GetmatchParser:
                 logger.debug("getmatch.offers_api_auth_wall", url=api_url)
                 break
             inventory = extract_vacancy_urls_from_offers(text, limit=page_size)
+            total = _offers_total(text)
             page_urls = extract_vacancy_urls_from_offers(
                 text, limit=max(limit, page_size), seen=seen, keywords=keywords or ()
             )
@@ -794,7 +810,9 @@ class GetmatchParser:
                 urls.append(url)
                 if len(urls) >= limit:
                     break
-            if len(inventory) < page_size:
+            if total is not None and offset + page_size >= total:
+                break
+            if total is None and len(inventory) < page_size:
                 break
             offset += page_size
         return urls[:limit]

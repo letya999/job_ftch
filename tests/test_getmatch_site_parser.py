@@ -578,6 +578,45 @@ async def test_parser_discovers_via_offers_api_when_sphere_is_set() -> None:
     assert client.calls[0].startswith("https://getmatch.ru/api/offers")
 
 
+@pytest.mark.asyncio
+async def test_parser_scans_api_pages_until_declared_total_for_sparse_role() -> None:
+    first = {
+        "meta": {"total": 4, "offset": 0, "limit": 3},
+        "offers": [
+            {"id": 1, "position": "Backend Developer", "url": "/vacancies/1-backend"},
+            {"id": 2, "position": "QA Engineer", "url": "/vacancies/2-qa"},
+            {"id": 3, "position": "Product Manager", "url": "/vacancies/3-product"},
+        ],
+    }
+    second = {
+        "meta": {"total": 4, "offset": 3, "limit": 3},
+        "offers": [
+            {"id": 4, "position": "AI Developer", "url": "/vacancies/4-ai-developer"},
+        ],
+    }
+    api0 = "https://getmatch.ru/api/offers?sa=any&pa=all&offset=0&limit=3"
+    api3 = "https://getmatch.ru/api/offers?sa=any&pa=all&offset=3&limit=3"
+    client = _FakeClient(
+        {
+            api0: _FakeResponse(
+                json.dumps(first), api0, headers={"content-type": "application/json"}
+            ),
+            api3: _FakeResponse(
+                json.dumps(second), api3, headers={"content-type": "application/json"}
+            ),
+        }
+    )
+    spec = CareerSiteSpec(
+        url="https://getmatch.ru/vacancies",
+        source_name="getmatch",
+        monitor_config={"_search_keywords": ["AI Developer"]},
+        limit=3,
+    )
+    assert await GetmatchParser().discover(spec, client) == [
+        "https://getmatch.ru/vacancies/4-ai-developer"
+    ]
+
+
 def test_runtime_defaults_do_not_hardcode_core_host_switch() -> None:
     defaults = GetmatchParser().runtime_defaults("https://getmatch.ru/vacancies")
     assert defaults.url_filter is not None

@@ -463,6 +463,26 @@ def _is_valid_detail_candidate(url: str, board_url: str) -> bool:
     )
 
 
+def _ats_tenant_prefix(url: str) -> str | None:
+    """Return the provider tenant path from an explicit ATS board URL."""
+    from urllib.parse import urlsplit
+
+    parts = [part for part in urlsplit(url).path.split("/") if part]
+    marker_index = next(
+        (
+            index
+            for index, part in enumerate(parts)
+            if part.casefold() in {"job", "jobs", "vacancy", "vacancies", "positions", "postings"}
+        ),
+        None,
+    )
+    if marker_index is None:
+        return "/" + parts[0].casefold() if parts else None
+    if marker_index == 0:
+        return None
+    return "/" + "/".join(parts[:marker_index]).casefold()
+
+
 def _has_vacancy_page_evidence(payload: ScrapedPostingPayload) -> bool:
     metadata = payload.metadata or {}
     if metadata.get("page_type") == "job_posting":
@@ -565,6 +585,8 @@ class CareerSiteSource(Source["RawItem"]):
         self.spec = apply_runtime_defaults(spec)
         self._source_origin_url = spec.url
         self._ownership_url = spec.url
+        self._ats_tenant_prefix: str | None = None
+        self._ats_tenant_host: str | None = None
         self.http = http_client
         self._base_http = http_client
         self._own_http_client = own_http_client
@@ -1424,6 +1446,12 @@ class CareerSiteSource(Source["RawItem"]):
 
                     if isinstance(exc, AtsRedirectException):
                         logger.info("redirecting_to_ats", ats=exc.monitor_name, url=exc.url)
+                        self._ats_tenant_prefix = _ats_tenant_prefix(exc.url)
+                        from urllib.parse import urlsplit
+
+                        self._ats_tenant_host = (urlsplit(exc.url).netloc or "").casefold() or None
+                        if self._ats_tenant_prefix or self._ats_tenant_host:
+                            self._ownership_url = exc.url
                         self.spec = self.spec.model_copy(
                             update={"url": exc.url, "monitor": exc.monitor_name}
                         )
@@ -2076,12 +2104,7 @@ class CareerSiteSource(Source["RawItem"]):
         """
         candidates: list[DiscoveredCandidate] = []
 
-        owned_urls = {
-            url
-            for url in result.urls
-            if is_same_site_family(url, board_url=self._ownership_url)
-            or url in self._trusted_parser_urls
-        }
+        owned_urls = {url for url in result.urls if self._is_owned_candidate_url(url)}
         if owned_urls != result.urls:
             self.stats.source_partial = True
             self.stats.truncated = True
@@ -2152,6 +2175,20 @@ class CareerSiteSource(Source["RawItem"]):
             self.stats.monitor_truncated = 1
 
         return candidates
+
+    def _is_owned_candidate_url(self, url: str) -> bool:
+        if url in self._trusted_parser_urls:
+            return True
+        if not is_same_site_family(url, board_url=self._ownership_url):
+            return False
+        from urllib.parse import urlsplit
+
+        if self._ats_tenant_host and (urlsplit(url).netloc or "").casefold() != self._ats_tenant_host:
+            return False
+        if self._ats_tenant_prefix:
+            path = urlsplit(url).path.rstrip("/").casefold()
+            return path == self._ats_tenant_prefix or path.startswith(self._ats_tenant_prefix + "/")
+        return True
 
     async def _enrich_candidates(
         self,
@@ -2252,7 +2289,10 @@ class CareerSiteSource(Source["RawItem"]):
         if (
             url not in self._trusted_parser_urls
             and not explicitly_included_self
-            and not _is_valid_detail_candidate(url, self._ownership_url)
+            and (
+                not self._is_owned_candidate_url(url)
+                or not _is_valid_detail_candidate(url, self._ownership_url)
+            )
         ):
             logger.debug("detail_candidate_rejected", url=url, board_url=self.spec.url)
             return None
