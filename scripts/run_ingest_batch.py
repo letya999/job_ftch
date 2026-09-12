@@ -490,9 +490,14 @@ def _load_resume_order(path: Path) -> list[str]:
 
 
 def _write_slow_retry_queue(path: Path, results: list[dict[str, Any]]) -> None:
-    """Persist only deadline-limited sources for a later, slower retry run."""
-    urls = [
-        str(result["url"])
+    """Persist deadline-limited sources for a later, slower retry run."""
+    entries = [
+        {
+            "url": str(result["url"]),
+            "attempt": 1,
+            "previous_elapsed_seconds": result.get("elapsed_seconds"),
+            "previous_failure_bucket": result.get("failure_bucket"),
+        }
         for result in results
         if result.get("deadline_exceeded") is True
         and (
@@ -505,8 +510,19 @@ def _write_slow_retry_queue(path: Path, results: list[dict[str, Any]]) -> None:
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        yaml.safe_dump({"urls": urls}, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        yaml.safe_dump({"urls": entries}, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
+
+
+def _load_slow_retry_urls(path: Path) -> list[str]:
+    """Read both legacy string queues and structured retry queues."""
+    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    values = payload.get("urls", []) if isinstance(payload, dict) else []
+    return [
+        value if isinstance(value, str) else str(value.get("url"))
+        for value in values
+        if isinstance(value, str) or isinstance(value, dict) and isinstance(value.get("url"), str)
+    ]
 
 
 def _gate_exit_code(results: list[dict[str, Any]], *, min_success_rate: float) -> int:
@@ -587,6 +603,11 @@ async def main() -> int:
         help="Write hard-deadline URLs to a YAML diagnostic queue.",
     )
     parser.add_argument(
+        "--slow-queue-in",
+        default=None,
+        help="Retry URLs from a previous slow queue; combine with a larger --timeout.",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Skip URLs already saved in --out-json and preserve their results.",
@@ -610,6 +631,10 @@ async def main() -> int:
 
     with open(args.input, encoding="utf-8") as f:
         urls = yaml.safe_load(f)["urls"][args.start : args.end]
+    if args.slow_queue_in:
+        queue_path = Path(args.slow_queue_in)
+        urls = _load_slow_retry_urls(queue_path)
+        print(f"Loaded {len(urls)} URLs from slow retry queue")
     print(f"Loaded {len(urls)} URLs (indices {args.start}..{args.end - 1})")
 
     from datetime import datetime, timedelta, timezone

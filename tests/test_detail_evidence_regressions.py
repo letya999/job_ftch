@@ -28,6 +28,50 @@ def test_structured_company_and_fixed_salary_survive_acquisition():
     assert result.metadata["detail_vacancy_confirmed"] is False
 
 
+def test_jsonld_selects_posting_matching_requested_url():
+    html = (
+        '<script type="application/ld+json">'
+        + json.dumps(
+            {
+                "@graph": [
+                    {
+                        "@type": "JobPosting",
+                        "url": "https://jobs.example/jobs/other",
+                        "title": "Other vacancy",
+                        "description": "other",
+                    },
+                    {
+                        "@type": "JobPosting",
+                        "url": "https://jobs.example/jobs/target?utm_source=x",
+                        "title": "Target vacancy",
+                        "description": "target",
+                    },
+                ]
+            }
+        )
+        + "</script>"
+    )
+    result = parse_html(html, url="https://jobs.example/jobs/target")
+    assert result is not None
+    assert result.title == "Target vacancy"
+
+
+def test_jsonld_rejects_explicitly_foreign_posting_locator():
+    html = (
+        '<script type="application/ld+json">'
+        + json.dumps(
+            {
+                "@type": "JobPosting",
+                "url": "https://jobs.example/jobs/other",
+                "title": "Other vacancy",
+                "description": "other",
+            }
+        )
+        + "</script>"
+    )
+    assert parse_html(html, url="https://jobs.example/jobs/target") is None
+
+
 def test_getmatch_search_uses_position_not_only_slug():
     payload = {"offers": [{"id": 123, "position": "AI Developer", "url": "/vacancies/123"}]}
     assert extract_vacancy_urls_from_offers(payload, limit=3, keywords=["AI Developer"]) == [

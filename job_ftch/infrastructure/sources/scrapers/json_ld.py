@@ -15,6 +15,7 @@ import json
 import re
 from html.parser import HTMLParser
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import urlsplit
 
 from job_ftch.application.registry import register_scraper
 from job_ftch.domain.site_models import ScrapedPostingPayload
@@ -118,26 +119,72 @@ def _normalize_keys(data: Any) -> Any:
     return data
 
 
-def _find_job_posting(data: dict[str, Any] | list[Any]) -> dict[str, Any] | None:
+def _posting_locator(posting: dict[str, Any]) -> str | None:
+    for key in ("url", "@id", "mainEntityOfPage"):
+        value = posting.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            nested = value.get("@id") or value.get("url")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+    return None
+
+
+def _same_document(left: str, right: str) -> bool:
+    left_parts = urlsplit(left)
+    right_parts = urlsplit(right)
+    if not left_parts.netloc or not right_parts.netloc:
+        return left.rstrip("/").casefold() == right.rstrip("/").casefold()
+    return (
+        left_parts.netloc.casefold().removeprefix("www.")
+        == right_parts.netloc.casefold().removeprefix("www.")
+        and left_parts.path.rstrip("/").casefold() == right_parts.path.rstrip("/").casefold()
+    )
+
+
+def _job_posting_candidates(data: dict[str, Any] | list[Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
     if isinstance(data, list):
         for item in data:
-            result = _find_job_posting(item)
-            if result:
-                return result
-        return None
+            candidates.extend(_job_posting_candidates(item))
+        return candidates
 
     if isinstance(data, dict):
         type_val = data.get("@type", "")
-        if isinstance(type_val, str) and "JobPosting" in type_val:
-            return cast("dict[str, Any]", _normalize_keys(data))
-        if isinstance(type_val, list) and any("JobPosting" in t for t in type_val):
-            return cast("dict[str, Any]", _normalize_keys(data))
+        if (
+            isinstance(type_val, str)
+            and "JobPosting" in type_val
+            or isinstance(type_val, list)
+            and any("JobPosting" in t for t in type_val)
+        ):
+            candidates.append(cast("dict[str, Any]", _normalize_keys(data)))
 
         graph = data.get("@graph")
         if isinstance(graph, list):
-            return _find_job_posting(graph)
+            candidates.extend(_job_posting_candidates(graph))
+    return candidates
 
-    return None
+
+def _find_job_posting(
+    data: dict[str, Any] | list[Any], *, expected_url: str = ""
+) -> dict[str, Any] | None:
+    candidates = _job_posting_candidates(data)
+    if not candidates:
+        return None
+    if expected_url:
+        for candidate in candidates:
+            locator = _posting_locator(candidate)
+            if locator and _same_document(locator, expected_url):
+                return candidate
+        # A posting without a locator is still usable; an unrelated explicit
+        # locator is not. This keeps pages with incomplete schema usable while
+        # preventing a neighbouring JobPosting from winning by list order.
+        for candidate in candidates:
+            if _posting_locator(candidate) is None:
+                return candidate
+        return None
+    return candidates[0]
 
 
 def _extract_locations(posting: dict[str, Any]) -> list[str] | None:
@@ -255,7 +302,7 @@ def parse_html(html: str, *, url: str = "") -> ScrapedPostingPayload | None:
     extractor.feed(html)
 
     for block in extractor.results:
-        posting = _find_job_posting(block)
+        posting = _find_job_posting(block, expected_url=url)
         if posting:
             return _parse_posting(posting)
 
