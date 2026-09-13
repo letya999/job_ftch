@@ -1,7 +1,7 @@
 ---
 title: "CAPTCHA provider rollout"
 description: "Operational rollout for observed CAPTCHA/bot-protection handling: project wiring, browser setup, provider roles, and eval gates."
-updated: 2026-08-05
+updated: 2026-09-13
 ---
 # CAPTCHA provider rollout
 
@@ -44,6 +44,23 @@ captcha_provider_routes: {}
 
 Paid providers only run when explicitly selected as `captcha_provider` and
 included in `captcha_enabled_providers`.
+
+## Domain authorization (`captcha_authorized_domains`)
+
+Paid/external solving is additionally gated by the domain allowlist
+(`JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS`, `JOB_FTCH_` prefix is required — bare
+`CAPTCHA_AUTHORIZED_DOMAINS` is ignored). `browser_wait` is never gated.
+
+| Allowlist | Behavior |
+|---|---|
+| empty (default) | deny for every domain (safe default) |
+| `hh.ru,m.hh.ru` | suffix match covers subdomains |
+| `*` | wildcard: authorize every domain, no per-site enumeration needed |
+
+Since 2026-09-13 the wildcard is supported in both config paths
+(`CaptchaSolverBypass._domain_authorized` and
+`_authorized_domains_from_config`), so single-domain rehearsals no longer need
+manual domain lists.
 
 Solver guardrails:
 
@@ -209,3 +226,47 @@ uv run python scripts/eval/run_captcha_provider_eval.py `
 
 Add `--allow-paid` only when the selected providers are funded and the target
 page is owned or explicitly authorized for testing.
+
+## Rehearsal log
+
+### 2026-09-13 — hh.ru cannot be provoked onto CAPTCHA, provider token path re-verified
+
+Provider smoke (`scripts/eval/run_captcha_provider_eval.py --allow-paid`,
+Google reCAPTCHA v2 demo, keys funded):
+
+- `capsolver` solved `recaptcha` (token kind) in ~18 s, token present;
+- session flow still requires HH-style sites to actually serve a CAPTCHA.
+
+Session stress on hh.ru (residential DataImpulse, patchright headless,
+`scripts/hh_ai_dev_probe.py` / churn + parallel sessions):
+
+- ~30 sessions and ~200 navigations: search pages and vacancy cards never
+  served a CAPTCHA (`captchaText` absent, no reCAPTCHA iframe);
+- HH escalates via intermediate `blocked_fingerprint` HTTP 200 pages during
+  session open and single 403s on detail URLs, cleared transparently by the
+  same-session `browser.challenge_retry`;
+- verdict: hh.ru CAPTCHA solving needs a live CAPTCHA trigger that is still not
+  reproducible in this environment; keep CapSolver wired, do not interpret
+  absence of CAPTCHA as solver untested.
+
+Same-day site rehearsal (`scripts/captcha_rehearsal.py`,
+`.runtime/runs/captcha_rehearsal/`):
+
+- kadrof.ru and telecom.kz loaded clean from residential geo-RU — no recaptcha
+  shown at 10 rapid same-site navigations each, unlike the 2026-08 observed run;
+- airastana.com: captcha-class `incapsula` reproduce output — hard session
+  gate, `browser_wait` does not clear it, provider chain correctly stops at
+  `observe` (fail-closed). Sites behind Incapsula stay manual/HITL until an
+  approved provider integration.
+- ozon.tech/vacancies/: hard `fab_chlg_` Antibot Challenge Page (403, JS-only
+  shell from `st.ozone.ru/s3/abt-challenge/script_v47_1.js`). Chromium
+  patchright tier cannot pass it (`browser_wait` + reload cycles keep the
+  403 challenge); the `camoufox` tier cleared it on the first wait+reload
+  cycle with no paid provider call: challenge gone, 20 vacancy cards listed,
+  2 vacancy detail pages extracted in the same session. Ozon antibot must be
+  routed through the camoufox tier, not through provider CAPTCHA solving.
+
+Takeaway: `*` domain authorization + funded keys make provider solving live for
+all authorized targets; per-site CAPTCHA appearance remains rate/fingerprint
+dependent and must be re-evaluated against production telemetry rather than
+assumed from `observe` runs.

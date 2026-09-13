@@ -1200,6 +1200,30 @@ def test_empty_allowlist_authorizes_nothing() -> None:
     assert not solver._domain_authorized("example.com")
 
 
+def test_wildcard_allowlist_authorizes_everything() -> None:
+    solver = CaptchaSolverBypass(authorized_domains=frozenset({"*"}))
+    assert solver._domain_authorized("hh.ru")
+    assert solver._domain_authorized("m.hh.ru")
+    assert solver._domain_authorized("anything.test")
+
+
+def test_factory_wildcard_authorized_domains(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "job_ftch.config.get_settings",
+        lambda: SimpleNamespace(
+            captcha_provider="browser_wait",
+            captcha_provider_routes={},
+            captcha_solver_timeout_budget_seconds=10.0,
+            captcha_solver_backoff_seconds=1.0,
+            captcha_enabled_providers=frozenset(),
+            captcha_authorized_domains=["*"],
+        ),
+    )
+    solver = _create_captcha_solver({"passed": True})
+    assert solver._domain_authorized("hh.ru")
+    assert solver._domain_authorized("evil.test")
+
+
 def test_factory_unions_parser_captcha_authorized_domains(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "job_ftch.config.get_settings",

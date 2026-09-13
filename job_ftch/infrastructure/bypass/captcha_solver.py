@@ -954,14 +954,17 @@ class CaptchaSolverBypass:
         """Whether provider-backed solving is authorized for ``domain``.
 
         Matches the domain or any parent suffix against the allowlist, so
-        ``jobs.example.com`` is covered by an ``example.com`` entry. An empty
-        allowlist authorizes nothing (safe default); ``browser_wait`` is not
-        gated by this and stays available everywhere.
+        ``jobs.example.com`` is covered by an ``example.com`` entry. ``*``
+        authorizes every domain. An empty allowlist authorizes nothing
+        (safe default); ``browser_wait`` is not gated by this and stays
+        available everywhere.
         """
         if self._authorized_domains is None:
             return True  # gate not configured -> unrestricted
         if not self._authorized_domains:
             return False  # configured but empty -> deny by default
+        if "*" in self._authorized_domains:
+            return True
         host = domain.strip().lower().lstrip(".")
         if not host:
             return False
@@ -1141,7 +1144,10 @@ def _authorized_domains_from_config(config: dict[str, Any], settings: Any) -> fr
     for key in ("authorized_domains", "captcha_authorized_domains"):
         collected.extend(_iter_domain_values(config.get(key)))
     collected.extend(_iter_domain_values(getattr(settings, "captcha_authorized_domains", ())))
-    return frozenset(item.strip().lower().lstrip(".") for item in collected if item.strip())
+    normalized = [item.strip().lower().lstrip(".") for item in collected if item.strip()]
+    if "*" in normalized:
+        return frozenset({"*"})
+    return frozenset(normalized)
 
 
 def _create_captcha_solver(
