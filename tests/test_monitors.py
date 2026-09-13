@@ -10,6 +10,9 @@ from job_ftch.infrastructure.sources.monitors.dom import (
 from job_ftch.infrastructure.sources.monitors.dom import (
     discover as dom_discover,
 )
+from job_ftch.infrastructure.sources.monitors.rss_board import discover as rss_discover
+from job_ftch.infrastructure.sources.monitors.shared import AtsRedirectException, check_ats_redirect
+from job_ftch.infrastructure.sources.monitors.workday import _parse_components
 
 
 @pytest.mark.asyncio
@@ -58,6 +61,70 @@ async def test_dom_monitor_uses_browser_search_prefetch() -> None:
     )
 
     assert any("/jobs/42" in url for url in result)
+
+
+def test_static_dom_detects_external_ats_before_same_site_filtering() -> None:
+    html = (
+        '<a href="https://servicetitan.wd1.myworkdayjobs.com/ServiceTitan/job/'
+        'US-Remote/Engineer_JR123">Engineer</a>'
+    )
+
+    with pytest.raises(AtsRedirectException) as exc_info:
+        check_ats_redirect(html, "https://careers.servicetitan.com/")
+
+    assert exc_info.value.monitor_name == "workday"
+    assert "servicetitan.wd1.myworkdayjobs.com" in exc_info.value.url
+
+
+def test_static_dom_detects_footer_ats_embeds_and_teamtailor() -> None:
+    html = (
+        '<main>' + ("x" * 100_100) + '</main>'
+        '<script src="https://jobs.ashbyhq.com/choco/embed"></script>'
+    )
+
+    with pytest.raises(AtsRedirectException) as exc_info:
+        check_ats_redirect(html, "https://example.com/careers")
+
+    assert exc_info.value.monitor_name == "ashby"
+    assert "ashbyhq.com" in exc_info.value.url
+
+    with pytest.raises(AtsRedirectException) as exc_info:
+        check_ats_redirect(
+            '<a href="https://webbfontainegroup.teamtailor.com/jobs/123-engineer">job</a>',
+            "https://example.com/careers",
+        )
+    assert exc_info.value.monitor_name == "rss_board"
+    assert "teamtailor.com" in exc_info.value.url
+
+
+def test_workday_redirected_job_url_keeps_only_tenant_site() -> None:
+    assert _parse_components(
+        "https://servicetitan.wd1.myworkdayjobs.com/en-US/ServiceTitan/job/Engineer_JR123"
+    ) == ("servicetitan", "wd1", "ServiceTitan")
+
+
+@pytest.mark.asyncio
+async def test_teamtailor_feed_url_infers_preset_without_runtime_hint() -> None:
+    class _Response:
+        text = '''<?xml version="1.0"?><rss xmlns:tt="https://teamtailor.com/locations"><channel>
+        <item><title>Engineer</title><link>https://acme.teamtailor.com/jobs/42-engineer</link>
+        <description>&lt;p&gt;Build things&lt;/p&gt;</description><tt:locations><tt:location><tt:name>Remote</tt:name></tt:location></tt:locations></item>
+        </channel></rss>'''
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _Client:
+        async def get(self, url: str, **_: object) -> _Response:
+            assert url == "https://acme.teamtailor.com/jobs.rss"
+            return _Response()
+
+    result = await rss_discover(
+        CareerSiteSpec(url="https://acme.teamtailor.com/jobs.rss", monitor_config={}), _Client()
+    )
+
+    assert len(result) == 1
+    assert result[0].locations == ["Remote"]
 
 
 @pytest.mark.asyncio

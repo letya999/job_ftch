@@ -445,6 +445,65 @@ async def test_response_detector_sets_observed_challenge_type() -> None:
 
 
 @pytest.mark.asyncio
+async def test_response_detector_ignores_embedded_captcha_from_third_party_widget() -> None:
+    callbacks: dict[str, object] = {}
+    controller = SimpleNamespace(set_observed_challenge_type=AsyncMock())
+
+    class _Page:
+        def on(self, event: str, callback: object) -> None:
+            callbacks[event] = callback
+
+    async def body() -> bytes:
+        return b"<html><body>recaptcha widget</body></html>"
+
+    response = SimpleNamespace(
+        status=200,
+        headers={"content-type": "text/html"},
+        url="https://ep2.adtrafficquality.google/recaptcha/widget",
+        request=SimpleNamespace(resource_type="document"),
+        body=body,
+    )
+
+    await install_challenge_response_detector(
+        _Page(),
+        url="https://jobs.example.test/careers",
+        controller=controller,
+        surface="monitor",
+    )
+    callbacks["response"](response)  # type: ignore[operator]
+    await asyncio.sleep(0)
+
+    controller.set_observed_challenge_type.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_response_detector_ignores_third_party_failure_response() -> None:
+    callbacks: dict[str, object] = {}
+    controller = SimpleNamespace(set_observed_challenge_type=AsyncMock())
+
+    class _Page:
+        def on(self, event: str, callback: object) -> None:
+            callbacks[event] = callback
+
+    response = SimpleNamespace(
+        status=403,
+        headers={"cf-mitigated": "challenge"},
+        url="https://tracker.example/blocked",
+    )
+
+    await install_challenge_response_detector(
+        _Page(),
+        url="https://jobs.example.test/careers",
+        controller=controller,
+        surface="monitor",
+    )
+    callbacks["response"](response)  # type: ignore[operator]
+    await asyncio.sleep(0)
+
+    controller.set_observed_challenge_type.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_recaptcha_v3_token_application_invokes_callbacks() -> None:
     page = SimpleNamespace(evaluate=AsyncMock(return_value=True))
     solver = CaptchaSolverBypass(wait_seconds=0.01)
@@ -809,9 +868,46 @@ async def test_provider_chain_falls_back_to_second_provider(
 
 
 @pytest.mark.asyncio
+async def test_provider_chain_does_not_spend_paid_budget_on_missing_first_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SecondProvider:
+        def __init__(self, api_key: str, *, proxy_url: str = "") -> None:
+            assert api_key == "second-provider-key"  # pragma: allowlist secret
+            del proxy_url
+
+        async def solve(self, page, *, challenge_type: str, url: str):
+            del page, challenge_type, url
+            return CaptchaSolveResult(solved=True, method="chain_second")
+
+    register_captcha_provider("chain_available_second")(SecondProvider)  # type: ignore[arg-type]
+    monkeypatch.setitem(
+        __import__(
+            "job_ftch.infrastructure.bypass.captcha_solver",
+            fromlist=["CAPTCHA_PROVIDER_ENV_KEYS"],
+        ).CAPTCHA_PROVIDER_ENV_KEYS,
+        "chain_available_second",
+        "CHAIN_SECOND_API_KEY",
+    )
+    monkeypatch.setenv("CHAIN_SECOND_API_KEY", "second-provider-key")
+
+    solver = CaptchaSolverBypass(
+        provider_routes={"recaptcha": ("chain_missing_first", "chain_available_second")},
+        enabled_providers=frozenset({"chain_missing_first", "chain_available_second"}),
+        max_paid_attempts=1,
+        min_provider_seconds=0,
+    )
+
+    result = await solver.solve(_FixturePage(), challenge_type="recaptcha")
+    assert result.solved is True
+    assert result.method == "chain_second"
+
+
+@pytest.mark.asyncio
 async def test_provider_chain_stops_at_manual_required() -> None:
     solver = CaptchaSolverBypass(
         provider_routes={"recaptcha": ("manual_required",)},
+        wait_seconds=0.001,
         enabled_providers=frozenset({"browser_wait"}),
         min_provider_seconds=0,
     )
@@ -819,7 +915,7 @@ async def test_provider_chain_stops_at_manual_required() -> None:
     result = await solver.solve(_FixturePage(), challenge_type="recaptcha")
     assert result.solved is False
     assert result.method == "manual_required"
-    assert result.failure_reason is CaptchaFailureReason.UNSUPPORTED_CHALLENGE
+    assert result.result_kind == "manual_required"
 
 
 @pytest.mark.asyncio

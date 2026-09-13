@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 import httpx
 import structlog
@@ -406,13 +406,14 @@ _DETAIL_URL_RE = re.compile(
     r"|locuri-de-munca|locuri_de_munca"
     r"|career|careers"
     r"|opening|openings"
+    r"|announcement|announcements"
     r"|offer|offers"
     r"|ployment|ployments"
     r"|stelle|stellen"
     r"|offre|offres"
     r"|empleo|empleos"
     r"|trabajo|trabajos)"
-    r"/[^/?#]*\d[^/?#]*(?:\.(?:html?|php|aspx))?",
+    r"/(?:[^/?#]+/)?[^/?#]*\d[^/?#]*(?:\.(?:html?|php|aspx))?",
     re.IGNORECASE,
 )
 
@@ -467,7 +468,12 @@ def _ats_tenant_prefix(url: str) -> str | None:
     """Return the provider tenant path from an explicit ATS board URL."""
     from urllib.parse import urlsplit
 
-    parts = [part for part in urlsplit(url).path.split("/") if part]
+    parsed = urlsplit(url)
+    # A feed endpoint is a board-wide transport, not a tenant path. Treating
+    # ``/jobs.rss`` as a prefix rejects every real ``/jobs/<id>`` item.
+    if parsed.path.casefold().endswith((".rss", ".xml", ".atom")):
+        return None
+    parts = [part for part in parsed.path.split("/") if part]
     marker_index = next(
         (
             index
@@ -478,15 +484,27 @@ def _ats_tenant_prefix(url: str) -> str | None:
     )
     if marker_index is None:
         return "/" + parts[0].casefold() if parts else None
-    if marker_index == 0:
+    prefix_parts = parts[:marker_index]
+    # Workday commonly redirects through a locale segment (``/en-US/``),
+    # while its API/detail URLs omit that segment.  It is not part of the
+    # tenant identity used for ownership checks.
+    if prefix_parts and re.fullmatch(r"[a-z]{2}-[A-Z]{2}", prefix_parts[0]):
+        prefix_parts = prefix_parts[1:]
+    if not prefix_parts:
         return None
-    return "/" + "/".join(parts[:marker_index]).casefold()
+    return "/" + "/".join(prefix_parts).casefold()
 
 
-def _has_vacancy_page_evidence(payload: ScrapedPostingPayload) -> bool:
+def _has_vacancy_page_evidence(
+    payload: ScrapedPostingPayload,
+    *,
+    url: str | None = None,
+) -> bool:
     metadata = payload.metadata or {}
     if metadata.get("page_type") == "job_posting":
         return True
+    if metadata.get("content_kind") in {"article", "announcement", "excerpt"}:
+        return False
     text = html_lib.unescape(re.sub(r"<[^>]+>", " ", payload.description or "")).casefold()
     # This proves page type, not completeness. A job URL and a long body do not.
     groups = (
@@ -494,7 +512,18 @@ def _has_vacancy_page_evidence(payload: ScrapedPostingPayload) -> bool:
         ("requirements", "qualifications", "требован", "must have", "must-have"),
         ("apply for", "apply now", "отклик", "we offer", "мы предлагаем"),
     )
-    return sum(any(token in text for token in group) for group in groups) >= 2
+    if sum(any(token in text for token in group) for group in groups) >= 2:
+        return True
+
+    # Generic DOM pages often omit section headings even though the URL is an
+    # unambiguous posting locator. Require both a strong detail path and a
+    # substantial body so a marketing/career landing page cannot pass merely
+    # because it contains the word "jobs".
+    if not url or len(text) < 20:
+        return False
+    strong_detail_path = _DETAIL_URL_RE.search(url)
+    title = " ".join((payload.title or "").split()).casefold()
+    return bool(strong_detail_path and title and not _looks_like_http_error_title(title))
 
 
 def _is_filtered_listing_url(url: str) -> bool:
@@ -1447,8 +1476,6 @@ class CareerSiteSource(Source["RawItem"]):
                     if isinstance(exc, AtsRedirectException):
                         logger.info("redirecting_to_ats", ats=exc.monitor_name, url=exc.url)
                         self._ats_tenant_prefix = _ats_tenant_prefix(exc.url)
-                        from urllib.parse import urlsplit
-
                         self._ats_tenant_host = (urlsplit(exc.url).netloc or "").casefold() or None
                         if self._ats_tenant_prefix or self._ats_tenant_host:
                             self._ownership_url = exc.url
@@ -1538,6 +1565,33 @@ class CareerSiteSource(Source["RawItem"]):
                 if result.metadata_updates.get("board_gone"):
                     self.stats.zero_reason = ZeroYieldReason.BOARD_GONE
                     return
+
+                # A known ATS monitor can legitimately return an external
+                # board even when discovery started on the employer CMS. Bind
+                # ownership from the monitor's declared URL pattern before
+                # candidate filtering; otherwise valid ATS items are marked
+                # as an untrusted parser gap and discarded.
+                if not self._ats_tenant_host and result.urls:
+                    hint = getattr(monitor_entry, "assessment_hint", None)
+                    patterns = getattr(hint, "url_patterns", ()) if hint else ()
+                    for candidate_url in result.urls:
+                        if is_same_site_family(candidate_url, board_url=self._ownership_url):
+                            continue
+                        if patterns and any(
+                            re.search(pattern, candidate_url, re.IGNORECASE)
+                            for pattern in patterns
+                        ):
+                            self._ownership_url = candidate_url
+                            self._ats_tenant_host = (
+                                urlsplit(candidate_url).netloc.casefold() or None
+                            )
+                            self._ats_tenant_prefix = _ats_tenant_prefix(candidate_url)
+                            logger.info(
+                                "ats_ownership_inferred_from_monitor",
+                                monitor=current_monitor_name,
+                                host=self._ats_tenant_host,
+                            )
+                            break
 
                 # 4. Check if we found anything useful. If not, and we are in auto mode, try next monitor.
                 # We ignore the self-url fallback for this check.
@@ -2316,7 +2370,7 @@ class CareerSiteSource(Source["RawItem"]):
         if (
             url not in self._trusted_parser_urls
             and not explicitly_included_self
-            and not _has_vacancy_page_evidence(scrape_result)
+            and not _has_vacancy_page_evidence(scrape_result, url=url)
         ):
             logger.debug("detail_candidate_rejected_page_type", url=url)
             return None

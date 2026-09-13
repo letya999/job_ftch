@@ -364,19 +364,33 @@ class AdaptiveBypassManager:
                 self.current_tier_index = self._tiers.index(recommended)
                 self._ensure_strategy()
                 logger.info("bypass_preflight_engine_selected", engine=recommended)
-        if getattr(preflight, "network", "direct") == "proxy":
-            if bool(getattr(context, "residential_proxy_available", False)):
+        preflight_network = getattr(preflight, "network", "direct")
+        if preflight_network in {"proxy", "residential_proxy"}:
+            if (
+                preflight_network == "residential_proxy"
+                and bool(getattr(context, "residential_proxy_available", False))
+            ) or (
+                preflight_network == "proxy"
+                and bool(getattr(context, "proxy_available", False))
+            ):
+                network = (
+                    NetworkRoute.RESIDENTIAL_PROXY
+                    if preflight_network == "residential_proxy"
+                    else NetworkRoute.PROXY
+                )
+                self._route_state = self._route_state.transition(
+                    network=network,
+                    session=SessionMode.STICKY,
+                )
+                logger.info("bypass_preflight_network_selected", network=network.value)
+            elif preflight_network == "proxy" and bool(
+                getattr(context, "residential_proxy_available", False)
+            ):
                 self._route_state = self._route_state.transition(
                     network=NetworkRoute.RESIDENTIAL_PROXY,
                     session=SessionMode.STICKY,
                 )
                 logger.info("bypass_preflight_network_selected", network="residential_proxy")
-            elif bool(getattr(context, "proxy_available", False)):
-                self._route_state = self._route_state.transition(
-                    network=NetworkRoute.PROXY,
-                    session=SessionMode.STICKY,
-                )
-                logger.info("bypass_preflight_network_selected", network="proxy")
         self._sync_context_route()
 
     def _sync_context_route(self) -> None:
@@ -681,6 +695,12 @@ class AdaptiveBypassManager:
             }
         )
         return True
+
+    def _fallback_to_direct(self) -> bool:
+        """Drop a failing proxy route so the origin can be retried once."""
+        if self._route_state.network is NetworkRoute.DIRECT:
+            return False
+        return self._transition_network(NetworkRoute.DIRECT)
 
     def _rotate_proxy(
         self,
@@ -1296,6 +1316,16 @@ class AdaptiveBypassManager:
             return kind
         if decision.action is TransitionAction.DEBOUNCED_PROXY:
             self._record_failure(source_id, kind)
+            if (
+                self.adaptive_enabled
+                and kind in {FailureKind.TIMEOUT, FailureKind.DNS_ERROR, FailureKind.CONNECT_ERROR}
+                and self._fallback_to_direct()
+            ):
+                logger.info(
+                    "bypass_proxy_transport_failed_fallback_direct",
+                    failure_kind=kind,
+                )
+                return kind
             if (
                 self.adaptive_enabled
                 and self._should_escalate(source_id, threshold=self._timeout_threshold)

@@ -408,7 +408,7 @@ _AIJOBS_AI_JOB_RE = re.compile(r"/job/([^/?#]+)/?", re.IGNORECASE)
 class AIJobsParser(HtmlAggregatorParser):
     """aijobs.net redirects to foorilla.com; listing is an HTMX fragment."""
 
-    domain_pattern = r"^https?://(?:(?:www\.)?aijobs\.net|(?:www\.)?foorilla\.com)(?:/|$)"
+    domain_pattern = r"^https?://(?:(?:www\.)?ai-?jobs\.net|(?:www\.)?foorilla\.com)(?:/|$)"
     parser_name = "aijobs"
     supports_search = True
     search_mode = "combined"

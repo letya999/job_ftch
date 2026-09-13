@@ -55,6 +55,50 @@ async def test_probe_wrapper_preserves_input_identity_for_domain_named_parser_ou
     assert [item.source_name for item in items] == ["ingest_probe_0"]
 
 
+@pytest.mark.asyncio
+async def test_probe_keeps_detail_frontier_separate_from_emission_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    captured: dict[str, CareerSiteSpec] = {}
+
+    class _EmptySource:
+        def __init__(self, spec: CareerSiteSpec) -> None:
+            self.spec = spec
+            self.stats = {}
+            self.bypass_strategy = None
+
+        async def fetch(self) -> AsyncIterator[RawItem]:
+            if False:
+                yield RawItem(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name="never",
+                    external_id="never",
+                    url="https://example.test/jobs/never",
+                    text="never",
+                )
+
+    def _capture(spec: CareerSiteSpec, **_: object) -> _EmptySource:
+        captured["spec"] = spec
+        return _EmptySource(spec)
+
+    monkeypatch.setattr(module, "create_source_from_spec", _capture)
+
+    await module._probe_one(
+        url="https://example.test/jobs",
+        source_name="probe",
+        max_items=1,
+        timeout_seconds=1,
+    )
+
+    assert captured["spec"].limit == 1
+    assert captured["spec"].detail_limit == module._PROBE_DETAIL_CANDIDATE_LIMIT
+    assert captured["spec"].monitor_config == {
+        "captcha_authorized_domains": ["example.test"],
+        "proxy_rescue_allow_domains": ["example.test"],
+    }
+
+
 def test_probe_classifies_exhausted_monitors_by_their_observed_stage() -> None:
     module = _load_script_module()
     result = SourceFetchResult(
@@ -409,6 +453,62 @@ async def test_resume_returns_cleanly_when_every_selected_url_is_saved(
     assert await module.main() == 0
 
     assert "All 1 selected URLs are already saved" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_resume_retry_failures_keeps_only_successful_saved_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    input_path = tmp_path / "sources.yaml"
+    output_path = tmp_path / "results.json"
+    url = "https://example.test/jobs"
+    input_path.write_text(f"urls:\n  - {url}\n", encoding="utf-8")
+    output_path.write_text(
+        json.dumps([{"url": url, "parse_status": "parsed_failed"}]), encoding="utf-8"
+    )
+
+    class _RecoveredSource:
+        def __init__(self, spec: CareerSiteSpec) -> None:
+            self.spec = spec
+            self.stats = {}
+            self.bypass_strategy = None
+
+        async def fetch(self) -> AsyncIterator[RawItem]:
+            yield RawItem(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=self.spec.source_name,
+                external_id="job-1",
+                url=f"{url}/1",
+                text="<h1>Engineer</h1>",
+            )
+
+    monkeypatch.setattr(module.sys, "platform", "linux")
+    monkeypatch.setattr(module, "create_source_from_spec", lambda spec: _RecoveredSource(spec))
+    monkeypatch.setattr(module, "resolve_site_parser", lambda _url: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_ingest_batch.py",
+            "--input",
+            str(input_path),
+            "--out-json",
+            str(output_path),
+            "--resume",
+            "--retry-failures",
+            "--timeout",
+            "2",
+            "--soft-timeout",
+            "1",
+        ],
+    )
+
+    assert await module.main() == 0
+
+    rows = json.loads(output_path.read_text(encoding="utf-8"))
+    assert rows[0]["parse_status"] == "parsed_ok"
 
 
 @pytest.mark.asyncio

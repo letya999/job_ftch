@@ -98,6 +98,15 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [087 — Autonomous tenant search lanes](087-autonomous-tenant-search-lanes.md) - Tenant is the unit of isolated scheduling, configuration, execution and storage. (Updated: 2026-09-06)
 - [088 — Private pull API and optional webhook delivery](088-private-pull-api-and-webhook-delivery.md) - Stored tenant data is exposed through an authenticated generic API; webhooks are optional acceleration. (Updated: 2026-09-06)
 - [089 — OpenAI observability in OpenObserve](089-openai-observability-in-openobserve.md) - OpenAI operational telemetry is separated from ingest logs without adding LangFuse or another backend. (Updated: 2026-09-06)
+- [090 — Подтверждённая доставка](090-delivery-truth.md) - Решение S1 инициативы восстановления production. (Updated: 2026-09-12)
+- [091 — Неизменяемый архив публикаций](091-publication-archive.md) - Решение S2 инициативы восстановления production. (Updated: 2026-09-12)
+- [092 — Идентичность вакансий и дедупликация](092-stable-job-identity.md) - Решение S3 инициативы восстановления production. (Updated: 2026-09-12)
+- [093 — 14-дневная диагностика и защищённый архив](093-retention-14-days.md) - Решение S4 инициативы восстановления production. (Updated: 2026-09-12)
+- [094 — Интеграция, метрики и безопасное восстановление](094-integration-recovery.md) - Решение S5 инициативы восстановления production. (Updated: 2026-09-12)
+- [095 — Полный ingest и ключевые парсеры](095-complete-ingest-parsers.md) - Решение P1 инициативы восстановления production. (Updated: 2026-09-12)
+- [096 — Доказательное извлечение компании, оплаты и географии](096-evidence-field-extraction.md) - Решение P2 инициативы восстановления production. (Updated: 2026-09-12)
+- [097 — Прокси, CAPTCHA и бюджет доступа](097-proxy-captcha-budget.md) - Решение P3 инициативы восстановления production. (Updated: 2026-09-12)
+- [098 — Контроль источников, пропусков и роста хранения](098-source-coverage-observability.md) - Решение P4 инициативы восстановления production. (Updated: 2026-09-12)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

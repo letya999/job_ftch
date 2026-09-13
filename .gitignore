@@ -111,7 +111,6 @@ job_ftch/infrastructure/ontology/data/ontology_*.json
 .venv_dev/
 results/
 profiles/
-artifacts/
 dist/
 data/
 !tools/bot_parity_lab/data/

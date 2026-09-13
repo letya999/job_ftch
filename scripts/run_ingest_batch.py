@@ -16,6 +16,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -25,6 +26,12 @@ if __name__ == "__main__":
 from job_ftch.application.registry import create_source_from_spec, resolve_site_parser
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.composite import SourceFetchResult, _capture_source_stats
+
+# The coverage probe only emits ``max_items`` items, but must inspect a small
+# detail frontier before declaring a source broken. A single stale/marketing
+# link is common on generic boards and is not evidence that the board has no
+# parseable vacancy.
+_PROBE_DETAIL_CANDIDATE_LIMIT = 10
 
 
 class _TimedProbeSource:
@@ -315,11 +322,22 @@ async def _probe_one(
     The ingest eval measures whether a URL can produce at least one vacancy.
     It should not depend on how many unrelated slow URLs are queued beside it.
     """
+    hostname = urlsplit(url).hostname
     spec = CareerSiteSpec(
         url=url,
         source_name=source_name,
         limit=max_items,
-        detail_limit=max_items,
+        detail_limit=max(max_items, _PROBE_DETAIL_CANDIDATE_LIMIT),
+        # The fixture is an operator-authorized public job-board eval set;
+        # allow its own host to use the configured proxy and paid CAPTCHA fallbacks.
+        monitor_config=(
+            {
+                "captcha_authorized_domains": [hostname],
+                "proxy_rescue_allow_domains": [hostname],
+            }
+            if hostname
+            else {}
+        ),
     )
     source = _TimedProbeSource(create_source_from_spec(spec))
     source_id = f"career_site:{spec.source_name}"
@@ -613,6 +631,11 @@ async def main() -> int:
         help="Skip URLs already saved in --out-json and preserve their results.",
     )
     parser.add_argument(
+        "--retry-failures",
+        action="store_true",
+        help="With --resume, retry saved results that are not parsed_ok.",
+    )
+    parser.add_argument(
         "--gate",
         action="store_true",
         help="Exit non-zero when parsed_ok / total is below --min-success-rate.",
@@ -665,6 +688,17 @@ async def main() -> int:
         except (OSError, ValueError) as exc:
             parser.error(str(exc))
         print(f"Resuming: {len(results_by_url)} saved URLs will be skipped")
+        if args.retry_failures:
+            selected_url_set = set(urls)
+            results_by_url = {
+                url: result
+                for url, result in results_by_url.items()
+                if url not in selected_url_set or result.get("parse_status") == "parsed_ok"
+            }
+            resume_order = [url for url in resume_order if url in results_by_url]
+            print(
+                f"Retrying saved non-parsed results: {len(urls) - sum(url in results_by_url for url in urls)}"
+            )
 
     pending_urls = [url for url in urls if url not in results_by_url]
     if not pending_urls:

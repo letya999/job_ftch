@@ -209,11 +209,12 @@ class CaptchaSolverBypass:
             parsed_page_url = urlparse(str(page.url))
             domain = (parsed_page_url.hostname or parsed_page_url.netloc).lower()
         normalized_type = normalize_challenge_type(challenge_type)
+        manual_mode = self._provider in {"manual_required", "observe"}
         request_url = url or str(getattr(page, "url", ""))
         attempt_key = self._attempt_key(domain, normalized_type, request_url)
         backoff_key = attempt_key
         backoff_until = self._failure_backoff.get(backoff_key)
-        if domain and backoff_until and backoff_until > time.monotonic():
+        if not manual_mode and domain and backoff_until and backoff_until > time.monotonic():
             return CaptchaSolveResult(
                 solved=False,
                 method="backoff",
@@ -223,7 +224,7 @@ class CaptchaSolverBypass:
                 raw_provider_status=f"retry_after_seconds={backoff_until - time.monotonic():.1f}",
             )
 
-        cached = self._cookie_cache.get(domain)
+        cached = self._cookie_cache.get(domain) if not manual_mode else None
         if cached and not cached.expired:
             return CaptchaSolveResult(
                 solved=True,
@@ -234,7 +235,7 @@ class CaptchaSolverBypass:
                 result_kind=CaptchaResultKind.SESSION,
             )
 
-        if self._attempts.get(attempt_key, 0) >= self._max_attempts:
+        if not manual_mode and self._attempts.get(attempt_key, 0) >= self._max_attempts:
             return CaptchaSolveResult(
                 solved=False,
                 method=self._provider,
@@ -242,14 +243,19 @@ class CaptchaSolverBypass:
                 failure_reason=CaptchaFailureReason.BUDGET_EXHAUSTED,
                 challenge_type=normalized_type,
             )
-        self._attempts[attempt_key] = self._attempts.get(attempt_key, 0) + 1
+        if not manual_mode:
+            self._attempts[attempt_key] = self._attempts.get(attempt_key, 0) + 1
 
         provider_authorized = self._domain_authorized(domain)
-        provider_chain = self._provider_chain_for(challenge_type)
+        provider_chain = () if manual_mode else self._provider_chain_for(challenge_type)
         if provider_chain and not provider_authorized:
             # Off-allowlist domains keep only the free passive wait; paid/
             # external providers are dropped from the chain.
-            filtered = tuple(name for name in provider_chain if name == "browser_wait")
+            filtered = tuple(
+                name
+                for name in provider_chain
+                if name in {"browser_wait", "observe", "manual_required"}
+            )
             if filtered != provider_chain:
                 logger.info(
                     "captcha_provider_blocked_unauthorized",
@@ -260,6 +266,15 @@ class CaptchaSolverBypass:
         if provider_chain:
             result = await self._solve_provider_chain(
                 page, challenge_type, url, provider_chain, attempt_key
+            )
+        elif self._provider == "manual_required":
+            result = await self._wait_for_manual_clearance(page, challenge_type, url)
+        elif self._provider == "observe":
+            result = CaptchaSolveResult(
+                solved=False,
+                method="observe",
+                challenge_type=normalized_type,
+                result_kind=CaptchaResultKind.SKIPPED_OBSERVE,
             )
         elif self._provider == "browser_wait":
             result = await self._solve_browser_wait(page, challenge_type)
@@ -411,14 +426,16 @@ class CaptchaSolverBypass:
     ) -> CaptchaSolveResult:
         failures: list[str] = []
         for provider_name in provider_chain:
-            if provider_name in {"observe", "manual_required"}:
+            if provider_name == "manual_required":
+                return await self._wait_for_manual_clearance(page, challenge_type, url)
+            if provider_name == "observe":
                 return CaptchaSolveResult(
                     solved=False,
                     method=provider_name,
                     error=f"provider chain stopped at {provider_name}",
                     failure_reason=CaptchaFailureReason.UNSUPPORTED_CHALLENGE,
                     challenge_type=normalize_challenge_type(challenge_type),
-                    result_kind=CaptchaResultKind.UNSUPPORTED,
+                    result_kind=CaptchaResultKind.SKIPPED_OBSERVE,
                     raw_provider_status=";".join(failures),
                 )
             previous_provider = self._provider
@@ -449,6 +466,15 @@ class CaptchaSolverBypass:
                             error="source deadline cannot cover provider timeout",
                             failure_reason=CaptchaFailureReason.DEADLINE_INSUFFICIENT,
                             challenge_type=normalize_challenge_type(challenge_type),
+                        )
+                    elif not self._api_key:
+                        # A missing provider credential is configuration
+                        # failure, not a paid attempt.  Keep the chain alive
+                        # so an enabled fallback provider can still run.
+                        result = await self._solve_external_api(
+                            page,
+                            challenge_type,
+                            url,
                         )
                     else:
                         async with self._paid_lock:
@@ -503,6 +529,71 @@ class CaptchaSolverBypass:
             )
         return await self.solve(page, challenge_type=challenge_type, url=url)
 
+    async def _wait_for_manual_clearance(
+        self, page: Any, challenge_type: str, expected_url: str
+    ) -> CaptchaSolveResult:
+        """Only observe; the operator submits the form in the same open session."""
+        from urllib.parse import urlsplit
+
+        from job_ftch.infrastructure.bypass.challenge_classifier import (
+            classify_challenge,
+            emit_challenge_detection,
+        )
+        from job_ftch.infrastructure.bypass.failure_signal import FailureKind
+
+        initial_url = str(getattr(page, "url", ""))
+        initial = urlsplit(initial_url)
+        expected = urlsplit(expected_url)
+        started = time.monotonic()
+        first = True
+        while True:
+            html = await page.content()
+            current = urlsplit(str(getattr(page, "url", "")))
+            detection = classify_challenge(
+                surface="manual_captcha_wait",
+                status_code=200,
+                body=html,
+            )
+            if first:
+                emit_challenge_detection(initial.hostname or "", detection)
+                logger.info("captcha_manual_required", type=challenge_type)
+                first = False
+            target_matches = bool(expected.hostname) and (
+                current.scheme,
+                current.netloc,
+                current.path,
+                current.query,
+            ) == (expected.scheme, expected.netloc, expected.path, expected.query)
+            navigated = (current.netloc, current.path) != (initial.netloc, initial.path)
+            if (
+                detection.kind == FailureKind.OK
+                and not detection.detected
+                and current.hostname == initial.hostname
+                and (target_matches if expected_url else navigated)
+                and await page.evaluate("document.readyState") == "complete"
+                and await page.evaluate(
+                    "performance.getEntriesByType('navigation').at(-1)?.responseStatus === 200"
+                )
+                and await page.evaluate("Boolean(document.body && document.body.innerText.trim())")
+            ):
+                return CaptchaSolveResult(
+                    solved=True,
+                    method="manual_required",
+                    challenge_type=challenge_type,
+                    result_kind=CaptchaResultKind.SESSION,
+                )
+            if time.monotonic() - started >= self._wait:
+                return CaptchaSolveResult(
+                    solved=False,
+                    method="manual_required",
+                    challenge_type=challenge_type,
+                    result_kind=CaptchaResultKind.MANUAL_REQUIRED,
+                    error="manual completion not confirmed; retry in the operator session",
+                )
+            await sleep_with_source_deadline(
+                max(0.0, min(self.POLL_INTERVAL_SECONDS, self._wait - (time.monotonic() - started)))
+            )
+
     async def _detect_challenge(self, page: Any) -> str | None:
         try:
             html = ""
@@ -526,7 +617,9 @@ class CaptchaSolverBypass:
                 normalized = normalize_challenge_type(detection.challenge_type)
                 if normalized != CaptchaChallengeType.UNKNOWN.value:
                     return normalized
-            if "recaptcha/api.js" in html_lower and "render=" in html_lower:
+            from job_ftch.infrastructure.bypass.failure_signal import _detect_captcha_type
+
+            if _detect_captcha_type(html) == "recaptcha_v3":
                 return CaptchaChallengeType.RECAPTCHA_V3.value
 
             if any(
@@ -564,10 +657,10 @@ class CaptchaSolverBypass:
                 return "datadome"
             if "perimeterx" in html_lower or "px-captcha" in html_lower:
                 return "perimeterx"
-            if (
-                "captcha-image" in html_lower
-                or "captcha_image" in html_lower
-                or ("<img" in html_lower and "captcha" in html_lower)
+            from selectolax.parser import HTMLParser
+
+            if HTMLParser(html).css_first(
+                'img[class*="captcha-image"], img[class*="captcha_image"], img[src*="captcha"]'
             ):
                 return "image"
 

@@ -63,7 +63,7 @@ parsers:
     has_custom_parse: true
     supports_discover: false
   - name: aijobs
-    domain_pattern: "^https?://(?:(?:www\\.)?aijobs\\.net|(?:www\\.)?foorilla\\.com)(?:/|$)"
+    domain_pattern: "^https?://(?:(?:www\\.)?ai-?jobs\\.net|(?:www\\.)?foorilla\\.com)(?:/|$)"
     has_custom_parse: true
     supports_discover: false
   - name: aijobs_com
@@ -410,7 +410,7 @@ parsers:
     wait: "domcontentloaded"
     include_if_detail_page: false
   - name: sololearn
-    domain_pattern: "^https?://(?:www\\.)?sololearn\\.com/(?:[a-z]{2}/)?career(?:/|$)"
+    domain_pattern: "^https?://(?:www\\.)?sololearn\\.com/(?:[a-z]{2}/)?careers?(?:/|$)"
     has_custom_parse: true
     supports_discover: false
     render: false

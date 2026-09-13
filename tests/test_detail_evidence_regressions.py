@@ -124,6 +124,12 @@ def test_ats_host_is_not_source_ownership_evidence():
 def test_external_ats_binding_is_limited_to_confirmed_tenant():
     assert _ats_tenant_prefix("https://boards.greenhouse.io/jetbrains/jobs/123") == "/jetbrains"
     assert _ats_tenant_prefix("https://boards.greenhouse.io/jetbrains") == "/jetbrains"
+    assert (
+        _ats_tenant_prefix(
+            "https://servicetitan.wd1.myworkdayjobs.com/en-US/ServiceTitan/job/123"
+        )
+        == "/servicetitan"
+    )
     assert _ats_tenant_prefix("https://webbfontainegroup.teamtailor.com/jobs/123") is None
     assert _ats_tenant_prefix("https://jobs.lever.co/acme/123") == "/acme"
 
@@ -141,6 +147,10 @@ def test_external_ats_candidate_requires_confirmed_teamtailor_host():
     assert not source._is_owned_candidate_url("https://other.teamtailor.com/jobs/456")
 
 
+def test_feed_ats_url_does_not_become_a_job_path_prefix():
+    assert _ats_tenant_prefix("https://webbfontainegroup.teamtailor.com/jobs.rss") is None
+
+
 def test_long_marketing_text_is_not_vacancy_page_evidence():
     from job_ftch.domain.site_models import ScrapedPostingPayload
 
@@ -151,6 +161,40 @@ def test_long_marketing_text_is_not_vacancy_page_evidence():
         ScrapedPostingPayload(
             title="Developer", description="Responsibilities: build. Requirements: Python."
         )
+    )
+
+
+def test_strong_job_detail_url_can_back_generic_body_without_headings():
+    from job_ftch.domain.site_models import ScrapedPostingPayload
+
+    assert _has_vacancy_page_evidence(
+        ScrapedPostingPayload(title="Senior Engineer", description="Job details. " * 100),
+        url="https://example.test/jobs/senior-engineer-1234",
+    )
+    assert not _has_vacancy_page_evidence(
+        ScrapedPostingPayload(title="Career opportunities", description="Job details. " * 100),
+        url="https://example.test/careers/",
+    )
+    assert _has_vacancy_page_evidence(
+        ScrapedPostingPayload(title="Engineer", description="Apply now: Python role."),
+        url="https://example.test/jobs/1234",
+    )
+    assert _has_vacancy_page_evidence(
+        ScrapedPostingPayload(title="Engineer", description="Apply now: Python role."),
+        url="https://example.test/careers/vacancy_1234_engineer",
+    )
+
+
+def test_workday_location_segment_is_a_strong_detail_url():
+    from job_ftch.domain.site_models import ScrapedPostingPayload
+
+    url = (
+        "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/"
+        "job/US-CA-Remote/Applied-AI-Engineer_JR2018181-1"
+    )
+    assert _has_vacancy_page_evidence(
+        ScrapedPostingPayload(title="Applied AI Engineer", description="A full posting body."),
+        url=url,
     )
 
 

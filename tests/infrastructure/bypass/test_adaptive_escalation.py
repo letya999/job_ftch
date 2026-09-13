@@ -127,6 +127,16 @@ def test_conservative_fallback_order_is_explicit() -> None:
     )
 
 
+def test_preflight_residential_route_is_applied() -> None:
+    manager = AdaptiveBypassManager()
+    context = _ProxyContext()
+    context.preflight = SimpleNamespace(tier="adaptive", network="residential_proxy")
+
+    manager.bind_context(context)
+
+    assert manager.route_state.network.value == "residential_proxy"
+
+
 @pytest.mark.asyncio
 async def test_captcha_failure_escalates() -> None:
     manager = AdaptiveBypassManager()
@@ -424,6 +434,20 @@ async def test_exhausted_http_timeout_activates_proxy_on_first_controller_report
 
     assert kind is FailureKind.TIMEOUT
     assert manager.uses_proxy
+
+
+@pytest.mark.asyncio
+async def test_proxy_transport_failure_falls_back_to_direct() -> None:
+    manager = AdaptiveBypassManager()
+    manager.bind_context(_ProxyContext())
+    assert manager.activate_proxy()
+    assert manager.activate_proxy()
+    assert manager.uses_proxy
+
+    kind = await manager.handle_failure("source", error=ConnectionError("connection refused"))
+
+    assert kind is FailureKind.CONNECT_ERROR
+    assert not manager.uses_proxy
 
 
 @pytest.mark.asyncio

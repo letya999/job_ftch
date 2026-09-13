@@ -58,6 +58,7 @@ DEFAULT_WAIT_FALLBACK = "commit"
 
 _CHALLENGE_DETECTOR_ATTR = "_job_ftch_challenge_response_detector"
 
+
 _PATCHRIGHT_CANCELLATION_FIX_ATTR = "_job_ftch_cancellation_safe_inner_send"
 _PATCHRIGHT_ROUTE_FIX_ATTR = "_job_ftch_cancellation_safe_route_handler"
 
@@ -1258,6 +1259,16 @@ async def install_challenge_response_detector(
     async def _inspect_response(response: Any) -> None:
         try:
             status_code = int(getattr(response, "status", 0) or 0)
+            response_url = str(getattr(response, "url", "") or url)
+            response_host = (urlparse(response_url).hostname or "").lower().rstrip(".")
+            target_host = (urlparse(url).hostname or "").lower().rstrip(".")
+            same_target = bool(
+                response_host
+                and target_host
+                and (response_host == target_host or response_host.endswith(f".{target_host}"))
+            )
+            if not same_target:
+                return
             headers = dict(getattr(response, "headers", {}) or {})
             body = await _challenge_probe_body(response, status_code, headers)
             from job_ftch.infrastructure.bypass.challenge_classifier import (
@@ -1274,8 +1285,7 @@ async def install_challenge_response_detector(
             )
             if not detection.detected:
                 return
-            response_url = str(getattr(response, "url", "") or url)
-            emit_challenge_detection(urlparse(response_url).netloc.lower(), detection)
+            emit_challenge_detection(response_host, detection)
             setter = getattr(controller, "set_observed_challenge_type", None)
             if detection.challenge_type and callable(setter):
                 maybe_result = setter(detection.challenge_type)
@@ -1326,6 +1336,7 @@ async def _page_has_captcha_marker(page: Page) -> bool:
                 """
                 () => {
                   const selectors = [
+                    'form input[name="captchaText"]',
                     '.g-recaptcha',
                     '#g-recaptcha',
                     '[data-sitekey]',

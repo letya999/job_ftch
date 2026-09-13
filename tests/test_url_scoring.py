@@ -251,6 +251,16 @@ def test_score_job_url_keeps_kadrof_and_aijobs_details() -> None:
         )
         >= 8
     )
+
+
+def test_score_job_url_prefers_numeric_announcement_postings_over_customer_pages() -> None:
+    posting = "https://www.hr.ge/announcement/489568/inglisurenovani-gayidvebis-agenti"
+    customer = "https://www.hr.ge/customer/25924/Gamarjoba-Georgia-Tours"
+
+    assert score_job_url(posting, board_url="https://www.hr.ge/") >= 8
+    assert score_job_url(posting, board_url="https://www.hr.ge/") > score_job_url(
+        customer, board_url="https://www.hr.ge/"
+    )
     assert (
         score_job_url(
             "https://aijobs.net/job/senior-ml-engineer-123",

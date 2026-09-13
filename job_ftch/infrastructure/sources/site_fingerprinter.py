@@ -37,6 +37,7 @@ _KNOWN_BOARD_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"[\w-]+\.breezy\.hr/?$", re.IGNORECASE), "breezy"),
     (re.compile(r"[\w-]+\.jobs\.personio\.\w+", re.IGNORECASE), "personio"),
     (re.compile(r"[\w-]+\.recruitee\.com/?$", re.IGNORECASE), "recruitee"),
+    (re.compile(r"[\w-]+\.teamtailor\.com/", re.IGNORECASE), "rss_board"),
     (
         re.compile(
             r"ats\.(?:\w+\.)?rippling\.com/(?:[a-z]{2}-[A-Z]{2}/)?[\w-]+/jobs", re.IGNORECASE
@@ -59,7 +60,15 @@ def _specific_monitor_from_text(url: str, body: str | None) -> str | None:
     if body:
         from job_ftch.config import get_settings
 
-        haystacks.append(body[: get_settings().fingerprint_body_scan_max_chars])
+        # ATS embeds are frequently appended after a large CMS document. Keep
+        # the bounded scan, but inspect both ends so a footer script is not
+        # invisible to routing.
+        limit = get_settings().fingerprint_body_scan_max_chars
+        if len(body) > limit:
+            half = max(1, limit // 2)
+            haystacks.append(body[:half] + body[-half:])
+        else:
+            haystacks.append(body)
     for pattern, monitor_name in _KNOWN_BOARD_PATTERNS:
         if any(pattern.search(text) for text in haystacks):
             return monitor_name

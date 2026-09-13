@@ -210,12 +210,30 @@ class FetchOutcome:
 def is_challenge_body(text: str) -> bool:
     """Check if HTML body contains anti-bot challenge markers."""
     lowered = text.lower()
-    return any(marker in lowered for marker in _CHALLENGE_MARKERS)
+    return _active_captcha_type(text) is not None or any(
+        marker in lowered for marker in _CHALLENGE_MARKERS
+    )
+
+
+def _active_captcha_type(text: str) -> str | None:
+    """Recognize interactive forms, not mentions in scripts or vacancy text."""
+    from selectolax.parser import HTMLParser
+
+    tree = HTMLParser(text)
+    for form in tree.css("form"):
+        if form.css_first('input[name="captchaText"]') and form.css_first("img"):
+            return "image"
+    if tree.css_first('iframe[src*="/recaptcha/api2/anchor"]'):
+        return "recaptcha"
+    return None
 
 
 def _detect_captcha_type(text: str, headers: Mapping[str, str] | None = None) -> str | None:
     """Return a conservative label for observed challenge evidence."""
     lowered = text.lower()
+    active_type = _active_captcha_type(text)
+    if active_type:
+        return active_type
     lowered_headers = {
         str(key).lower(): str(value).lower() for key, value in (headers or {}).items()
     }
@@ -233,7 +251,9 @@ def _detect_captcha_type(text: str, headers: Mapping[str, str] | None = None) ->
         return "smartcaptcha"
     if "hcaptcha" in lowered:
         return "hcaptcha"
-    if "recaptcha/api.js" in lowered and "render=" in lowered:
+    if re.search(
+        r"recaptcha/api\.js\?[^\"'<>\s]*render=(?!explicit(?:&|[\"'<>\s]|$))[^&\"'<>\s]+", lowered
+    ):
         return "recaptcha_v3"
     if "recaptcha" in lowered or "g-recaptcha" in lowered:
         return "recaptcha"
@@ -411,6 +431,11 @@ class HeuristicFailureSignal:
         # retain the substantial-content guard used for successful responses.
         if text:
             lowered = text.lower()
+            active_type = _active_captcha_type(text)
+            if active_type:
+                return FetchOutcome(
+                    kind=FailureKind.CAPTCHA, challenge=True, captcha_type=active_type
+                )
             substantial_content = _has_substantial_visible_content(text)
             for pattern in _PASSIVE_CHALLENGE_STRONG_PATTERNS:
                 if pattern.search(text):

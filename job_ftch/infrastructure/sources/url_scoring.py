@@ -56,6 +56,8 @@ _NEGATIVE_PATH_WORDS = frozenset(
         "cities",
         "client",
         "clients",
+        "customer",
+        "customers",
         "companies",
         "company",
         "contact",
@@ -164,6 +166,8 @@ _NEGATIVE_SUBSTRINGS = (
     "/category/",
     "/client/",
     "/clients/",
+    "/customer/",
+    "/customers/",
     "/companies/",
     "/company/",
     "/content/",
@@ -215,6 +219,7 @@ _DETAIL_PATH_RE = re.compile(
     r"|locuri-de-munca|locuri_de_munca"
     r"|career|careers"
     r"|opening|openings"
+    r"|announcement|announcements"
     r"|offer|offers"
     r"|ployment|ployments"
     r"|stelle|stellen"

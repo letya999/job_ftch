@@ -30,7 +30,7 @@ def _clean(value: str | None) -> str:
 class SololearnParser:
     """Follow Sololearn's public ATS link and detect when it has gone stale."""
 
-    domain_pattern = r"^https?://(?:www\.)?sololearn\.com/(?:[a-z]{2}/)?career(?:/|$)"
+    domain_pattern = r"^https?://(?:www\.)?sololearn\.com/(?:[a-z]{2}/)?careers?(?:/|$)"
     has_custom_parse = True
     terminal_on_empty = True
 
