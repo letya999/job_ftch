@@ -25,6 +25,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_identity_contract.py](test_identity_contract.py)
 - [test_managed.py](test_managed.py)
 - [test_managed_bypass.py](test_managed_bypass.py)
+- [test_manual_captcha_detection.py](test_manual_captcha_detection.py)
 - [test_multi_layer_obfuscation.py](test_multi_layer_obfuscation.py)
 - [test_pacing.py](test_pacing.py)
 - [test_parity_audit.py](test_parity_audit.py)
