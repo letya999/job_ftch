@@ -166,6 +166,67 @@ def _challenge_solution_requires_reload(controller: Any) -> bool:
     return bool(getattr(controller, "challenge_solution_requires_reload", True))
 
 
+def _json_safe_cookies(cookies: Any) -> list[dict[str, Any]]:
+    """Flatten cookies into strictly JSON-serializable dicts.
+
+    Session handoff may carry CDP enum values (e.g. CookieSameSite) which
+    Playwright's ``add_cookies`` rejects. Enum values are flattened to their
+    string value; unknown keys are dropped.
+    """
+    allowed = {"name", "value", "domain", "path", "expires", "secure", "httpOnly", "sameSite"}
+    safe: list[dict[str, Any]] = []
+    for cookie in cookies or []:
+        if not isinstance(cookie, dict):
+            continue
+        item: dict[str, Any] = {}
+        for key, value in cookie.items():
+            if hasattr(value, "value") and not isinstance(value, (str, int, float, bool)):
+                value = str(value.value)
+            if str(key) in allowed:
+                item[str(key)] = value
+        if item.get("name") is not None and item.get("value") is not None:
+            safe.append(item)
+    return safe
+
+
+async def _solve_settled_in_place(page: Any, challenge_wait_ms: int) -> bool:
+    """Wait in place after a session-kind solve and check the challenge left.
+
+    browser_wait-style JS navigation solutions need a bounded pause on the
+    already-open page so the challenge can hand control over; an immediate
+    ``goto`` reload restarts the challenge (Cloudflare, Incapsula). Returns
+    True when the page is challenge-free after the pause.
+    """
+    from job_ftch.infrastructure.sources.source_deadline import sleep_with_source_deadline
+
+    await sleep_with_source_deadline(challenge_wait_ms / 1000)
+    try:
+        if await _page_has_captcha_marker(page):
+            return False
+        return not bool(
+            await page.evaluate(
+                """
+                () => {
+                  const title = (document.title || '').toLowerCase();
+                  const body = (document.body && document.body.innerText) || '';
+                  const hay = title + ' ' + body.slice(0, 2000).toLowerCase();
+                  if (/just a moment|attention required|verify you are human|checking your browser|challenge page/i.test(hay)) {
+                    return true;
+                  }
+                  return Boolean(
+                    document.querySelector(
+                      '#challenge-form, #challenge-running, #challenge-stage, '
+                      + 'script[src*="challenge-platform"], [id*="cf-please"]'
+                    )
+                  );
+                }
+                """
+            )
+        )
+    except Exception:
+        return False
+
+
 def _browser_proxy(proxy_url: str) -> dict[str, str]:
     return ProxyEndpoint(url=proxy_url).playwright_proxy()
 
@@ -888,7 +949,7 @@ async def _open_playwright_page(
     context.set_default_timeout(timeout_ms)
 
     if config.get("cookies"):
-        await context.add_cookies(config["cookies"])
+        await context.add_cookies(_json_safe_cookies(config["cookies"]))
 
     page: Page = await await_with_source_deadline(context.new_page())
 
@@ -1016,7 +1077,7 @@ async def _open_persistent_page(
     context.set_default_timeout(timeout_ms)
 
     if config.get("cookies"):
-        await context.add_cookies(config["cookies"])
+        await context.add_cookies(_json_safe_cookies(config["cookies"]))
 
     page = (
         context.pages[0] if context.pages else await await_with_source_deadline(context.new_page())
@@ -1070,7 +1131,7 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
         config.get("timeout", settings.browser_default_timeout_ms)
     )
     challenge_retries = config.get("challenge_retries", settings.browser_challenge_retries)
-    challenge_wait_ms = config.get("challenge_wait_ms", 6000)
+    challenge_wait_ms = config.get("challenge_wait_ms", settings.browser_challenge_wait_ms)
     blocked = (403, 401, 429, 503)
     # Statuses worth a wait-and-reload: a JS/cookie challenge (403/503) or a cookie-warmup
     # rate-limit (429) that clears once the anti-bot cookies are set by the in-page JS.
@@ -1119,18 +1180,18 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
 
     if resp is not None and resp.status in challenge:
         controller = config.get("_bypass_strategy")
-        if await _solve_page_challenge(controller, page, url=url) and (
-            _challenge_solution_requires_reload(controller)
-        ):
+        if await _solve_page_challenge(controller, page, url=url) and not await _solve_settled_in_place(
+            page, challenge_wait_ms
+        ) and _challenge_solution_requires_reload(controller):
             resp = await await_with_source_deadline(
                 page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
             )
 
     if resp is not None and resp.status not in blocked and await _page_has_captcha_marker(page):
         controller = config.get("_bypass_strategy")
-        if await _solve_page_challenge(controller, page, url=url) and (
-            _challenge_solution_requires_reload(controller)
-        ):
+        if await _solve_page_challenge(controller, page, url=url) and not await _solve_settled_in_place(
+            page, challenge_wait_ms
+        ) and _challenge_solution_requires_reload(controller):
             resp = await await_with_source_deadline(
                 page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
             )
@@ -1144,9 +1205,9 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     observed = getattr(controller, "observed_challenge_type", None)
     if isinstance(observed, str) and observed.strip():
         log.info("browser.observed_challenge_solve", url=url, challenge_type=observed)
-        if await _solve_page_challenge(controller, page, url=url) and (
-            _challenge_solution_requires_reload(controller)
-        ):
+        if await _solve_page_challenge(controller, page, url=url) and not await _solve_settled_in_place(
+            page, challenge_wait_ms
+        ) and _challenge_solution_requires_reload(controller):
             resp = await await_with_source_deadline(
                 page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
             )

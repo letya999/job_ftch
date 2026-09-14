@@ -1129,6 +1129,29 @@ async def test_navigate_solves_observed_challenge_without_response_object() -> N
         page,
         url="https://example.test/jobs",
     )
+    # Session-kind solutions settle in place when the challenge marker is
+    # gone; no reload is needed.
+    assert page.goto.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_navigate_reloads_when_challenge_marker_persists_after_solve() -> None:
+    page = SimpleNamespace(
+        goto=AsyncMock(return_value=None),
+        evaluate=AsyncMock(return_value=True),
+    )
+    controller = SimpleNamespace(
+        observed_challenge_type="cloudflare_challenge",
+        solve_page_challenge=AsyncMock(return_value=True),
+    )
+
+    await navigate(
+        page,
+        "https://example.test/jobs",
+        {"challenge_retries": 0, "challenge_wait_ms": 1, "_bypass_strategy": controller},
+    )
+
+    # Marker persisted after the in-place settle: controller requires a reload.
     assert page.goto.await_count == 2
 
 
