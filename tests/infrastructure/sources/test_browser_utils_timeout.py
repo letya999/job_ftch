@@ -44,7 +44,15 @@ def test_json_safe_cookies_flattens_enums_and_keeps_valid_keys() -> None:
         }
     ]
     safe = _json_safe_cookies(cookies)
-    assert safe == [{"name": "cf_clearance", "value": "tok", "domain": ".example.test", "path": "/", "sameSite": "None"}]
+    assert safe == [
+        {
+            "name": "cf_clearance",
+            "value": "tok",
+            "domain": ".example.test",
+            "path": "/",
+            "sameSite": "None",
+        }
+    ]
 
 
 def test_json_safe_cookies_drops_incomplete_entries() -> None:

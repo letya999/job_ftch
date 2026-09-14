@@ -370,8 +370,7 @@ class AdaptiveBypassManager:
                 preflight_network == "residential_proxy"
                 and bool(getattr(context, "residential_proxy_available", False))
             ) or (
-                preflight_network == "proxy"
-                and bool(getattr(context, "proxy_available", False))
+                preflight_network == "proxy" and bool(getattr(context, "proxy_available", False))
             ):
                 network = (
                     NetworkRoute.RESIDENTIAL_PROXY

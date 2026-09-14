@@ -1578,8 +1578,7 @@ class CareerSiteSource(Source["RawItem"]):
                         if is_same_site_family(candidate_url, board_url=self._ownership_url):
                             continue
                         if patterns and any(
-                            re.search(pattern, candidate_url, re.IGNORECASE)
-                            for pattern in patterns
+                            re.search(pattern, candidate_url, re.IGNORECASE) for pattern in patterns
                         ):
                             self._ownership_url = candidate_url
                             self._ats_tenant_host = (
@@ -2237,7 +2236,10 @@ class CareerSiteSource(Source["RawItem"]):
             return False
         from urllib.parse import urlsplit
 
-        if self._ats_tenant_host and (urlsplit(url).netloc or "").casefold() != self._ats_tenant_host:
+        if (
+            self._ats_tenant_host
+            and (urlsplit(url).netloc or "").casefold() != self._ats_tenant_host
+        ):
             return False
         if self._ats_tenant_prefix:
             path = urlsplit(url).path.rstrip("/").casefold()

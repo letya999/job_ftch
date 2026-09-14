@@ -78,7 +78,7 @@ def test_static_dom_detects_external_ats_before_same_site_filtering() -> None:
 
 def test_static_dom_detects_footer_ats_embeds_and_teamtailor() -> None:
     html = (
-        '<main>' + ("x" * 100_100) + '</main>'
+        "<main>" + ("x" * 100_100) + "</main>"
         '<script src="https://jobs.ashbyhq.com/choco/embed"></script>'
     )
 
@@ -106,10 +106,10 @@ def test_workday_redirected_job_url_keeps_only_tenant_site() -> None:
 @pytest.mark.asyncio
 async def test_teamtailor_feed_url_infers_preset_without_runtime_hint() -> None:
     class _Response:
-        text = '''<?xml version="1.0"?><rss xmlns:tt="https://teamtailor.com/locations"><channel>
+        text = """<?xml version="1.0"?><rss xmlns:tt="https://teamtailor.com/locations"><channel>
         <item><title>Engineer</title><link>https://acme.teamtailor.com/jobs/42-engineer</link>
         <description>&lt;p&gt;Build things&lt;/p&gt;</description><tt:locations><tt:location><tt:name>Remote</tt:name></tt:location></tt:locations></item>
-        </channel></rss>'''
+        </channel></rss>"""
 
         def raise_for_status(self) -> None:
             return None

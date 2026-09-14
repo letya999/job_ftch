@@ -26,7 +26,6 @@ def _save(out: Path, name: str, data: dict) -> None:
     (out / name).write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8-sig")
 
 
-
 async def _evidence(service: OperatorBrowserSessionService, sid: str, out: Path, tag: str) -> dict:
     snap = await service.get(sid)
     html = await service.capture(sid, "html")
@@ -37,8 +36,15 @@ async def _evidence(service: OperatorBrowserSessionService, sid: str, out: Path,
         png = out / f"{tag}_screenshot.png"
         shutil.copyfile(Path(str(shot["path"])), png)
         saved["screenshot"] = str(png)
-    _save(out, f"{tag}_snapshot.json", {"snapshot": snap, "html_prefix": html.get("html", "")[:2000]})
-    return {"challenge": snap.get("challenge"), "final_url": snap.get("final_url"), "saved": saved, "trace": trace.get("trace", {}).get("kind")}
+    _save(
+        out, f"{tag}_snapshot.json", {"snapshot": snap, "html_prefix": html.get("html", "")[:2000]}
+    )
+    return {
+        "challenge": snap.get("challenge"),
+        "final_url": snap.get("final_url"),
+        "saved": saved,
+        "trace": trace.get("trace", {}).get("kind"),
+    }
 
 
 async def main() -> int:
@@ -52,7 +58,9 @@ async def main() -> int:
     for i in range(MAX_SESSIONS):
         query = random.choice(QUERIES)
         url = f"https://hh.ru/search/vacancy?text={quote(query)}&page={random.randint(0, 5)}"
-        info = await service.open(tenant_id=TENANT, url=url, engine="residential_proxy", headed=False)
+        info = await service.open(
+            tenant_id=TENANT, url=url, engine="residential_proxy", headed=False
+        )
         entry: dict = {"session": i, "requested": url, "status": info.get("status")}
         sid = info.get("session_id", "")
         if not sid:
@@ -65,30 +73,52 @@ async def main() -> int:
             entry["captcha"] = await _evidence(service, sid, out, f"sess{i}_captcha")
             result = await service.continue_session(sid, "solve:provider")
             post = await service.get(sid)
-            entry["solve"] = {"result": result.get("captcha"), "challenge_after": post.get("challenge"), "cleared": not post.get("challenge")}
+            entry["solve"] = {
+                "result": result.get("captcha"),
+                "challenge_after": post.get("challenge"),
+                "cleared": not post.get("challenge"),
+            }
             if entry["solve"]["cleared"]:
                 nav = await service.continue_session(sid, f"navigate {url}")
-                entry["after_recovery_nav"] = {"status": nav.get("status"), "challenge": nav.get("challenge")}
+                entry["after_recovery_nav"] = {
+                    "status": nav.get("status"),
+                    "challenge": nav.get("challenge"),
+                }
                 solved_proof = entry["solve"]
         elif challenge:
             entry["soft_challenge"] = challenge
         # quick page churn to build pressure
         for page in (0, 1, 2):
-            nav = await service.continue_session(sid, f"navigate {f'https://hh.ru/search/vacancy?text={quote(query)}&page={page}'}")
+            nav = await service.continue_session(
+                sid, f"navigate {f'https://hh.ru/search/vacancy?text={quote(query)}&page={page}'}"
+            )
             if nav.get("status") != "ok":
                 break
             ch = (nav.get("challenge") or "").strip()
             if ch and ch not in _SOFT_CHALLENGES:
                 captcha_hits += 1
-                entry[f"churn_captcha_{page}"] = await _evidence(service, sid, out, f"sess{i}_p{page}_captcha")
+                entry[f"churn_captcha_{page}"] = await _evidence(
+                    service, sid, out, f"sess{i}_p{page}_captcha"
+                )
                 break
             await asyncio.sleep(random.uniform(0.4, 1.2))
         await service.close(sid)
         results.append(entry)
         await asyncio.sleep(random.uniform(0.3, 1.0))
-    summary = {"started": stamp, "sessions": results, "captcha_challenges": captcha_hits, "solved_proof": solved_proof}
+    summary = {
+        "started": stamp,
+        "sessions": results,
+        "captcha_challenges": captcha_hits,
+        "solved_proof": solved_proof,
+    }
     _save(out, "summary.json", summary)
-    print(json.dumps({"captcha_challenges": captcha_hits, "solved_proof": solved_proof, "dir": str(out)}, ensure_ascii=False, indent=1))
+    print(
+        json.dumps(
+            {"captcha_challenges": captcha_hits, "solved_proof": solved_proof, "dir": str(out)},
+            ensure_ascii=False,
+            indent=1,
+        )
+    )
     return 0
 
 

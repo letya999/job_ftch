@@ -1180,18 +1180,22 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
 
     if resp is not None and resp.status in challenge:
         controller = config.get("_bypass_strategy")
-        if await _solve_page_challenge(controller, page, url=url) and not await _solve_settled_in_place(
-            page, challenge_wait_ms
-        ) and _challenge_solution_requires_reload(controller):
+        if (
+            await _solve_page_challenge(controller, page, url=url)
+            and not await _solve_settled_in_place(page, challenge_wait_ms)
+            and _challenge_solution_requires_reload(controller)
+        ):
             resp = await await_with_source_deadline(
                 page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
             )
 
     if resp is not None and resp.status not in blocked and await _page_has_captcha_marker(page):
         controller = config.get("_bypass_strategy")
-        if await _solve_page_challenge(controller, page, url=url) and not await _solve_settled_in_place(
-            page, challenge_wait_ms
-        ) and _challenge_solution_requires_reload(controller):
+        if (
+            await _solve_page_challenge(controller, page, url=url)
+            and not await _solve_settled_in_place(page, challenge_wait_ms)
+            and _challenge_solution_requires_reload(controller)
+        ):
             resp = await await_with_source_deadline(
                 page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
             )
@@ -1205,9 +1209,11 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     observed = getattr(controller, "observed_challenge_type", None)
     if isinstance(observed, str) and observed.strip():
         log.info("browser.observed_challenge_solve", url=url, challenge_type=observed)
-        if await _solve_page_challenge(controller, page, url=url) and not await _solve_settled_in_place(
-            page, challenge_wait_ms
-        ) and _challenge_solution_requires_reload(controller):
+        if (
+            await _solve_page_challenge(controller, page, url=url)
+            and not await _solve_settled_in_place(page, challenge_wait_ms)
+            and _challenge_solution_requires_reload(controller)
+        ):
             resp = await await_with_source_deadline(
                 page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
             )

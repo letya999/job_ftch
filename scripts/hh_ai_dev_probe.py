@@ -33,7 +33,9 @@ def _persist(path: Path, name: str, data: dict) -> dict:
     return {"saved": str(target)}
 
 
-async def _capture_snapshot(service: OperatorBrowserSessionService, sid: str, page: int, out: Path) -> dict:
+async def _capture_snapshot(
+    service: OperatorBrowserSessionService, sid: str, page: int, out: Path
+) -> dict:
     info = await service.get(sid)
     challenge = info.get("challenge") or ""
     html = await service.capture(sid, "html")
@@ -44,7 +46,13 @@ async def _capture_snapshot(service: OperatorBrowserSessionService, sid: str, pa
             png = out / f"page{page:02d}_challenge_screenshot.png"
             shutil.copyfile(Path(str(shot["path"])), png)
             saved["screenshot"] = str(png)
-    saved.update(_persist(out, f"page{page:02d}_snapshot", {"snapshot": info, "html_prefix": html.get("html", "")[:2000]}))
+    saved.update(
+        _persist(
+            out,
+            f"page{page:02d}_snapshot",
+            {"snapshot": info, "html_prefix": html.get("html", "")[:2000]},
+        )
+    )
     return {"challenge": challenge, "status": info.get("status"), "saved": saved}
 
 
@@ -54,7 +62,13 @@ async def _js_links(session, page) -> tuple[list[str], str]:
         await page.evaluate(_H2_JS)
     except Exception as exc:
         return [], f"eval_error:{type(exc).__name__}"
-    links = sorted({h.split("?", 1)[0].split("#", 1)[0] for h in hrefs if isinstance(h, str) and _VACANCY_RE.fullmatch(h.split("?", 1)[0].split("#", 1)[0])})
+    links = sorted(
+        {
+            h.split("?", 1)[0].split("#", 1)[0]
+            for h in hrefs
+            if isinstance(h, str) and _VACANCY_RE.fullmatch(h.split("?", 1)[0].split("#", 1)[0])
+        }
+    )
     return links, "ok"
 
 
@@ -63,7 +77,9 @@ async def _walk_search(service: OperatorBrowserSessionService, sid: str, out: Pa
     pages_info: list[dict] = []
     await service.continue_session(sid, "extend")
     for page in range(PAGES):
-        nav = await service.continue_session(sid, f"navigate {SEARCH.format(q=quote(QUERY), page=page)}")
+        nav = await service.continue_session(
+            sid, f"navigate {SEARCH.format(q=quote(QUERY), page=page)}"
+        )
         if nav.get("status") != "ok":
             break
         await asyncio.sleep(2.5)
@@ -91,12 +107,20 @@ async def _solve_challenge(service: OperatorBrowserSessionService, sid: str, out
     result = await service.continue_session(sid, "solve:provider")
     await asyncio.sleep(3.0)
     after = await service.get(sid)
-    result_entry = {"solve_result": result.get("captcha"), "challenge_after": after.get("challenge"), "cleared": not after.get("challenge")}
-    result_entry["saved"] = _persist(out, "captcha_solve_result", {"before": before, "result": result_entry})
+    result_entry = {
+        "solve_result": result.get("captcha"),
+        "challenge_after": after.get("challenge"),
+        "cleared": not after.get("challenge"),
+    }
+    result_entry["saved"] = _persist(
+        out, "captcha_solve_result", {"before": before, "result": result_entry}
+    )
     return result_entry
 
 
-async def _check_details(service: OperatorBrowserSessionService, sid: str, vacancy_urls: list[str], out: Path) -> dict:
+async def _check_details(
+    service: OperatorBrowserSessionService, sid: str, vacancy_urls: list[str], out: Path
+) -> dict:
     details: list[dict] = []
     for url in vacancy_urls[:3]:
         nav = await service.continue_session(sid, f"navigate {url}")
@@ -110,10 +134,19 @@ async def _check_details(service: OperatorBrowserSessionService, sid: str, vacan
             try:
                 charstr = str(await borrowed.page.evaluate(_H2_JS) or "")
                 chars = len(charstr)
-                (out / f"detail_{url.rsplit('/', 1)[-1]}.txt").write_text(charstr, encoding="utf-8-sig")
+                (out / f"detail_{url.rsplit('/', 1)[-1]}.txt").write_text(
+                    charstr, encoding="utf-8-sig"
+                )
             finally:
                 await service.release(sid)
-        details.append({"url": url, "text_chars": chars, "status": nav.get("status"), "challenge": nav.get("challenge")})
+        details.append(
+            {
+                "url": url,
+                "text_chars": chars,
+                "status": nav.get("status"),
+                "challenge": nav.get("challenge"),
+            }
+        )
         await service.continue_session(sid, "extend")
     _persist(out, "details_probe", {"details": details})
     return {"details": details}
@@ -134,10 +167,15 @@ async def main() -> int:
         manual_challenge=False,
     )
     sid = info.get("session_id", "")
-    report["open"] = {k: info.get(k) for k in ("status", "error", "challenge", "final_url", "page_title", "session_id")}
+    report["open"] = {
+        k: info.get(k)
+        for k in ("status", "error", "challenge", "final_url", "page_title", "session_id")
+    }
     if not sid:
         report["failure"] = "no session"
-        (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+        (out / "report.json").write_text(
+            json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
         return 1
     walk = await _walk_search(service, sid, out)
     report["walk"] = {"pages": walk["pages"], "vacancy_count": len(walk["vacancy_urls"])}
@@ -160,8 +198,19 @@ async def main() -> int:
         "m_hh_domain_gb": round(tracker.domain_gb("m.hh.ru"), 4),
         "hh_domain_gb": round(tracker.domain_gb("hh.ru"), 4),
     }
-    (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
-    print(json.dumps({k: report.get(k) for k in ("open", "walk", "solve", "details_probe", "proxy_budget", "failure")}, ensure_ascii=False, indent=1))
+    (out / "report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+    print(
+        json.dumps(
+            {
+                k: report.get(k)
+                for k in ("open", "walk", "solve", "details_probe", "proxy_budget", "failure")
+            },
+            ensure_ascii=False,
+            indent=1,
+        )
+    )
     return 0
 
 

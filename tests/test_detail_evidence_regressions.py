@@ -125,9 +125,7 @@ def test_external_ats_binding_is_limited_to_confirmed_tenant():
     assert _ats_tenant_prefix("https://boards.greenhouse.io/jetbrains/jobs/123") == "/jetbrains"
     assert _ats_tenant_prefix("https://boards.greenhouse.io/jetbrains") == "/jetbrains"
     assert (
-        _ats_tenant_prefix(
-            "https://servicetitan.wd1.myworkdayjobs.com/en-US/ServiceTitan/job/123"
-        )
+        _ats_tenant_prefix("https://servicetitan.wd1.myworkdayjobs.com/en-US/ServiceTitan/job/123")
         == "/servicetitan"
     )
     assert _ats_tenant_prefix("https://webbfontainegroup.teamtailor.com/jobs/123") is None
@@ -140,7 +138,9 @@ def test_external_ats_candidate_requires_confirmed_teamtailor_host():
     from job_ftch.domain.source_spec import CareerSiteSpec
     from job_ftch.infrastructure.sources.career_site_source import CareerSiteSource
 
-    source = CareerSiteSource(CareerSiteSpec(url="https://example.com/careers"), MagicMock(), MagicMock())
+    source = CareerSiteSource(
+        CareerSiteSpec(url="https://example.com/careers"), MagicMock(), MagicMock()
+    )
     source._ownership_url = "https://webbfontainegroup.teamtailor.com/jobs/123"
     source._ats_tenant_host = "webbfontainegroup.teamtailor.com"
     assert source._is_owned_candidate_url("https://webbfontainegroup.teamtailor.com/jobs/456")

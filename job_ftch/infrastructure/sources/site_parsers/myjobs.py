@@ -50,9 +50,7 @@ class MyJobsParser:
             if emitted >= limit or not isinstance(row, dict) or not row.get("id"):
                 continue
             vacancy_id = str(row["id"])
-            detail = await client.get(
-                f"https://api.myjobs.ge/api/ka/public/vacancies/{vacancy_id}"
-            )
+            detail = await client.get(f"https://api.myjobs.ge/api/ka/public/vacancies/{vacancy_id}")
             detail.raise_for_status()
             payload = detail.json().get("data")
             if not isinstance(payload, dict) or payload.get("status") not in {None, "active"}:
