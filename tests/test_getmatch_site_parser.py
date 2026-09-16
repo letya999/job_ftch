@@ -522,7 +522,7 @@ def test_build_search_urls_are_runtime_configurable() -> None:
     assert len(urls) == 1
     assert urls[0].startswith("https://getmatch.ru/vacancies")
     assert "sp=" not in urls[0]
-    assert "query=" not in urls[0]
+    assert "query=AI+engineer+OR+ML+engineer" in urls[0]
 
 
 def test_extract_vacancy_urls_from_offers_payload() -> None:
@@ -539,6 +539,28 @@ def test_extract_vacancy_urls_from_offers_payload() -> None:
         "https://getmatch.ru/vacancies/35602-team-lead-data-science-ml-promo-i",
         "https://getmatch.ru/vacancies/34714-senior-ai-ml-engineer-llm-agents",
     ]
+
+
+def test_offers_title_filter_drops_product_manager_for_project_search() -> None:
+    payload = {
+        "offers": [
+            {
+                "id": 1,
+                "position": "Product Manager",
+                "url": "/vacancies/1-product-manager",
+                "description_html": "Need a project manager in the team",
+            },
+            {
+                "id": 2,
+                "position": "Руководитель проектов",
+                "url": "/vacancies/2-project-manager",
+            },
+        ]
+    }
+    urls = extract_vacancy_urls_from_offers(
+        payload, limit=10, keywords=["project manager"]
+    )
+    assert urls == ["https://getmatch.ru/vacancies/2-project-manager"]
 
 
 def test_getmatch_offer_card_keeps_rich_api_fields() -> None:

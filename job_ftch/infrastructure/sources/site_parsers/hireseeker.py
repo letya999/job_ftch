@@ -22,9 +22,9 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     browser_scroll_collect_urls,
     is_challenge_response,
     keywords_from_spec,
+    listing_matches_keywords,
     normalize_search_keywords,
     resolve_browser_config,
-    text_matches_keywords,
     with_query_params,
 )
 from job_ftch.infrastructure.sources.site_utils import payload_to_raw_item
@@ -164,14 +164,41 @@ def _listing_cards(html_text: str, base_url: str) -> dict[str, dict[str, str]]:
     return cards
 
 
-def _seed_listing_url(url: str) -> str:
-    parsed = urlparse(url)
-    if (
-        not _LISTING_PATH_RE.fullmatch(parsed.path or "/")
-        or parsed.path.rstrip("/") == "/vacancy-list"
+def _preferred_category_slugs(keywords: Any) -> list[str]:
+    blob = " ".join(normalize_search_keywords(keywords or ())).casefold()
+    if not blob:
+        return []
+    if any(
+        marker in blob
+        for marker in (
+            "project manager",
+            "проектн",
+            "проджект",
+            "менеджер проекта",
+            "менеджер проектов",
+            "руководитель проекта",
+            "руководитель проектов",
+        )
     ):
-        parsed = parsed._replace(path="/vacancy-list/backend")
-    return urlunparse(parsed)
+        return ["product_project", "engineering_management"]
+    return []
+
+
+def _category_listing_url(url: str, slug: str) -> str:
+    parsed = urlparse(url)
+    return urlunparse(parsed._replace(path=f"/vacancy-list/{slug}"))
+
+
+def _seed_listing_url(url: str, keywords: Any = None) -> str:
+    parsed = urlparse(url)
+    path = parsed.path or "/"
+    preferred = _preferred_category_slugs(keywords)
+    if _CATEGORY_PATH_RE.fullmatch(path):
+        if preferred and path.rstrip("/").endswith("/backend"):
+            parsed = parsed._replace(path=f"/vacancy-list/{preferred[0]}")
+        return urlunparse(parsed)
+    slug = preferred[0] if preferred else "backend"
+    return urlunparse(parsed._replace(path=f"/vacancy-list/{slug}"))
 
 
 def _category_urls(html_text: str, base_url: str, seed_url: str) -> list[str]:
@@ -510,8 +537,13 @@ class HireSeekerParser:
     ) -> tuple[list[str], dict[str, dict[str, str]]]:
         config = self._browser_config(spec, bypass_strategy)
         keywords = keywords_from_spec(spec)
-        current_url = _seed_listing_url(spec.url)
+        current_url = _seed_listing_url(spec.url, keywords)
         category_queue = [current_url]
+        preferred_slugs = _preferred_category_slugs(keywords)
+        for slug in preferred_slugs[1:]:
+            extra = _category_listing_url(current_url, slug)
+            if extra not in category_queue:
+                category_queue.append(extra)
         visited_categories: set[str] = set()
         visited_pages: set[str] = set()
         collected: list[str] = []
@@ -565,14 +597,20 @@ class HireSeekerParser:
                     content = await page.content()
                     page_cards = _listing_cards(content, rendered_url)
                     cards.update(page_cards)
-                    for category in _category_urls(content, rendered_url, spec.url):
-                        if category not in visited_categories and category not in category_queue:
-                            category_queue.append(category)
+                    if not preferred_slugs:
+                        for category in _category_urls(content, rendered_url, spec.url):
+                            if (
+                                category not in visited_categories
+                                and category not in category_queue
+                            ):
+                                category_queue.append(category)
                     for raw_url in urls:
                         url = _canonical_url(raw_url)
                         identity = _detail_identity(url)
                         card = page_cards.get(identity, {})
-                        if keywords and not text_matches_keywords(card.get("text", ""), keywords):
+                        if keywords and not listing_matches_keywords(
+                            card.get("title", ""), card.get("text", ""), keywords
+                        ):
                             continue
                         if identity in seen or not _is_detail_url(url):
                             continue
@@ -658,14 +696,20 @@ class HireSeekerParser:
         limit = max(1, int(spec.limit or 50))
         source_name = spec.source_name or "hireseeker"
         bypass_strategy = spec.monitor_config.get("_bypass_strategy")
-        category_queue = [_seed_listing_url(spec.url)]
+        keywords = keywords_from_spec(spec)
+        seed = _seed_listing_url(spec.url, keywords)
+        category_queue = [seed]
+        preferred_slugs = _preferred_category_slugs(keywords)
+        for slug in preferred_slugs[1:]:
+            extra = _category_listing_url(seed, slug)
+            if extra not in category_queue:
+                category_queue.append(extra)
         visited_categories: set[str] = set()
         visited_pages: set[str] = set()
         collected: list[str] = []
         cards: dict[str, dict[str, str]] = {}
         seen: set[str] = set()
         listing_error: Exception | None = None
-        keywords = keywords_from_spec(spec)
 
         while category_queue and len(collected) < limit:
             category_url = category_queue.pop(0)
@@ -694,20 +738,30 @@ class HireSeekerParser:
                 if not page_cards:
                     break
                 cards.update(page_cards)
-                for category in _category_urls(body, response_url, spec.url):
-                    if category not in visited_categories and category not in category_queue:
-                        category_queue.append(category)
+                if not preferred_slugs:
+                    for category in _category_urls(body, response_url, spec.url):
+                        if (
+                            category not in visited_categories
+                            and category not in category_queue
+                        ):
+                            category_queue.append(category)
+                added = 0
                 for identity, card in page_cards.items():
-                    if keywords and not text_matches_keywords(card.get("text", ""), keywords):
+                    if keywords and not listing_matches_keywords(
+                        card.get("title", ""), card.get("text", ""), keywords
+                    ):
                         continue
                     url = _canonical_url(card["url"])
                     if identity in seen or not _is_detail_url(url):
                         continue
                     seen.add(identity)
                     collected.append(url)
+                    added += 1
                     if len(collected) >= limit:
                         break
                 if len(collected) >= limit:
+                    break
+                if added == 0:
                     break
                 next_url = _next_listing_url(body, response_url)
                 if next_url is None:
@@ -790,7 +844,7 @@ class HireSeekerParser:
         terms = normalize_search_keywords(keywords)
         if not terms:
             return []
-        listing_url = _seed_listing_url(base_url)
+        listing_url = _seed_listing_url(base_url, terms)
         return [with_query_params(listing_url, {"search": term}) for term in terms]
 
     @property
@@ -809,6 +863,6 @@ register_site_parser(
         can_detect_freshness_without_snapshot=False,
         ordered_by_newest=True,
         requires_full_snapshot=False,
-        rationale="HireSeeker exposes category SSR cards and internal JobPosting detail pages; free-text search is applied locally.",
+        rationale="HireSeeker exposes category SSR cards and internal JobPosting detail pages; keyword search pins a matching category and filters titles locally.",
     ),
 )(HireSeekerParser)

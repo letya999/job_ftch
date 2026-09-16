@@ -99,6 +99,89 @@ async def test_probe_keeps_detail_frontier_separate_from_emission_limit(
     }
 
 
+@pytest.mark.asyncio
+async def test_probe_attaches_keywords_for_local_title_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    captured: dict[str, CareerSiteSpec] = {}
+
+    class _EmptySource:
+        def __init__(self, spec: CareerSiteSpec) -> None:
+            self.spec = spec
+            self.stats = {}
+            self.bypass_strategy = None
+
+        async def fetch(self) -> AsyncIterator[RawItem]:
+            if False:
+                yield RawItem(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name="never",
+                    external_id="never",
+                    url="https://example.test/jobs/never",
+                    text="never",
+                )
+
+    def _capture(spec: CareerSiteSpec, **_: object) -> _EmptySource:
+        captured["spec"] = spec
+        return _EmptySource(spec)
+
+    monkeypatch.setattr(module, "create_source_from_spec", _capture)
+
+    await module._probe_one(
+        url="https://example.test/jobs",
+        source_name="probe",
+        max_items=1,
+        timeout_seconds=1,
+        keywords=["project manager"],
+    )
+
+    assert captured["spec"].monitor_config["_search_keywords"] == ["project manager"]
+
+
+@pytest.mark.asyncio
+async def test_probe_persists_item_titles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+
+    class _TitledSource:
+        def __init__(self, spec: CareerSiteSpec) -> None:
+            self.spec = spec
+            self.stats = {}
+            self.bypass_strategy = None
+
+        async def fetch(self) -> AsyncIterator[RawItem]:
+            yield RawItem(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=self.spec.source_name,
+                external_id="job-1",
+                url="https://example.test/jobs/1",
+                text="Project Manager\nAcme\nLead the delivery team.",
+                metadata={"title": "Project Manager"},
+            )
+
+    def _titled(spec: CareerSiteSpec, **_: object) -> _TitledSource:
+        return _TitledSource(spec)
+
+    monkeypatch.setattr(module, "create_source_from_spec", _titled)
+
+    result = await module._probe_one(
+        url="https://example.test/jobs",
+        source_name="probe",
+        max_items=1,
+        timeout_seconds=1,
+    )
+
+    assert result["items"] == [
+        {
+            "url": "https://example.test/jobs/1",
+            "title": "Project Manager",
+            "text_preview": "Project Manager\nAcme\nLead the delivery team.",
+        }
+    ]
+
+
 def test_probe_classifies_exhausted_monitors_by_their_observed_stage() -> None:
     module = _load_script_module()
     result = SourceFetchResult(

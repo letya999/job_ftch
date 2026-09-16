@@ -166,6 +166,59 @@ def keywords_from_spec(spec: Any) -> list[str]:
     return normalize_search_keywords(getattr(spec, "target_roles", None) or ())
 
 
+_ROLE_ALIASES: dict[str, tuple[str, ...]] = {
+    "project manager": (
+        "project manager",
+        "project-manager",
+        "проектный менеджер",
+        "менеджер проекта",
+        "менеджер проектов",
+        "руководитель проекта",
+        "руководитель проектов",
+        "проджект менеджер",
+        "проджект-менеджер",
+        "project management officer",
+    ),
+}
+
+
+def expanded_search_keywords(keywords: Sequence[str] | None) -> list[str]:
+    """Expand a search term with known bilingual role aliases."""
+    terms = normalize_search_keywords(keywords)
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        phrase = " ".join(term.casefold().split())
+        aliases = _ROLE_ALIASES.get(phrase, (term,))
+        for alias in (term, *aliases):
+            key = " ".join(str(alias).casefold().split())
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            expanded.append(alias)
+    return expanded
+
+
+def listing_matches_keywords(
+    title: str,
+    text: str = "",
+    keywords: Sequence[str] | None = None,
+) -> bool:
+    """Match a listing by title first so description noise does not leak.
+
+    Empty keywords mean "do not filter". Title-only matching keeps Habr/GeekJob
+    server search from promoting Product Manager cards that merely mention
+    "project" in the snippet.
+    """
+    terms = expanded_search_keywords(keywords)
+    if not terms:
+        return True
+    title_text = str(title or "").strip()
+    if title_text:
+        return text_matches_keywords(title_text, terms)
+    return text_matches_keywords(str(text or ""), terms)
+
+
 def text_matches_keywords(text: str, keywords: Sequence[str] | None) -> bool:
     """True when ``text`` matches any search term, or when no terms are set.
 

@@ -340,6 +340,46 @@ async def test_hh_parser_routes_detail_captcha_to_bypass() -> None:
 
 
 @pytest.mark.asyncio
+async def test_hh_parser_uses_listing_when_detail_captcha_and_bypass_is_set() -> None:
+    listing_url = "https://hh.ru/search/vacancy?text=project+manager"
+    detail_url = "https://hh.ru/vacancy/123"
+
+    class _Bypass:
+        current_name = "noop"
+        uses_proxy = False
+
+        async def apply_http(self, value: object) -> object:
+            return value
+
+    client = _FakeClient(
+        {
+            listing_url: _FakeResponse(
+                '<div id="123">'
+                f'<a data-qa="serp-item__title" href="{detail_url}">Project Manager</a>'
+                "</div>",
+                listing_url,
+            ),
+            detail_url: _FakeResponse('<div class="g-recaptcha"></div>', detail_url),
+        }
+    )
+    items = [
+        item
+        async for item in HhParser().parse(
+            CareerSiteSpec(
+                url=listing_url,
+                source_name="hh",
+                limit=1,
+                monitor_config={"_bypass_strategy": _Bypass()},
+            ),
+            client,
+        )
+    ]
+    assert len(items) == 1
+    assert items[0].external_id == "123"
+    assert "Project Manager" in items[0].text
+
+
+@pytest.mark.asyncio
 async def test_hh_parser_respects_configured_detail_limit() -> None:
     listing_url = "https://hh.ru/search/vacancy?text=ai"
     first_url = "https://hh.ru/vacancy/1"

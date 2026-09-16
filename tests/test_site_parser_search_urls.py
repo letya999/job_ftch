@@ -18,6 +18,7 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     detect_listing_pagination,
     distinctive_search_tokens,
     keywords_from_spec,
+    listing_matches_keywords,
     listing_page_url,
     normalize_search_keywords,
     paginate_listing,
@@ -237,13 +238,23 @@ def test_getmatch_keeps_listing_without_hardcoded_sphere() -> None:
     assert len(urls) == 1
     assert urls[0].startswith("https://getmatch.ru/vacancies")
     assert "sp=" not in urls[0]
-    assert "query=" not in urls[0]
+    assert _query(urls[0])["query"] == ["AI engineer OR LLM engineer OR ИИ инженер"]
 
 
 def test_text_matches_keywords_keeps_ml_titles() -> None:
     assert text_matches_keywords("ML-разработчик", ["ML Engineer"]) is True
     assert text_matches_keywords("Java developer", ["LLM Engineer"]) is False
     assert text_matches_keywords("anything", []) is True
+
+
+def test_listing_matches_keywords_uses_title_and_role_aliases() -> None:
+    assert listing_matches_keywords("Руководитель проектов", keywords=["project manager"]) is True
+    assert listing_matches_keywords("Product Manager", keywords=["project manager"]) is False
+    assert listing_matches_keywords(
+        "Product Manager",
+        "We need a project manager in the team",
+        ["project manager"],
+    ) is False
 
 
 def test_keywords_from_spec_read_monitor_config() -> None:

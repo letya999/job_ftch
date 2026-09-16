@@ -396,6 +396,85 @@ async def test_habr_parser_walks_twenty_five_card_pages_to_two_hundred() -> None
 
 
 @pytest.mark.asyncio
+async def test_habr_parser_keeps_russian_project_manager_and_stops_empty_pages() -> None:
+    listing_base = "https://career.habr.com/vacancies?q=project+manager&type=all"
+    calls: list[str] = []
+
+    def _cards(*rows: tuple[int, str]) -> str:
+        return "".join(
+            f'<div class="vacancy-card"><a class="vacancy-card__title-link" '
+            f'href="/vacancies/{job_id}">{title}</a></div>'
+            for job_id, title in rows
+        )
+
+    class Client:
+        async def get(self, url: str, **_: object) -> _FakeResponse:
+            calls.append(url)
+            query = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+            page = int(query.get("page") or "1")
+            if page == 1:
+                body = _cards((1, "Project Manager"), (2, "Product Manager"))
+            elif page == 2:
+                body = _cards((3, "Руководитель проектов"), (4, "Java Developer"))
+            else:
+                body = _cards((2, "Product Manager"))
+            return _FakeResponse(body, url)
+
+    items = [
+        item
+        async for item in HabrCareerParser().parse(
+            CareerSiteSpec(
+                url=listing_base,
+                source_name="habr_jobs",
+                limit=20,
+                detail_limit=0,
+            ),
+            Client(),
+        )
+    ]
+    assert [item.external_id for item in items] == ["1", "3"]
+    assert "Project Manager" in items[0].text
+    assert "Руководитель проектов" in items[1].text
+    assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_geekjob_parser_filters_fuzzy_qs_hits_by_title() -> None:
+    parser = GeekJobParser()
+
+    class _ApiResponse(_FakeResponse):
+        def json(self) -> dict[str, object]:
+            return {
+                "data": [
+                    {"id": "pm1", "position": "Project Manager"},
+                    {"id": "prod1", "position": "Product Manager iGaming"},
+                    {"id": "ops1", "position": "People Operations Specialist"},
+                ],
+                "pagecount": 1,
+                "nextpage": 0,
+            }
+
+    class _ApiClient:
+        async def get(self, url: str, **_: object) -> _ApiResponse:
+            return _ApiResponse("", url)
+
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(
+                url="https://geekjob.ru/vacancies?qs=project+manager",
+                source_name="geekjob_jobs",
+                limit=20,
+                detail_limit=0,
+            ),
+            _ApiClient(),
+        )
+    ]
+    assert [item.external_id for item in items] == ["pm1"]
+    assert "Project Manager" in items[0].text
+
+
+@pytest.mark.asyncio
 async def test_habr_parser_propagates_listing_429() -> None:
     request = httpx.Request("GET", "https://career.habr.com/vacancies?q=developer")
     response = httpx.Response(429, request=request, headers={"Retry-After": "0"})

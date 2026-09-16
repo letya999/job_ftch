@@ -107,6 +107,31 @@ async def test_api_rate_gate_uses_raw_client_under_retrying_wrapper() -> None:
 
 
 @pytest.mark.asyncio
+async def test_detail_rate_limit_does_not_sleep_retry_after() -> None:
+    class _RawClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def get(self, url: str, **kwargs: object) -> _JsonResponse:
+            del kwargs
+            self.calls += 1
+            response = _JsonResponse({}, url, text='{"retry_after": 38}')
+            response.status_code = 429
+            response.headers = {"Retry-After": "38"}
+            return response
+
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(HirifyRateLimitedError):
+        await HirifyParser()._api_get(
+            _RawClient(),
+            "https://api.hirify.me/api/vacancies/668118",
+            headers={},
+            retry_rate_limit=False,
+        )
+    assert asyncio.get_running_loop().time() - started < 1.0
+
+
+@pytest.mark.asyncio
 async def test_rate_gate_does_not_sleep_past_source_budget() -> None:
     gate = _HirifyRateGate()
     gate.record_rate_limit(120)
@@ -293,19 +318,25 @@ async def test_one_rate_limited_detail_does_not_discard_successful_details() -> 
 
     parser._fetch_detail_body = _detail  # type: ignore[method-assign]
 
+    browser_calls = {"count": 0}
+
     async def _browser_details(
         spec: CareerSiteSpec,
         html: str,
         rows: list[dict[str, object]],
     ) -> dict[str, dict[str, object]]:
         del spec, html, rows
+        browser_calls["count"] += 1
         return {}
 
     parser._fetch_details_via_browser = _browser_details  # type: ignore[method-assign]
     items = [item async for item in parser.parse(_spec(), client)]
 
-    assert len(items) == 1
-    assert items[0].external_id == "668118"
+    assert browser_calls["count"] == 0
+    assert [item.external_id for item in items] == ["668118", "668119"]
+    assert items[0].metadata["detail_vacancy_confirmed"] is True
+    assert items[1].metadata["detail_vacancy_confirmed"] is False
+    assert "Product Owner (AI)" in items[1].text
 
 
 @pytest.mark.asyncio
@@ -355,12 +386,49 @@ async def test_rate_limited_listing_expands_from_browser_discovery() -> None:
     parser.discover = _discover  # type: ignore[assignment]
     parser._fetch_detail_body = _detail  # type: ignore[method-assign]
     spec = _spec().model_copy(
-        update={"limit": 2, "url": "https://hirify.me/jobs-in-russia?search=manager"}
+        update={"limit": 2, "url": "https://hirify.me/jobs-in-russia?search=product+owner"}
     )
 
     items = [item async for item in parser.parse(spec, _UnfilteredSsrClient())]
 
     assert [item.external_id for item in items] == ["668118", "668119"]
+
+
+@pytest.mark.asyncio
+async def test_search_keeps_project_manager_titles_not_any_manager() -> None:
+    sales = {**_LISTING_ROW, "id": 1, "slug": "1-sales", "title": "Head of Sales (SaaS)"}
+    project = {
+        **_LISTING_ROW,
+        "id": 2,
+        "slug": "2-project-manager",
+        "title": "IT Project Manager",
+    }
+    product = {
+        **_LISTING_ROW,
+        "id": 3,
+        "slug": "3-product-manager",
+        "title": "Staff Product Manager",
+    }
+    client = _ApiClient(listing={"data": [sales, project, product]})
+
+    async def _detail(
+        client: object,
+        html: str,
+        vacancy_id: object,
+        referer: str,
+    ) -> dict[str, object] | None:
+        del client, html, referer
+        return {"id": vacancy_id, "tldr": "listing fallback"}
+
+    parser = HirifyParser()
+    parser._fetch_detail_body = _detail  # type: ignore[method-assign]
+    spec = _spec().model_copy(
+        update={"url": "https://hirify.me/jobs-in-russia?search=project+manager", "limit": 10}
+    )
+    items = [item async for item in parser.parse(spec, client)]
+
+    assert [item.external_id for item in items] == ["2"]
+    assert "IT Project Manager" in items[0].text
 
 
 @pytest.mark.asyncio

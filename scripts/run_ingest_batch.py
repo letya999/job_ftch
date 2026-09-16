@@ -80,6 +80,23 @@ class _LiveProbe:
         self.items = items
 
 
+def _item_snapshot(item: Any) -> dict[str, str]:
+    text = str(getattr(item, "text", "") or "")
+    title = ""
+    metadata = getattr(item, "metadata", None) or {}
+    if isinstance(metadata, dict):
+        raw_title = metadata.get("title")
+        if isinstance(raw_title, str) and raw_title.strip():
+            title = raw_title.strip()
+    if not title:
+        title = text.split("\n", 1)[0].strip()
+    return {
+        "url": str(getattr(item, "url", "") or ""),
+        "title": title[:240],
+        "text_preview": text[:240],
+    }
+
+
 def _parser_name(spec: CareerSiteSpec) -> str | None:
     parser = resolve_site_parser(spec.url)
     if parser is None:
@@ -272,6 +289,7 @@ def _probe_result(
             "issues": coherence_issues,
         },
         "parser_outcome": parser_outcome,
+        "items": list(items),
         "evicted": source_result.evicted,
         "eviction_kind": source_result.eviction_kind,
         "terminal_outcome": source_result.terminal_outcome,
@@ -316,6 +334,7 @@ async def _probe_one(
     max_items: int,
     timeout_seconds: float,
     live_probes: dict[str, _LiveProbe] | None = None,
+    keywords: list[str] | None = None,
 ) -> dict[str, Any]:
     """Probe one URL with an isolated source budget.
 
@@ -323,21 +342,20 @@ async def _probe_one(
     It should not depend on how many unrelated slow URLs are queued beside it.
     """
     hostname = urlsplit(url).hostname
+    monitor_config: dict[str, Any] = {}
+    if hostname:
+        # The fixture is an operator-authorized public job-board eval set;
+        # allow its own host to use the configured proxy and paid CAPTCHA fallbacks.
+        monitor_config["captcha_authorized_domains"] = [hostname]
+        monitor_config["proxy_rescue_allow_domains"] = [hostname]
+    if keywords:
+        monitor_config["_search_keywords"] = list(keywords)
     spec = CareerSiteSpec(
         url=url,
         source_name=source_name,
         limit=max_items,
         detail_limit=max(max_items, _PROBE_DETAIL_CANDIDATE_LIMIT),
-        # The fixture is an operator-authorized public job-board eval set;
-        # allow its own host to use the configured proxy and paid CAPTCHA fallbacks.
-        monitor_config=(
-            {
-                "captcha_authorized_domains": [hostname],
-                "proxy_rescue_allow_domains": [hostname],
-            }
-            if hostname
-            else {}
-        ),
+        monitor_config=monitor_config,
     )
     source = _TimedProbeSource(create_source_from_spec(spec))
     source_id = f"career_site:{spec.source_name}"
@@ -360,12 +378,7 @@ async def _probe_one(
             async for item in source.fetch():
                 source_result.yielded += 1
                 if len(items) < max_items:
-                    items.append(
-                        {
-                            "url": str(getattr(item, "url", "")),
-                            "text_preview": str(getattr(item, "text", ""))[:240],
-                        }
-                    )
+                    items.append(_item_snapshot(item))
                 if len(items) >= max_items:
                     break
     except BaseException as err:
@@ -449,6 +462,7 @@ def _timeout_result(
             "urls_found": 0,
             "items_extracted": 0,
         },
+        "items": [],
         "evicted": True,
         "eviction_kind": "task_watchdog",
         "terminal_outcome": "deadline_exceeded",
@@ -612,6 +626,16 @@ async def main() -> int:
         help="Items per URL for the parsing coverage gate; use larger values only for diagnostics.",
     )
     parser.add_argument("--concurrency", type=int, default=10)
+    parser.add_argument(
+        "--keywords",
+        nargs="+",
+        default=None,
+        help=(
+            "Local search terms attached as monitor_config['_search_keywords'] "
+            "for boards without a live query box. Quote a phrase: "
+            '--keywords "project manager".'
+        ),
+    )
     parser.add_argument("--start", type=int, default=0, help="Start index (inclusive)")
     parser.add_argument("--end", type=int, default=999, help="End index (exclusive)")
     parser.add_argument("--out-json", default=None, help="JSON output path for incremental saves")
@@ -743,6 +767,7 @@ async def main() -> int:
             max_items=args.max_items,
             timeout_seconds=args.timeout,
             live_probes=live_probes,
+            keywords=args.keywords,
         )
 
     url_index = {url: index for index, url in enumerate(urls)}

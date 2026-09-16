@@ -52,8 +52,30 @@ CAPTCHA_PROVIDER_ENV_KEYS = {
     "2captcha": "TWOCAPTCHA_API_KEY",
     "anticaptcha": "ANTICAPTCHA_API_KEY",
     "nopecha": "NOPECHA_API_KEY",
-    "cliproxy_image": "JOB_FTCH_CAPTCHA_VISION_API_KEY",
+    "cliproxy_image": "JOB_FTCH_OPENAI_API_KEY",
 }
+
+
+def _provider_api_key(provider_name: str) -> str:
+    """Return the env/settings key for one captcha provider.
+
+    Image OCR reuses the OpenAI-compatible client key (CLIProxy or OpenAI).
+    There is no separate ``JOB_FTCH_CAPTCHA_VISION_API_KEY``.
+    """
+    if provider_name == "cliproxy_image":
+        from job_ftch.config import get_settings
+
+        secret = get_settings().openai_api_key
+        if secret is not None:
+            value = str(secret.get_secret_value() or "").strip()
+            if value:
+                return value
+        return (
+            os.environ.get("JOB_FTCH_OPENAI_API_KEY", "").strip()
+            or os.environ.get("OPENAI_API_KEY", "").strip()
+        )
+    env_name = CAPTCHA_PROVIDER_ENV_KEYS.get(provider_name, "")
+    return os.environ.get(env_name, "").strip() if env_name else ""
 
 
 def _counts_as_paid_captcha_provider(name: str) -> bool:
@@ -272,10 +294,12 @@ class CaptchaSolverBypass:
                     dropped=[name for name in provider_chain if name != "browser_wait"],
                 )
             provider_chain = filtered
+        chain_already_verified = False
         if provider_chain:
             result = await self._solve_provider_chain(
                 page, challenge_type, url, provider_chain, attempt_key
             )
+            chain_already_verified = True
         elif self._provider == "manual_required":
             result = await self._wait_for_manual_clearance(page, challenge_type, url)
         elif self._provider == "observe":
@@ -335,42 +359,10 @@ class CaptchaSolverBypass:
                             self._paid_attempts.get(attempt_key, 0) + 1
                         )
                         result = await self._solve_external_api(page, challenge_type, url)
-        if result.solved and result.tokens:
-            token = result.tokens.get("captcha_token", "")
-            if token and not await self._inject_token(page, challenge_type, token):
-                result = CaptchaSolveResult(
-                    solved=False,
-                    method=result.method,
-                    error="provider token could not be injected",
-                    failure_reason=CaptchaFailureReason.INJECTION_FAILED,
-                    challenge_type=normalized_type,
-                    result_kind=CaptchaResultKind.TOKEN,
-                    provider_task_id=result.provider_task_id,
-                    raw_provider_status=result.raw_provider_status,
-                )
-            elif token and not await self._check_challenge_cleared(page, challenge_type):
-                result = CaptchaSolveResult(
-                    solved=False,
-                    method=result.method,
-                    error="challenge remained after token injection",
-                    failure_reason=CaptchaFailureReason.VERIFICATION_FAILED,
-                    challenge_type=normalized_type,
-                    result_kind=CaptchaResultKind.TOKEN,
-                    provider_task_id=result.provider_task_id,
-                    raw_provider_status=result.raw_provider_status,
-                )
-        elif result.solved and result.cookies:
-            if not await self._apply_clearance_cookies(page, domain, result.cookies):
-                result = CaptchaSolveResult(
-                    solved=False,
-                    method=result.method,
-                    error="provider cookies could not be applied",
-                    failure_reason=CaptchaFailureReason.INJECTION_FAILED,
-                    challenge_type=normalized_type,
-                    result_kind=CaptchaResultKind.SESSION,
-                    provider_task_id=result.provider_task_id,
-                    raw_provider_status=result.raw_provider_status,
-                )
+        if not chain_already_verified:
+            result = await self._apply_solved_result(
+                page, result, challenge_type, domain
+            )
 
         result.elapsed_seconds = time.monotonic() - start
         if result.challenge_type == CaptchaChallengeType.UNKNOWN.value:
@@ -425,6 +417,53 @@ class CaptchaSolverBypass:
 
         return domain, challenge_type, urlparse(url).path or "/"
 
+    async def _apply_solved_result(
+        self,
+        page: Any,
+        result: CaptchaSolveResult,
+        challenge_type: str,
+        domain: str,
+    ) -> CaptchaSolveResult:
+        """Inject a provider token/session and confirm the challenge actually cleared."""
+        normalized_type = normalize_challenge_type(challenge_type)
+        if result.solved and result.tokens:
+            token = result.tokens.get("captcha_token", "")
+            if token and not await self._inject_token(page, challenge_type, token):
+                return CaptchaSolveResult(
+                    solved=False,
+                    method=result.method,
+                    error="provider token could not be injected",
+                    failure_reason=CaptchaFailureReason.INJECTION_FAILED,
+                    challenge_type=normalized_type,
+                    result_kind=CaptchaResultKind.TOKEN,
+                    provider_task_id=result.provider_task_id,
+                    raw_provider_status=result.raw_provider_status,
+                )
+            if token and not await self._check_challenge_cleared(page, challenge_type):
+                return CaptchaSolveResult(
+                    solved=False,
+                    method=result.method,
+                    error="challenge remained after token injection",
+                    failure_reason=CaptchaFailureReason.VERIFICATION_FAILED,
+                    challenge_type=normalized_type,
+                    result_kind=CaptchaResultKind.TOKEN,
+                    provider_task_id=result.provider_task_id,
+                    raw_provider_status=result.raw_provider_status,
+                )
+        elif result.solved and result.cookies:
+            if not await self._apply_clearance_cookies(page, domain, result.cookies):
+                return CaptchaSolveResult(
+                    solved=False,
+                    method=result.method,
+                    error="provider cookies could not be applied",
+                    failure_reason=CaptchaFailureReason.INJECTION_FAILED,
+                    challenge_type=normalized_type,
+                    result_kind=CaptchaResultKind.SESSION,
+                    provider_task_id=result.provider_task_id,
+                    raw_provider_status=result.raw_provider_status,
+                )
+        return result
+
     async def _solve_provider_chain(
         self,
         page: Any,
@@ -433,11 +472,23 @@ class CaptchaSolverBypass:
         provider_chain: tuple[str, ...],
         attempt_key: tuple[str, str, str],
     ) -> CaptchaSolveResult:
+        from urllib.parse import urlparse
+
         failures: list[str] = []
+        domain = (urlparse(url).hostname or urlparse(url).netloc).lower() if url else ""
         for provider_name in provider_chain:
             if provider_name == "manual_required":
                 return await self._wait_for_manual_clearance(page, challenge_type, url)
             if provider_name == "observe":
+                if failures:
+                    return CaptchaSolveResult(
+                        solved=False,
+                        method="provider_chain",
+                        error="all captcha providers failed",
+                        failure_reason=CaptchaFailureReason.PROVIDER_REJECTED,
+                        challenge_type=normalize_challenge_type(challenge_type),
+                        raw_provider_status=";".join(failures),
+                    )
                 return CaptchaSolveResult(
                     solved=False,
                     method=provider_name,
@@ -450,7 +501,7 @@ class CaptchaSolverBypass:
             previous_provider = self._provider
             previous_api_key = self._api_key
             self._provider = provider_name
-            self._api_key = os.environ.get(CAPTCHA_PROVIDER_ENV_KEYS.get(provider_name, ""), "")
+            self._api_key = _provider_api_key(provider_name)
             try:
                 if provider_name == "browser_wait":
                     result = await self._solve_browser_wait(page, challenge_type)
@@ -509,14 +560,16 @@ class CaptchaSolverBypass:
                 self._provider = previous_provider
                 self._api_key = previous_api_key
             if result.solved:
-                return result
+                result = await self._apply_solved_result(
+                    page, result, challenge_type, domain
+                )
+                if result.solved:
+                    return result
             provider_status = result.raw_provider_status or str(result.failure_reason or "failed")
             failures.append(f"{provider_name}:{provider_status}")
-            if result.failure_reason in {
-                CaptchaFailureReason.DEADLINE_INSUFFICIENT,
-                CaptchaFailureReason.BUDGET_EXHAUSTED,
-            }:
+            if result.failure_reason is CaptchaFailureReason.DEADLINE_INSUFFICIENT:
                 return result
+            # Paid budget exhaustion must not skip free OCR (cliproxy_image).
         return CaptchaSolveResult(
             solved=False,
             method="provider_chain",
@@ -1243,7 +1296,7 @@ def _create_captcha_solver(
     provider_routes = _normalize_provider_routes(route_config)
     return CaptchaSolverBypass(
         provider=provider,
-        api_key=os.environ.get(CAPTCHA_PROVIDER_ENV_KEYS.get(provider, ""), ""),
+        api_key=_provider_api_key(provider),
         wait_seconds=float(config["wait_seconds"]) if "wait_seconds" in config else None,
         max_attempts=int(config.get("max_attempts", "2")),
         max_paid_attempts=int(config.get("max_paid_attempts", "1")),

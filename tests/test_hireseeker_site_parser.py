@@ -158,3 +158,45 @@ async def test_hireseeker_propagates_listing_429() -> None:
 def test_hireseeker_builds_local_search_listing_url() -> None:
     urls = HireSeekerParser().build_search_urls("https://hireseeker.ru/", ["developer"])
     assert urls == ["https://hireseeker.ru/vacancy-list/backend?search=developer"]
+
+
+def test_hireseeker_pins_project_manager_search_to_product_category() -> None:
+    urls = HireSeekerParser().build_search_urls("https://hireseeker.ru/", ["project manager"])
+    assert urls == [
+        "https://hireseeker.ru/vacancy-list/product_project?search=project+manager"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_hireseeker_does_not_walk_unrelated_categories_for_pm_search() -> None:
+    calls: list[str] = []
+
+    class Client:
+        async def get(self, url: str, **_: object) -> SimpleNamespace:
+            calls.append(url)
+            if "/vacancy/" in url:
+                job_id = int(urlparse(url).path.split("/vacancy/", 1)[1].split("-", 1)[0])
+                body = _detail_html(job_id, "Project Manager")
+            elif "/product_project" in url:
+                body = (
+                    '<div data-vacancy-card="801">'
+                    '<a data-testid="vacancy-title-link" href="/vacancy/801-project-manager">'
+                    "Project Manager</a></div>"
+                    '<a href="/vacancy-list/backend">Backend</a>'
+                )
+            elif "/engineering_management" in url:
+                body = ""
+            else:
+                raise AssertionError(f"unexpected url {url}")
+            return SimpleNamespace(url=url, text=body, raise_for_status=lambda: None)
+
+    spec = CareerSiteSpec(
+        url="https://hireseeker.ru/vacancy-list/backend?search=project+manager",
+        limit=5,
+        monitor_config={"detail_concurrency": 1},
+    )
+    items = [item async for item in HireSeekerParser().parse(spec, Client())]
+    assert len(items) == 1
+    assert "Project Manager" in items[0].text
+    assert all("/vacancy-list/backend" not in url for url in calls)
+    assert any("/vacancy-list/product_project" in url for url in calls)

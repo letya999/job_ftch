@@ -22,10 +22,10 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     browser_scroll_collect_urls,
     is_challenge_response,
     keywords_from_spec,
+    listing_matches_keywords,
     normalize_search_keywords,
     resolve_browser_config,
     safe_fetch,
-    text_matches_keywords,
     with_query_params,
 )
 from job_ftch.infrastructure.sources.site_utils import payload_to_raw_item
@@ -222,7 +222,8 @@ def _next_listing_url(html_text: str, base_url: str) -> str | None:
             continue
         candidate = urljoin(base_url, html.unescape(raw_href))
         parsed = urlparse(candidate)
-        if (parsed.hostname or "").casefold() != "career.habr.com":
+        host = (parsed.hostname or "").casefold().removeprefix("www.")
+        if host != "career.habr.com":
             continue
         if parsed.path.rstrip("/") != listing_path:
             continue
@@ -674,7 +675,9 @@ class HabrCareerParser:
                     if (
                         keywords
                         and card
-                        and not text_matches_keywords(card.get("text", ""), keywords)
+                        and not listing_matches_keywords(
+                            card.get("title", ""), card.get("text", ""), keywords
+                        )
                     ):
                         continue
                     if identity in seen:
@@ -780,15 +783,19 @@ class HabrCareerParser:
                     seen.add(url)
                     collected.append(url)
                 break
+            added = 0
             for identity, card in _listing_cards(str(response.text), response_url).items():
                 url = _canonical_detail_url(card["url"])
                 if identity in seen or not _is_detail_url(url):
                     continue
                 seen.add(identity)
                 collected.append(url)
+                added += 1
                 if len(collected) >= limit:
                     break
             if len(collected) >= limit:
+                break
+            if added == 0:
                 break
             next_url = _next_listing_url(str(response.text), response_url)
             listing_url = next_url or _listing_page_url(
@@ -828,14 +835,18 @@ class HabrCareerParser:
             if not page_cards:
                 break
             cards.update(page_cards)
+            added = 0
             for identity, card in page_cards.items():
-                if keywords and not text_matches_keywords(card.get("text", ""), keywords):
+                if keywords and not listing_matches_keywords(
+                    card.get("title", ""), card.get("text", ""), keywords
+                ):
                     continue
                 url = _canonical_detail_url(card["url"])
                 if identity in seen or not _is_detail_url(url):
                     continue
                 seen.add(identity)
                 collected.append(url)
+                added += 1
                 if len(collected) >= limit:
                     break
             stats = spec.monitor_config.get("_pipeline_stats")
@@ -845,9 +856,12 @@ class HabrCareerParser:
                 "habr.listing_page",
                 page=_page_number(response_url),
                 discovered=len(collected),
+                added=added,
                 requested=limit,
             )
             if len(collected) >= limit:
+                break
+            if added == 0:
                 break
             next_url = _next_listing_url(body, response_url)
             listing_url = next_url or _listing_page_url(

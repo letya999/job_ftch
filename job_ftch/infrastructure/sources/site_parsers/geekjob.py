@@ -24,10 +24,10 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     extract_urls_with_limit,
     is_challenge_response,
     keywords_from_spec,
+    listing_matches_keywords,
     normalize_search_keywords,
     resolve_browser_config,
     safe_fetch,
-    text_matches_keywords,
     with_query_params,
 )
 from job_ftch.infrastructure.sources.site_utils import payload_to_raw_item
@@ -759,7 +759,9 @@ class GeekJobParser:
                     if not _is_detail_url(url) or identity in seen:
                         continue
                     card = cards.get(identity)
-                    if keywords and card and not text_matches_keywords(card.get("text", ""), keywords):
+                    if keywords and card and not listing_matches_keywords(
+                        card.get("title", ""), card.get("text", ""), keywords
+                    ):
                         continue
                     seen.add(identity)
                     collected.append(url)
@@ -887,8 +889,6 @@ class GeekJobParser:
         collected: list[str] = []
         seen: set[str] = set()
         listing_error: Exception | None = None
-        server_filtered = bool(self._search_query(spec.url))
-
         for page in range(1, self._max_listing_pages(spec, limit) + 1):
             try:
                 rows, payload = await self._fetch_api_page(spec, client, page)
@@ -906,11 +906,10 @@ class GeekJobParser:
                 identity = card["id"] or _detail_identity(card["url"])
                 if identity in seen:
                     continue
-                # `qs` is GeekJob's authoritative server-side search. Only
-                # filter locally when the caller supplied a bare listing plus
-                # attached profile keywords.
-                if keywords and not server_filtered and not text_matches_keywords(
-                    card["text"], keywords
+                # `qs` is fuzzy: "project manager" also returns Product/Construction
+                # Manager. Keep the server query for recall, then match the title.
+                if keywords and not listing_matches_keywords(
+                    card.get("title", ""), card.get("text", ""), keywords
                 ):
                     continue
                 seen.add(identity)

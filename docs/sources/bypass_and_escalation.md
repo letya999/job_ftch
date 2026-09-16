@@ -138,6 +138,10 @@ For Cloudflare browser challenges, the route is intentionally conservative:
   `residential_proxy`) unless an operator explicitly pins a persistent profile;
 - a provider response is not accepted as solved until the browser route has
   clearance cookies and no classified challenge body remains;
+- image captcha follows `capsolver -> cliproxy_image -> observe`; verification
+  failure on a CapSolver token continues the chain instead of backing off for
+  300s. HH detail pages with a listing snapshot skip per-card captcha solving
+  and keep the listing title so ingest does not stall behind `/account/captcha`;
 - CapSolver `AntiCloudflareTask` is allowed only for authorized domains and
   requires a static/sticky proxy that the provider can reach.
 

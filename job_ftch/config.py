@@ -320,7 +320,8 @@ class Settings(BaseSettings):
     captcha_solver_timeout_budget_seconds: float = Field(default=40.0, ge=0.0, le=180.0)
     captcha_solver_backoff_seconds: float = Field(default=300.0, ge=0.0, le=3600.0)
     # Image-OCR fallback via OpenAI-compatible CLIProxy. Empty base_url disables
-    # it. Does not switch pipeline LLM (JOB_FTCH_LLM_GATEWAY). Host stays in env.
+    # it. Auth is openai_api_key. Does not switch pipeline LLM
+    # (JOB_FTCH_LLM_GATEWAY). Host stays in env.
     captcha_vision_base_url: str = ""
     captcha_vision_model: str = "gemini-3-flash"
     proxy_provider: str = Field(default="raw")

@@ -1,10 +1,11 @@
 """Site parser for getmatch.ru IT vacancies.
 
 Getmatch listing pages are a Next.js SPA with no free-text search box.
-Keyword ``?query=`` is stripped client-side. Discovery uses public
-``/api/offers`` with offset pagination, then sitemap. Target roles from the
-profile stay on ``_search_keywords`` and are applied locally. Detail pages
-are server-rendered HTML.
+``?query=`` is stripped client-side, but the parser still puts the terms
+there so ``keywords_from_spec`` can read them on the diagnostic ingest path.
+Discovery uses public ``/api/offers`` with offset pagination, then sitemap.
+Roles are matched locally against listing titles. Detail pages are
+server-rendered HTML.
 
 Fetcher stays thin: this module only extracts candidates/drafts from supplied
 HTML/API/sitemap artifacts. Challenge/auth/layout outcomes are raised as
@@ -36,9 +37,9 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     browser_scroll_collect_urls,
     is_challenge_response,
     keywords_from_spec,
+    listing_matches_keywords,
     normalize_search_keywords,
     resolve_browser_config,
-    text_matches_keywords,
     with_query_params,
 )
 
@@ -289,6 +290,14 @@ def extract_vacancy_urls_from_sitemap(
     return [url for _, url in scored[:limit]]
 
 
+def _title_from_offer_row(row: dict[str, Any]) -> str:
+    for key in ("position", "title", "name"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return _strip_text(value)
+    return ""
+
+
 def extract_vacancy_urls_from_offers(
     payload: Any,
     *,
@@ -326,7 +335,8 @@ def extract_vacancy_urls_from_offers(
         if external_id is None or external_id in seen_ids:
             continue
         seen_ids.add(external_id)
-        if keywords and not text_matches_keywords(json.dumps(row, ensure_ascii=False), keywords):
+        title = _title_from_offer_row(row)
+        if keywords and not listing_matches_keywords(title, keywords=keywords):
             continue
         urls.append(canonical)
         if len(urls) >= limit:
@@ -427,7 +437,11 @@ def _offer_cards_from_payload(
         identity = card["id"] or vacancy_id_from_url(card["url"])
         if not identity or identity in seen_ids:
             continue
-        if keywords and not text_matches_keywords(card["text"], keywords):
+        if keywords and not listing_matches_keywords(
+            str(card.get("title") or ""),
+            str(card.get("text") or ""),
+            keywords,
+        ):
             continue
         seen_ids.add(identity)
         cards.append(card)
@@ -924,7 +938,8 @@ def _classify_response(
             "Getmatch listing pages are SPA shells with no free-text search; "
             "the dedicated parser discovers via public /api/offers with offset "
             "pagination and falls back to the sitemap, then extracts server-rendered "
-            "detail HTML. Target roles are applied locally."
+            "detail HTML. Target roles ride on ?query= / _search_keywords and "
+            "are matched against listing titles."
         ),
     ),
 )
@@ -976,10 +991,10 @@ class GetmatchParser:
         if not (parsed.path or "").startswith("/vacancies"):
             parsed = parsed._replace(path="/vacancies")
         listing = urlunparse(parsed._replace(query=""))
-        # Live search box does not exist; `?query=` is stripped. Keep the
-        # listing URL; target roles are applied locally after paginated
-        # /api/offers (and sitemap) discovery.
-        return [listing]
+        # Live search box does not exist and strips `?query=`. Keep the terms
+        # on the URL so diagnostic ingest (no `_search_keywords`) still
+        # title-filters /api/offers locally.
+        return [with_query_params(listing, {"query": " OR ".join(terms)})]
 
     def _limit(self, spec_limit: int | None) -> int:
         if spec_limit is not None:
@@ -1112,9 +1127,11 @@ class GetmatchParser:
                 if identity is None or identity in seen:
                     continue
                 card = cards.get(identity)
-                if keywords and card and not text_matches_keywords(str(card.get("text", "")), keywords):
-                    continue
-                if keywords and not card and not text_matches_keywords(canonical, keywords):
+                if keywords and not listing_matches_keywords(
+                    str((card or {}).get("title") or ""),
+                    str((card or {}).get("text") or canonical),
+                    keywords,
+                ):
                     continue
                 seen.add(identity)
                 collected.append(canonical)
@@ -1308,7 +1325,12 @@ class GetmatchParser:
                     listing_urls = [
                         url
                         for url in listing_urls
-                        if text_matches_keywords(
+                        if listing_matches_keywords(
+                            str(
+                                card_store.get(vacancy_id_from_url(url) or "", {}).get(
+                                    "title", ""
+                                )
+                            ),
                             str(
                                 card_store.get(vacancy_id_from_url(url) or "", {}).get(
                                     "text", url

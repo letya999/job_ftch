@@ -27,7 +27,7 @@ updated: 2026-09-16
 - `.env.dev.example`
 - `.env.prod.example`
 - `.env.cliproxy.example` — локальный CLIProxyAPI: `JOB_FTCH_OPENAI_BASE_URL=http://127.0.0.1:8317/v1`
-- Image captcha OCR fallback: `JOB_FTCH_CAPTCHA_VISION_BASE_URL` / `JOB_FTCH_CAPTCHA_VISION_API_KEY` / `JOB_FTCH_CAPTCHA_VISION_MODEL`. Это не `JOB_FTCH_LLM_GATEWAY`.
+- Image captcha OCR fallback: `JOB_FTCH_CAPTCHA_VISION_BASE_URL` / `JOB_FTCH_CAPTCHA_VISION_MODEL`. Auth is `JOB_FTCH_OPENAI_API_KEY` (or `OPENAI_API_KEY`). Это не `JOB_FTCH_LLM_GATEWAY`.
 - Local/dev captcha allowlist: `JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=*` (see `.env.dev.example` and `config/runtime.dev.yaml`). Empty env denies every domain and overrides YAML. Prod template stays empty.
 - `job_ftch/adapters/telegram_bot/.env.dev.example`
 - `job_ftch/adapters/telegram_bot/.env.prod.example`

@@ -736,8 +736,6 @@ class HhParser:
         bypass_strategy: Any,
         browser_detail: Any = None,
     ) -> RawItem | None:
-        detail_challenge = False
-        detail_challenge_response: Any | None = None
         response: Any | None = None
         try:
             response = await effective_client.get(detail_url, follow_redirects=True)
@@ -753,23 +751,21 @@ class HhParser:
 
         if response is not None and is_challenge_response(response.text):
             logger.warning("hh.captcha_detected_detail", url=detail_url)
-            detail_challenge = True
-            detail_challenge_response = response
+            if bypass_strategy is None:
+                from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
+
+                raise BrowserChallengeError(
+                    url=detail_url,
+                    status_code=getattr(response, "status_code", None),
+                    headers=dict(getattr(response, "headers", {}) or {}),
+                    body=(getattr(response, "content", b"") or response.text.encode()),
+                    challenge_type="captcha",
+                )
+            snapshot = listing_snapshots.get(_detail_identity(detail_url))
+            if snapshot is not None:
+                logger.info("hh.detail_captcha_uses_listing", url=detail_url)
+                return _item_from_listing(detail_url, *snapshot, source_name, spec.url)
             response = None
-
-        if detail_challenge and bypass_strategy is None:
-            from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
-
-            raise BrowserChallengeError(
-                url=detail_url,
-                status_code=getattr(detail_challenge_response, "status_code", None),
-                headers=dict(getattr(detail_challenge_response, "headers", {}) or {}),
-                body=(
-                    getattr(detail_challenge_response, "content", b"")
-                    or getattr(detail_challenge_response, "text", "").encode()
-                ),
-                challenge_type="captcha",
-            )
 
         item = None
         final_url = detail_url

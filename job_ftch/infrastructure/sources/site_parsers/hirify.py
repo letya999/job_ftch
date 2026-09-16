@@ -50,6 +50,8 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     browser_scroll_collect_urls,
     extract_urls_with_limit,
     is_challenge_response,
+    keywords_from_spec,
+    listing_matches_keywords,
     normalize_search_keywords,
     resolve_browser_config,
     safe_fetch,
@@ -430,11 +432,18 @@ class HirifyParser:
         *,
         params: dict[str, str] | None = None,
         headers: dict[str, str],
+        retry_rate_limit: bool = True,
     ) -> Any:
         # Keep the endpoint-wide flood window ordered. Four concurrent callers
         # could otherwise already be queued before the first 429 is observed.
         async with self._api_request_lock:
-            return await self._api_get_locked(client, url, params=params, headers=headers)
+            return await self._api_get_locked(
+                client,
+                url,
+                params=params,
+                headers=headers,
+                retry_rate_limit=retry_rate_limit,
+            )
 
     async def _api_get_locked(
         self,
@@ -443,13 +452,15 @@ class HirifyParser:
         *,
         params: dict[str, str] | None,
         headers: dict[str, str],
+        retry_rate_limit: bool = True,
     ) -> Any:
         last_wait = 0.0
         # The default career client wraps httpx and raises on final 429. Use
         # its raw client here so this parser owns the server-provided wait and
         # never sleeps twice for the same response.
         request_client = getattr(client, "_client", client)
-        for attempt in range(2):
+        attempts = 2 if retry_rate_limit else 1
+        for attempt in range(attempts):
             await self._rate_gate.acquire()
             response = await fetch_with_retry(
                 request_client,
@@ -463,6 +474,11 @@ class HirifyParser:
                 self._rate_gate.record_success()
                 return response
             last_wait = _retry_after_seconds(response)
+            if not retry_rate_limit:
+                raise HirifyRateLimitedError(
+                    f"429 Too many requests from hirify api; wait {last_wait:.1f}s",
+                    retry_after_seconds=last_wait,
+                )
             self._rate_gate.record_rate_limit(last_wait)
             logger.warning(
                 "hirify_rate_limit_wait",
@@ -649,6 +665,7 @@ class HirifyParser:
         seen_requests: set[str] = set()
         api_url = self._api_url(html)
         query = self._query_for_spec(spec)
+        keywords = keywords_from_spec(spec) if query.get("search") else []
         request_url = api_url
         page = 1
         limit = spec.limit or 50
@@ -687,6 +704,12 @@ class HirifyParser:
                 if identity in seen_rows:
                     continue
                 seen_rows.add(identity)
+                if keywords and not listing_matches_keywords(
+                    str(row.get("title") or row.get("original_title") or ""),
+                    str(row.get("listing_card_text") or row.get("tldr") or ""),
+                    keywords,
+                ):
+                    continue
                 rows.append(row)
                 if len(rows) >= limit:
                     return rows[:limit]
@@ -721,6 +744,7 @@ class HirifyParser:
                     "Referer": referer,
                     "Origin": "https://hirify.me",
                 },
+                retry_rate_limit=False,
             )
             response_text = str(getattr(response, "text", "") or "")
             if is_challenge_response(response_text):
@@ -854,16 +878,18 @@ class HirifyParser:
         if not title or not url:
             return None
 
-        # `text` is the posting itself. `tldr` is hirify's own summary and is the
-        # only body available when the detail call failed - thin, but honest.
+        # `text` is the posting itself. `tldr` is hirify's own summary. When
+        # the detail call 429s, keep the listing card (title/company/snippet)
+        # instead of dropping the vacancy or waiting Retry-After.
         body = _html_to_text(str(merged.get("text") or ""))
         if not body:
             body = str(merged.get("clear_text") or "").strip() or str(merged.get("tldr") or "")
         if not body:
-            return None
-
+            body = str(merged.get("listing_card_text") or "").strip()
         company = str(merged.get("company_title") or "").strip()
-        sections = [title, company, body]
+        sections = [title, company]
+        if body and " ".join(body.split()).casefold() != " ".join(title.split()).casefold():
+            sections.append(body)
 
         work_format = _names(merged.get("work_format"))
         regions = _names(merged.get("regions"), "name", "name_en")
@@ -991,15 +1017,23 @@ class HirifyParser:
 
         rows = rows[:limit]
         semaphore = asyncio.Semaphore(_DETAIL_CONCURRENCY)
+        stop_details = False
 
         async def _detail(row: dict[str, Any]) -> dict[str, Any] | None:
+            nonlocal stop_details
             vacancy_id = row.get("id")
-            if vacancy_id is None:
+            if vacancy_id is None or stop_details:
                 return None
             async with semaphore:
-                return await self._fetch_detail_body(
-                    client, html, vacancy_id, _detail_url(row) or spec.url
-                )
+                if stop_details:
+                    return None
+                try:
+                    return await self._fetch_detail_body(
+                        client, html, vacancy_id, _detail_url(row) or spec.url
+                    )
+                except HirifyRateLimitedError:
+                    stop_details = True
+                    raise
 
         details_with_errors = await asyncio.gather(
             *(_detail(row) for row in rows), return_exceptions=True
@@ -1008,10 +1042,6 @@ class HirifyParser:
         rate_limited_rows: list[dict[str, Any]] = []
         for row, result in zip(rows, details_with_errors, strict=True):
             if isinstance(result, HirifyRateLimitedError):
-                self.last_retry_after_seconds = max(
-                    self.last_retry_after_seconds or 0.0,
-                    float(result.retry_after_seconds or 0.0),
-                )
                 rate_limited_rows.append(row)
                 details.append(None)
             elif isinstance(result, BrowserChallengeError):
@@ -1027,19 +1057,11 @@ class HirifyParser:
                 details.append(result)
 
         if rate_limited_rows:
-            rate_limited_ids = {str(row.get("id")) for row in rate_limited_rows}
-            try:
-                browser_details = await self._fetch_details_via_browser(
-                    spec, html, rate_limited_rows
-                )
-            except BrowserChallengeError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                logger.info("hirify_browser_detail_fallback_failed", url=spec.url, error=str(exc))
-            else:
-                for index, row in enumerate(rows):
-                    if str(row.get("id")) in rate_limited_ids:
-                        details[index] = browser_details.get(str(row.get("id")))
+            logger.info(
+                "hirify_detail_listing_fallback",
+                url=spec.url,
+                rate_limited_details=len(rate_limited_rows),
+            )
         if rate_limited:
             logger.info(
                 "hirify_listing_card_fallback",
@@ -1049,12 +1071,17 @@ class HirifyParser:
             )
 
         source_name = spec.source_name or source_spec_name(spec)
+        keywords = keywords_from_spec(spec) if search_requested else []
         emitted = 0
         for row, detail in zip(rows, details, strict=True):
             item = self._to_raw_item(row, detail, source_name)
-            if item is not None:
-                emitted += 1
-                yield item
+            if item is None:
+                continue
+            title = str(item.text or "").split("\n", 1)[0]
+            if keywords and not listing_matches_keywords(title, "", keywords):
+                continue
+            emitted += 1
+            yield item
         logger.info("hirify_api_parsed", url=spec.url, rows=len(rows), emitted=emitted)
 
     async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:

@@ -31,7 +31,7 @@ Environment variables:
 | 2Captcha | `TWOCAPTCHA_API_KEY` |
 | Anti-Captcha | `ANTICAPTCHA_API_KEY` |
 | NopeCHA | `NOPECHA_API_KEY` |
-| CLIProxy image OCR | `JOB_FTCH_CAPTCHA_VISION_API_KEY` plus `JOB_FTCH_CAPTCHA_VISION_BASE_URL` / `JOB_FTCH_CAPTCHA_VISION_MODEL` |
+| CLIProxy image OCR | `JOB_FTCH_OPENAI_API_KEY` (or `OPENAI_API_KEY`) plus `JOB_FTCH_CAPTCHA_VISION_BASE_URL` / `JOB_FTCH_CAPTCHA_VISION_MODEL` |
 
 `cliproxy_image` is image-OCR only (after CapSolver). It does not solve recaptcha/turnstile/hcaptcha and does not switch `JOB_FTCH_LLM_GATEWAY`.
 
@@ -85,8 +85,12 @@ captcha_solver_backoff_seconds: 300
 ```
 
 The provider path waits briefly for a challenge marker/sitekey before creating a
-task. Recent domain+challenge failures are backed off in-process, so one bad
-sitekey/action does not burn the whole paid budget.
+task. A CapSolver image token that injects but does not clear the page is not a
+solved challenge: the image chain continues to `cliproxy_image` in the same
+`solve()` call. In-process backoff starts only after the whole chain is
+exhausted, so HH `/account/captcha` does not skip CLIProxy OCR after the first
+CapSolver miss. Paid budget exhaustion on CapSolver also does not skip the free
+OCR fallback.
 
 Suggested eval routes:
 
