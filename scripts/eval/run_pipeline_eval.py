@@ -142,6 +142,16 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Load the same root and adapter env/config layers as run_bot_ingest.",
     )
+    parser.add_argument(
+        "--llm-gateway",
+        choices=("openai", "cliproxy"),
+        default=None,
+        help=(
+            "Select the OpenAI-compatible LLM gateway. `cliproxy` loads "
+            ".env.cliproxy when present, appends config/runtime.cliproxy.yaml, "
+            "and fails unless GET {base_url}/models contains the configured ids."
+        ),
+    )
     parser.add_argument("--graph", default=None, help="Declarative graph YAML for a future replay.")
     parser.add_argument(
         "--set", dest="overrides", action="append", default=[], metavar="NODE.PARAM=VALUE"
@@ -214,6 +224,59 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     return parser.parse_args()
+
+
+def _apply_eval_llm_gateway(gateway: str) -> None:
+    """Switch the process onto the requested OpenAI-compatible gateway."""
+    from job_ftch.config import apply_llm_gateway
+
+    if gateway == "cliproxy":
+        cliproxy_env = Path(".env.cliproxy")
+        if cliproxy_env.exists():
+            load_dotenv(cliproxy_env, override=True)
+    apply_llm_gateway(gateway)
+
+
+def _preflight_llm_gateway(settings: Settings) -> dict[str, Any]:
+    """Fail fast when CLIProxy is selected but the catalog lacks configured ids."""
+    from urllib.parse import urljoin
+
+    import httpx
+
+    if settings.llm_gateway != "cliproxy":
+        return {"status": "skipped", "llm_gateway": settings.llm_gateway}
+    base_url = settings.openai_base_url
+    if not base_url:
+        raise RuntimeError("llm_gateway=cliproxy requires JOB_FTCH_OPENAI_BASE_URL")
+    root = base_url if base_url.endswith("/") else f"{base_url}/"
+    headers: dict[str, str] = {}
+    if settings.openai_api_key is not None:
+        headers["Authorization"] = f"Bearer {settings.openai_api_key.get_secret_value()}"
+    response = httpx.get(urljoin(root, "models"), headers=headers, timeout=15.0)
+    if response.status_code >= 400:
+        raise RuntimeError(f"CLIProxy /models returned HTTP {response.status_code}")
+    payload = response.json()
+    data = payload.get("data") if isinstance(payload, dict) else None
+    ids = [
+        str(item["id"])
+        for item in (data if isinstance(data, list) else [])
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    ]
+    required = {settings.openai_model, settings.relevance_llm_model} - {None, ""}
+    missing = sorted(required - set(ids))
+    if missing:
+        raise RuntimeError(
+            "CLIProxy catalog is missing configured models: "
+            + ", ".join(missing)
+            + f" (available={ids[:12]})"
+        )
+    return {
+        "status": "ok",
+        "llm_gateway": settings.llm_gateway,
+        "endpoint": base_url,
+        "configured_models": sorted(required),
+        "models_available": len(ids),
+    }
 
 
 def _parse_slice_requirement(spec: str) -> tuple[str, int, int, float]:
@@ -2369,6 +2432,8 @@ async def main(*, bgem3_provider: object | None = None) -> int:
         from scripts.run_bot_ingest import _select_runtime
 
         _select_runtime(args.runtime)
+    if args.llm_gateway:
+        _apply_eval_llm_gateway(args.llm_gateway)
     graph = _compile_requested_graph(args) if args.graph else None
     if args.compile_only or args.print_graph:
         if graph is None:
@@ -2525,6 +2590,18 @@ async def main(*, bgem3_provider: object | None = None) -> int:
         build_context,
         cleanup_resources,
     ) = await _build_full_pipeline(args, bgem3_provider=bgem3_provider)
+    try:
+        gateway_preflight = _preflight_llm_gateway(settings)
+    except Exception as exc:
+        print(f"ERROR: LLM gateway preflight failed: {exc}", file=sys.stderr)
+        await _close_eval_resources(cleanup_resources)
+        return 1
+    if gateway_preflight.get("status") == "ok":
+        print(
+            "LLM gateway preflight: "
+            f"{gateway_preflight['endpoint']} models="
+            f"{', '.join(gateway_preflight['configured_models'])}"
+        )
     active_store = build_context.get("_active_store")
     active_job_group_store = build_context.get("_active_job_group_store")
 
@@ -2599,6 +2676,7 @@ async def main(*, bgem3_provider: object | None = None) -> int:
         "source_revision": _source_revision(),
         "state_mode": args.state_mode,
         "profile_source": args.profile_source,
+        "llm_gateway_preflight": gateway_preflight,
     }
     if graph_executor is not None:
         experiment_manifest["graph"] = graph_executor.graph.as_dict()
@@ -2643,6 +2721,9 @@ async def main(*, bgem3_provider: object | None = None) -> int:
     print(f"Relevance backend: {settings.relevance_backend}")
     print(f"Shot backend: {settings.relevance_shot_backend}")
     print(f"LLM backend: {settings.llm_backend}")
+    print(f"LLM gateway: {settings.llm_gateway}")
+    print(f"OpenAI model: {settings.openai_model}")
+    print(f"Relevance model: {settings.relevance_llm_model}")
     print(f"State mode: {args.state_mode}")
     print(f"Pipeline nodes: {len(nodes) + 1}")
 
@@ -2923,6 +3004,8 @@ async def main(*, bgem3_provider: object | None = None) -> int:
         sample_size=args.sample if args.sample > 0 else parent_items,
         seed=args.seed,
         models={
+            "llm_gateway": settings.llm_gateway,
+            "openai_base_url": settings.openai_base_url,
             "openai_model": settings.openai_model,
             "relevance_llm_model": settings.relevance_llm_model,
         },
@@ -2960,6 +3043,8 @@ async def main(*, bgem3_provider: object | None = None) -> int:
             "store_backend": settings.store_backend,
             "job_group_store_backend": settings.job_group_store_backend,
             "llm_backend": settings.llm_backend,
+            "llm_gateway": settings.llm_gateway,
+            "openai_base_url": settings.openai_base_url,
             "openai_model": settings.openai_model,
             "relevance_llm_model": settings.relevance_llm_model,
             "embedding_prefilter_enabled": settings.embedding_prefilter_enabled,

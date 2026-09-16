@@ -157,6 +157,8 @@ class FetchStats:
     challenge_events: list[dict[str, Any]] = field(default_factory=list)
     monitor_failure_without_escalation: int = 0
     zero_reason: ZeroYieldReason | None = None
+    rate_limit_retry_after_seconds: float | None = None
+    rate_limit_scope: str | None = None
 
     def to_log_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -192,6 +194,8 @@ class FetchStats:
             "detected_captcha_types": self.detected_captcha_types,
             "challenge_events": self.challenge_events,
             "monitor_failure_without_escalation": self.monitor_failure_without_escalation,
+            "rate_limit_retry_after_seconds": self.rate_limit_retry_after_seconds,
+            "rate_limit_scope": self.rate_limit_scope,
         }
         if self.zero_reason is not None:
             d["zero_reason"] = self.zero_reason.value
@@ -216,6 +220,33 @@ def _parse_retry_after(raw_value: str | None) -> float | None:
     from job_ftch.infrastructure.sources.http_retry import parse_retry_after
 
     return parse_retry_after(raw_value)
+
+
+def _rate_limit_hint(
+    exc: BaseException | None = None,
+    response: Any | None = None,
+) -> tuple[float | None, int | None]:
+    """Extract a server-provided wait without exposing response bodies."""
+    current = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        retry_after = getattr(current, "retry_after_seconds", None)
+        if retry_after is None and any(
+            marker in type(current).__name__.casefold() for marker in ("flood", "rate", "limit")
+        ):
+            retry_after = getattr(current, "retry_after", None) or getattr(current, "seconds", None)
+        if retry_after is not None:
+            try:
+                return max(0.0, float(retry_after)), 429
+            except (TypeError, ValueError):
+                pass
+        current = current.__cause__ or current.__context__
+    response = response or getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    headers = getattr(response, "headers", None)
+    raw_retry_after = headers.get("Retry-After") if headers is not None else None
+    return _parse_retry_after(raw_retry_after), status_code
 
 
 def _should_enable_render_on_monitor_retry(strategy: Any) -> bool:
@@ -627,6 +658,7 @@ class CareerSiteSource(Source["RawItem"]):
         self._bypass_ctx: Any = None
         self.stats = FetchStats()
         self._trusted_parser_urls: set[str] = set()
+        self._last_site_parser: Any = None
         self._parser_failure_is_terminal = False
         self._detail_protection_circuit_open = False
 
@@ -955,6 +987,7 @@ class CareerSiteSource(Source["RawItem"]):
         from job_ftch.application.registry import resolve_site_parser_for_spec
 
         site_parser = resolve_site_parser_for_spec(self.spec)
+        self._last_site_parser = site_parser
         self.stats.requested_parser = self.spec.site_parser
         self.stats.actual_parser = (
             getattr(site_parser, "parser_name", None) or type(site_parser).__name__
@@ -974,6 +1007,7 @@ class CareerSiteSource(Source["RawItem"]):
             parser_spec = self._runtime_monitor_spec()
             parser_monitor_config = dict(self.spec.monitor_config)
             supports_discover = getattr(site_parser, "supports_discover", False)
+            emitted_parser_keys: set[str] = set()
             while True:
                 try:
                     self.http = await self._apply_bypass_http(original_http)
@@ -988,6 +1022,7 @@ class CareerSiteSource(Source["RawItem"]):
                     break
 
                 attempt_items: list[RawItem | QuarantinedRawItem] = []
+                attempt_parser_keys: set[str] = set()
                 freshness_filtered_before = self.stats.freshness_filtered
                 freshness_undated_before = self.stats.freshness_undated_passed
                 try:
@@ -1033,12 +1068,24 @@ class CareerSiteSource(Source["RawItem"]):
                             parsed += 1
                             if not self._passes_freshness_cutoff(_raw_item_posted_at(parsed_item)):
                                 continue
+                            key = str(
+                                getattr(parsed_item, "external_id", "")
+                                or getattr(parsed_item, "stable_id", "")
+                                or getattr(parsed_item, "url", "")
+                                or ""
+                            )
+                            if key and key in emitted_parser_keys:
+                                if key not in attempt_parser_keys:
+                                    self.stats.parser_duplicates_suppressed += 1
+                                attempt_parser_keys.add(key)
+                                continue
+                            if key:
+                                emitted_parser_keys.add(key)
+                                attempt_parser_keys.add(key)
                             attempt_items.append(parsed_item)
+                            self.stats.detail_cards_extracted += 1
+                            yield parsed_item
                         if attempt_items:
-                            unique_items = self._dedupe_parser_items(attempt_items)
-                            self.stats.detail_cards_extracted += len(unique_items)
-                            for unique_item in unique_items:
-                                yield unique_item
                             return
                         if parsed and self.stats.freshness_filtered >= parsed:
                             self.stats.zero_reason = ZeroYieldReason.FRESHNESS_FILTERED
@@ -1083,6 +1130,18 @@ class CareerSiteSource(Source["RawItem"]):
                         else None
                     )
                     body = response.content if response is not None else None
+                    retry_after, status_code = _rate_limit_hint(exc, response)
+                    if status_code == 429 or retry_after is not None:
+                        self.stats.rate_limit_retry_after_seconds = retry_after
+                        self.stats.rate_limit_scope = urlsplit(self.spec.url).netloc.casefold()
+                        self.stats.zero_reason = ZeroYieldReason.RATE_LIMITED
+                        self.stats.source_partial = self.stats.source_partial or bool(
+                            emitted_parser_keys or attempt_items
+                        )
+                        self._parser_failure_is_terminal = True
+                        raise
+                    if not supports_discover and emitted_parser_keys:
+                        self.stats.source_partial = True
                     if await self._try_escalate_bypass(exc, response=response, response_body=body):
                         if not supports_discover:
                             self.stats.freshness_filtered = freshness_filtered_before
@@ -1114,8 +1173,6 @@ class CareerSiteSource(Source["RawItem"]):
                             yielded=len(attempt_items),
                             error=str(exc),
                         )
-                        for partial_item in self._dedupe_parser_items(attempt_items):
-                            yield partial_item
                         return
                     # SiteParser yields RawItems only; explainable terminal
                     # reasons ride on exception.kind / BrowserChallengeError.
@@ -1526,6 +1583,13 @@ class CareerSiteSource(Source["RawItem"]):
                         else None
                     )
                     body = response.content if response is not None else None
+                    retry_after, status_code = _rate_limit_hint(exc, response)
+                    if status_code == 429 or retry_after is not None:
+                        self.stats.rate_limit_retry_after_seconds = retry_after
+                        self.stats.rate_limit_scope = urlsplit(self.spec.url).netloc.casefold()
+                        self.stats.zero_reason = ZeroYieldReason.RATE_LIMITED
+                        self.stats.source_partial = True
+                        return
                     if await self._try_escalate_bypass(exc, response=response, response_body=body):
                         continue
                     if _is_protected_source_error(exc):
@@ -1795,6 +1859,7 @@ class CareerSiteSource(Source["RawItem"]):
         self._trusted_parser_urls.clear()
         self._parser_failure_is_terminal = False
         self._detail_protection_circuit_open = False
+        self._last_site_parser = None
         operation_token: Any = None
         try:
             domain, cached_strategy, original_http, initial_bypass = await self._init_strategy()
@@ -1816,6 +1881,16 @@ class CareerSiteSource(Source["RawItem"]):
             async for item in self._try_site_parser(original_http):
                 site_parser_emitted = True
                 yield item
+
+            parser_retry_after = getattr(self._last_site_parser, "last_retry_after_seconds", None)
+            if parser_retry_after is not None:
+                try:
+                    self.stats.rate_limit_retry_after_seconds = max(0.0, float(parser_retry_after))
+                except (TypeError, ValueError):
+                    self.stats.rate_limit_retry_after_seconds = None
+                self.stats.rate_limit_scope = urlsplit(self.spec.url).netloc.casefold()
+                self.stats.zero_reason = ZeroYieldReason.RATE_LIMITED
+                self.stats.source_partial = True
 
             if site_parser_emitted or self._parser_failure_is_terminal:
                 return

@@ -52,7 +52,13 @@ CAPTCHA_PROVIDER_ENV_KEYS = {
     "2captcha": "TWOCAPTCHA_API_KEY",
     "anticaptcha": "ANTICAPTCHA_API_KEY",
     "nopecha": "NOPECHA_API_KEY",
+    "cliproxy_image": "JOB_FTCH_CAPTCHA_VISION_API_KEY",
 }
+
+
+def _counts_as_paid_captcha_provider(name: str) -> bool:
+    # Subscription vision OCR must still run after the one paid CapSolver slot.
+    return name != "cliproxy_image"
 
 _CF_CHALLENGE_SELECTORS = (
     "#challenge-running",
@@ -156,7 +162,10 @@ class CaptchaSolverBypass:
         self._min_provider_seconds = max(0.0, min_provider_seconds)
         self._paid_lock = asyncio.Lock()
         self._proxy_url = proxy_url
-        self._provider_routes = provider_routes or {}
+        self._provider_routes = {
+            "image": ("capsolver", "cliproxy_image", "observe"),
+            **(provider_routes or {}),
+        }
         self._backoff_seconds = max(0.0, backoff_seconds)
         self._failure_backoff: dict[tuple[str, str, str], float] = {}
 
@@ -467,10 +476,11 @@ class CaptchaSolverBypass:
                             failure_reason=CaptchaFailureReason.DEADLINE_INSUFFICIENT,
                             challenge_type=normalize_challenge_type(challenge_type),
                         )
-                    elif not self._api_key:
-                        # A missing provider credential is configuration
-                        # failure, not a paid attempt.  Keep the chain alive
-                        # so an enabled fallback provider can still run.
+                    elif not self._api_key or not _counts_as_paid_captcha_provider(
+                        provider_name
+                    ):
+                        # Missing credentials and cliproxy_image (subscription OCR)
+                        # do not consume the paid CapSolver slot.
                         result = await self._solve_external_api(
                             page,
                             challenge_type,
@@ -771,6 +781,39 @@ class CaptchaSolverBypass:
     async def _check_challenge_cleared(self, page: Any, challenge_type: str) -> bool:
         try:
             normalized_type = normalize_challenge_type(challenge_type)
+            if normalized_type == CaptchaChallengeType.IMAGE.value:
+                from job_ftch.infrastructure.bypass.challenge_classifier import classify_challenge
+
+                for _ in range(10):
+                    try:
+                        html = await page.content()
+                        detection = classify_challenge(
+                            surface="image_captcha_clear_check", status_code=200, body=html
+                        )
+                        ready = await page.evaluate("document.readyState")
+                        active_image_form = await page.evaluate(
+                            "Boolean([...document.querySelectorAll('form')].some(form => "
+                            "form.querySelector('input[name=\"captchaText\"]') && "
+                            "form.querySelector('img') && form.getClientRects().length))"
+                        )
+                        successful_document = await page.evaluate(
+                            "(() => { const status = performance.getEntriesByType('navigation')"
+                            ".at(-1)?.responseStatus; return !status || (status >= 200 && status < 400); })()"
+                        )
+                        if (
+                            not detection.detected
+                            and not active_image_form
+                            and ready in ("interactive", "complete")
+                            and successful_document
+                            and await page.evaluate(
+                                "Boolean(document.body && document.body.innerText.trim().length > 100)"
+                            )
+                        ):
+                            return True
+                    except Exception:
+                        pass  # Form submission can briefly destroy the execution context.
+                    await sleep_with_source_deadline(1.0)
+                return False
             if hasattr(page, "evaluate"):
                 ready_state = await page.evaluate("document.readyState")
                 if ready_state not in ("interactive", "complete"):
@@ -1038,10 +1081,46 @@ class CaptchaSolverBypass:
         if not token or not hasattr(page, "evaluate"):
             return False
         try:
+            if (
+                normalize_challenge_type(challenge_type) == CaptchaChallengeType.IMAGE.value
+                and callable(getattr(page, "fill", None))
+                and callable(getattr(page, "click", None))
+                and await page.evaluate('Boolean(document.querySelector(\'input[name="captchaText"]\'))')
+            ):
+                await page.fill('input[name="captchaText"]:visible', token, timeout=10_000)
+                await page.click(
+                    'form:has(input[name="captchaText"]:visible) button[type="submit"]',
+                    timeout=10_000,
+                )
+                return True
             return bool(
                 await page.evaluate(
                     """({token, challengeType}) => {
                       const normalized = String(challengeType || '').toLowerCase();
+                      if (normalized === 'image') {
+                        const img = document.querySelector(
+                          'img[data-qa*="captcha"], img[alt="captcha" i], img[class*="captcha-image"], img[class*="captcha_image"], img[src*="captcha"]'
+                        );
+                        const form = img && (img.closest('form') ||
+                          [...document.forms].find(candidate => candidate.querySelector('input[name="captchaText"]')));
+                        if (!form) return false;
+                        const inputs = [...form.querySelectorAll('input')].filter(el =>
+                          !el.disabled && ['text', 'search', 'tel'].includes(el.type) &&
+                          /captcha/i.test(`${el.name} ${el.id} ${el.getAttribute('data-qa') || ''}`)
+                        );
+                        if (inputs.length !== 1) return false;
+                        const input = inputs[0];
+                        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+                        setter.call(input, token);
+                        input.dispatchEvent(new Event('input', {bubbles: true}));
+                        input.dispatchEvent(new Event('change', {bubbles: true}));
+                        if (!form.checkValidity()) return false;
+                        const submitter = form.querySelector('button[type="submit"], input[type="submit"]');
+                        if (submitter && submitter.disabled) return false;
+                        if (submitter) submitter.click();
+                        else form.requestSubmit();
+                        return true;
+                      }
                       const selectors = normalized === 'hcaptcha'
                         ? ['textarea[name="h-captcha-response"]']
                         : ['textarea[name="g-recaptcha-response"]',

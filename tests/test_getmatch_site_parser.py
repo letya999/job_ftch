@@ -24,6 +24,7 @@ from job_ftch.infrastructure.sources.site_parsers.getmatch import (
     extract_vacancy_urls_from_offers,
     extract_vacancy_urls_from_sitemap,
     item_from_detail_html,
+    item_from_offer_card,
     public_failure_code_for,
     vacancy_id_from_url,
 )
@@ -538,6 +539,35 @@ def test_extract_vacancy_urls_from_offers_payload() -> None:
         "https://getmatch.ru/vacancies/35602-team-lead-data-science-ml-promo-i",
         "https://getmatch.ru/vacancies/34714-senior-ai-ml-engineer-llm-agents",
     ]
+
+
+def test_getmatch_offer_card_keeps_rich_api_fields() -> None:
+    item = item_from_offer_card(
+        {
+            "id": "36244",
+            "url": "https://getmatch.ru/vacancies/36244-cpp-developer",
+            "title": "C++ Developer",
+            "description": "Build low-latency services.",
+            "description_html": "<b>Build low-latency services.</b>",
+            "company": "Acme",
+            "salary": "10 000 $/мес",
+            "locations": ["Москва"],
+            "work_modes": ["remote"],
+            "skills": ["C++"],
+            "published_at": "2026-09-15T12:00:00",
+            "offer_type": "vacancy",
+            "is_active": True,
+        },
+        "getmatch",
+        "https://getmatch.ru/vacancies",
+    )
+
+    assert item is not None
+    assert item.external_id == "36244"
+    assert "low-latency" in item.text
+    assert item.metadata["parser"] == "site_getmatch_card"
+    assert item.metadata["detail_vacancy_confirmed"] is False
+    assert item.metadata["skills"] == ["C++"]
 
 
 @pytest.mark.asyncio

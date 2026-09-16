@@ -1167,6 +1167,14 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
             page.goto(url, wait_until=wait_fallback, timeout=timeout)
         )
 
+    challenge_solved = False
+
+    async def _solve_current_challenge(controller: Any) -> bool:
+        nonlocal challenge_solved
+        solved = await _solve_page_challenge(controller, page, url=url)
+        challenge_solved = challenge_solved or solved
+        return solved
+
     attempt = 0
     while resp is not None and resp.status in challenge and attempt < challenge_retries:
         attempt += 1
@@ -1181,7 +1189,7 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     if resp is not None and resp.status in challenge:
         controller = config.get("_bypass_strategy")
         if (
-            await _solve_page_challenge(controller, page, url=url)
+            await _solve_current_challenge(controller)
             and not await _solve_settled_in_place(page, challenge_wait_ms)
             and _challenge_solution_requires_reload(controller)
         ):
@@ -1192,7 +1200,7 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     if resp is not None and resp.status not in blocked and await _page_has_captcha_marker(page):
         controller = config.get("_bypass_strategy")
         if (
-            await _solve_page_challenge(controller, page, url=url)
+            await _solve_current_challenge(controller)
             and not await _solve_settled_in_place(page, challenge_wait_ms)
             and _challenge_solution_requires_reload(controller)
         ):
@@ -1210,7 +1218,7 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     if isinstance(observed, str) and observed.strip():
         log.info("browser.observed_challenge_solve", url=url, challenge_type=observed)
         if (
-            await _solve_page_challenge(controller, page, url=url)
+            await _solve_current_challenge(controller)
             and not await _solve_settled_in_place(page, challenge_wait_ms)
             and _challenge_solution_requires_reload(controller)
         ):
@@ -1219,6 +1227,24 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
             )
 
     if resp is not None and resp.status in blocked:
+        if challenge_solved:
+            from urllib.parse import urlsplit
+
+            from job_ftch.infrastructure.bypass.challenge_classifier import classify_challenge
+
+            current_status = await page.evaluate(
+                "performance.getEntriesByType('navigation').at(-1)?.responseStatus"
+            )
+            if (
+                isinstance(current_status, (int, float))
+                and 200 <= current_status < 300
+                and urlsplit(str(page.url)).path == urlsplit(url).path
+                and not classify_challenge(
+                    surface="post_solve_navigation", status_code=int(current_status),
+                    body=await page.content(),
+                ).detected
+            ):
+                return
         await _observe_blocked_navigation(
             page,
             resp,

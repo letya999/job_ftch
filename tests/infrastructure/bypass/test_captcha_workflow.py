@@ -962,7 +962,7 @@ def test_factory_reads_provider_key_from_environment_only(
 
 def test_new_captcha_providers_self_register_with_capabilities() -> None:
     providers = set(list_captcha_providers())
-    assert {"capsolver", "capmonster", "nextcaptcha", "nopecha"} <= providers
+    assert {"capsolver", "capmonster", "nextcaptcha", "nopecha", "cliproxy_image"} <= providers
 
     capsolver = get_captcha_provider_capability("capsolver")
     capmonster = get_captcha_provider_capability("capmonster")
@@ -979,6 +979,9 @@ def test_new_captcha_providers_self_register_with_capabilities() -> None:
         {"recaptcha", "recaptcha_v3", "turnstile"}
     )
     assert nopecha is not None and nopecha.free_or_dev
+    cliproxy_image = get_captcha_provider_capability("cliproxy_image")
+    assert cliproxy_image is not None and cliproxy_image.free_or_dev
+    assert cliproxy_image.supported_challenge_types == frozenset({"image"})
 
 
 def test_challenge_type_aliases_match_observe_labels() -> None:

@@ -46,6 +46,7 @@ _CAPTCHA_PROVIDER_ENV: dict[str, str] = {
     "2captcha": "TWOCAPTCHA_API_KEY",
     "anticaptcha": "ANTICAPTCHA_API_KEY",
     "nopecha": "NOPECHA_API_KEY",
+    "cliproxy_image": "JOB_FTCH_CAPTCHA_VISION_API_KEY",
 }
 _RUNTIME_ENGINES: tuple[tuple[str, str, str, str], ...] = (
     ("stealth_browser", "playwright_stealth", "stealth", "stealth_browser"),
@@ -859,6 +860,7 @@ class TenantMCPServer:
             return
         tenants = load_tenants(self.configs_dir)
         self.runner = TenantRunner.from_tenants(tenants, base_settings=self.base_settings)
+        await self.runner.start()
 
     async def shutdown(self) -> None:
         if self.runner is None:

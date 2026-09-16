@@ -1,7 +1,7 @@
 ---
 title: "Runtime и env: где правда"
 description: "Короткая карта того, какие файлы являются source of truth для конфигурации и переменных окружения."
-updated: 2026-07-28
+updated: 2026-09-16
 ---
 # Runtime и env: где правда
 
@@ -16,6 +16,7 @@ updated: 2026-07-28
 - `config/runtime.yaml` — общая runtime-база.
 - `config/runtime.dev.yaml` — dev-override.
 - `config/runtime.prod.yaml` — prod-override.
+- `config/runtime.cliproxy.yaml` — overlay моделей для CLIProxyAPI; включается через `JOB_FTCH_LLM_GATEWAY=cliproxy`.
 - `job_ftch/adapters/telegram_bot/runtime.dev.yaml` — bot-специфичный dev runtime.
 - `job_ftch/adapters/telegram_bot/runtime.prod.yaml` — bot-специфичный prod runtime.
 - `job_ftch/adapters/telegram_bot/config/tenants/*.yaml` — tenant-level sources и wiring.
@@ -25,6 +26,9 @@ updated: 2026-07-28
 
 - `.env.dev.example`
 - `.env.prod.example`
+- `.env.cliproxy.example` — локальный CLIProxyAPI: `JOB_FTCH_OPENAI_BASE_URL=http://127.0.0.1:8317/v1`
+- Image captcha OCR fallback: `JOB_FTCH_CAPTCHA_VISION_BASE_URL` / `JOB_FTCH_CAPTCHA_VISION_API_KEY` / `JOB_FTCH_CAPTCHA_VISION_MODEL`. Это не `JOB_FTCH_LLM_GATEWAY`.
+- Local/dev captcha allowlist: `JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=*` (see `.env.dev.example` and `config/runtime.dev.yaml`). Empty env denies every domain and overrides YAML. Prod template stays empty.
 - `job_ftch/adapters/telegram_bot/.env.dev.example`
 - `job_ftch/adapters/telegram_bot/.env.prod.example`
 - `deploy/observability/.env.dev.example`

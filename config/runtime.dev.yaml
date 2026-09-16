@@ -37,13 +37,23 @@ pipeline_item_concurrency_adaptive: false
 source_soft_deadline_seconds: 60.0
 source_hard_deadline_seconds: 180.0
 
+# Wildcard: every domain may use CapSolver / cliproxy_image / other external
+# solvers. Env JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=* must match — an empty env
+# value overrides this list and denies everything.
+captcha_authorized_domains:
+  - "*"
 captcha_enabled_providers:
   - browser_wait
   - nopecha
   - capsolver
   - capmonster
   - nextcaptcha
+  - cliproxy_image
 captcha_provider_routes:
+  image:
+    - capsolver
+    - cliproxy_image
+    - observe
   recaptcha:
     - capsolver
     - capmonster

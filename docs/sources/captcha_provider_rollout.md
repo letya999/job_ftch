@@ -18,8 +18,8 @@ Provider roles:
 |---|---|
 | Production candidates | `capsolver`, `capmonster` |
 | Benchmark candidate | `nextcaptcha` for `recaptcha` and `turnstile` |
-| Free/dev contour | `browser_wait`, `nopecha`, manual/mock/sandbox fixtures |
-| Observe-only until confirmed | `turnstile`, `hcaptcha`, `datadome`, `perimeterx`, `image`, `unknown` |
+| Free/dev contour | `browser_wait`, `nopecha`, `cliproxy_image`, manual/mock/sandbox fixtures |
+| Observe-only until confirmed | `turnstile`, `hcaptcha`, `datadome`, `perimeterx`, `unknown` |
 
 Environment variables:
 
@@ -31,6 +31,9 @@ Environment variables:
 | 2Captcha | `TWOCAPTCHA_API_KEY` |
 | Anti-Captcha | `ANTICAPTCHA_API_KEY` |
 | NopeCHA | `NOPECHA_API_KEY` |
+| CLIProxy image OCR | `JOB_FTCH_CAPTCHA_VISION_API_KEY` plus `JOB_FTCH_CAPTCHA_VISION_BASE_URL` / `JOB_FTCH_CAPTCHA_VISION_MODEL` |
+
+`cliproxy_image` is image-OCR only (after CapSolver). It does not solve recaptcha/turnstile/hcaptcha and does not switch `JOB_FTCH_LLM_GATEWAY`.
 
 Default runtime remains conservative:
 
@@ -47,20 +50,32 @@ included in `captcha_enabled_providers`.
 
 ## Domain authorization (`captcha_authorized_domains`)
 
-Paid/external solving is additionally gated by the domain allowlist
-(`JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS`, `JOB_FTCH_` prefix is required — bare
-`CAPTCHA_AUTHORIZED_DOMAINS` is ignored). `browser_wait` is never gated.
+Paid/external solving (CapSolver, CapMonster, NextCaptcha, `cliproxy_image`,
+…) is gated by the domain allowlist. `browser_wait` is never gated.
+
+Env: `JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS`. The `JOB_FTCH_` prefix is required
+— bare `CAPTCHA_AUTHORIZED_DOMAINS` is ignored. Env overrides runtime YAML;
+an empty env value therefore **denies all domains** even if YAML has `*`.
 
 | Allowlist | Behavior |
 |---|---|
-| empty (default) | deny for every domain (safe default) |
+| empty | deny for every domain (code default and `.env.prod.example`) |
 | `hh.ru,m.hh.ru` | suffix match covers subdomains |
-| `*` | wildcard: authorize every domain, no per-site enumeration needed |
+| `*` | wildcard: authorize every domain |
+
+**Local docker-dev uses the wildcard.** Set both:
+
+```text
+JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=*
+```
+
+in `.env.dev` (see `.env.dev.example`) and `captcha_authorized_domains: ["*"]`
+in `config/runtime.dev.yaml`. Without `*`, image fallback CapSolver →
+CLIProxy OCR never runs. Production stays empty unless you opt in.
 
 Since 2026-09-13 the wildcard is supported in both config paths
 (`CaptchaSolverBypass._domain_authorized` and
-`_authorized_domains_from_config`), so single-domain rehearsals no longer need
-manual domain lists.
+`_authorized_domains_from_config`).
 
 Solver guardrails:
 
@@ -81,6 +96,7 @@ Suggested eval routes:
 | `turnstile` | `capsolver -> capmonster -> nextcaptcha -> manual_required` after authorized eval |
 | `cloudflare_challenge` | `browser_wait -> capsolver -> manual_required` only for authorized eval domains with a static/sticky proxy |
 | `hcaptcha` | `observe` until the fixture run confirms real frequency |
+| `image` | `capsolver -> cliproxy_image -> observe` |
 | `datadome`, `perimeterx`, `unknown` | `observe -> manual_required`; no provider solve by default |
 
 Example benchmark route:
@@ -92,7 +108,12 @@ captcha_enabled_providers:
   - capsolver
   - capmonster
   - nextcaptcha
+  - cliproxy_image
 captcha_provider_routes:
+  image:
+    - capsolver
+    - cliproxy_image
+    - observe
   recaptcha:
     - capsolver
     - capmonster

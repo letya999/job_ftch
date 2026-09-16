@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -7,8 +8,14 @@ import pytest
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.site_parsers.hirify import (
     HirifyParser,
+    HirifyRateLimitedError,
     _extract_detail_urls,
+    _HirifyRateGate,
+    _listing_card_rows,
+    _next_api_request,
+    _retry_after_seconds,
 )
+from job_ftch.infrastructure.sources.source_deadline import source_deadline_scope
 
 
 def test_extract_detail_urls_finds_canonical_hirify_jobs() -> None:
@@ -20,6 +27,94 @@ def test_extract_detail_urls_finds_canonical_hirify_jobs() -> None:
     urls = _extract_detail_urls(html, "https://hirify.me/", limit=5)
 
     assert urls == ["https://hirify.me/jobs/711365-software-engineer-genai-silicon-automation"]
+
+
+def test_ssr_cards_keep_ids_and_card_fields_for_api_fallback() -> None:
+    html = """
+    <div class="vacancy-card" data-vacancy-id="711365">
+      <a class="vacancy-card-link" href="/jobs/711365-manager">
+        <div class="company">Acme</div>
+        <div class="tag">remote</div>
+        <h3 class="title">Operations Manager</h3>
+      </a>
+    </div>
+    """
+
+    rows = _listing_card_rows(html, "https://hirify.me/jobs-in-russia", limit=5)
+
+    assert rows == [
+        {
+            "id": "711365",
+            "slug": "711365-manager",
+            "title": "Operations Manager",
+            "company_title": "Acme",
+            "listing_card_tags": ["remote"],
+            "listing_card_text": "Acme remote Operations Manager",
+        }
+    ]
+
+
+def test_cursor_pagination_becomes_a_request_parameter() -> None:
+    request = _next_api_request(
+        {"data": [], "meta": {"next_cursor": "cursor-2"}},
+        current_url="https://api.hirify.me/api/vacancies",
+        api_url="https://api.hirify.me/api/vacancies",
+        query={"search": "manager"},
+        page=1,
+    )
+
+    assert request == (
+        "https://api.hirify.me/api/vacancies",
+        {"search": "manager", "cursor": "cursor-2"},
+        1,
+    )
+
+
+def test_retry_after_prefers_header_then_parses_hirify_body() -> None:
+    assert _retry_after_seconds({"Retry-After": "17"}, "wait 3 seconds") == 17.0
+    assert _retry_after_seconds({}, '{"retry_after": 11}') == 11.0
+    assert _retry_after_seconds({}, "Please try again in 9 seconds") == 9.0
+
+
+@pytest.mark.asyncio
+async def test_api_rate_gate_uses_raw_client_under_retrying_wrapper() -> None:
+    class _RawClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def get(self, url: str, **kwargs: object) -> _JsonResponse:
+            del kwargs
+            self.calls += 1
+            return _JsonResponse({"data": []}, url)
+
+    class _RetryingWrapper:
+        def __init__(self, raw: _RawClient) -> None:
+            self._client = raw
+
+        async def get(self, url: str, **kwargs: object) -> _JsonResponse:
+            del url, kwargs
+            raise AssertionError("wrapper should not handle Hirify 429s")
+
+    raw = _RawClient()
+    response = await HirifyParser()._api_get(
+        _RetryingWrapper(raw),
+        "https://api.hirify.me/api/vacancies",
+        headers={},
+    )
+
+    assert response.status_code == 200
+    assert raw.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_rate_gate_does_not_sleep_past_source_budget() -> None:
+    gate = _HirifyRateGate()
+    gate.record_rate_limit(120)
+    loop = asyncio.get_running_loop()
+
+    async with source_deadline_scope(loop.time() + 0.01):
+        with pytest.raises(HirifyRateLimitedError, match="exceeds remaining source budget"):
+            await gate.acquire()
 
 
 @pytest.mark.asyncio
@@ -177,6 +272,95 @@ async def test_listing_api_paginates_until_limit() -> None:
 
     assert client.pages == ["1", "2"]
     assert len(items) == 2
+
+
+@pytest.mark.asyncio
+async def test_one_rate_limited_detail_does_not_discard_successful_details() -> None:
+    second_row = {**_LISTING_ROW, "id": 668119, "slug": "668119-manager"}
+    client = _ApiClient(listing={"data": [_LISTING_ROW, second_row]})
+    parser = HirifyParser()
+
+    async def _detail(
+        client: object,
+        html: str,
+        vacancy_id: object,
+        referer: str,
+    ) -> dict[str, object] | None:
+        del client, html, referer
+        if str(vacancy_id) == "668119":
+            raise HirifyRateLimitedError("429")
+        return _DETAIL_BODY
+
+    parser._fetch_detail_body = _detail  # type: ignore[method-assign]
+
+    async def _browser_details(
+        spec: CareerSiteSpec,
+        html: str,
+        rows: list[dict[str, object]],
+    ) -> dict[str, dict[str, object]]:
+        del spec, html, rows
+        return {}
+
+    parser._fetch_details_via_browser = _browser_details  # type: ignore[method-assign]
+    items = [item async for item in parser.parse(_spec(), client)]
+
+    assert len(items) == 1
+    assert items[0].external_id == "668118"
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_listing_expands_from_browser_discovery() -> None:
+    parser = HirifyParser()
+    discovered = [
+        "https://hirify.me/jobs/668118-product-owner-ai-platform",
+        "https://hirify.me/jobs/668119-manager",
+    ]
+
+    async def _rate_limited_listing(
+        spec: CareerSiteSpec,
+        client: object,
+        html: str,
+    ) -> list[dict[str, object]]:
+        del spec, client, html
+        raise HirifyRateLimitedError("429", retry_after_seconds=2)
+
+    async def _discover(spec: CareerSiteSpec, client: object) -> list[str]:
+        del spec, client
+        return discovered
+
+    async def _detail(
+        client: object,
+        html: str,
+        vacancy_id: object,
+        referer: str,
+    ) -> dict[str, object]:
+        del client, html, referer
+        return {**_DETAIL_BODY, "id": vacancy_id}
+
+    class _UnfilteredSsrClient(_ApiClient):
+        async def get(self, url: str, **kwargs: object) -> object:
+            if "/api/vacancies" not in url:
+                return _JsonResponse(
+                    None,
+                    url,
+                    text=(
+                        '<div class="vacancy-card" data-vacancy-id="668117">'
+                        '<a class="vacancy-card-link" href="/jobs/668117-unrelated">'
+                        '<h3 class="title">Unrelated role</h3></a></div>'
+                    ),
+                )
+            return await super().get(url, **kwargs)
+
+    parser._fetch_listing_rows = _rate_limited_listing  # type: ignore[method-assign]
+    parser.discover = _discover  # type: ignore[assignment]
+    parser._fetch_detail_body = _detail  # type: ignore[method-assign]
+    spec = _spec().model_copy(
+        update={"limit": 2, "url": "https://hirify.me/jobs-in-russia?search=manager"}
+    )
+
+    items = [item async for item in parser.parse(spec, _UnfilteredSsrClient())]
+
+    assert [item.external_id for item in items] == ["668118", "668119"]
 
 
 @pytest.mark.asyncio

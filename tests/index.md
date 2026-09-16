@@ -73,6 +73,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_hh_site_parser.py](test_hh_site_parser.py)
 - [test_hirehi_site_parser.py](test_hirehi_site_parser.py)
 - [test_hireme_site_parser.py](test_hireme_site_parser.py)
+- [test_hireseeker_site_parser.py](test_hireseeker_site_parser.py)
 - [test_hirify_site_parser.py](test_hirify_site_parser.py)
 - [test_http_hygiene.py](test_http_hygiene.py)
 - [test_indeed_site_parser.py](test_indeed_site_parser.py)

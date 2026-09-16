@@ -143,13 +143,16 @@ For Cloudflare browser challenges, the route is intentionally conservative:
 
 ### Provider domain authorization
 
-Paid provider solving (`capsolver`, `capmonster`, `nextcaptcha`, `manual_required`)
-is gated by `captcha_authorized_domains`. `browser_wait` is never gated by this.
+Paid/external solving (`capsolver`, `capmonster`, `nextcaptcha`,
+`cliproxy_image`, `manual_required`) is gated by `captcha_authorized_domains`.
+`browser_wait` is never gated by this.
 Authorization semantics (2026-09-13):
 
-- empty allowlist denies every domain (safe default);
+- empty allowlist denies every domain (safe default and production template);
 - `*` (wildcard) authorizes every domain — operator mode for "solve anywhere";
-  env form: `JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=*`;
+  env form: `JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=*`. Local docker-dev sets this
+  in `.env.dev` / `.env.dev.example` and `config/runtime.dev.yaml`. Empty env
+  overrides YAML and denies everything;
 - site parsers may still add per-source allowlists in bypass/monitor config;
 - suffix match covers subdomains (`m.hh.ru` covered by `hh.ru`).
 

@@ -279,7 +279,7 @@ def _detect_captcha_type(text: str, headers: Mapping[str, str] | None = None) ->
     return None
 
 
-def _has_substantial_visible_content(text: str) -> bool:
+def _visible_text(text: str) -> str:
     without_code = re.sub(
         r"<\s*(?:script|style)\b[^>]*>.*?<\s*/\s*(?:script|style)\b[^>]*>",
         " ",
@@ -287,7 +287,11 @@ def _has_substantial_visible_content(text: str) -> bool:
         flags=re.I | re.S,
     )
     visible = " ".join(re.sub(r"<[^>]+>", " ", without_code).split())
-    return len(visible) >= 200
+    return visible
+
+
+def _has_substantial_visible_content(text: str) -> bool:
+    return len(_visible_text(text)) >= 200
 
 
 def is_empty_html_200(status_code: int, content_type: str, body: str) -> bool:
@@ -452,9 +456,10 @@ class HeuristicFailureSignal:
                     challenge=True,
                     captcha_type="qrator_jsid",
                 )
-            if any(marker in lowered for marker in _CHROMIUM_FINGERPRINT_BLOCK_MARKERS):
+            visible_lowered = _visible_text(text).lower()
+            if any(marker in visible_lowered for marker in _CHROMIUM_FINGERPRINT_BLOCK_MARKERS):
                 return FetchOutcome(kind=FailureKind.BLOCKED_CHROMIUM_FINGERPRINT)
-            if any(marker in lowered for marker in _FINGERPRINT_BLOCK_MARKERS):
+            if any(marker in visible_lowered for marker in _FINGERPRINT_BLOCK_MARKERS):
                 return FetchOutcome(kind=FailureKind.BLOCKED_FINGERPRINT)
             for pattern in _CAPTCHA_PATTERNS:
                 if pattern.search(text) and not substantial_content:

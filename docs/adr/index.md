@@ -107,6 +107,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [096 — Доказательное извлечение компании, оплаты и географии](096-evidence-field-extraction.md) - Решение P2 инициативы восстановления production. (Updated: 2026-09-12)
 - [097 — Прокси, CAPTCHA и бюджет доступа](097-proxy-captcha-budget.md) - Решение P3 инициативы восстановления production. (Updated: 2026-09-12)
 - [098 — Контроль источников, пропусков и роста хранения](098-source-coverage-observability.md) - Решение P4 инициативы восстановления production. (Updated: 2026-09-12)
+- [099 — Durable ingest continuation for upstream rate limits](099-durable-ingest-rate-limit-queue.md) - Durable source-run continuation for upstream rate limits. (Updated: 2026-09-16)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

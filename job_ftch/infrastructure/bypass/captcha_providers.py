@@ -214,6 +214,46 @@ class _BaseProvider:
         self.api_key = api_key
         self.proxy_url = proxy_url
 
+    async def _extract_image_with_wait(self, page: Any) -> str:
+        body = await page.evaluate(
+            """async () => {
+                const selector = 'img[data-qa*="captcha"], img[alt="captcha" i], img[class*="captcha-image"], img[class*="captcha_image"], img[src*="captcha"]';
+                const selectImage = () => [...document.querySelectorAll(selector)].find(img => img.getClientRects().length);
+                const original = selectImage();
+                const form = original && original.closest('form');
+                const english = form && [...form.querySelectorAll('button')].find(button =>
+                    /^English$/i.test(button.innerText.trim()) && !button.disabled
+                );
+                if (english) {
+                    const previous = original.currentSrc;
+                    english.click();
+                    let changed = false;
+                    for (let attempt = 0; attempt < 20; attempt++) {
+                        await new Promise(resolve => setTimeout(resolve, 250));
+                        const next = selectImage();
+                        if (next && next.currentSrc && next.currentSrc !== previous && next.complete && next.naturalWidth) {
+                            changed = true;
+                            break;
+                        }
+                    }
+                    if (!changed) return '';
+                }
+                const img = selectImage();
+                if (!img) return '';
+                for (let attempt = 0; attempt < 20 && (!img.currentSrc || !img.complete || !img.naturalWidth); attempt++) {
+                    await new Promise(resolve => setTimeout(resolve, 250));
+                }
+                if (!img.currentSrc || !img.complete || !img.naturalWidth) return '';
+                const canvas = document.createElement('canvas');
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                canvas.getContext('2d').drawImage(img, 0, 0);
+                const body = canvas.toDataURL('image/png').split(',')[1] || '';
+                return body.length <= 2700000 ? body : '';
+            }"""
+        )
+        return body if isinstance(body, str) else ""
+
     async def _extract_sitekey_with_wait(self, page: Any, challenge_type: str) -> str:
         await _wait_for_sitekey_marker(page, challenge_type)
         return await extract_sitekey(page)
@@ -341,6 +381,7 @@ class CapSolverProvider(_BaseProvider):
             CaptchaChallengeType.HCAPTCHA.value,
             CaptchaChallengeType.TURNSTILE.value,
             CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value,
+            CaptchaChallengeType.IMAGE.value,
         }
     )
     capability = CaptchaProviderCapability(
@@ -366,6 +407,40 @@ class CapSolverProvider(_BaseProvider):
         if unsupported := self.unsupported(challenge_type, "capsolver"):
             return unsupported
         wire_type = _provider_wire_type(challenge_type)
+        if wire_type == CaptchaChallengeType.IMAGE.value:
+            try:
+                body = await self._extract_image_with_wait(page)
+                if not isinstance(body, str) or not body:
+                    return _rejected("capsolver", "captcha image could not be extracted")
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        "https://api.capsolver.com/createTask",
+                        json={
+                            "clientKey": self.api_key,
+                            "task": {
+                                "type": "ImageToTextTask",
+                                "websiteURL": url or str(getattr(page, "url", "")),
+                                "module": "common",
+                                "body": body,
+                            },
+                        },
+                    )
+                    response.raise_for_status()
+                    created = response.json()
+                if created.get("errorId", 0) != 0 or created.get("status") != "ready":
+                    return _rejected(
+                        "capsolver", _provider_error_text(created, "image recognition failed")
+                    )
+                solution = created.get("solution") or {}
+                text = solution.get("text") if isinstance(solution, dict) else None
+                return _token_result(
+                    "capsolver",
+                    text.strip() if isinstance(text, str) else "",
+                    challenge_type=challenge_type,
+                    task_id=str(created.get("taskId") or ""),
+                )
+            except (httpx.HTTPError, ValueError, TypeError) as exc:
+                return _unavailable("capsolver", exc)
         if wire_type == "cloudflare":
             proxy_value = self._capsolver_proxy_value()
             if not proxy_value:
@@ -781,6 +856,7 @@ class CapMonsterProvider(_BaseProvider):
             CaptchaChallengeType.RECAPTCHA_V3.value,
             CaptchaChallengeType.TURNSTILE.value,
             CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value,
+            CaptchaChallengeType.IMAGE.value,
         }
     )
     capability = CaptchaProviderCapability(
@@ -803,6 +879,49 @@ class CapMonsterProvider(_BaseProvider):
         if unsupported := self.unsupported(challenge_type, "capmonster"):
             return unsupported
         wire_type = _provider_wire_type(challenge_type)
+        if wire_type == CaptchaChallengeType.IMAGE.value:
+            try:
+                body = await self._extract_image_with_wait(page)
+                if not body:
+                    return _rejected("capmonster", "captcha image could not be extracted")
+                task: dict[str, Any] = {"type": "ImageToTextTask", "body": body}
+                module = getattr(page, "_captcha_image_module", None)
+                if isinstance(module, str) and module:
+                    task["capMonsterModule"] = module
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        "https://api.capmonster.cloud/createTask",
+                        json={"clientKey": self.api_key, "task": task},
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+                    task_id = result.get("taskId")
+                    for _ in range(30):
+                        if result.get("errorId", 0) != 0:
+                            return _rejected(
+                                "capmonster", _provider_error_text(result, "image recognition failed")
+                            )
+                        if result.get("status") == "ready":
+                            solution = result.get("solution") or {}
+                            text = solution.get("text") if isinstance(solution, dict) else None
+                            return _token_result(
+                                "capmonster",
+                                text.strip() if isinstance(text, str) else "",
+                                challenge_type=challenge_type,
+                                task_id=str(task_id or ""),
+                            )
+                        if not task_id:
+                            return _rejected("capmonster", "provider did not return a task id")
+                        await sleep_with_source_deadline(1.0)
+                        response = await client.post(
+                            "https://api.capmonster.cloud/getTaskResult",
+                            json={"clientKey": self.api_key, "taskId": task_id},
+                        )
+                        response.raise_for_status()
+                        result = response.json()
+                return _timeout("capmonster")
+            except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+                return _unavailable("capmonster", exc)
         if wire_type == "cloudflare":
             return CaptchaSolveResult(
                 solved=False,
@@ -982,6 +1101,141 @@ class NextCaptchaProvider(_BaseProvider):
                 return _timeout("nextcaptcha")
         except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
             return _unavailable("nextcaptcha", exc)
+
+
+@register_captcha_provider("cliproxy_image")
+class CliproxyImageProvider(_BaseProvider):
+    """Image-OCR fallback through an OpenAI-compatible CLIProxy vision model."""
+
+    supported = frozenset({CaptchaChallengeType.IMAGE.value})
+    capability = CaptchaProviderCapability(
+        provider="cliproxy_image",
+        supported_challenge_types=supported,
+        result_kinds=frozenset({CaptchaResultKind.TOKEN}),
+        free_or_dev=True,
+        notes="Image OCR fallback after CapSolver; not a widget/token solver.",
+    )
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        proxy_url: str = "",
+        base_url: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        super().__init__(api_key, proxy_url=proxy_url)
+        if base_url is None or model is None:
+            from job_ftch.config import get_settings
+
+            settings = get_settings()
+            if base_url is None:
+                base_url = settings.captcha_vision_base_url
+            if model is None:
+                model = settings.captcha_vision_model
+        self._base_url = str(base_url or "").strip().rstrip("/")
+        self._model = str(model or "").strip()
+
+    async def solve(
+        self,
+        page: Any,
+        *,
+        challenge_type: str,
+        url: str,
+        proxy_url: str = "",
+    ) -> CaptchaSolveResult:
+        del url, proxy_url
+        if unsupported := self.unsupported(challenge_type, "cliproxy_image"):
+            return unsupported
+        if not self.api_key or not self._base_url or not self._model:
+            return CaptchaSolveResult(
+                solved=False,
+                method="cliproxy_image",
+                error="captcha vision base_url, model, or api_key is not configured",
+                failure_reason=CaptchaFailureReason.MISSING_CREDENTIAL,
+                challenge_type=CaptchaChallengeType.IMAGE.value,
+                result_kind=CaptchaResultKind.TOKEN,
+            )
+        try:
+            body = await self._extract_image_with_wait(page)
+            if not isinstance(body, str) or not body:
+                return _rejected("cliproxy_image", "captcha image could not be extracted")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    _chat_completions_url(self._base_url),
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json={
+                        "model": self._model,
+                        "temperature": 0,
+                        "max_tokens": 32,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": (
+                                            "Read the captcha. Reply with only the "
+                                            "characters shown, no explanation."
+                                        ),
+                                    },
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:image/png;base64,{body}"
+                                        },
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                )
+                response.raise_for_status()
+                payload = response.json()
+            text = _ocr_text_from_completion(payload)
+            return _token_result(
+                "cliproxy_image",
+                text,
+                challenge_type=challenge_type,
+            )
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+            return _unavailable("cliproxy_image", exc)
+
+
+def _chat_completions_url(base_url: str) -> str:
+    trimmed = base_url.rstrip("/")
+    if trimmed.endswith("/v1"):
+        return f"{trimmed}/chat/completions"
+    return f"{trimmed}/v1/chat/completions"
+
+
+def _ocr_text_from_completion(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    message = first.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        raw = content
+    elif isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and item.get("text"):
+                parts.append(str(item["text"]))
+        raw = "".join(parts)
+    else:
+        return ""
+    first_line = raw.strip().strip("\"'").splitlines()[0].strip() if raw.strip() else ""
+    return first_line if first_line and len(first_line) <= 64 else ""
 
 
 def _token_result(

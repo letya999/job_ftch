@@ -89,6 +89,12 @@ def test_habr_uses_q_and_type_all() -> None:
     assert query["type"] == ["all"]
 
 
+def test_habr_uses_role_listing_for_single_ascii_keyword() -> None:
+    urls = HabrCareerParser().build_search_urls("https://career.habr.com/", ["developer"])
+
+    assert urls == ["https://career.habr.com/vacancies/developer"]
+
+
 def test_geekjob_builds_api_search_urls() -> None:
     urls = GeekJobParser().build_search_urls("https://geekjob.ru/vacancies", ROLES)
     assert len(urls) == len(ROLES)

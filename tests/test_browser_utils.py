@@ -774,3 +774,37 @@ async def test_navigate_falls_back_to_less_strict_commit() -> None:
     )
 
     assert waits == ["domcontentloaded", "commit"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("current_status", [200, 403])
+async def test_post_solve_navigation_checks_current_document(monkeypatch, current_status) -> None:
+    from unittest.mock import AsyncMock
+
+    target = "https://example.com/jobs"
+
+    class _Page:
+        url = target
+
+        async def goto(self, *args, **kwargs):
+            return SimpleNamespace(status=403)
+
+        async def evaluate(self, script):
+            return current_status
+
+        async def content(self):
+            return "<h1>Jobs</h1><p>" + "Open engineering roles. " * 20 + "</p>"
+
+    module = "job_ftch.infrastructure.sources.browser_utils"
+    monkeypatch.setattr(f"{module}._solve_page_challenge", AsyncMock(return_value=True))
+    monkeypatch.setattr(f"{module}._solve_settled_in_place", AsyncMock(return_value=True))
+    monkeypatch.setattr(f"{module}._page_has_captcha_marker", AsyncMock(return_value=False))
+    config = {
+        "challenge_retries": 0, "_allow_private_selfcheck_fixture": True,
+        "_bypass_strategy": SimpleNamespace(observed_challenge_type=None),
+    }
+    if current_status == 200:
+        await navigate(_Page(), target, config)
+    else:
+        with pytest.raises(RuntimeError, match="blocked with status 403"):
+            await navigate(_Page(), target, config)

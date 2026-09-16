@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from job_ftch.domain import RawItem, SourceKind
+from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.composite import CompositeSource
 
 if TYPE_CHECKING:
@@ -30,6 +31,20 @@ class FastSource:
 
     async def fetch(self) -> AsyncIterator[RawItem]:
         yield _build_item(self.source_name, self.source_name)
+
+
+class SpecDelayedSource:
+    def __init__(self, source_name: str, delay: float, deadline: float) -> None:
+        self.spec = CareerSiteSpec(
+            url=f"https://{source_name}.example/jobs",
+            source_name=source_name,
+            monitor_config={"source_hard_deadline_seconds": deadline},
+        )
+        self._delay = delay
+
+    async def fetch(self) -> AsyncIterator[RawItem]:
+        await asyncio.sleep(self._delay)
+        yield _build_item(self.spec.source_name or "source", "done")
 
 
 class BlockingSource:
@@ -191,6 +206,21 @@ async def test_sequential_pool_enforces_the_same_hard_deadline() -> None:
     assert started.is_set()
     assert result.eviction_kind == "hard_deadline"
     assert result.deadline_exceeded is True
+
+
+@pytest.mark.asyncio
+async def test_source_can_raise_its_bounded_hard_deadline() -> None:
+    source = SpecDelayedSource("hirify", delay=0.04, deadline=0.2)
+    composite = CompositeSource(
+        [source],
+        concurrency=1,
+        soft_deadline_seconds=0.01,
+        hard_deadline_seconds=0.05,
+    )
+
+    items = [item async for item in composite.fetch()]
+
+    assert [item.external_id for item in items] == ["done"]
 
 
 @pytest.mark.asyncio

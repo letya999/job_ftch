@@ -190,6 +190,8 @@ class RunSummary(StatsBase):
     skipped_already_active: bool = False
     trigger: str = "manual"
     config_fingerprint: str | None = None
+    completion_state: str = "completed"
+    next_retry_at: datetime | None = None
 
     def finish(self) -> RunSummary:
         self.finished_at = datetime.now(UTC)
@@ -530,6 +532,8 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     "generic_scraper_used": result.generic_scraper_used,
                     "parser_urls_discovered": result.parser_urls_discovered,
                     "detail_cards_extracted": result.detail_cards_extracted,
+                    "rate_limit_retry_after_seconds": result.rate_limit_retry_after_seconds,
+                    "rate_limit_scope": result.rate_limit_scope,
                 }
             )
             if result.failed:
