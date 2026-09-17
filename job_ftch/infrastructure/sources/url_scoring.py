@@ -56,6 +56,8 @@ _NEGATIVE_PATH_WORDS = frozenset(
         "cities",
         "client",
         "clients",
+        "customer",
+        "customers",
         "companies",
         "company",
         "contact",
@@ -164,6 +166,8 @@ _NEGATIVE_SUBSTRINGS = (
     "/category/",
     "/client/",
     "/clients/",
+    "/customer/",
+    "/customers/",
     "/companies/",
     "/company/",
     "/content/",
@@ -215,6 +219,7 @@ _DETAIL_PATH_RE = re.compile(
     r"|locuri-de-munca|locuri_de_munca"
     r"|career|careers"
     r"|opening|openings"
+    r"|announcement|announcements"
     r"|offer|offers"
     r"|ployment|ployments"
     r"|stelle|stellen"
@@ -241,6 +246,24 @@ _DETAIL_QUERY_KEYS = frozenset(
     }
 )
 _WEAK_DETAIL_FRAGMENT_RE = re.compile(r"^#(?:job|vacancy|opening)[\w-]*$", re.IGNORECASE)
+_STATIC_ASSET_SUFFIXES = (
+    ".css",
+    ".eot",
+    ".gif",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".js",
+    ".map",
+    ".mp4",
+    ".png",
+    ".svg",
+    ".ttf",
+    ".webm",
+    ".webp",
+    ".woff",
+    ".woff2",
+)
 
 
 def _site_family(hostname: str) -> str:
@@ -270,6 +293,38 @@ def is_same_site_family(url: str, *, board_url: str | None = None) -> bool:
         or url_host.endswith(f".{board_host}")
         or board_host.endswith(f".{url_host}")
     )
+
+
+_CAPTCHA_LISTING_MARKERS: tuple[str, ...] = (
+    "showcaptcha",
+    "tmgrdfrend",
+    "cian-captcha",
+    "smartcaptcha",
+)
+
+
+def safe_listing_canonical(
+    original: str,
+    canonical: str | None,
+    *,
+    challenge: bool = False,
+) -> str | None:
+    """Keep listing discovery on the career host; drop captcha/classifieds hops."""
+    if not canonical:
+        return None
+    if canonical.rstrip("/") == original.rstrip("/"):
+        return None
+    if challenge:
+        return None
+    parsed = urlparse(canonical)
+    blob = f"{parsed.path}?{parsed.query}".lower()
+    if any(marker in blob for marker in _CAPTCHA_LISTING_MARKERS):
+        return None
+    orig_host = (urlparse(original).hostname or "").lower()
+    cand_host = (parsed.hostname or "").lower()
+    if orig_host.startswith("career.") and cand_host and not cand_host.startswith("career."):
+        return None
+    return canonical
 
 
 def score_job_url(url: str, *, board_url: str | None = None) -> int:
@@ -386,6 +441,10 @@ def score_job_url(url: str, *, board_url: str | None = None) -> int:
 
     if path.endswith((".pdf", ".doc", ".docx")):
         score -= 8
+    if path.endswith(_STATIC_ASSET_SUFFIXES):
+        score -= 50
+    if any(part in {"static", "assets", "_next", "cdn-cgi"} for part in segments):
+        score -= 20
 
     return score
 

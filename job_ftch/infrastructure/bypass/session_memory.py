@@ -176,6 +176,11 @@ class SessionMemory:
             self._state.cookies = [
                 cookie for cookie in all_cookies if cookie.get("name") in _COOKIE_ALLOWLIST
             ]
+            # Flatten CDP enum leaks (CookieSameSite etc.) so persisted state
+            # stays JSON-serializable for later add_cookies restores.
+            import json as _json
+
+            self._state.cookies = _json.loads(_json.dumps(self._state.cookies, default=str))
             logger.debug(
                 "session_cookies_captured",
                 persona_id=self._persona_id,

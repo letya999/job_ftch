@@ -66,6 +66,35 @@ career_site_retry_delay_seconds: 1.0
 career_site_max_connections: 10
 career_site_max_keepalive_connections: 5
 career_site_detail_concurrency: 8
+career_site_default_limit: 50
+career_site_default_detail_limit: 50
+career_site_spa_shell_max_visible_chars: 80
+career_site_window_max_details: 500
+
+bypass_keep_proxy_on_engine_connect_error: true
+bypass_js_hardening_browser_families:
+  - chromium
+  - chromium_patchright
+
+proxy_country_default: RU
+proxy_timezone_by_country:
+  RU: Europe/Moscow
+  KZ: Asia/Almaty
+  BY: Europe/Minsk
+  UZ: Asia/Tashkent
+  UA: Europe/Kyiv
+  US: America/New_York
+proxy_locale_by_country:
+  RU: ru-RU
+  KZ: ru-KZ
+  BY: ru-BY
+  UZ: ru-UZ
+  UA: uk-UA
+  US: en-US
+
+# Operational logs stream. Bot images may override to job_ftch_bot.
+openobserve_logs_stream: job_ftch_ingest
+openobserve_llm_stream: job_ftch_openai
 
 browser_default_timeout_ms: 30000
 browser_context_timeout_ms: 120000

@@ -37,6 +37,7 @@ _KNOWN_BOARD_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"[\w-]+\.breezy\.hr/?$", re.IGNORECASE), "breezy"),
     (re.compile(r"[\w-]+\.jobs\.personio\.\w+", re.IGNORECASE), "personio"),
     (re.compile(r"[\w-]+\.recruitee\.com/?$", re.IGNORECASE), "recruitee"),
+    (re.compile(r"[\w-]+\.teamtailor\.com/", re.IGNORECASE), "rss_board"),
     (
         re.compile(
             r"ats\.(?:\w+\.)?rippling\.com/(?:[a-z]{2}-[A-Z]{2}/)?[\w-]+/jobs", re.IGNORECASE
@@ -59,7 +60,15 @@ def _specific_monitor_from_text(url: str, body: str | None) -> str | None:
     if body:
         from job_ftch.config import get_settings
 
-        haystacks.append(body[: get_settings().fingerprint_body_scan_max_chars])
+        # ATS embeds are frequently appended after a large CMS document. Keep
+        # the bounded scan, but inspect both ends so a footer script is not
+        # invisible to routing.
+        limit = get_settings().fingerprint_body_scan_max_chars
+        if len(body) > limit:
+            half = max(1, limit // 2)
+            haystacks.append(body[:half] + body[-half:])
+        else:
+            haystacks.append(body)
     for pattern, monitor_name in _KNOWN_BOARD_PATTERNS:
         if any(pattern.search(text) for text in haystacks):
             return monitor_name
@@ -174,23 +183,30 @@ async def fingerprint(url: str, client: httpx.AsyncClient | None = None) -> Site
         log.info("site_board_gone_detected")
         return SiteProfile(SiteClass.SSR, [], {"board_gone": True}, canonical_url=_canonical)
 
-    from job_ftch.infrastructure.bypass.challenge_classifier import classify_challenge
+    from job_ftch.infrastructure.bypass.challenge_classifier import (
+        classify_challenge,
+        emit_challenge_detection,
+    )
     from job_ftch.infrastructure.bypass.failure_signal import HeuristicFailureSignal
 
     body_bytes = body.encode("utf-8", errors="ignore")
     challenge_outcome = HeuristicFailureSignal().classify_detailed(
         status_code=response.status_code,
+        headers=dict(response.headers),
         body=body_bytes,
         error=None,
+        page_url=final_url,
     )
     if challenge_outcome.challenge:
         challenge_detection = classify_challenge(
             surface="fingerprinter",
             status_code=response.status_code,
-            headers=response.headers,
+            headers=dict(response.headers),
             body=body_bytes,
+            page_url=final_url,
         )
         log.info("site_challenge_detected", status=response.status_code)
+        emit_challenge_detection(urlparse(final_url).hostname or "", challenge_detection)
         challenge_confidence = challenge_detection.confidence or (
             0.82 if challenge_outcome.captcha_type else 0.65
         )

@@ -12,6 +12,7 @@ MAJOR_EMPLOYER_SITES = (
     ("Alfa-Bank", "https://digital.alfabank.ru/vacancies"),
     ("Wildberries", "https://www.wildberries.ru/services/trudoustroystvo"),
     ("CIAN", "https://www.cian.ru/vacancies/"),
+    ("CIAN career", "https://career.cian.ru/"),
     ("T-Bank", "https://www.tbank.ru/career/vacancies/it/"),
     ("VK", "https://team.vk.company/vacancy/"),
     ("Avito", "https://career.avito.com/vacancies/"),

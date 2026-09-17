@@ -242,6 +242,62 @@ async def test_discover_parser_trusts_slug_only_detail_urls(
     assert str(item.url) == url
 
 
+class _DiscoverThenParse:
+    domain_pattern = r"^https?://mock\.com/"
+    has_custom_parse = True
+    supports_discover = True
+    parser_name = "discover_then_parse"
+
+    def runtime_defaults(self, url: str) -> None:
+        del url
+        return None
+
+    def parser_kind(self, url: str) -> None:
+        del url
+        return None
+
+    async def discover(self, spec: CareerSiteSpec, client: object) -> list[str]:
+        del spec, client
+        return ["https://mock.com/jobs/1"]
+
+    async def parse(self, spec: CareerSiteSpec, client: object):  # type: ignore[no-untyped-def]
+        del spec, client
+        yield _build_item("https://mock.com/jobs/1")
+
+
+@pytest.mark.asyncio
+async def test_discover_zero_enrich_falls_through_to_parse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser",
+        lambda url: _DiscoverThenParse() if "mock.com" in url else None,
+    )
+    source = CareerSiteSource(
+        spec=CareerSiteSpec(url="https://mock.com/jobs", source_name="mock_site"),
+        http_client=object(),
+        auth=MagicMock(),
+    )
+
+    class _NoopBypass:
+        current_name = "noop"
+
+        async def apply_http(self, client: object) -> object:
+            return client
+
+    source.bypass_strategy = _NoopBypass()
+
+    async def _no_detail(url: str, scraper_chain: list[str], source_name: str) -> None:
+        del url, scraper_chain, source_name
+        return None
+
+    monkeypatch.setattr(source, "_scrape_detail_url_to_raw_item", _no_detail)
+
+    items = [item async for item in source._try_site_parser(object())]
+
+    assert [item.external_id for item in items] == ["1"]
+
+
 @pytest.mark.asyncio
 async def test_generic_detail_drops_title_only_payload(
     monkeypatch: pytest.MonkeyPatch,

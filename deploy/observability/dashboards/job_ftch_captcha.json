@@ -1,0 +1,182 @@
+{
+  "version": 5,
+  "title": "job_ftch captcha",
+  "description": "CAPTCHA encounters by type and host, plus unsolved solver outcomes. Filter by source_run_id for one run.",
+  "variables": {
+    "list": [
+      {
+        "type": "query_values",
+        "name": "source_run_id",
+        "label": "Run",
+        "query_data": {
+          "stream_type": "logs",
+          "stream": "__LOGS_STREAM__",
+          "field": "source_run_id",
+          "max_record_size": 40,
+          "filter": []
+        },
+        "value": "",
+        "options": []
+      }
+    ],
+    "showDynamicFilters": true
+  },
+  "tabs": [
+    {
+      "tabId": "captcha",
+      "name": "Капча",
+      "panels": [
+        {
+          "id": "captcha-over-time",
+          "type": "line",
+          "title": "Встречи капчи по времени",
+          "description": "captcha_encounter count, stacked by captcha_type",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) AS x_axis, captcha_type, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY x_axis, captcha_type ORDER BY x_axis",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [{"label": "Time", "alias": "x_axis", "column": "x_axis", "color": null, "aggregationFunction": null}],
+                "y": [{"label": "encounters", "alias": "y_axis", "column": "y_axis", "color": null, "aggregationFunction": "count"}],
+                "z": [],
+                "breakdown": [{"label": "type", "alias": "captcha_type", "column": "captcha_type", "color": null, "aggregationFunction": null}],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 0, "min": 0, "max": 100, "promql_legend": "", "layer_type": "line", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 0, "w": 48, "h": 10, "i": "1"},
+          "config": {"show_legends": true, "decimals": 0}
+        },
+        {
+          "id": "captcha-by-type",
+          "type": "bar",
+          "title": "Типы капчи",
+          "description": "How often each challenge type is observed",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT captcha_type AS x_axis, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY captcha_type ORDER BY y_axis DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [{"label": "type", "alias": "x_axis", "column": "x_axis", "color": null, "aggregationFunction": null}],
+                "y": [{"label": "encounters", "alias": "y_axis", "column": "y_axis", "color": null, "aggregationFunction": "count"}],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 20, "min": 0, "max": 100, "promql_legend": "", "layer_type": "bar", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 10, "w": 24, "h": 10, "i": "2"},
+          "config": {"show_legends": false, "decimals": 0}
+        },
+        {
+          "id": "captcha-unsolved",
+          "type": "bar",
+          "title": "Непройденные капчи",
+          "description": "captcha_solve_outcome where captcha_solved is false",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT captcha_type AS x_axis, captcha_outcome, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_solve_outcome' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') AND (captcha_solved = false OR cast(captcha_solved as text) IN ('false', '0', 'f', 'False')) GROUP BY captcha_type, captcha_outcome ORDER BY y_axis DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [{"label": "type", "alias": "x_axis", "column": "x_axis", "color": null, "aggregationFunction": null}],
+                "y": [{"label": "unsolved", "alias": "y_axis", "column": "y_axis", "color": null, "aggregationFunction": "count"}],
+                "z": [],
+                "breakdown": [{"label": "outcome", "alias": "captcha_outcome", "column": "captcha_outcome", "color": null, "aggregationFunction": null}],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 20, "min": 0, "max": 100, "promql_legend": "", "layer_type": "bar", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 24, "y": 10, "w": 24, "h": 10, "i": "3"},
+          "config": {"show_legends": true, "decimals": 0}
+        },
+        {
+          "id": "captcha-by-host",
+          "type": "table",
+          "title": "Капча по хостам",
+          "description": "Which sources hit which challenge types",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT captcha_host, captcha_type, captcha_surface, count(*) AS encounters FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY captcha_host, captcha_type, captcha_surface ORDER BY encounters DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 200, "min": 0, "max": 100, "promql_legend": "", "layer_type": "scatter", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 20, "w": 24, "h": 12, "i": "4"},
+          "config": {"show_legends": false, "decimals": 0}
+        },
+        {
+          "id": "captcha-solve-table",
+          "type": "table",
+          "title": "Исходы солвера",
+          "description": "solved / unsupported / failed by host and type",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT captcha_host, captcha_type, captcha_outcome, captcha_failure_reason, captcha_engine, count(*) AS n FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_solve_outcome' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY captcha_host, captcha_type, captcha_outcome, captcha_failure_reason, captcha_engine ORDER BY n DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [],
+                "y": [],
+                "z": [],
+                "breakdown": [],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 200, "min": 0, "max": 100, "promql_legend": "", "layer_type": "scatter", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 24, "y": 20, "w": 24, "h": 12, "i": "5"},
+          "config": {"show_legends": false, "decimals": 0}
+        },
+        {
+          "id": "captcha-by-host-bar",
+          "type": "bar",
+          "title": "Капча по источникам",
+          "description": "captcha_encounter count by host, stacked by captcha_type",
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT captcha_host AS x_axis, captcha_type, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY captcha_host, captcha_type ORDER BY y_axis DESC",
+              "customQuery": true,
+              "fields": {
+                "stream": "__LOGS_STREAM__",
+                "stream_type": "logs",
+                "x": [{"label": "host", "alias": "x_axis", "column": "x_axis", "color": null, "aggregationFunction": null}],
+                "y": [{"label": "encounters", "alias": "y_axis", "column": "y_axis", "color": null, "aggregationFunction": "count"}],
+                "z": [],
+                "breakdown": [{"label": "type", "alias": "captcha_type", "column": "captcha_type", "color": null, "aggregationFunction": null}],
+                "filter": {"filterType": "group", "logicalOperator": "AND", "conditions": []}
+              },
+              "config": {"limit": 20, "min": 0, "max": 100, "promql_legend": "", "layer_type": "bar", "weight_fixed": 1}
+            }
+          ],
+          "layout": {"x": 0, "y": 32, "w": 48, "h": 10, "i": "6"},
+          "config": {"show_legends": true, "decimals": 0}
+        }
+      ]
+    }
+  ]
+}

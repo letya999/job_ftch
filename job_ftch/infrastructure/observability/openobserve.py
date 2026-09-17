@@ -75,6 +75,17 @@ _CORRELATION_FIELDS = frozenset(
         "tokens_in",
         "cached_tokens_in",
         "tokens_out",
+        "captcha_host",
+        "captcha_type",
+        "captcha_kind",
+        "captcha_surface",
+        "captcha_outcome",
+        "captcha_solved",
+        "captcha_result_kind",
+        "captcha_failure_reason",
+        "captcha_engine",
+        "captcha_provider",
+        "evidence_hash",
     }
 )
 
@@ -308,7 +319,65 @@ def upsert_openobserve_dashboards(settings: Settings) -> None:
                     extra={"dashboard": dashboard_file.name, "status": response.status},
                 )
         except urllib.error.HTTPError as exc:
-            if exc.code in {409, 400}:
+            if exc.code == 409:
+                try:
+                    title = str(json.loads(body).get("title") or "")
+                    list_url = f"{dashboard_url}?folder=default&title={quote(title, safe='')}"
+                    list_request = urllib.request.Request(
+                        list_url,
+                        method="GET",
+                        headers={"Authorization": f"Basic {auth}"},
+                    )
+                    with urllib.request.urlopen(list_request, timeout=timeout) as listed:  # nosec B310
+                        dashboards = json.loads(listed.read().decode("utf-8")).get("dashboards", [])
+                    existing = next(
+                        (
+                            item
+                            for item in dashboards
+                            if isinstance(item, dict) and item.get("title") == title
+                        ),
+                        None,
+                    )
+                    dashboard_id = (existing or {}).get("dashboard_id") or (existing or {}).get(
+                        "dashboardId"
+                    )
+                    dashboard_hash = (existing or {}).get("hash")
+                    if dashboard_id:
+                        put_url = (
+                            f"{dashboard_url}/{quote(str(dashboard_id), safe='')}?folder=default"
+                        )
+                        if dashboard_hash:
+                            put_url += f"&hash={quote(str(dashboard_hash), safe='')}"
+                        put_request = urllib.request.Request(
+                            put_url,
+                            data=body.encode("utf-8"),
+                            method="PUT",
+                            headers={
+                                "Authorization": f"Basic {auth}",
+                                "Content-Type": "application/json",
+                            },
+                        )
+                        with urllib.request.urlopen(put_request, timeout=timeout) as response:  # nosec B310
+                            logger.info(
+                                "OpenObserve dashboard upserted",
+                                extra={
+                                    "dashboard": dashboard_file.name,
+                                    "status": response.status,
+                                },
+                            )
+                        continue
+                except (
+                    urllib.error.HTTPError,
+                    urllib.error.URLError,
+                    json.JSONDecodeError,
+                    OSError,
+                ):
+                    logger.info(
+                        "OpenObserve dashboard 409 retry failed",
+                        extra={"dashboard": dashboard_file.name},
+                    )
+                continue
+            if exc.code == 400:
                 logger.info(
                     "OpenObserve dashboard already present or rejected",
                     extra={"dashboard": dashboard_file.name, "status": exc.code},
@@ -389,7 +458,9 @@ def record_run_metrics(summary: RunSummary) -> None:
     _runtime_state_snapshots["job_ftch.ingest.conversion.accept"] = [
         ((summary.emitted / fetched) if fetched else 0.0, attrs)
     ]
-    _runtime_state_snapshots["job_ftch.ingest.run.duration"] = [(_duration_seconds(summary), attrs)]
+    _runtime_state_snapshots["job_ftch.ingest.run.last_duration"] = [
+        (_duration_seconds(summary), attrs)
+    ]
     _runtime_state_snapshots["job_ftch.ingest.run.cost"] = [
         (float(summary.llm_cost_usd or 0.0), attrs)
     ]
@@ -436,7 +507,7 @@ def record_run_metrics(summary: RunSummary) -> None:
             "quarantined",
             "deferred",
         ):
-            _counter(meter, f"job_ftch.ingest.items.{field}").add(
+            _counter(meter, f"job_ftch.ingest.source.items.{field}").add(
                 getattr(stats, field), source_attrs
             )
     from job_ftch.application.source_quality import source_status_category
@@ -747,7 +818,7 @@ def _register_runtime_state_gauges(meter: Any) -> None:
         ("job_ftch.source.quality.window_runs", "runs"),
         ("job_ftch.ingest.conversion.extract", "1"),
         ("job_ftch.ingest.conversion.accept", "1"),
-        ("job_ftch.ingest.run.duration", "s"),
+        ("job_ftch.ingest.run.last_duration", "s"),
         ("job_ftch.ingest.run.cost", "USD"),
         ("job_ftch.runtime.last_run_finished_age", "s"),
         ("job_ftch.runtime.last_run_failed", "1"),

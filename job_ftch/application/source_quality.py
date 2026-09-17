@@ -60,6 +60,8 @@ SOURCE_OUTCOME_CATEGORIES = frozenset(
         "partial",
         "unconfirmed_empty",
         "transport_error",
+        "unknown",
+        "skipped",
     }
 )
 
@@ -92,6 +94,10 @@ def source_status_category(status: str | None, error: str | None = None) -> str:
         return "transport_error"
     if normalized in FAIL_STATUSES or "source_hard_deadline_exceeded" in detail:
         return "hard_failure"
+    if normalized in {"not_due", "skipped"}:
+        return "skipped"
+    if not normalized or normalized == "unknown":
+        return "unknown"
     return "ok"
 
 

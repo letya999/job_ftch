@@ -1,14 +1,26 @@
 ---
 title: "CAPTCHA provider rollout"
 description: "Operational rollout for observed CAPTCHA/bot-protection handling: project wiring, browser setup, provider roles, and eval gates."
-updated: 2026-08-05
+updated: 2026-09-17
 ---
 # CAPTCHA provider rollout
 
 This rollout is based on the 2026-08-02 observe run over the 300 career-site
-fixtures. The only confirmed CAPTCHA subtype in that run was `recaptcha`;
-`cloudflare_challenge` was observed separately as a browser/session challenge.
-Other types stay observe-only until a fresh run confirms them.
+fixtures plus later Cian/Yandex SmartCaptcha detections. Confirmed interactive
+types: `recaptcha`, `smartcaptcha` (Yandex, including Cian `/cian-captcha/` and
+`/tmgrdfrend/showcaptcha`). `cloudflare_challenge` is a browser/session
+challenge. Other types stay observe-only until a fresh run confirms them.
+
+`smartcaptcha` is a first-class `CaptchaChallengeType`. A paid token is injected
+into `smart-token`, the site callback is fired, and the captcha form is submitted.
+Clearance is the page leaving `/cian-captcha` / `showcaptcha` / `tmgrdfrend`.
+The SmartCaptcha route is `browser_wait` (checkbox, then vision clicks on the
+image puzzle) then CapSolver then CapMonster then 2Captcha then `observe`.
+Live CapSolver createTask returns `ERROR_TYPE_NOT_SUPPORTED` for
+`YandexCaptchaTask` / `YandexSmartCaptchaTask`; that rejection does not
+consume the paid slot. 2Captcha token (`YandexSmartCaptchaTaskProxyless`) and
+image (`SmartCaptchaTask` coordinates) need `TWOCAPTCHA_API_KEY`.
+Encounters stay in OpenObserve as `captcha_encounter` / `captcha_solve_outcome`.
 
 ## Project wiring
 
@@ -18,8 +30,9 @@ Provider roles:
 |---|---|
 | Production candidates | `capsolver`, `capmonster` |
 | Benchmark candidate | `nextcaptcha` for `recaptcha` and `turnstile` |
-| Free/dev contour | `browser_wait`, `nopecha`, manual/mock/sandbox fixtures |
-| Observe-only until confirmed | `turnstile`, `hcaptcha`, `datadome`, `perimeterx`, `image`, `unknown` |
+| Free/dev contour | `browser_wait`, `nopecha`, `cliproxy_image`, manual/mock/sandbox fixtures |
+| Observe-only until confirmed | `turnstile`, `hcaptcha`, `datadome`, `perimeterx`, `unknown` |
+| Yandex SmartCaptcha | `browser_wait` (checkbox + vision clicks), then `capsolver`, `capmonster`, `2captcha` if keyed, else `observe` |
 
 Environment variables:
 
@@ -31,6 +44,9 @@ Environment variables:
 | 2Captcha | `TWOCAPTCHA_API_KEY` |
 | Anti-Captcha | `ANTICAPTCHA_API_KEY` |
 | NopeCHA | `NOPECHA_API_KEY` |
+| CLIProxy image OCR | `JOB_FTCH_OPENAI_API_KEY` (or `OPENAI_API_KEY`) plus `JOB_FTCH_CAPTCHA_VISION_BASE_URL` / `JOB_FTCH_CAPTCHA_VISION_MODEL` |
+
+`cliproxy_image` is image-OCR only (after CapSolver). It does not solve recaptcha/turnstile/hcaptcha and does not switch `JOB_FTCH_LLM_GATEWAY`.
 
 Default runtime remains conservative:
 
@@ -45,6 +61,35 @@ captcha_provider_routes: {}
 Paid providers only run when explicitly selected as `captcha_provider` and
 included in `captcha_enabled_providers`.
 
+## Domain authorization (`captcha_authorized_domains`)
+
+Paid/external solving (CapSolver, CapMonster, NextCaptcha, `cliproxy_image`,
+…) is gated by the domain allowlist. `browser_wait` is never gated.
+
+Env: `JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS`. The `JOB_FTCH_` prefix is required
+— bare `CAPTCHA_AUTHORIZED_DOMAINS` is ignored. Env overrides runtime YAML;
+an empty env value therefore **denies all domains** even if YAML has `*`.
+
+| Allowlist | Behavior |
+|---|---|
+| empty | deny for every domain (code default and `.env.prod.example`) |
+| `hh.ru,m.hh.ru` | suffix match covers subdomains |
+| `*` | wildcard: authorize every domain |
+
+**Local docker-dev uses the wildcard.** Set both:
+
+```text
+JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=*
+```
+
+in `.env.dev` (see `.env.dev.example`) and `captcha_authorized_domains: ["*"]`
+in `config/runtime.dev.yaml`. Without `*`, image fallback CapSolver →
+CLIProxy OCR never runs. Production stays empty unless you opt in.
+
+Since 2026-09-13 the wildcard is supported in both config paths
+(`CaptchaSolverBypass._domain_authorized` and
+`_authorized_domains_from_config`).
+
 Solver guardrails:
 
 ```yaml
@@ -53,8 +98,12 @@ captcha_solver_backoff_seconds: 300
 ```
 
 The provider path waits briefly for a challenge marker/sitekey before creating a
-task. Recent domain+challenge failures are backed off in-process, so one bad
-sitekey/action does not burn the whole paid budget.
+task. A CapSolver image token that injects but does not clear the page is not a
+solved challenge: the image chain continues to `cliproxy_image` in the same
+`solve()` call. In-process backoff starts only after the whole chain is
+exhausted, so HH `/account/captcha` does not skip CLIProxy OCR after the first
+CapSolver miss. Paid budget exhaustion on CapSolver also does not skip the free
+OCR fallback.
 
 Suggested eval routes:
 
@@ -64,6 +113,7 @@ Suggested eval routes:
 | `turnstile` | `capsolver -> capmonster -> nextcaptcha -> manual_required` after authorized eval |
 | `cloudflare_challenge` | `browser_wait -> capsolver -> manual_required` only for authorized eval domains with a static/sticky proxy |
 | `hcaptcha` | `observe` until the fixture run confirms real frequency |
+| `image` | `capsolver -> cliproxy_image -> observe` |
 | `datadome`, `perimeterx`, `unknown` | `observe -> manual_required`; no provider solve by default |
 
 Example benchmark route:
@@ -75,7 +125,12 @@ captcha_enabled_providers:
   - capsolver
   - capmonster
   - nextcaptcha
+  - cliproxy_image
 captcha_provider_routes:
+  image:
+    - capsolver
+    - cliproxy_image
+    - observe
   recaptcha:
     - capsolver
     - capmonster
@@ -209,3 +264,47 @@ uv run python scripts/eval/run_captcha_provider_eval.py `
 
 Add `--allow-paid` only when the selected providers are funded and the target
 page is owned or explicitly authorized for testing.
+
+## Rehearsal log
+
+### 2026-09-13 — hh.ru cannot be provoked onto CAPTCHA, provider token path re-verified
+
+Provider smoke (`scripts/eval/run_captcha_provider_eval.py --allow-paid`,
+Google reCAPTCHA v2 demo, keys funded):
+
+- `capsolver` solved `recaptcha` (token kind) in ~18 s, token present;
+- session flow still requires HH-style sites to actually serve a CAPTCHA.
+
+Session stress on hh.ru (residential DataImpulse, patchright headless,
+`scripts/hh_ai_dev_probe.py` / churn + parallel sessions):
+
+- ~30 sessions and ~200 navigations: search pages and vacancy cards never
+  served a CAPTCHA (`captchaText` absent, no reCAPTCHA iframe);
+- HH escalates via intermediate `blocked_fingerprint` HTTP 200 pages during
+  session open and single 403s on detail URLs, cleared transparently by the
+  same-session `browser.challenge_retry`;
+- verdict: hh.ru CAPTCHA solving needs a live CAPTCHA trigger that is still not
+  reproducible in this environment; keep CapSolver wired, do not interpret
+  absence of CAPTCHA as solver untested.
+
+Same-day site rehearsal (`scripts/captcha_rehearsal.py`,
+`.runtime/runs/captcha_rehearsal/`):
+
+- kadrof.ru and telecom.kz loaded clean from residential geo-RU — no recaptcha
+  shown at 10 rapid same-site navigations each, unlike the 2026-08 observed run;
+- airastana.com: captcha-class `incapsula` reproduce output — hard session
+  gate, `browser_wait` does not clear it, provider chain correctly stops at
+  `observe` (fail-closed). Sites behind Incapsula stay manual/HITL until an
+  approved provider integration.
+- ozon.tech/vacancies/: hard `fab_chlg_` Antibot Challenge Page (403, JS-only
+  shell from `st.ozone.ru/s3/abt-challenge/script_v47_1.js`). Chromium
+  patchright tier cannot pass it (`browser_wait` + reload cycles keep the
+  403 challenge); the `camoufox` tier cleared it on the first wait+reload
+  cycle with no paid provider call: challenge gone, 20 vacancy cards listed,
+  2 vacancy detail pages extracted in the same session. Ozon antibot must be
+  routed through the camoufox tier, not through provider CAPTCHA solving.
+
+Takeaway: `*` domain authorization + funded keys make provider solving live for
+all authorized targets; per-site CAPTCHA appearance remains rate/fingerprint
+dependent and must be re-evaluated against production telemetry rather than
+assumed from `observe` runs.

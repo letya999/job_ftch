@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from job_ftch.domain import (
         CompiledOntology,
         DuplicateRecord,
+        IngestTask,
         JobGroup,
         JobRecord,
         ManagedCandidateProfile,
@@ -284,6 +285,57 @@ class Store(Protocol):
         self, tenant_id: str, rows: Sequence[SourceRunStatsRow]
     ) -> None:
         """Upsert per-source stats for one pipeline run."""
+
+
+class IngestQueueStore(Protocol):
+    """Optional durable queue capability implemented by persistent stores."""
+
+    async def enqueue_ingest_task(self, task: IngestTask) -> IngestTask: ...
+
+    async def claim_due_ingest_tasks(
+        self,
+        tenant_id: str,
+        worker_id: str,
+        *,
+        limit: int,
+        lease_seconds: int,
+        now: _DateTime,
+    ) -> tuple[IngestTask, ...]: ...
+
+    async def complete_ingest_task(self, task_id: str, worker_id: str) -> IngestTask | None: ...
+
+    async def defer_ingest_task(
+        self,
+        task: IngestTask,
+        worker_id: str,
+        *,
+        available_at: _DateTime,
+        error: str | None = None,
+    ) -> IngestTask | None: ...
+
+    async def fail_ingest_task(
+        self,
+        task: IngestTask,
+        worker_id: str,
+        *,
+        needs_operator: bool = False,
+        error: str | None = None,
+    ) -> IngestTask | None: ...
+
+    async def reap_ingest_leases(self, now: _DateTime) -> int: ...
+
+    async def list_active_ingest_tasks(
+        self, tenant_id: str, *, run_id: str | None = None
+    ) -> tuple[IngestTask, ...]: ...
+
+    async def record_ingest_rate_limit(
+        self,
+        scope_id: str,
+        *,
+        cooldown_until: _DateTime,
+        retry_after_seconds: float | None,
+        status_code: int | None = None,
+    ) -> None: ...
 
 
 @runtime_checkable

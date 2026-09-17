@@ -26,6 +26,12 @@ from job_ftch.application.registry import create_source_from_spec, resolve_site_
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.composite import SourceFetchResult, _capture_source_stats
 
+# The coverage probe only emits ``max_items`` items, but must inspect a small
+# detail frontier before declaring a source broken. A single stale/marketing
+# link is common on generic boards and is not evidence that the board has no
+# parseable vacancy.
+_PROBE_DETAIL_CANDIDATE_LIMIT = 10
+
 
 class _TimedProbeSource:
     """Preserve a child source's contract while recording its terminal time."""
@@ -71,6 +77,23 @@ class _LiveProbe:
         self.source = source
         self.source_result = source_result
         self.items = items
+
+
+def _item_snapshot(item: Any) -> dict[str, str]:
+    text = str(getattr(item, "text", "") or "")
+    title = ""
+    metadata = getattr(item, "metadata", None) or {}
+    if isinstance(metadata, dict):
+        raw_title = metadata.get("title")
+        if isinstance(raw_title, str) and raw_title.strip():
+            title = raw_title.strip()
+    if not title:
+        title = text.split("\n", 1)[0].strip()
+    return {
+        "url": str(getattr(item, "url", "") or ""),
+        "title": title[:240],
+        "text_preview": text[:240],
+    }
 
 
 def _parser_name(spec: CareerSiteSpec) -> str | None:
@@ -265,6 +288,7 @@ def _probe_result(
             "issues": coherence_issues,
         },
         "parser_outcome": parser_outcome,
+        "items": list(items),
         "evicted": source_result.evicted,
         "eviction_kind": source_result.eviction_kind,
         "terminal_outcome": source_result.terminal_outcome,
@@ -309,17 +333,24 @@ async def _probe_one(
     max_items: int,
     timeout_seconds: float,
     live_probes: dict[str, _LiveProbe] | None = None,
+    keywords: list[str] | None = None,
 ) -> dict[str, Any]:
     """Probe one URL with an isolated source budget.
 
     The ingest eval measures whether a URL can produce at least one vacancy.
     It should not depend on how many unrelated slow URLs are queued beside it.
     """
+    monitor_config: dict[str, Any] = {}
+    # Do not inject the probe hostname into paid captcha/proxy allowlists.
+    # Eval uses the same authorization policy as the runtime environment.
+    if keywords:
+        monitor_config["_search_keywords"] = list(keywords)
     spec = CareerSiteSpec(
         url=url,
         source_name=source_name,
         limit=max_items,
-        detail_limit=max_items,
+        detail_limit=max(max_items, _PROBE_DETAIL_CANDIDATE_LIMIT),
+        monitor_config=monitor_config,
     )
     source = _TimedProbeSource(create_source_from_spec(spec))
     source_id = f"career_site:{spec.source_name}"
@@ -342,12 +373,7 @@ async def _probe_one(
             async for item in source.fetch():
                 source_result.yielded += 1
                 if len(items) < max_items:
-                    items.append(
-                        {
-                            "url": str(getattr(item, "url", "")),
-                            "text_preview": str(getattr(item, "text", ""))[:240],
-                        }
-                    )
+                    items.append(_item_snapshot(item))
                 if len(items) >= max_items:
                     break
     except BaseException as err:
@@ -431,6 +457,7 @@ def _timeout_result(
             "urls_found": 0,
             "items_extracted": 0,
         },
+        "items": [],
         "evicted": True,
         "eviction_kind": "task_watchdog",
         "terminal_outcome": "deadline_exceeded",
@@ -490,9 +517,14 @@ def _load_resume_order(path: Path) -> list[str]:
 
 
 def _write_slow_retry_queue(path: Path, results: list[dict[str, Any]]) -> None:
-    """Persist only deadline-limited sources for a later, slower retry run."""
-    urls = [
-        str(result["url"])
+    """Persist deadline-limited sources for a later, slower retry run."""
+    entries = [
+        {
+            "url": str(result["url"]),
+            "attempt": 1,
+            "previous_elapsed_seconds": result.get("elapsed_seconds"),
+            "previous_failure_bucket": result.get("failure_bucket"),
+        }
         for result in results
         if result.get("deadline_exceeded") is True
         and (
@@ -505,8 +537,19 @@ def _write_slow_retry_queue(path: Path, results: list[dict[str, Any]]) -> None:
     ]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        yaml.safe_dump({"urls": urls}, allow_unicode=True, sort_keys=False), encoding="utf-8"
+        yaml.safe_dump({"urls": entries}, allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
+
+
+def _load_slow_retry_urls(path: Path) -> list[str]:
+    """Read both legacy string queues and structured retry queues."""
+    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    values = payload.get("urls", []) if isinstance(payload, dict) else []
+    return [
+        value if isinstance(value, str) else str(value.get("url"))
+        for value in values
+        if isinstance(value, str) or isinstance(value, dict) and isinstance(value.get("url"), str)
+    ]
 
 
 def _gate_exit_code(results: list[dict[str, Any]], *, min_success_rate: float) -> int:
@@ -578,6 +621,16 @@ async def main() -> int:
         help="Items per URL for the parsing coverage gate; use larger values only for diagnostics.",
     )
     parser.add_argument("--concurrency", type=int, default=10)
+    parser.add_argument(
+        "--keywords",
+        nargs="+",
+        default=None,
+        help=(
+            "Local search terms attached as monitor_config['_search_keywords'] "
+            "for boards without a live query box. Quote a phrase: "
+            '--keywords "project manager".'
+        ),
+    )
     parser.add_argument("--start", type=int, default=0, help="Start index (inclusive)")
     parser.add_argument("--end", type=int, default=999, help="End index (exclusive)")
     parser.add_argument("--out-json", default=None, help="JSON output path for incremental saves")
@@ -587,9 +640,19 @@ async def main() -> int:
         help="Write hard-deadline URLs to a YAML diagnostic queue.",
     )
     parser.add_argument(
+        "--slow-queue-in",
+        default=None,
+        help="Retry URLs from a previous slow queue; combine with a larger --timeout.",
+    )
+    parser.add_argument(
         "--resume",
         action="store_true",
         help="Skip URLs already saved in --out-json and preserve their results.",
+    )
+    parser.add_argument(
+        "--retry-failures",
+        action="store_true",
+        help="With --resume, retry saved results that are not parsed_ok.",
     )
     parser.add_argument(
         "--gate",
@@ -610,6 +673,10 @@ async def main() -> int:
 
     with open(args.input, encoding="utf-8") as f:
         urls = yaml.safe_load(f)["urls"][args.start : args.end]
+    if args.slow_queue_in:
+        queue_path = Path(args.slow_queue_in)
+        urls = _load_slow_retry_urls(queue_path)
+        print(f"Loaded {len(urls)} URLs from slow retry queue")
     print(f"Loaded {len(urls)} URLs (indices {args.start}..{args.end - 1})")
 
     from datetime import datetime, timedelta, timezone
@@ -640,6 +707,17 @@ async def main() -> int:
         except (OSError, ValueError) as exc:
             parser.error(str(exc))
         print(f"Resuming: {len(results_by_url)} saved URLs will be skipped")
+        if args.retry_failures:
+            selected_url_set = set(urls)
+            results_by_url = {
+                url: result
+                for url, result in results_by_url.items()
+                if url not in selected_url_set or result.get("parse_status") == "parsed_ok"
+            }
+            resume_order = [url for url in resume_order if url in results_by_url]
+            print(
+                f"Retrying saved non-parsed results: {len(urls) - sum(url in results_by_url for url in urls)}"
+            )
 
     pending_urls = [url for url in urls if url not in results_by_url]
     if not pending_urls:
@@ -684,6 +762,7 @@ async def main() -> int:
             max_items=args.max_items,
             timeout_seconds=args.timeout,
             live_probes=live_probes,
+            keywords=args.keywords,
         )
 
     url_index = {url: index for index, url in enumerate(urls)}

@@ -40,6 +40,15 @@ def reset_operator_page(token: Token[Any | None]) -> None:
     _ATTACHED_OPERATOR_PAGE.reset(token)
 
 
+def _default_browser_geo(settings: Any) -> tuple[str, str | None]:
+    country = str(getattr(settings, "proxy_country_default", "") or "RU").upper()
+    locales = getattr(settings, "proxy_locale_by_country", None) or {}
+    timezones = getattr(settings, "proxy_timezone_by_country", None) or {}
+    locale = str(locales.get(country) or "en-US")
+    timezone_id = timezones.get(country)
+    return locale, str(timezone_id) if timezone_id else None
+
+
 def resolve_identity_ua(config: dict[str, Any], persona_kw: dict[str, Any]) -> str | None:
     """The identity's coherent User-Agent, or ``None`` to keep the real one.
 
@@ -57,6 +66,7 @@ DEFAULT_WAIT = "domcontentloaded"
 DEFAULT_WAIT_FALLBACK = "commit"
 
 _CHALLENGE_DETECTOR_ATTR = "_job_ftch_challenge_response_detector"
+
 
 _PATCHRIGHT_CANCELLATION_FIX_ATTR = "_job_ftch_cancellation_safe_inner_send"
 _PATCHRIGHT_ROUTE_FIX_ATTR = "_job_ftch_cancellation_safe_route_handler"
@@ -163,6 +173,67 @@ async def _solve_page_challenge(controller: Any, page: Any, *, url: str) -> bool
 
 def _challenge_solution_requires_reload(controller: Any) -> bool:
     return bool(getattr(controller, "challenge_solution_requires_reload", True))
+
+
+def _json_safe_cookies(cookies: Any) -> list[dict[str, Any]]:
+    """Flatten cookies into strictly JSON-serializable dicts.
+
+    Session handoff may carry CDP enum values (e.g. CookieSameSite) which
+    Playwright's ``add_cookies`` rejects. Enum values are flattened to their
+    string value; unknown keys are dropped.
+    """
+    allowed = {"name", "value", "domain", "path", "expires", "secure", "httpOnly", "sameSite"}
+    safe: list[dict[str, Any]] = []
+    for cookie in cookies or []:
+        if not isinstance(cookie, dict):
+            continue
+        item: dict[str, Any] = {}
+        for key, value in cookie.items():
+            if hasattr(value, "value") and not isinstance(value, (str, int, float, bool)):
+                value = str(value.value)
+            if str(key) in allowed:
+                item[str(key)] = value
+        if item.get("name") is not None and item.get("value") is not None:
+            safe.append(item)
+    return safe
+
+
+async def _solve_settled_in_place(page: Any, challenge_wait_ms: int) -> bool:
+    """Wait in place after a session-kind solve and check the challenge left.
+
+    browser_wait-style JS navigation solutions need a bounded pause on the
+    already-open page so the challenge can hand control over; an immediate
+    ``goto`` reload restarts the challenge (Cloudflare, Incapsula). Returns
+    True when the page is challenge-free after the pause.
+    """
+    from job_ftch.infrastructure.sources.source_deadline import sleep_with_source_deadline
+
+    await sleep_with_source_deadline(challenge_wait_ms / 1000)
+    try:
+        if await _page_has_captcha_marker(page):
+            return False
+        return not bool(
+            await page.evaluate(
+                """
+                () => {
+                  const title = (document.title || '').toLowerCase();
+                  const body = (document.body && document.body.innerText) || '';
+                  const hay = title + ' ' + body.slice(0, 2000).toLowerCase();
+                  if (/just a moment|attention required|verify you are human|checking your browser|challenge page/i.test(hay)) {
+                    return true;
+                  }
+                  return Boolean(
+                    document.querySelector(
+                      '#challenge-form, #challenge-running, #challenge-stage, '
+                      + 'script[src*="challenge-platform"], [id*="cf-please"]'
+                    )
+                  );
+                }
+                """
+            )
+        )
+    except Exception:
+        return False
 
 
 def _browser_proxy(proxy_url: str) -> dict[str, str]:
@@ -628,9 +699,16 @@ async def open_page(
     if attached is not None:
         yield attached
         return
+    if bypass_strategy is not None:
+        # navigate() solves from config["_bypass_strategy"]. Stamp it on the
+        # caller's dict so a bypass passed only to open_page still reaches
+        # the detector and the solver.
+        config["_bypass_strategy"] = bypass_strategy
     prepare_config = getattr(bypass_strategy, "prepare_browser_config", None)
     if callable(prepare_config):
         config = prepare_config(config)
+        if bypass_strategy is not None:
+            config["_bypass_strategy"] = bypass_strategy
     # All browser users (monitors, DOM/API sniffing and detail enrichment)
     # share one settings-driven limiter.  A local fixed semaphore let each
     # path create its own Chromium processes and ignored the environment.
@@ -816,10 +894,13 @@ async def _open_playwright_page(
         launch_kwargs["channel"] = channel
 
     persona_kw = bypass_ctx.context_kwargs() if bypass_ctx else {}
+    fallback_locale, fallback_timezone = (
+        _default_browser_geo(settings) if use_proxy else ("en-US", None)
+    )
     context_kwargs: dict[str, Any] = {
         "viewport": config.get("viewport")
         or persona_kw.get("viewport", {"width": 1440, "height": 900}),
-        "locale": config.get("locale") or persona_kw.get("locale", "en-US"),
+        "locale": config.get("locale") or persona_kw.get("locale") or fallback_locale,
         "ignore_https_errors": config.get("skip_ssl", True),
     }
     identity_ua = resolve_identity_ua(config, persona_kw)
@@ -833,8 +914,10 @@ async def _open_playwright_page(
         launch_kwargs["_process_identity_locale"] = context_kwargs["locale"]
     if config.get("timezone_id"):
         context_kwargs["timezone_id"] = config["timezone_id"]
-    if persona_kw.get("timezone_id") and "timezone_id" not in config:
+    elif persona_kw.get("timezone_id"):
         context_kwargs["timezone_id"] = persona_kw["timezone_id"]
+    elif fallback_timezone:
+        context_kwargs["timezone_id"] = fallback_timezone
 
     if use_proxy:
         proxy_url = config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY")
@@ -887,7 +970,7 @@ async def _open_playwright_page(
     context.set_default_timeout(timeout_ms)
 
     if config.get("cookies"):
-        await context.add_cookies(config["cookies"])
+        await context.add_cookies(_json_safe_cookies(config["cookies"]))
 
     page: Page = await await_with_source_deadline(context.new_page())
 
@@ -959,13 +1042,16 @@ async def _open_persistent_page(
         args.append("--headless=new")
     args.append(_browser_session_switch(session_id))
 
+    fallback_locale, fallback_timezone = (
+        _default_browser_geo(settings) if use_proxy else ("en-US", None)
+    )
     launch_kwargs: dict[str, Any] = {
         "user_data_dir": user_data_dir,
         "headless": headless,
         "args": args,
         "viewport": config.get("viewport")
         or persona_kw.get("viewport", {"width": 1440, "height": 900}),
-        "locale": config.get("locale") or persona_kw.get("locale", "en-US"),
+        "locale": config.get("locale") or persona_kw.get("locale") or fallback_locale,
         "ignore_https_errors": config.get("skip_ssl", True),
         "timeout": settings.browser_context_timeout_ms,
     }
@@ -976,8 +1062,10 @@ async def _open_persistent_page(
         launch_kwargs["channel"] = channel
     if config.get("timezone_id"):
         launch_kwargs["timezone_id"] = config["timezone_id"]
-    if persona_kw.get("timezone_id") and "timezone_id" not in config:
+    elif persona_kw.get("timezone_id"):
         launch_kwargs["timezone_id"] = persona_kw["timezone_id"]
+    elif fallback_timezone:
+        launch_kwargs["timezone_id"] = fallback_timezone
 
     if use_proxy:
         proxy_url = config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY")
@@ -1015,7 +1103,7 @@ async def _open_persistent_page(
     context.set_default_timeout(timeout_ms)
 
     if config.get("cookies"):
-        await context.add_cookies(config["cookies"])
+        await context.add_cookies(_json_safe_cookies(config["cookies"]))
 
     page = (
         context.pages[0] if context.pages else await await_with_source_deadline(context.new_page())
@@ -1069,7 +1157,7 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
         config.get("timeout", settings.browser_default_timeout_ms)
     )
     challenge_retries = config.get("challenge_retries", settings.browser_challenge_retries)
-    challenge_wait_ms = config.get("challenge_wait_ms", 6000)
+    challenge_wait_ms = config.get("challenge_wait_ms", settings.browser_challenge_wait_ms)
     blocked = (403, 401, 429, 503)
     # Statuses worth a wait-and-reload: a JS/cookie challenge (403/503) or a cookie-warmup
     # rate-limit (429) that clears once the anti-bot cookies are set by the in-page JS.
@@ -1105,6 +1193,16 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
             page.goto(url, wait_until=wait_fallback, timeout=timeout)
         )
 
+    challenge_solved = False
+    solve_attempted = False
+
+    async def _solve_current_challenge(controller: Any) -> bool:
+        nonlocal challenge_solved, solve_attempted
+        solve_attempted = True
+        solved = await _solve_page_challenge(controller, page, url=url)
+        challenge_solved = challenge_solved or solved
+        return solved
+
     attempt = 0
     while resp is not None and resp.status in challenge and attempt < challenge_retries:
         attempt += 1
@@ -1118,8 +1216,10 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
 
     if resp is not None and resp.status in challenge:
         controller = config.get("_bypass_strategy")
-        if await _solve_page_challenge(controller, page, url=url) and (
-            _challenge_solution_requires_reload(controller)
+        if (
+            await _solve_current_challenge(controller)
+            and not await _solve_settled_in_place(page, challenge_wait_ms)
+            and _challenge_solution_requires_reload(controller)
         ):
             resp = await await_with_source_deadline(
                 page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
@@ -1127,8 +1227,10 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
 
     if resp is not None and resp.status not in blocked and await _page_has_captcha_marker(page):
         controller = config.get("_bypass_strategy")
-        if await _solve_page_challenge(controller, page, url=url) and (
-            _challenge_solution_requires_reload(controller)
+        if (
+            await _solve_current_challenge(controller)
+            and not await _solve_settled_in_place(page, challenge_wait_ms)
+            and _challenge_solution_requires_reload(controller)
         ):
             resp = await await_with_source_deadline(
                 page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
@@ -1141,16 +1243,37 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     await asyncio.sleep(0)
     controller = config.get("_bypass_strategy")
     observed = getattr(controller, "observed_challenge_type", None)
-    if isinstance(observed, str) and observed.strip():
+    if isinstance(observed, str) and observed.strip() and not solve_attempted:
         log.info("browser.observed_challenge_solve", url=url, challenge_type=observed)
-        if await _solve_page_challenge(controller, page, url=url) and (
-            _challenge_solution_requires_reload(controller)
+        if (
+            await _solve_current_challenge(controller)
+            and not await _solve_settled_in_place(page, challenge_wait_ms)
+            and _challenge_solution_requires_reload(controller)
         ):
             resp = await await_with_source_deadline(
                 page.goto(url, wait_until=wait_fallback or wait, timeout=timeout)
             )
 
     if resp is not None and resp.status in blocked:
+        if challenge_solved:
+            from urllib.parse import urlsplit
+
+            from job_ftch.infrastructure.bypass.challenge_classifier import classify_challenge
+
+            current_status = await page.evaluate(
+                "performance.getEntriesByType('navigation').at(-1)?.responseStatus"
+            )
+            if (
+                isinstance(current_status, (int, float))
+                and 200 <= current_status < 300
+                and urlsplit(str(page.url)).path == urlsplit(url).path
+                and not classify_challenge(
+                    surface="post_solve_navigation",
+                    status_code=int(current_status),
+                    body=await page.content(),
+                ).detected
+            ):
+                return
         await _observe_blocked_navigation(
             page,
             resp,
@@ -1258,6 +1381,22 @@ async def install_challenge_response_detector(
     async def _inspect_response(response: Any) -> None:
         try:
             status_code = int(getattr(response, "status", 0) or 0)
+            response_url = str(getattr(response, "url", "") or url)
+            response_host = (urlparse(response_url).hostname or "").lower().rstrip(".")
+            target_host = (urlparse(url).hostname or "").lower().rstrip(".")
+            from job_ftch.infrastructure.sources.url_scoring import is_same_site_family
+
+            same_target = bool(
+                response_host
+                and target_host
+                and (
+                    response_host == target_host
+                    or response_host.endswith(f".{target_host}")
+                    or is_same_site_family(response_url, board_url=url)
+                )
+            )
+            if not same_target:
+                return
             headers = dict(getattr(response, "headers", {}) or {})
             body = await _challenge_probe_body(response, status_code, headers)
             from job_ftch.infrastructure.bypass.challenge_classifier import (
@@ -1271,11 +1410,11 @@ async def install_challenge_response_detector(
                 headers=headers,
                 body=body,
                 started_at=started_at,
+                page_url=response_url,
             )
             if not detection.detected:
                 return
-            response_url = str(getattr(response, "url", "") or url)
-            emit_challenge_detection(urlparse(response_url).netloc.lower(), detection)
+            emit_challenge_detection(response_host, detection)
             setter = getattr(controller, "set_observed_challenge_type", None)
             if detection.challenge_type and callable(setter):
                 maybe_result = setter(detection.challenge_type)
@@ -1326,15 +1465,22 @@ async def _page_has_captcha_marker(page: Page) -> bool:
                 """
                 () => {
                   const selectors = [
+                    'form input[name="captchaText"]',
                     '.g-recaptcha',
                     '#g-recaptcha',
                     '[data-sitekey]',
                     'iframe[src*="recaptcha"]',
                     'iframe[src*="hcaptcha"]',
                     'iframe[src*="turnstile"]',
+                    'iframe[src*="smartcaptcha"]',
+                    '.smart-captcha',
+                    '#smartcaptcha-container',
+                    '[data-sitekey^="ysc1_"]',
+                    'input[name="smart-token"]',
                     'script[src*="recaptcha"]',
                     'script[src*="hcaptcha"]',
-                    'script[src*="turnstile"]'
+                    'script[src*="turnstile"]',
+                    'script[src*="smartcaptcha"]'
                   ];
                   return selectors.some((selector) => document.querySelector(selector));
                 }

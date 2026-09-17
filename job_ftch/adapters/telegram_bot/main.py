@@ -1080,6 +1080,7 @@ async def start_polling(
     settings = get_settings()
     configure_logging(settings.log_level)
     configure_observability(settings)
+    await runner.start()
 
     bot = build_bot(config)
     await configure_bot(bot, config)

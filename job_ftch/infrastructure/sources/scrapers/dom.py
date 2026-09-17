@@ -26,8 +26,6 @@ logger = structlog.get_logger("job_ftch.scrapers.dom")
 
 _STOP_MARKERS = [
     "Apply",
-    "Requirements",
-    "Qualifications",
     "Back",
     "Submit",
     "Similar",
@@ -144,7 +142,7 @@ def _heuristic_steps(elements: list[dict[str, Any]]) -> list[dict[str, Any]] | N
     # If no stop marker found, use stop_count based on remaining content
     if "stop" not in desc_step:
         remaining = len(elements) - anchor_idx - 1
-        desc_step["stop_count"] = min(remaining, 50)
+        desc_step["stop_count"] = remaining
 
     steps.append(desc_step)
 

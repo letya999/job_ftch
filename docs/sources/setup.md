@@ -198,7 +198,10 @@ Ingest eval contract:
 
 Operational notes:
 
-- `--max-items` defaults to `1` and should stay `1` for the coverage gate.
+- `--max-items` defaults to `1` and should stay `1` for the coverage gate. The
+  probe emits at most that many items, but inspects a bounded frontier of up
+  to 10 detail URLs so one stale or non-vacancy link does not mark an otherwise
+  working board as failed.
 - `--gate --min-success-rate 0.65` makes the eval fail non-zero when coverage
   drops below the release floor.
 - `--timeout` is an isolated per-URL source budget.

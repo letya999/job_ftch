@@ -42,6 +42,32 @@ def _resolve_env_files() -> tuple[str, ...]:
     return (".env", ".env.dev")
 
 
+CLIPROXY_RUNTIME_OVERLAY = "config/runtime.cliproxy.yaml"
+_VALID_LLM_GATEWAYS = {"openai", "cliproxy"}
+
+
+def _normalize_llm_gateway(value: str | None) -> str:
+    normalized = (value or "openai").strip().lower()
+    if normalized not in _VALID_LLM_GATEWAYS:
+        allowed = ", ".join(sorted(_VALID_LLM_GATEWAYS))
+        msg = f"llm_gateway must be one of: {allowed}"
+        raise ValueError(msg)
+    return normalized
+
+
+def _with_cliproxy_overlay(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Append the CLIProxy model overlay when JOB_FTCH_LLM_GATEWAY=cliproxy."""
+    if _normalize_llm_gateway(os.environ.get("JOB_FTCH_LLM_GATEWAY")) != "cliproxy":
+        return paths
+    overlay = CLIPROXY_RUNTIME_OVERLAY
+    if overlay in paths:
+        return paths
+    if not Path(overlay).exists():
+        msg = f"Missing CLIProxy runtime overlay: {overlay}"
+        raise FileNotFoundError(msg)
+    return (*paths, overlay)
+
+
 def _resolve_runtime_config_files() -> tuple[str, ...] | None:
     """Pick the global runtime YAML config file(s).
 
@@ -64,12 +90,12 @@ def _resolve_runtime_config_files() -> tuple[str, ...] | None:
             joined = ", ".join(missing)
             msg = f"Missing runtime YAML path from JOB_FTCH_RUNTIME_CONFIG_PATH: {joined}"
             raise FileNotFoundError(msg)
-        return paths or None
+        return _with_cliproxy_overlay(paths) if paths else None
 
     mode = os.environ.get("JOB_FTCH_ENV", "dev").strip().lower()
     if mode in {"prod", "production"}:
-        return ("config/runtime.yaml", "config/runtime.prod.yaml")
-    return ("config/runtime.yaml", "config/runtime.dev.yaml")
+        return _with_cliproxy_overlay(("config/runtime.yaml", "config/runtime.prod.yaml"))
+    return _with_cliproxy_overlay(("config/runtime.yaml", "config/runtime.dev.yaml"))
 
 
 class Settings(BaseSettings):
@@ -82,6 +108,7 @@ class Settings(BaseSettings):
     )
     job_group_store_backend: str = "sqlite"
     llm_backend: str = "openai"
+    llm_gateway: str = "openai"
     posting_backend: str = "none"
     notify_mode: str = "instant"  # "instant" (per job) or "digest" (once per run)
     notify_batch_size: int = 10
@@ -216,7 +243,8 @@ class Settings(BaseSettings):
     openai_max_retries: int = Field(default=2, ge=0, le=10)
     career_site_url: str | None = None
     career_site_default_limit: int = Field(default=50, gt=0)
-    career_site_default_detail_limit: int | None = Field(default=None, ge=1)
+    career_site_default_detail_limit: int | None = Field(default=50, ge=1)
+    career_site_spa_shell_max_visible_chars: int = Field(default=80, ge=0, le=10_000)
     career_site_timeout_seconds: float = Field(default=15.0, gt=0.0, le=300.0)
     career_site_connect_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     career_site_max_retries: int = Field(default=2, ge=0, le=10)
@@ -275,6 +303,13 @@ class Settings(BaseSettings):
     # Debug-only: on each page, log any identity-coherence issue (never raises in
     # prod). Off by default => zero behavior change; used with the self-check.
     bypass_identity_selfcheck: bool = False
+    # When an HTTP CONNECT/proxy transport fails on the current engine
+    # (Camoufox+HTTP is the live case), keep the network axis and try the
+    # next engine instead of dropping to direct.
+    bypass_keep_proxy_on_engine_connect_error: bool = True
+    bypass_js_hardening_browser_families: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["chromium", "chromium_patchright"]
+    )
     # CAPTCHA solving. `captcha_provider` is the external provider used when the
     # free browser-wait tier cannot clear a challenge. It only actually fires if
     # it is also listed in `captcha_enabled_providers`; paid providers
@@ -292,11 +327,36 @@ class Settings(BaseSettings):
     captcha_authorized_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
     captcha_solver_timeout_budget_seconds: float = Field(default=40.0, ge=0.0, le=180.0)
     captcha_solver_backoff_seconds: float = Field(default=300.0, ge=0.0, le=3600.0)
+    # Image-OCR fallback via OpenAI-compatible CLIProxy. Empty base_url disables
+    # it. Auth is openai_api_key. Does not switch pipeline LLM
+    # (JOB_FTCH_LLM_GATEWAY). Host stays in env.
+    captcha_vision_base_url: str = ""
+    captcha_vision_model: str = "gemini-3-flash"
     proxy_provider: str = Field(default="raw")
     proxy_gateway: str = ""
     proxy_user: str = ""
     proxy_pass: str = ""
-    proxy_country_default: str = ""
+    proxy_country_default: str = "RU"
+    proxy_timezone_by_country: dict[str, str] = Field(
+        default_factory=lambda: {
+            "RU": "Europe/Moscow",
+            "KZ": "Asia/Almaty",
+            "BY": "Europe/Minsk",
+            "UZ": "Asia/Tashkent",
+            "UA": "Europe/Kyiv",
+            "US": "America/New_York",
+        }
+    )
+    proxy_locale_by_country: dict[str, str] = Field(
+        default_factory=lambda: {
+            "RU": "ru-RU",
+            "KZ": "ru-KZ",
+            "BY": "ru-BY",
+            "UZ": "ru-UZ",
+            "UA": "uk-UA",
+            "US": "en-US",
+        }
+    )
     proxy_sticky_ttl_seconds: int = Field(default=600, ge=30, le=3600)
     proxy_gb_budget: float = Field(default=0.0, ge=0.0)
     proxy_per_domain_gb_budget: float = Field(default=0.0, ge=0.0)
@@ -336,6 +396,17 @@ class Settings(BaseSettings):
     source_assessment_ttl_days: int = Field(default=7, gt=0)
     career_site_window_max_details: int = Field(default=500, gt=0)
     scheduler_jitter_seconds: float = Field(default=0.0, ge=0.0)
+    # Durable source-run continuation. The default maximum wait is ten minutes:
+    # longer server cooldowns are surfaced for operator action, never retried early.
+    ingest_queue_enabled: bool = True
+    ingest_queue_poll_seconds: float = Field(default=5.0, gt=0.0, le=300.0)
+    ingest_queue_max_wait_seconds: float = Field(default=600.0, gt=0.0, le=86_400.0)
+    ingest_queue_max_run_age_seconds: float = Field(default=86_400.0, gt=0.0, le=604_800.0)
+    ingest_queue_lease_seconds: int = Field(default=300, gt=0, le=3_600)
+    ingest_queue_max_attempts: int = Field(default=8, gt=0, le=100)
+    ingest_queue_default_retry_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
+    ingest_queue_error_retry_seconds: float = Field(default=60.0, gt=0.0, le=3_600.0)
+    ingest_queue_jitter_seconds: float = Field(default=0.0, ge=0.0, le=60.0)
     job_backend: str = "sqlite"
     search_backend: str = "sqlite"
     job_store_path: Path | None = None
@@ -510,6 +581,7 @@ class Settings(BaseSettings):
         "proxy_rescue_allow_domains",
         "proxy_rescue_deny_domains",
         "captcha_authorized_domains",
+        "bypass_js_hardening_browser_families",
         "api_tenant_allowlist",
         mode="before",
     )
@@ -590,6 +662,17 @@ class Settings(BaseSettings):
         if self.llm_backend == "openai" and self.openai_model is None:
             msg = "openai_model is required when llm_backend=openai."
             raise ValueError(msg)
+        object.__setattr__(self, "llm_gateway", _normalize_llm_gateway(self.llm_gateway))
+        if self.llm_gateway == "cliproxy":
+            if self.llm_backend != "openai":
+                msg = "llm_gateway=cliproxy requires llm_backend=openai."
+                raise ValueError(msg)
+            if not self.openai_base_url:
+                msg = (
+                    "openai_base_url is required when llm_gateway=cliproxy. "
+                    "Set JOB_FTCH_OPENAI_BASE_URL to the CLIProxy /v1 endpoint."
+                )
+                raise ValueError(msg)
         if self.posting_backend == "telegram_posting":
             if self.telegram_publish_entity is None:
                 msg = "telegram_publish_entity is required when posting_backend=telegram_posting."
@@ -709,3 +792,15 @@ def resolve_outcome_lane_backend(
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+def apply_llm_gateway(gateway: str) -> None:
+    """Select the OpenAI-compatible LLM gateway for the current process.
+
+    ``openai`` keeps the default cloud endpoint and runtime models.
+    ``cliproxy`` appends ``config/runtime.cliproxy.yaml`` so extract/judge
+    model ids come from the local CLIProxy catalog. The HTTP endpoint and
+    client key stay in env (``JOB_FTCH_OPENAI_BASE_URL`` / ``_API_KEY``).
+    """
+    os.environ["JOB_FTCH_LLM_GATEWAY"] = _normalize_llm_gateway(gateway)
+    get_settings.cache_clear()

@@ -80,6 +80,9 @@ adapter dependency ranges. Новые heavy зависимости добавл�
 - `mypy` — static typing.
 - `pytest`, `pytest-asyncio`, `pytest-cov` — tests/coverage.
 - `bandit`, `pip-audit` — security/supply-chain checks.
+
+Optional BGE/ML extras pin `accelerate` to the first release after the 2026
+checkpoint path-traversal advisory; never load untrusted checkpoint indexes.
 - `hypothesis`, `syrupy`, `pytest-benchmark` — property/snapshot/benchmark tests.
 
 ## Явно не используем

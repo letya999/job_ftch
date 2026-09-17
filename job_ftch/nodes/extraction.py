@@ -577,6 +577,8 @@ class ExtractionNode:
             extracted_title = None
         title = extracted_title or _fallback_title(item)
         company = extracted.company or _fallback_company(item)
+        if item.metadata.get("company_authoritative") is True:
+            company = _fallback_company(item) or company
         description = _strip_prompt_scaffnewing(extracted.description or item.text).strip()
         canonical_url = _coerce_url(extracted.canonical_url) or _fallback_url(item)
         location = extracted.location or _fallback_location(item)

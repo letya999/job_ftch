@@ -90,7 +90,7 @@ bgem3 = [
     "flagembedding>=1.2.0",
     "torch>=2.3",
     "dill>=0.3.8,<0.4",
-    "accelerate>=1.10.1,<1.11",
+    "accelerate>=1.15.0,<1.16",
     "datasets>=5.0.1,<6",
     "huggingface-hub>=1.24,<2",
 ]
@@ -112,7 +112,7 @@ all = [
     "sentence-transformers>=3.0",
     "torch>=2.3",
     "dill>=0.3.8,<0.4",
-    "accelerate>=1.10.1,<1.11",
+    "accelerate>=1.15.0,<1.16",
     "datasets>=5.0.1,<6",
     "huggingface-hub>=1.24,<2",
     "qdrant-client>=1.18.0",

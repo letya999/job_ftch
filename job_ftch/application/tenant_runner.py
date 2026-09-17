@@ -50,6 +50,7 @@ from job_ftch.application.source_assessment import (
 )
 from job_ftch.config import Settings, get_settings
 from job_ftch.domain import (
+    IngestTask,
     JobGroup,
     JobLineage,
     JobRecord,
@@ -602,6 +603,130 @@ class TenantRunner:
     def __init__(self, runtimes: dict[str, TenantRuntime]) -> None:
         self._runtimes = runtimes
         self._operator_sessions: Any = None
+        self._ingest_worker_task: asyncio.Task[None] | None = None
+        self._ingest_worker_stop: asyncio.Event | None = None
+        self._ingest_worker_id = f"runner-{uuid.uuid4().hex}"
+
+    async def start(self) -> None:
+        """Start the durable continuation worker after the event loop exists."""
+        if self._ingest_worker_task is not None:
+            return
+        if not any(
+            bool(getattr(runtime.settings, "ingest_queue_enabled", False))
+            for runtime in self._runtimes.values()
+        ):
+            return
+        self._ingest_worker_stop = asyncio.Event()
+        self._ingest_worker_task = asyncio.create_task(
+            self._ingest_queue_loop(),
+            name="ingest_delayed_queue_worker",
+        )
+
+    async def _ensure_ingest_worker_started(self) -> None:
+        await self.start()
+
+    async def _ingest_queue_loop(self) -> None:
+        stop = self._ingest_worker_stop
+        if stop is None:
+            return
+        try:
+            while not stop.is_set():
+                worked = False
+                now = datetime.now(UTC)
+                for runtime in self._runtimes.values():
+                    store = runtime.store
+                    reap = getattr(store, "reap_ingest_leases", None)
+                    claim = getattr(store, "claim_due_ingest_tasks", None)
+                    if not callable(reap) or not callable(claim):
+                        continue
+                    await reap(now)
+                    tasks = await claim(
+                        runtime.tenant.tenant_id,
+                        self._ingest_worker_id,
+                        limit=1,
+                        lease_seconds=runtime.settings.ingest_queue_lease_seconds,
+                        now=now,
+                    )
+                    for task in tasks:
+                        worked = True
+                        await self._process_ingest_task(runtime, task)
+                if worked:
+                    continue
+                poll_seconds = min(
+                    runtime.settings.ingest_queue_poll_seconds
+                    for runtime in self._runtimes.values()
+                    if runtime.settings.ingest_queue_enabled
+                )
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(stop.wait(), timeout=poll_seconds)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("ingest_delayed_queue_worker_failed")
+
+    async def _process_ingest_task(self, runtime: TenantRuntime, task: IngestTask) -> None:
+        store = runtime.store
+        settings = runtime.settings
+        if task.attempt > settings.ingest_queue_max_attempts:
+            await store.fail_ingest_task(
+                task,
+                self._ingest_worker_id,
+                needs_operator=True,
+                error="ingest_queue_max_attempts_exceeded",
+            )
+            return
+        try:
+            summary = await self.run_tenant(
+                task.tenant_id,
+                run_id=task.run_id,
+                max_items=task.max_items,
+                user_id=task.user_id,
+                source_ids=(task.source_id,),
+                bypass_override=task.bypass_override,
+                parser_override=task.parser_override,
+                ignore_schedule_gates=True,
+                personal_mode=task.personal_mode,
+                trigger=task.trigger,
+                _from_ingest_queue=True,
+                _ingest_task_id=task.task_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - lease keeps crash recovery durable
+            if task.attempt >= settings.ingest_queue_max_attempts:
+                await store.fail_ingest_task(
+                    task,
+                    self._ingest_worker_id,
+                    needs_operator=True,
+                    error=f"ingest_queue_attempt_failed:{type(exc).__name__}",
+                )
+            else:
+                await store.defer_ingest_task(
+                    task,
+                    self._ingest_worker_id,
+                    available_at=datetime.now(UTC)
+                    + timedelta(seconds=settings.ingest_queue_error_retry_seconds),
+                    error=f"ingest_queue_attempt_failed:{type(exc).__name__}",
+                )
+            logger.warning(
+                "ingest_delayed_task_failed",
+                tenant_id=task.tenant_id,
+                run_id=task.run_id,
+                source_id=task.source_id,
+                error=str(exc),
+            )
+            return
+        if summary.completion_state == "waiting_rate_limit":
+            return
+        if summary.completion_state == "needs_operator":
+            await store.fail_ingest_task(
+                task,
+                self._ingest_worker_id,
+                needs_operator=True,
+                error="ingest_queue_policy_blocked",
+            )
+            return
+        await store.complete_ingest_task(task.task_id, self._ingest_worker_id)
 
     @classmethod
     def from_tenants(
@@ -1673,9 +1798,12 @@ class TenantRunner:
         operator_session_id: str | None = None,
         personal_mode: bool = False,
         trigger: str = "manual",
+        _from_ingest_queue: bool = False,
+        _ingest_task_id: str | None = None,
     ) -> RunSummary:
         """Run acquisition and policy under one correlated trace/run id."""
         run_id = run_id or uuid.uuid4().hex
+        await self._ensure_ingest_worker_started()
         context_tokens = bind_contextvars(tenant_id=tenant_id, source_run_id=run_id)
         tracer = trace.get_tracer("job_ftch.tenant_runner")
         attach_token = None
@@ -1686,6 +1814,34 @@ class TenantRunner:
                 span.set_attribute("job_ftch.tenant_id", tenant_id)
                 runtime = self.get_runtime(tenant_id)
                 config_fingerprint = _tenant_config_fingerprint(runtime)
+                if not _from_ingest_queue and getattr(
+                    runtime.settings, "ingest_queue_enabled", False
+                ):
+                    list_active = getattr(runtime.store, "list_active_ingest_tasks", None)
+                    if callable(list_active):
+                        active_tasks = await list_active(tenant_id)
+                        if active_tasks:
+                            next_retry_at = min(task.available_at for task in active_tasks)
+                            summary = RunSummary(
+                                tenant_id=tenant_id,
+                                source_run_id=run_id,
+                                trigger=trigger,
+                                config_fingerprint=config_fingerprint,
+                                completion_state="waiting_rate_limit",
+                                next_retry_at=next_retry_at,
+                                source_outcomes=[
+                                    {
+                                        "source_id": task.source_id,
+                                        "status": "queued",
+                                        "completion_state": "waiting_rate_limit",
+                                        "next_retry_at": task.available_at.isoformat(),
+                                    }
+                                    for task in active_tasks
+                                ],
+                            )
+                            summary.finish()
+                            await self._persist_terminal_summary(runtime, summary)
+                            return summary
                 if not runtime.tenant.enabled:
                     summary = RunSummary(
                         tenant_id=tenant_id,
@@ -1787,6 +1943,8 @@ class TenantRunner:
                             personal_mode=personal_mode,
                             trigger=trigger,
                             config_fingerprint=config_fingerprint,
+                            ingest_task_id=_ingest_task_id,
+                            ingest_worker_id=self._ingest_worker_id if _from_ingest_queue else None,
                         )
                 except TenantRunAlreadyActiveError:
                     logger.info("tenant_run_skipped_already_active", tenant_id=tenant_id)
@@ -1839,6 +1997,8 @@ class TenantRunner:
         personal_mode: bool = False,
         trigger: str = "manual",
         config_fingerprint: str | None = None,
+        ingest_task_id: str | None = None,
+        ingest_worker_id: str | None = None,
     ) -> RunSummary:
         runtime = self.get_runtime(tenant_id)
         await self._ensure_runtime_sources_loaded(runtime)
@@ -1931,7 +2091,7 @@ class TenantRunner:
                     )
                     if wait_time < source_interval:
                         logger.info(
-                            "source_rate_limited",
+                            "source_not_due",
                             source_id=sid,
                             wait_remaining=source_interval - wait_time,
                         )
@@ -1940,12 +2100,7 @@ class TenantRunner:
                                 "source_id": sid,
                                 "source_kind": str(getattr(spec, "type", "unknown")),
                                 "source_name": source_spec_name(spec),
-                                "status": (
-                                    "not_due"
-                                    if spec.interval_seconds
-                                    and wait_time < float(spec.interval_seconds)
-                                    else "rate_limited"
-                                ),
+                                "status": "not_due",
                                 "completion_state": "skipped",
                             }
                         )
@@ -2088,6 +2243,18 @@ class TenantRunner:
             return summary
 
         summary.tenant_id = tenant_id
+        await self._schedule_ingest_continuations(
+            runtime,
+            summary,
+            max_items=max_items,
+            user_id=user_id,
+            bypass_override=bypass_override,
+            parser_override=parser_override,
+            personal_mode=personal_mode,
+            trigger=trigger,
+            ingest_task_id=ingest_task_id,
+            ingest_worker_id=ingest_worker_id,
+        )
         from job_ftch.infrastructure.observability.openobserve import record_run_metrics
         from job_ftch.infrastructure.observability.otel_setup import record_final_run_trace
 
@@ -2186,6 +2353,128 @@ class TenantRunner:
                         exc_info=True,
                     )
         return summary
+
+    async def _schedule_ingest_continuations(
+        self,
+        runtime: TenantRuntime,
+        summary: RunSummary,
+        *,
+        max_items: int | None,
+        user_id: str | None,
+        bypass_override: str | None,
+        parser_override: str | None,
+        personal_mode: bool,
+        trigger: str,
+        ingest_task_id: str | None,
+        ingest_worker_id: str | None,
+    ) -> None:
+        """Turn an authoritative source cooldown into a durable continuation."""
+        settings = runtime.settings
+        if not getattr(settings, "ingest_queue_enabled", False):
+            return
+        enqueue = getattr(runtime.store, "enqueue_ingest_task", None)
+        if not callable(enqueue):
+            return
+        rate_limited = [
+            outcome
+            for outcome in summary.source_outcomes
+            if isinstance(outcome, dict)
+            and (
+                str(outcome.get("status")) == "rate_limited"
+                or str(outcome.get("zero_reason")) == "rate_limited"
+            )
+            and outcome.get("source_id")
+        ]
+        if not rate_limited:
+            return
+        now = datetime.now(UTC)
+        queue_started_at = summary.started_at
+        if ingest_task_id:
+            list_active = getattr(runtime.store, "list_active_ingest_tasks", None)
+            if callable(list_active):
+                active_tasks = await list_active(
+                    runtime.tenant.tenant_id,
+                    run_id=summary.source_run_id,
+                )
+                current_task = next(
+                    (task for task in active_tasks if task.task_id == ingest_task_id),
+                    None,
+                )
+                if current_task is not None:
+                    queue_started_at = current_task.created_at
+        scheduled: list[datetime] = []
+        needs_operator: list[str] = []
+        for outcome in rate_limited:
+            source_id = str(outcome["source_id"])
+            raw_wait = outcome.get("rate_limit_retry_after_seconds")
+            if isinstance(raw_wait, (int, float, str)):
+                try:
+                    wait_seconds = float(raw_wait)
+                except (TypeError, ValueError):
+                    wait_seconds = 0.0
+            else:
+                wait_seconds = 0.0
+            if wait_seconds <= 0:
+                wait_seconds = settings.ingest_queue_default_retry_seconds
+            scope = str(outcome.get("rate_limit_scope") or source_id)
+            reason = "rate_limit_delay_exceeds_policy"
+            if wait_seconds > settings.ingest_queue_max_wait_seconds:
+                needs_operator.append(f"{source_id}:{reason}")
+                continue
+            if (now - queue_started_at).total_seconds() > settings.ingest_queue_max_run_age_seconds:
+                needs_operator.append(f"{source_id}:ingest_queue_max_run_age_exceeded")
+                continue
+            available_at = now + timedelta(seconds=wait_seconds)
+            if settings.ingest_queue_jitter_seconds > 0:
+                available_at += timedelta(
+                    seconds=random.uniform(0.0, settings.ingest_queue_jitter_seconds)
+                )
+            task_id = hashlib.sha256(
+                f"{runtime.tenant.tenant_id}:{summary.source_run_id}:{source_id}".encode()
+            ).hexdigest()
+            task = IngestTask(
+                task_id=task_id,
+                tenant_id=runtime.tenant.tenant_id,
+                run_id=str(summary.source_run_id),
+                source_id=source_id,
+                rate_scope=scope,
+                max_items=max_items,
+                user_id=user_id,
+                bypass_override=bypass_override,
+                parser_override=parser_override,
+                personal_mode=personal_mode,
+                trigger=trigger,
+                available_at=available_at,
+            )
+            await runtime.store.record_ingest_rate_limit(
+                scope,
+                cooldown_until=available_at,
+                retry_after_seconds=wait_seconds,
+                status_code=429,
+            )
+            if ingest_task_id == task_id and ingest_worker_id:
+                await runtime.store.defer_ingest_task(
+                    task,
+                    ingest_worker_id,
+                    available_at=available_at,
+                    error="rate_limit_retry_scheduled",
+                )
+            else:
+                await enqueue(task)
+            scheduled.append(available_at)
+        if needs_operator:
+            summary.completion_state = "needs_operator"
+            summary.failed += len(needs_operator)
+            summary.drop_reasons["rate_limit_delay_exceeds_policy"] = len(needs_operator)
+            await runtime.store.set_run_state("pipeline.status", "needs_operator")
+            await runtime.store.set_run_state("pipeline.queue.last_error", ";".join(needs_operator))
+        if scheduled:
+            summary.completion_state = "waiting_rate_limit"
+            summary.next_retry_at = min(scheduled)
+            await runtime.store.set_run_state("pipeline.status", "waiting_rate_limit")
+            await runtime.store.set_run_state(
+                "pipeline.queue.next_retry_at", summary.next_retry_at.isoformat()
+            )
 
     async def _update_source_health(self, runtime: TenantRuntime, summary: RunSummary) -> None:
         configured_source_ids = {
@@ -3510,6 +3799,15 @@ class TenantRunner:
             }
 
     async def close(self) -> None:
+        worker = self._ingest_worker_task
+        if worker is not None:
+            if self._ingest_worker_stop is not None:
+                self._ingest_worker_stop.set()
+            worker.cancel()
+            with suppress(asyncio.CancelledError):
+                await worker
+            self._ingest_worker_task = None
+            self._ingest_worker_stop = None
         sessions = self._operator_sessions
         if sessions is not None:
             closer = getattr(sessions, "close_all", None)

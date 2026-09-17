@@ -36,6 +36,10 @@ teardown, без ручного проброса таймаутов через �
 | `source_hard_deadline_seconds` | 120.0 | жёсткий бюджет источника (ставится в scope) |
 | `source_hard_cancel_grace_seconds` | 0.1 | добавка к hard для bounded cleanup |
 
+Зарегистрированный site parser может задать конечный
+`source_hard_deadline_seconds` в своих runtime defaults; это переопределяет
+общий бюджет только для данного источника и сохраняет абсолютный hard deadline.
+
 В `scripts/run_ingest_batch.py` поверх этого есть внешний watchdog: если task
 живёт дольше `timeout + hard_cancel_grace`, он принудительно отменяется и
 источнику ставится `deadline_exceeded`. Дедлайн — это операционный исход

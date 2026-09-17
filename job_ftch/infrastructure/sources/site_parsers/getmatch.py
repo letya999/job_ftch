@@ -1,10 +1,11 @@
 """Site parser for getmatch.ru IT vacancies.
 
 Getmatch listing pages are a Next.js SPA with no free-text search box.
-Keyword ``?query=`` is stripped client-side. Discovery uses public
-``/api/offers`` with offset pagination, then sitemap. Target roles from the
-profile stay on ``_search_keywords`` and are applied locally. Detail pages
-are server-rendered HTML.
+``?query=`` is stripped client-side, but the parser still puts the terms
+there so ``keywords_from_spec`` can read them on the diagnostic ingest path.
+Discovery uses public ``/api/offers`` with offset pagination, then sitemap.
+Roles are matched locally against listing titles. Detail pages are
+server-rendered HTML.
 
 Fetcher stays thin: this module only extracts candidates/drafts from supplied
 HTML/API/sitemap artifacts. Challenge/auth/layout outcomes are raised as
@@ -13,6 +14,7 @@ explainable local errors (or mapped onto existing challenge exceptions).
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import re
@@ -26,13 +28,18 @@ from selectolax.parser import HTMLParser
 
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
 from job_ftch.domain import SourceKind
+from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
+from job_ftch.infrastructure.sources.http_retry import fetch_with_retry
 from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    browser_scroll_collect_urls,
+    is_challenge_response,
     keywords_from_spec,
+    listing_matches_keywords,
     normalize_search_keywords,
-    text_matches_keywords,
+    resolve_browser_config,
     with_query_params,
 )
 
@@ -52,6 +59,10 @@ _DETAIL_PATH_RE = re.compile(
 )
 _DETAIL_HREF_RE = re.compile(
     r"(?:https?://(?:www\.)?getmatch\.ru)?/vacancies/(\d+)(?:-([a-z0-9][a-z0-9-]*))?",
+    re.IGNORECASE,
+)
+_DETAIL_URL_RE = re.compile(
+    r"^https?://(?:www\.)?getmatch\.ru/vacancies/\d+(?:-[a-z0-9][a-z0-9-]*)?/?$",
     re.IGNORECASE,
 )
 _SITEMAP_LOC_RE = re.compile(
@@ -279,11 +290,20 @@ def extract_vacancy_urls_from_sitemap(
     return [url for _, url in scored[:limit]]
 
 
+def _title_from_offer_row(row: dict[str, Any]) -> str:
+    for key in ("position", "title", "name"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            return _strip_text(value)
+    return ""
+
+
 def extract_vacancy_urls_from_offers(
     payload: Any,
     *,
     limit: int,
     seen: set[str] | None = None,
+    keywords: Sequence[str] = (),
 ) -> list[str]:
     """Extract canonical vacancy URLs from a public ``/api/offers`` payload."""
     if isinstance(payload, str):
@@ -315,10 +335,192 @@ def extract_vacancy_urls_from_offers(
         if external_id is None or external_id in seen_ids:
             continue
         seen_ids.add(external_id)
+        title = _title_from_offer_row(row)
+        if keywords and not listing_matches_keywords(title, keywords=keywords):
+            continue
         urls.append(canonical)
         if len(urls) >= limit:
             break
     return urls
+
+
+def _offer_card_from_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize one public API offer into a reusable listing card."""
+    raw_url = row.get("url")
+    if not isinstance(raw_url, str) or not raw_url.strip():
+        vacancy_id = row.get("id")
+        if not isinstance(vacancy_id, (int, str)) or not str(vacancy_id).strip():
+            return None
+        raw_url = f"/vacancies/{vacancy_id}"
+    url = canonicalize_vacancy_url(raw_url)
+    title = _strip_text(row.get("position") if isinstance(row.get("position"), str) else None)
+    if url is None or not title:
+        return None
+
+    description_html = row.get("description_html") or row.get("offer_description")
+    description = _strip_text(description_html if isinstance(description_html, str) else None)
+    company = row.get("company")
+    company_name = (
+        _strip_text(company.get("name"))
+        if isinstance(company, dict) and isinstance(company.get("name"), str)
+        else None
+    )
+    salary = _strip_text(row.get("salary_description"))
+    locations: list[str] = []
+    work_modes: list[str] = []
+    for location in row.get("location_items") or row.get("location_requirements") or ():
+        if not isinstance(location, dict):
+            continue
+        label = _strip_text(location.get("label") or location.get("city"))
+        if label and label not in locations:
+            locations.append(label)
+        mode = _strip_text(location.get("format"))
+        if mode and mode not in work_modes:
+            work_modes.append(mode)
+    skills: list[str] = []
+    for skill in row.get("skills_objects") or ():
+        value = _strip_text(skill.get("name")) if isinstance(skill, dict) else _strip_text(skill)
+        if value and value not in skills:
+            skills.append(value)
+    card_text = "\n".join(
+        part
+        for part in (
+            title,
+            company_name,
+            salary,
+            ", ".join(locations),
+            ", ".join(skills),
+            description,
+        )
+        if part
+    )
+    return {
+        "id": str(row.get("id") or vacancy_id_from_url(url) or "").strip(),
+        "url": url,
+        "title": title,
+        "text": card_text,
+        "description": description,
+        "description_html": description_html if isinstance(description_html, str) else None,
+        "company": company_name,
+        "salary": salary,
+        "locations": locations,
+        "work_modes": work_modes,
+        "skills": skills,
+        "published_at": row.get("published_at"),
+        "language": row.get("language"),
+        "offer_type": row.get("offer_type"),
+        "is_active": row.get("is_active"),
+    }
+
+
+def _offer_cards_from_payload(
+    payload: Any,
+    *,
+    keywords: Sequence[str] = (),
+    seen: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(payload, dict) or not isinstance(payload.get("offers"), list):
+        return []
+    seen_ids = seen if seen is not None else set()
+    cards: list[dict[str, Any]] = []
+    for row in payload["offers"]:
+        if not isinstance(row, dict):
+            continue
+        card = _offer_card_from_row(row)
+        if card is None:
+            continue
+        identity = card["id"] or vacancy_id_from_url(card["url"])
+        if not identity or identity in seen_ids:
+            continue
+        if keywords and not listing_matches_keywords(
+            str(card.get("title") or ""),
+            str(card.get("text") or ""),
+            keywords,
+        ):
+            continue
+        seen_ids.add(identity)
+        cards.append(card)
+    return cards
+
+
+def item_from_offer_card(
+    card: dict[str, Any],
+    source_name: str,
+    board_url: str,
+) -> RawItem | None:
+    """Build a lossless card-level item when detail HTML is unavailable."""
+    url = canonicalize_vacancy_url(str(card.get("url") or ""))
+    title = _strip_text(card.get("title") if isinstance(card.get("title"), str) else None)
+    if url is None or not title:
+        return None
+    external_id = vacancy_id_from_url(url) or url
+    text_parts = [title]
+    for key in ("company", "salary"):
+        value = _strip_text(card.get(key) if isinstance(card.get(key), str) else None)
+        if value:
+            text_parts.append(value)
+    for key in ("locations", "skills"):
+        values = card.get(key)
+        if isinstance(values, list) and values:
+            text_parts.append(", ".join(str(value) for value in values if value))
+    description = _strip_text(
+        card.get("description") if isinstance(card.get("description"), str) else None
+    )
+    if description:
+        text_parts.append(description)
+    created_at: datetime | None = None
+    published_at = card.get("published_at")
+    if isinstance(published_at, str):
+        try:
+            created_at = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        except ValueError:
+            created_at = None
+    metadata = {
+        "board_url": board_url,
+        "job_url": url,
+        "title": title,
+        "company": card.get("company"),
+        "company_authoritative": bool(card.get("company")),
+        "locations": card.get("locations") or None,
+        "work_modes": card.get("work_modes") or None,
+        "skills": card.get("skills") or None,
+        "base_salary_text": card.get("salary") or None,
+        "source_offer_id": external_id,
+        "source_offer_type": card.get("offer_type"),
+        "source_offer_active": card.get("is_active"),
+        "source_description_html": card.get("description_html"),
+        "published_at": published_at,
+        "parser": "site_getmatch_card",
+        "adapter": "getmatch",
+        "detail_vacancy_confirmed": False,
+        "detail_completeness_reason": "listing_api_card",
+    }
+    return build_raw_item(
+        source_kind=SourceKind.CAREER_SITE,
+        source_name=source_name,
+        external_id=external_id,
+        url=url,
+        text="\n".join(text_parts),
+        created_at=created_at,
+        metadata=metadata,
+    )
+
+
+def _offers_total(payload: Any) -> int | None:
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict) or not isinstance(payload.get("meta"), dict):
+        return None
+    total = payload["meta"].get("total")
+    return int(total) if isinstance(total, int) and total >= 0 else None
 
 
 def classify_getmatch_payload(
@@ -477,7 +679,9 @@ def item_from_detail_html(
             url=detail_url,
         )
 
-    canonical = canonicalize_vacancy_url(detail_url) or detail_url
+    canonical = canonicalize_vacancy_url(detail_url)
+    if canonical is None:
+        return None
     external_id = vacancy_id_from_url(canonical) or canonical
     tree = HTMLParser(html_text or "")
 
@@ -551,8 +755,10 @@ def item_from_detail_html(
             company_name = _strip_text(company_match.group(1))
 
     description = ""
-    desc_node = tree.css_first(".b-vacancy-description") or tree.css_first(
-        ".b-vacancy-description.markdown"
+    desc_node = (
+        tree.css_first(".b-vacancy-description")
+        or tree.css_first(".b-vacancy-description.markdown")
+        or tree.css_first(".markdown")
     )
     if desc_node is not None:
         description = _strip_text(desc_node.text(separator=" "))
@@ -595,13 +801,20 @@ def item_from_detail_html(
             "job_url": canonical,
             "title": title or None,
             "company": company_name,
+            "company_authoritative": bool(company_name),
             "locations": locations or None,
             "work_modes": work_modes or None,
             "base_salary_text": salary,
             "apply_url": canonical,
             "parser": "site_getmatch",
             "adapter": "getmatch",
-            "detail_vacancy_confirmed": True,
+            "detail_vacancy_confirmed": bool(desc_node is not None and description),
+            "source_description_html": desc_node.html if desc_node is not None else None,
+            "detail_completeness_reason": (
+                "detail_dom_extracted"
+                if desc_node is not None and description
+                else "announcement_only"
+            ),
             "archived": archived or None,
         },
     )
@@ -633,8 +846,61 @@ def _response_text(response: Any) -> str:
     return str(getattr(response, "text", "") or "")
 
 
+def _as_int(value: object, default: int) -> int:
+    if isinstance(value, (int, float, str)) and not isinstance(value, bool):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    return default
+
+
+def _listing_cards_from_html(html_text: str, base_url: str) -> dict[str, dict[str, Any]]:
+    """Extract titles and visible card text from a hydrated Getmatch listing."""
+    tree = HTMLParser(html.unescape(html_text or ""))
+    cards: dict[str, dict[str, Any]] = {}
+    for anchor in tree.css("a[href]"):
+        href = anchor.attributes.get("href")
+        if not isinstance(href, str):
+            continue
+        url = canonicalize_vacancy_url(urljoin(base_url, href))
+        if url is None:
+            continue
+        identity = vacancy_id_from_url(url)
+        if identity is None:
+            continue
+        title = _strip_text(anchor.text())
+        card: Any = anchor
+        while (
+            card is not None and "vacan" not in str(card.attributes.get("class") or "").casefold()
+        ):
+            card = card.parent
+        card_text = _strip_text((card or anchor).text(separator=" "))
+        current = cards.get(identity)
+        if current is None:
+            cards[identity] = {"id": identity, "url": url, "title": title, "text": card_text}
+        else:
+            current["title"] = current["title"] or title
+            if len(card_text) > len(str(current.get("text") or "")):
+                current["text"] = card_text
+    return cards
+
+
+def _status_from_exception(exc: BaseException) -> int | None:
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int):
+        return status
+    status = getattr(exc, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+def _protected_status(status: int | None) -> bool:
+    return status in {429, 503}
+
+
 async def _get(client: Any, url: str) -> Any:
-    return await client.get(url, follow_redirects=True)
+    return await fetch_with_retry(client, url, follow_redirects=True)
 
 
 def _classify_response(
@@ -672,7 +938,8 @@ def _classify_response(
             "Getmatch listing pages are SPA shells with no free-text search; "
             "the dedicated parser discovers via public /api/offers with offset "
             "pagination and falls back to the sitemap, then extracts server-rendered "
-            "detail HTML. Target roles are applied locally."
+            "detail HTML. Target roles ride on ?query= / _search_keywords and "
+            "are matched against listing titles."
         ),
     ),
 )
@@ -694,6 +961,15 @@ class GetmatchParser:
             url_filter=_URL_FILTER,
             include_if_detail_page=True,
             render=False,
+            extra={
+                "api_page_size": 50,
+                "max_listing_pages": 50,
+                "detail_concurrency": 8,
+                "browser_scroll_loops": 12,
+                "browser_scroll_pause_ms": 500,
+                "browser_scroll_px": 2500,
+                "browser_stale_rounds": 3,
+            },
         )
 
     def parser_kind(self, url: str) -> str | None:
@@ -715,10 +991,10 @@ class GetmatchParser:
         if not (parsed.path or "").startswith("/vacancies"):
             parsed = parsed._replace(path="/vacancies")
         listing = urlunparse(parsed._replace(query=""))
-        # Live search box does not exist; `?query=` is stripped. Keep the
-        # listing URL; target roles are applied locally after paginated
-        # /api/offers (and sitemap) discovery.
-        return [listing]
+        # Live search box does not exist and strips `?query=`. Keep the terms
+        # on the URL so diagnostic ingest (no `_search_keywords`) still
+        # title-filters /api/offers locally.
+        return [with_query_params(listing, {"query": " OR ".join(terms)})]
 
     def _limit(self, spec_limit: int | None) -> int:
         if spec_limit is not None:
@@ -729,6 +1005,165 @@ class GetmatchParser:
             return max(1, int(raw_limit))
         return 50
 
+    def _extra_value(self, spec: CareerSiteSpec, key: str, default: object) -> object:
+        value = spec.monitor_config.get(key)
+        if value is not None:
+            return value
+        manifest_entry = getattr(self, "_manifest_entry", None)
+        extra = getattr(manifest_entry, "extra", {}) if manifest_entry is not None else {}
+        if isinstance(extra, dict) and extra.get(key) is not None:
+            return extra[key]
+        return default
+
+    def _api_page_size(self, spec: CareerSiteSpec, limit: int) -> int:
+        configured = _as_int(self._extra_value(spec, "api_page_size", 50), 50)
+        # Preserve small explicit page sizes for deterministic API contracts;
+        # larger runs use the board's 50-row maximum.
+        return max(1, min(50, max(limit, 1), configured))
+
+    def _max_listing_pages(self, spec: CareerSiteSpec, limit: int, page_size: int) -> int:
+        configured = _as_int(self._extra_value(spec, "max_listing_pages", 50), 50)
+        required = (limit + page_size - 1) // page_size
+        return max(1, min(200, max(configured, required)))
+
+    def _detail_concurrency(self, spec: CareerSiteSpec) -> int:
+        configured = _as_int(self._extra_value(spec, "detail_concurrency", 8), 8)
+        return max(1, min(50, configured))
+
+    def _browser_config(self, spec: CareerSiteSpec, bypass_strategy: Any) -> dict[str, Any]:
+        config = resolve_browser_config(
+            spec,
+            bypass_strategy,
+            {"headless": True, "stealth": False, "wait": "domcontentloaded"},
+        )
+        config["_bypass_strategy"] = bypass_strategy
+        return config
+
+    async def _browser_search_box(
+        self,
+        page: Any,
+        keywords: Sequence[str],
+        *,
+        timeout_ms: int,
+    ) -> bool:
+        """Use a search box if Getmatch adds one; current UI has filters only."""
+        if not keywords:
+            return False
+        for selector in (
+            'input[name="query"]',
+            'input[type="search"]',
+            'input[placeholder*="Поиск"]',
+            'input[placeholder*="поиск"]',
+        ):
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() == 0:
+                    continue
+                await locator.fill(" ".join(keywords))
+                await locator.press("Enter")
+                wait_for_load_state = getattr(page, "wait_for_load_state", None)
+                if callable(wait_for_load_state):
+                    await wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+                return True
+            except Exception as exc:  # noqa: BLE001 - try the next site control
+                logger.debug(
+                    "getmatch.browser_search_box_failed", selector=selector, error=str(exc)
+                )
+        return False
+
+    async def _discover_with_browser(
+        self,
+        spec: CareerSiteSpec,
+        *,
+        limit: int,
+        keywords: Sequence[str],
+        bypass_strategy: Any,
+        cards: dict[str, dict[str, Any]],
+    ) -> list[str]:
+        config = self._browser_config(spec, bypass_strategy)
+        scroll_loops = _as_int(self._extra_value(spec, "browser_scroll_loops", 12), 12)
+        pause_sec = _as_int(self._extra_value(spec, "browser_scroll_pause_ms", 500), 500) / 1000
+        scroll_px = _as_int(self._extra_value(spec, "browser_scroll_px", 2500), 2500)
+        stale_rounds = _as_int(self._extra_value(spec, "browser_stale_rounds", 3), 3)
+        collected: list[str] = []
+        seen: set[str] = set()
+        async with open_page(
+            config,
+            use_proxy=bool(getattr(bypass_strategy, "uses_proxy", False)),
+            bypass_strategy=bypass_strategy,
+        ) as page:
+            await navigate(page, spec.url, config)
+            page_url = str(getattr(page, "url", spec.url) or spec.url)
+            content = await page.content()
+            if is_challenge_response(content):
+                raise BrowserChallengeError(url=page_url, challenge_type="getmatch_challenge")
+            page_cards = _listing_cards_from_html(content, page_url)
+            if not page_cards and await self._browser_search_box(
+                page,
+                keywords,
+                timeout_ms=_as_int(config.get("timeout"), 30_000),
+            ):
+                content = await page.content()
+                page_url = str(getattr(page, "url", page_url) or page_url)
+                page_cards = _listing_cards_from_html(content, page_url)
+            cards.update(page_cards)
+            urls = await browser_scroll_collect_urls(
+                page,
+                page_url,
+                _DETAIL_URL_RE,
+                limit=limit,
+                scroll_loops=scroll_loops,
+                pause_sec=pause_sec,
+                scroll_px=scroll_px,
+                stale_rounds=stale_rounds,
+            )
+            content = await page.content()
+            cards.update(_listing_cards_from_html(content, page_url))
+            for raw_url in urls:
+                canonical = canonicalize_vacancy_url(raw_url)
+                if canonical is None:
+                    continue
+                identity = vacancy_id_from_url(canonical)
+                if identity is None or identity in seen:
+                    continue
+                card = cards.get(identity)
+                if keywords and not listing_matches_keywords(
+                    str((card or {}).get("title") or ""),
+                    str((card or {}).get("text") or canonical),
+                    keywords,
+                ):
+                    continue
+                seen.add(identity)
+                collected.append(canonical)
+                if len(collected) >= limit:
+                    break
+        return collected
+
+    async def _browser_detail(
+        self,
+        spec: CareerSiteSpec,
+        detail_url: str,
+        bypass_strategy: Any,
+    ) -> RawItem | None:
+        config = self._browser_config(spec, bypass_strategy)
+        async with open_page(
+            config,
+            use_proxy=bool(getattr(bypass_strategy, "uses_proxy", False)),
+            bypass_strategy=bypass_strategy,
+        ) as page:
+            await navigate(page, detail_url, config)
+            final_url = canonicalize_vacancy_url(
+                str(getattr(page, "url", detail_url) or detail_url)
+            )
+            if final_url is None:
+                return None
+            content = await page.content()
+            if is_challenge_response(content):
+                raise BrowserChallengeError(url=final_url, challenge_type="getmatch_challenge")
+            return item_from_detail_html(
+                final_url, content, spec.source_name or "getmatch", spec.url
+            )
+
     def _sitemap_url(self, board_url: str) -> str:
         parsed = urlparse(board_url)
         host = (parsed.hostname or "getmatch.ru").lower()
@@ -738,7 +1173,12 @@ class GetmatchParser:
         return f"{scheme}://{host}/sitemap.xml"
 
     async def _discover_via_offers_api(
-        self, spec: CareerSiteSpec, client: Any, keywords: Sequence[str] | None = None
+        self,
+        spec: CareerSiteSpec,
+        client: Any,
+        keywords: Sequence[str] | None = None,
+        *,
+        cards: dict[str, dict[str, Any]] | None = None,
     ) -> list[str]:
         query = dict(parse_qsl(urlparse(spec.url or "").query, keep_blank_values=True))
         sphere = str(query.get("sp") or "").strip()
@@ -746,9 +1186,9 @@ class GetmatchParser:
         seen: set[str] = set()
         urls: list[str] = []
         offset = 0
-        page_size = min(50, max(limit, 1))
-        max_offset = 500
-        while len(urls) < limit and offset <= max_offset:
+        page_size = self._api_page_size(spec, limit)
+        max_pages = self._max_listing_pages(spec, limit, page_size)
+        for _ in range(max_pages):
             params: dict[str, str] = {}
             if sphere:
                 params["sp"] = sphere
@@ -764,33 +1204,51 @@ class GetmatchParser:
             try:
                 response = await _get(client, api_url)
             except Exception as exc:
+                if _status_from_exception(exc) == 429:
+                    raise
                 logger.debug("getmatch.offers_api_failed", url=api_url, error=str(exc))
                 break
+            status_code = getattr(response, "status_code", None)
+            if _protected_status(status_code):
+                response.raise_for_status()
             text = _response_text(response)
             if any(marker in text.casefold() for marker in _AUTH_MARKERS):
                 logger.debug("getmatch.offers_api_auth_wall", url=api_url)
                 break
+            inventory = extract_vacancy_urls_from_offers(text, limit=page_size)
+            total = _offers_total(text)
             page_urls = extract_vacancy_urls_from_offers(
-                text, limit=max(limit, page_size), seen=seen
+                text, limit=max(limit, page_size), seen=seen, keywords=keywords or ()
             )
-            if not page_urls:
+            if not inventory:
                 break
+            for card in _offer_cards_from_payload(text, keywords=keywords or ()):
+                if cards is not None:
+                    cards[card["id"]] = card
             for url in page_urls:
-                if keywords and not text_matches_keywords(url, keywords):
-                    continue
                 urls.append(url)
                 if len(urls) >= limit:
                     break
-            if len(page_urls) < page_size:
+            if total is not None and offset + page_size >= total:
+                break
+            if total is None and len(inventory) < page_size:
                 break
             offset += page_size
         return urls[:limit]
 
-    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+    async def discover(
+        self,
+        spec: CareerSiteSpec,
+        client: Any,
+        *,
+        cards: dict[str, dict[str, Any]] | None = None,
+    ) -> list[str]:
         """Return canonical detail URLs (API, listing HTML, then sitemap)."""
         limit = self._limit(spec.limit)
         keywords = _keywords_from_spec(spec)
         board_url = spec.url or _DEFAULT_BOARD_URL
+        card_store = cards if cards is not None else {}
+        bypass_strategy = spec.monitor_config.get("_bypass_strategy")
         seen: set[str] = set()
         urls: list[str] = []
 
@@ -799,7 +1257,7 @@ class GetmatchParser:
         if direct is not None:
             return [direct]
 
-        api_urls = await self._discover_via_offers_api(spec, client, keywords)
+        api_urls = await self._discover_via_offers_api(spec, client, keywords, cards=card_store)
         if api_urls:
             return api_urls[:limit]
 
@@ -810,18 +1268,36 @@ class GetmatchParser:
             listing_response = None
 
         if listing_response is not None:
+            if _protected_status(getattr(listing_response, "status_code", None)):
+                listing_response.raise_for_status()
             listing_kind, listing_html = _classify_response(
                 listing_response,
                 url=board_url,
                 expected="listing",
             )
             if listing_kind is GetmatchPageKind.CHALLENGE:
+                if bypass_strategy is not None:
+                    return await self._discover_with_browser(
+                        spec,
+                        limit=limit,
+                        keywords=keywords,
+                        bypass_strategy=bypass_strategy,
+                        cards=card_store,
+                    )
                 _raise_for_kind(
                     listing_kind,
                     url=board_url,
                     message="listing page is an anti-bot challenge wall",
                 )
             if listing_kind is GetmatchPageKind.AUTH_WALL:
+                if bypass_strategy is not None:
+                    return await self._discover_with_browser(
+                        spec,
+                        limit=limit,
+                        keywords=keywords,
+                        bypass_strategy=bypass_strategy,
+                        cards=card_store,
+                    )
                 _raise_for_kind(
                     listing_kind,
                     url=board_url,
@@ -833,6 +1309,12 @@ class GetmatchParser:
                 # Still attempt sitemap before failing hard.
                 logger.info("getmatch.listing_layout_changed_fallback_sitemap", url=board_url)
             else:
+                card_store.update(
+                    _listing_cards_from_html(
+                        listing_html,
+                        str(getattr(listing_response, "url", board_url) or board_url),
+                    )
+                )
                 listing_urls = extract_vacancy_urls_from_html(
                     listing_html,
                     str(getattr(listing_response, "url", board_url) or board_url),
@@ -841,7 +1323,17 @@ class GetmatchParser:
                 )
                 if keywords:
                     listing_urls = [
-                        url for url in listing_urls if text_matches_keywords(url, keywords)
+                        url
+                        for url in listing_urls
+                        if listing_matches_keywords(
+                            str(
+                                card_store.get(vacancy_id_from_url(url) or "", {}).get("title", "")
+                            ),
+                            str(
+                                card_store.get(vacancy_id_from_url(url) or "", {}).get("text", url)
+                            ),
+                            keywords,
+                        )
                     ]
                 urls.extend(listing_urls)
                 if urls:
@@ -852,6 +1344,16 @@ class GetmatchParser:
             sitemap_response = await _get(client, sitemap_url)
         except Exception as exc:
             logger.debug("getmatch.sitemap_fetch_failed", url=sitemap_url, error=str(exc))
+            if _status_from_exception(exc) == 429:
+                raise
+            if bypass_strategy is not None:
+                return await self._discover_with_browser(
+                    spec,
+                    limit=limit,
+                    keywords=keywords,
+                    bypass_strategy=bypass_strategy,
+                    cards=card_store,
+                )
             if not urls:
                 raise GetmatchIngestError(
                     "parser_error",
@@ -860,24 +1362,51 @@ class GetmatchParser:
                 ) from exc
             return urls[:limit]
 
+        if _protected_status(getattr(sitemap_response, "status_code", None)):
+            sitemap_response.raise_for_status()
+
         sitemap_kind, sitemap_text = _classify_response(
             sitemap_response,
             url=sitemap_url,
             expected="sitemap",
         )
         if sitemap_kind is GetmatchPageKind.CHALLENGE:
+            if bypass_strategy is not None:
+                return await self._discover_with_browser(
+                    spec,
+                    limit=limit,
+                    keywords=keywords,
+                    bypass_strategy=bypass_strategy,
+                    cards=card_store,
+                )
             _raise_for_kind(
                 sitemap_kind,
                 url=sitemap_url,
                 message="sitemap response is an anti-bot challenge wall",
             )
         if sitemap_kind is GetmatchPageKind.AUTH_WALL:
+            if bypass_strategy is not None:
+                return await self._discover_with_browser(
+                    spec,
+                    limit=limit,
+                    keywords=keywords,
+                    bypass_strategy=bypass_strategy,
+                    cards=card_store,
+                )
             _raise_for_kind(
                 sitemap_kind,
                 url=sitemap_url,
                 message="sitemap requires authentication",
             )
         if sitemap_kind is GetmatchPageKind.LAYOUT_CHANGED:
+            if bypass_strategy is not None:
+                return await self._discover_with_browser(
+                    spec,
+                    limit=limit,
+                    keywords=keywords,
+                    bypass_strategy=bypass_strategy,
+                    cards=card_store,
+                )
             raise GetmatchIngestError(
                 "layout_changed",
                 "sitemap is missing vacancy loc entries",
@@ -903,6 +1432,14 @@ class GetmatchParser:
             ordered.append(url)
             if len(ordered) >= limit:
                 break
+        if not ordered and bypass_strategy is not None:
+            return await self._discover_with_browser(
+                spec,
+                limit=limit,
+                keywords=keywords,
+                bypass_strategy=bypass_strategy,
+                cards=card_store,
+            )
         return ordered
 
     async def parse(
@@ -910,79 +1447,134 @@ class GetmatchParser:
         spec: CareerSiteSpec,
         client: Any,
     ) -> AsyncIterator[RawItem]:
-        limit = self._limit(spec.limit)
         source_name = spec.source_name or "getmatch"
         board_url = spec.url or _DEFAULT_BOARD_URL
-        detail_urls = await self.discover(spec, client)
+        bypass_strategy = spec.monitor_config.get("_bypass_strategy")
+        cards: dict[str, dict[str, Any]] = {}
+        detail_urls = await self.discover(spec, client, cards=cards)
         if not detail_urls:
             # Explicit empty is not a failure; CareerSiteSource maps this via
             # confirmed_empty_on_empty when parse yields nothing.
             return
 
+        stats = spec.monitor_config.get("_pipeline_stats")
+        if stats is not None:
+            stats.parser_urls_discovered = len(detail_urls)
+
+        detail_limit = spec.detail_limit
+        detail_urls_to_fetch = (
+            detail_urls if detail_limit is None else detail_urls[: max(0, int(detail_limit))]
+        )
+        listing_only_urls = detail_urls[len(detail_urls_to_fetch) :]
         emitted = 0
-        for detail_url in detail_urls:
-            if emitted >= limit:
-                break
+        detail_errors: list[Exception] = []
+
+        async def load_detail(
+            detail_url: str,
+        ) -> tuple[str, RawItem | None, Exception | None]:
             try:
                 response = await _get(client, detail_url)
-            except Exception as exc:
-                logger.debug("getmatch.detail_fetch_failed", url=detail_url, error=str(exc))
-                continue
-            status_code = getattr(response, "status_code", None)
-            if isinstance(status_code, int) and status_code >= 400:
-                kind = classify_getmatch_payload(
-                    _response_text(response),
-                    content_type=_response_content_type(response),
-                    status_code=status_code,
-                    expected="detail",
-                )
-                if (
-                    kind in {GetmatchPageKind.AUTH_WALL, GetmatchPageKind.CHALLENGE}
-                    and emitted == 0
-                ):
+                status_code = getattr(response, "status_code", None)
+                if _protected_status(status_code):
+                    response.raise_for_status()
+                if isinstance(status_code, int) and status_code >= 400:
+                    kind = classify_getmatch_payload(
+                        _response_text(response),
+                        content_type=_response_content_type(response),
+                        status_code=status_code,
+                        expected="detail",
+                    )
+                    if kind in {GetmatchPageKind.AUTH_WALL, GetmatchPageKind.CHALLENGE}:
+                        if bypass_strategy is not None:
+                            return (
+                                detail_url,
+                                await self._browser_detail(spec, detail_url, bypass_strategy),
+                                None,
+                            )
+                        _raise_for_kind(
+                            kind,
+                            url=detail_url,
+                            message=f"detail fetch returned {status_code}",
+                        )
+                    return detail_url, None, None
+                html_text = _response_text(response)
+                final_url = str(getattr(response, "url", detail_url) or detail_url)
+                kind = classify_getmatch_payload(html_text, expected="detail")
+                if kind is GetmatchPageKind.CHALLENGE:
+                    if bypass_strategy is not None:
+                        return (
+                            detail_url,
+                            await self._browser_detail(spec, detail_url, bypass_strategy),
+                            None,
+                        )
                     _raise_for_kind(
                         kind,
-                        url=detail_url,
-                        message=f"detail fetch returned {status_code}",
+                        url=final_url,
+                        message="detail page is an anti-bot challenge wall",
                     )
-                logger.debug(
-                    "getmatch.detail_http_error",
-                    url=detail_url,
-                    status_code=status_code,
-                )
-                continue
-            html_text = _response_text(response)
-            final_url = str(getattr(response, "url", detail_url) or detail_url)
-            try:
-                item = item_from_detail_html(
-                    final_url,
-                    html_text,
-                    source_name,
-                    board_url,
-                )
-            except GetmatchIngestError as exc:
-                if exc.kind in {"challenge_required", "auth_wall"} and emitted == 0:
-                    if exc.kind == "challenge_required":
-                        raise BrowserChallengeError(
-                            url=final_url,
-                            challenge_type="getmatch_challenge",
-                        ) from exc
+                item = item_from_detail_html(final_url, html_text, source_name, board_url)
+                if item is None and bypass_strategy is not None:
+                    item = await self._browser_detail(spec, detail_url, bypass_strategy)
+                return detail_url, item, None
+            except (BrowserChallengeError, GetmatchIngestError) as exc:
+                return detail_url, None, exc
+            except Exception as exc:
+                if _status_from_exception(exc) in {429, 503}:
                     raise
-                logger.debug(
-                    "getmatch.detail_classified_skip",
-                    url=final_url,
-                    kind=exc.kind,
-                )
-                continue
-            if item is None:
-                continue
-            if item.metadata.get("archived") is True:
-                # Sitemap includes historical vacancies; skip archived by default.
-                continue
-            yield item
-            emitted += 1
+                return detail_url, None, exc
+
+        tasks = [asyncio.create_task(load_detail(url)) for url in detail_urls_to_fetch]
+        try:
+            for task in asyncio.as_completed(tasks):
+                detail_url, item, error = await task
+                if error is not None:
+                    if isinstance(error, BrowserChallengeError):
+                        raise error
+                    if isinstance(error, GetmatchIngestError) and error.kind in {
+                        "challenge_required",
+                        "auth_wall",
+                    }:
+                        if error.kind == "challenge_required":
+                            raise BrowserChallengeError(
+                                url=error.url or board_url,
+                                challenge_type="getmatch_challenge",
+                            ) from error
+                        raise error
+                    detail_errors.append(error)
+                    continue
+                if item is None:
+                    item = item_from_offer_card(
+                        cards.get(vacancy_id_from_url(detail_url) or "", {}),
+                        source_name,
+                        board_url,
+                    )
+                if item is None:
+                    continue
+                if item.metadata.get("archived") is True:
+                    continue
+                yield item
+                emitted += 1
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+
+        # Cards are a lossless fallback for API results whose detail endpoint
+        # is temporarily unavailable or has a harmless layout drift.
+        for detail_url in listing_only_urls:
+            card_item = item_from_offer_card(
+                cards.get(vacancy_id_from_url(detail_url) or "", {}),
+                source_name,
+                board_url,
+            )
+            if card_item is not None:
+                yield card_item
+                emitted += 1
 
         if emitted == 0 and detail_urls:
+            if detail_errors:
+                raise detail_errors[0]
             # Had candidates but none produced usable drafts.
             raise GetmatchIngestError(
                 "layout_changed",

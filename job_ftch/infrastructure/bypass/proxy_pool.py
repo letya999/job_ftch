@@ -47,14 +47,22 @@ def is_domain_allowed(
     *,
     allow_domains: tuple[str, ...] = (),
     deny_domains: tuple[str, ...] = (),
+    empty_allow: str = "allow",
 ) -> bool:
+    """Domain policy. Deny list always wins. ``*`` allows all remaining hosts.
+
+    Provider pools use ``empty_allow="allow"`` (an unrestricted provider).
+    Paid rescue/captcha allowlists use ``empty_allow="deny"``.
+    """
     normalized = normalize_domain(domain)
     if not normalized:
-        return not allow_domains
+        return False
     if any(domain_matches(normalized, pattern) for pattern in deny_domains):
         return False
-    if not allow_domains:
+    if any(pattern.strip() == "*" for pattern in allow_domains):
         return True
+    if not allow_domains:
+        return empty_allow != "deny"
     return any(domain_matches(normalized, pattern) for pattern in allow_domains)
 
 
