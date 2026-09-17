@@ -619,6 +619,8 @@ class HireHiParser:
 
         detail_limit = spec.detail_limit
         if detail_limit is None:
+            detail_limit = spec.limit
+        if detail_limit is None:
             from job_ftch.config import get_settings
 
             detail_limit = get_settings().career_site_default_detail_limit

@@ -106,7 +106,7 @@ async def _cian_listing_html(
     client: Any,
     url: str,
     origin_host: str,
-) -> tuple[str, str] | None:
+) -> tuple[str, str]:
     """Fetch a Cian listing page without following onto classifieds or captcha."""
     from job_ftch.infrastructure.bypass.challenge_classifier import (
         classify_challenge,

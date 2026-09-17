@@ -685,6 +685,8 @@ class ResidentialProxyBypass(ProxyBypass):
         return self._gateway is not None or bool(self._health_pool)
 
     def current_url_for_domain(self, domain: str) -> str | None:
+        if not self._domain_allowed(domain):
+            return None
         current = self._resolve_current(domain)
         return current.url if current else None
 
@@ -696,6 +698,8 @@ class ResidentialProxyBypass(ProxyBypass):
         purpose: str = "ingest",
     ) -> str | None:
         del purpose
+        if not self._domain_allowed(domain):
+            return None
         current = self._select_for_domain_with_country(domain, country=country)
         return current.url if current else None
 
@@ -746,11 +750,17 @@ class ResidentialProxyBypass(ProxyBypass):
     def _select_for_domain(self, domain: str) -> ProxyHealth | None:
         """Return a sticky proxy for the domain, selecting one if needed."""
         if self._gateway is not None:
-            url = self._get_proxy_url_for_domain(domain or "")
-            if url:
-                return ProxyHealth(url=url)
-            if self._strict_geo:
+            if not domain:
                 return None
+            effective_country = self._preferred_geo or self._gateway.default_country or ""
+            if self._strict_geo and not effective_country:
+                return None
+            return ProxyHealth(
+                url=self._gateway.get_proxy_url(
+                    domain=domain,
+                    country=effective_country,
+                )
+            )
 
         if domain in self._domain_pin:
             pinned = self._domain_pin[domain]
@@ -811,6 +821,10 @@ class ResidentialProxyBypass(ProxyBypass):
     async def apply_http(self, client: Any) -> Any:
         domain = getattr(client, "_domain_hint", None)
         if domain and not self._domain_allowed(domain):
+            if self._strict_geo:
+                raise RuntimeError(
+                    f"Strict geo-binding enforced, but no suitable proxy found for domain {domain}"
+                )
             return client
         if domain and not self._cost.should_allow_request(domain):
             return client
@@ -873,6 +887,10 @@ class ResidentialProxyBypass(ProxyBypass):
     def apply_browser_args(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         domain = kwargs.pop("_domain_hint", None)
         if domain and not self._domain_allowed(domain):
+            if self._strict_geo:
+                raise RuntimeError(
+                    f"Strict geo-binding enforced, but no suitable proxy found for domain {domain}"
+                )
             return kwargs
         if (domain and not self._cost.should_allow_request(domain)) or (
             not domain and self._cost.budget_exhausted

@@ -871,9 +871,9 @@ def _listing_cards_from_html(html_text: str, base_url: str) -> dict[str, dict[st
             continue
         title = _strip_text(anchor.text())
         card: Any = anchor
-        while card is not None and "vacan" not in str(
-            card.attributes.get("class") or ""
-        ).casefold():
+        while (
+            card is not None and "vacan" not in str(card.attributes.get("class") or "").casefold()
+        ):
             card = card.parent
         card_text = _strip_text((card or anchor).text(separator=" "))
         current = cards.get(identity)
@@ -1066,7 +1066,9 @@ class GetmatchParser:
                     await wait_for_load_state("domcontentloaded", timeout=timeout_ms)
                 return True
             except Exception as exc:  # noqa: BLE001 - try the next site control
-                logger.debug("getmatch.browser_search_box_failed", selector=selector, error=str(exc))
+                logger.debug(
+                    "getmatch.browser_search_box_failed", selector=selector, error=str(exc)
+                )
         return False
 
     async def _discover_with_browser(
@@ -1080,9 +1082,7 @@ class GetmatchParser:
     ) -> list[str]:
         config = self._browser_config(spec, bypass_strategy)
         scroll_loops = _as_int(self._extra_value(spec, "browser_scroll_loops", 12), 12)
-        pause_sec = _as_int(
-            self._extra_value(spec, "browser_scroll_pause_ms", 500), 500
-        ) / 1000
+        pause_sec = _as_int(self._extra_value(spec, "browser_scroll_pause_ms", 500), 500) / 1000
         scroll_px = _as_int(self._extra_value(spec, "browser_scroll_px", 2500), 2500)
         stale_rounds = _as_int(self._extra_value(spec, "browser_stale_rounds", 3), 3)
         collected: list[str] = []
@@ -1160,7 +1160,9 @@ class GetmatchParser:
             content = await page.content()
             if is_challenge_response(content):
                 raise BrowserChallengeError(url=final_url, challenge_type="getmatch_challenge")
-            return item_from_detail_html(final_url, content, spec.source_name or "getmatch", spec.url)
+            return item_from_detail_html(
+                final_url, content, spec.source_name or "getmatch", spec.url
+            )
 
     def _sitemap_url(self, board_url: str) -> str:
         parsed = urlparse(board_url)
@@ -1255,9 +1257,7 @@ class GetmatchParser:
         if direct is not None:
             return [direct]
 
-        api_urls = await self._discover_via_offers_api(
-            spec, client, keywords, cards=card_store
-        )
+        api_urls = await self._discover_via_offers_api(spec, client, keywords, cards=card_store)
         if api_urls:
             return api_urls[:limit]
 
@@ -1327,14 +1327,10 @@ class GetmatchParser:
                         for url in listing_urls
                         if listing_matches_keywords(
                             str(
-                                card_store.get(vacancy_id_from_url(url) or "", {}).get(
-                                    "title", ""
-                                )
+                                card_store.get(vacancy_id_from_url(url) or "", {}).get("title", "")
                             ),
                             str(
-                                card_store.get(vacancy_id_from_url(url) or "", {}).get(
-                                    "text", url
-                                )
+                                card_store.get(vacancy_id_from_url(url) or "", {}).get("text", url)
                             ),
                             keywords,
                         )
@@ -1467,9 +1463,7 @@ class GetmatchParser:
 
         detail_limit = spec.detail_limit
         detail_urls_to_fetch = (
-            detail_urls
-            if detail_limit is None
-            else detail_urls[: max(0, int(detail_limit))]
+            detail_urls if detail_limit is None else detail_urls[: max(0, int(detail_limit))]
         )
         listing_only_urls = detail_urls[len(detail_urls_to_fetch) :]
         emitted = 0
@@ -1492,9 +1486,11 @@ class GetmatchParser:
                     )
                     if kind in {GetmatchPageKind.AUTH_WALL, GetmatchPageKind.CHALLENGE}:
                         if bypass_strategy is not None:
-                            return detail_url, await self._browser_detail(
-                                spec, detail_url, bypass_strategy
-                            ), None
+                            return (
+                                detail_url,
+                                await self._browser_detail(spec, detail_url, bypass_strategy),
+                                None,
+                            )
                         _raise_for_kind(
                             kind,
                             url=detail_url,
@@ -1506,9 +1502,11 @@ class GetmatchParser:
                 kind = classify_getmatch_payload(html_text, expected="detail")
                 if kind is GetmatchPageKind.CHALLENGE:
                     if bypass_strategy is not None:
-                        return detail_url, await self._browser_detail(
-                            spec, detail_url, bypass_strategy
-                        ), None
+                        return (
+                            detail_url,
+                            await self._browser_detail(spec, detail_url, bypass_strategy),
+                            None,
+                        )
                     _raise_for_kind(
                         kind,
                         url=final_url,

@@ -250,11 +250,14 @@ def test_text_matches_keywords_keeps_ml_titles() -> None:
 def test_listing_matches_keywords_uses_title_and_role_aliases() -> None:
     assert listing_matches_keywords("Руководитель проектов", keywords=["project manager"]) is True
     assert listing_matches_keywords("Product Manager", keywords=["project manager"]) is False
-    assert listing_matches_keywords(
-        "Product Manager",
-        "We need a project manager in the team",
-        ["project manager"],
-    ) is False
+    assert (
+        listing_matches_keywords(
+            "Product Manager",
+            "We need a project manager in the team",
+            ["project manager"],
+        )
+        is False
+    )
 
 
 def test_keywords_from_spec_read_monitor_config() -> None:

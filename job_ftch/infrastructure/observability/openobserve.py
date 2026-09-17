@@ -329,9 +329,7 @@ def upsert_openobserve_dashboards(settings: Settings) -> None:
                         headers={"Authorization": f"Basic {auth}"},
                     )
                     with urllib.request.urlopen(list_request, timeout=timeout) as listed:  # nosec B310
-                        dashboards = json.loads(listed.read().decode("utf-8")).get(
-                            "dashboards", []
-                        )
+                        dashboards = json.loads(listed.read().decode("utf-8")).get("dashboards", [])
                     existing = next(
                         (
                             item
@@ -345,7 +343,9 @@ def upsert_openobserve_dashboards(settings: Settings) -> None:
                     )
                     dashboard_hash = (existing or {}).get("hash")
                     if dashboard_id:
-                        put_url = f"{dashboard_url}/{quote(str(dashboard_id), safe='')}?folder=default"
+                        put_url = (
+                            f"{dashboard_url}/{quote(str(dashboard_id), safe='')}?folder=default"
+                        )
                         if dashboard_hash:
                             put_url += f"&hash={quote(str(dashboard_hash), safe='')}"
                         put_request = urllib.request.Request(
@@ -366,7 +366,12 @@ def upsert_openobserve_dashboards(settings: Settings) -> None:
                                 },
                             )
                         continue
-                except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError, OSError):
+                except (
+                    urllib.error.HTTPError,
+                    urllib.error.URLError,
+                    json.JSONDecodeError,
+                    OSError,
+                ):
                     logger.info(
                         "OpenObserve dashboard 409 retry failed",
                         extra={"dashboard": dashboard_file.name},

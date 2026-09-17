@@ -328,26 +328,37 @@ def _item_from_detail_dom(
                     return value
         return ""
 
-    title = _text((
-        '[data-qa="vacancy-title"]',
-        'h1[data-qa*="vacancy"]',
-        "h1",
-    ))
-    description = _text((
-        '[data-qa="vacancy-description"]',
-        '[data-qa*="vacancy-description"]',
-    ))
+    title = _text(
+        (
+            '[data-qa="vacancy-title"]',
+            'h1[data-qa*="vacancy"]',
+            "h1",
+        )
+    )
+    description = _text(
+        (
+            '[data-qa="vacancy-description"]',
+            '[data-qa*="vacancy-description"]',
+        )
+    )
     if not title or not description:
         return None
 
-    company = _text((
-        '[data-qa="vacancy-company-name"]',
-        '[data-qa*="vacancy-company"]',
-    )) or None
-    location = _text((
-        '[data-qa="vacancy-serp__vacancy-address"]',
-        '[data-qa*="vacancy-address"]',
-    ))
+    company = (
+        _text(
+            (
+                '[data-qa="vacancy-company-name"]',
+                '[data-qa*="vacancy-company"]',
+            )
+        )
+        or None
+    )
+    location = _text(
+        (
+            '[data-qa="vacancy-serp__vacancy-address"]',
+            '[data-qa*="vacancy-address"]',
+        )
+    )
     external_id_match = _DETAIL_URL_RE.search(detail_url)
     external_id = external_id_match.group(1) if external_id_match else detail_url
     text_parts = [title]
@@ -540,7 +551,9 @@ class HhParser:
     def _page_count(self, limit: int, page_size: int | None = None) -> int:
         manifest_entry = getattr(self, "_manifest_entry", None)
         extra = getattr(manifest_entry, "extra", {}) if manifest_entry is not None else {}
-        page_size = max(1, int(page_size if page_size is not None else extra.get("listing_page_size", 20)))
+        page_size = max(
+            1, int(page_size if page_size is not None else extra.get("listing_page_size", 20))
+        )
         return max(1, min(50, (limit + page_size - 1) // page_size))
 
     def _extra(self) -> dict[str, Any]:
@@ -635,7 +648,9 @@ class HhParser:
                     break
                 visited_pages.add(current_url)
                 await navigate(page, current_url, browser_config)
-                page_url = urljoin(current_url, str(getattr(page, "url", current_url) or current_url))
+                page_url = urljoin(
+                    current_url, str(getattr(page, "url", current_url) or current_url)
+                )
                 content = await page.content()
                 _raise_or_clear_observed_challenge(page_url, content, bypass_strategy)
                 if not _extract_vacancy_urls(content, page_url, limit=1) and keywords:
@@ -674,7 +689,8 @@ class HhParser:
                 added = len(collected) - before
                 if added:
                     max_pages = max(
-                        max_pages, min(50, page_index + 1 + self._page_count(limit - len(collected), added))
+                        max_pages,
+                        min(50, page_index + 1 + self._page_count(limit - len(collected), added)),
                     )
                 next_url = _extract_next_listing_url(content, page_url)
                 if next_url is None and urls:
@@ -849,8 +865,12 @@ class HhParser:
                     min(50, page_index + 1 + self._page_count(remaining, len(new_urls))),
                 )
             logger.info(
-                "hh.listing_page", page=page_index, added=len(new_urls),
-                discovered=len(collected_urls), max_pages=max_pages, requested=limit,
+                "hh.listing_page",
+                page=page_index,
+                added=len(new_urls),
+                discovered=len(collected_urls),
+                max_pages=max_pages,
+                requested=limit,
             )
             stats = spec.monitor_config.get("_pipeline_stats")
             if stats is not None:
@@ -906,9 +926,7 @@ class HhParser:
             unique_urls.append(detail_url)
 
         detail_urls = (
-            unique_urls
-            if detail_limit is None
-            else unique_urls[: max(0, int(detail_limit))]
+            unique_urls if detail_limit is None else unique_urls[: max(0, int(detail_limit))]
         )
         listing_only_urls = unique_urls[len(detail_urls) :]
         known_detail_ids = {str(value) for value in spec.monitor_config.get("_skip_detail_ids", ())}
@@ -924,10 +942,9 @@ class HhParser:
                 nonlocal shared_page
                 async with browser_lock:
                     if shared_page is None:
-                        native_first = (
-                            getattr(bypass_strategy, "current_name", None) == "noop"
-                            and not getattr(bypass_strategy, "uses_proxy", False)
-                        )
+                        native_first = getattr(
+                            bypass_strategy, "current_name", None
+                        ) == "noop" and not getattr(bypass_strategy, "uses_proxy", False)
                         shared_page = await browser_stack.enter_async_context(
                             open_page(
                                 browser_config,

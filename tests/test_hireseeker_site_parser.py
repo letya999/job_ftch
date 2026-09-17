@@ -162,9 +162,7 @@ def test_hireseeker_builds_local_search_listing_url() -> None:
 
 def test_hireseeker_pins_project_manager_search_to_product_category() -> None:
     urls = HireSeekerParser().build_search_urls("https://hireseeker.ru/", ["project manager"])
-    assert urls == [
-        "https://hireseeker.ru/vacancy-list/product_project?search=project+manager"
-    ]
+    assert urls == ["https://hireseeker.ru/vacancy-list/product_project?search=project+manager"]
 
 
 @pytest.mark.asyncio

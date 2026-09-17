@@ -740,10 +740,7 @@ class HireSeekerParser:
                 cards.update(page_cards)
                 if not preferred_slugs:
                     for category in _category_urls(body, response_url, spec.url):
-                        if (
-                            category not in visited_categories
-                            and category not in category_queue
-                        ):
+                        if category not in visited_categories and category not in category_queue:
                             category_queue.append(category)
                 added = 0
                 for identity, card in page_cards.items():

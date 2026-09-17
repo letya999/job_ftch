@@ -136,7 +136,10 @@ def test_postgres_backend_valid_dsn() -> None:
     )
     assert settings.store_backend == "postgres"
     assert settings.store_dsn is not None
-    assert settings.store_dsn.get_secret_value() == "postgresql+asyncpg://user:pass@host/db"  # pragma: allowlist secret -- fixture DSN
+    assert (
+        settings.store_dsn.get_secret_value()
+        == "postgresql+asyncpg://user:pass@host/db"  # pragma: allowlist secret -- fixture DSN
+    )
 
 
 def test_store_backend_auto_default() -> None:

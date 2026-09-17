@@ -382,7 +382,9 @@ class TenantStore:
     ) -> tuple[IngestTask, ...]:
         if tenant_id != self._tenant_id:
             raise ValueError(f"tenant_id mismatch: {tenant_id} != {self._tenant_id}")
-        return await self._ingest_queue_store().list_active_ingest_tasks(self._tenant_id, run_id=run_id)
+        return await self._ingest_queue_store().list_active_ingest_tasks(
+            self._tenant_id, run_id=run_id
+        )
 
     async def record_ingest_rate_limit(
         self,

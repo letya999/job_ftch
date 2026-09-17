@@ -557,9 +557,7 @@ def test_offers_title_filter_drops_product_manager_for_project_search() -> None:
             },
         ]
     }
-    urls = extract_vacancy_urls_from_offers(
-        payload, limit=10, keywords=["project manager"]
-    )
+    urls = extract_vacancy_urls_from_offers(payload, limit=10, keywords=["project manager"])
     assert urls == ["https://getmatch.ru/vacancies/2-project-manager"]
 
 

@@ -848,7 +848,8 @@ async def test_post_solve_navigation_checks_current_document(monkeypatch, curren
     monkeypatch.setattr(f"{module}._solve_settled_in_place", AsyncMock(return_value=True))
     monkeypatch.setattr(f"{module}._page_has_captcha_marker", AsyncMock(return_value=False))
     config = {
-        "challenge_retries": 0, "_allow_private_selfcheck_fixture": True,
+        "challenge_retries": 0,
+        "_allow_private_selfcheck_fixture": True,
         "_bypass_strategy": SimpleNamespace(observed_challenge_type=None),
     }
     if current_status == 200:

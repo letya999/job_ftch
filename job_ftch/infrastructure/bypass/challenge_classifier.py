@@ -25,6 +25,15 @@ _CHALLENGE_KINDS = {
     FailureKind.CAPTCHA,
     FailureKind.CHALLENGE,
     FailureKind.QRATOR_CHALLENGE,
+    FailureKind.BLOCKED_IP,
+    FailureKind.BLOCKED_FINGERPRINT,
+    FailureKind.BLOCKED_CHROMIUM_FINGERPRINT,
+}
+
+_CAPTCHA_ENCOUNTER_KINDS = {
+    FailureKind.CAPTCHA,
+    FailureKind.CHALLENGE,
+    FailureKind.QRATOR_CHALLENGE,
 }
 
 
@@ -72,7 +81,7 @@ def classify_challenge(
 
 def emit_challenge_detection(domain: str, detection: ChallengeDetection) -> None:
     """Emit a first-class OpenObserve CAPTCHA encounter (token/cookie-safe)."""
-    if not detection.detected:
+    if not detection.detected or detection.kind not in _CAPTCHA_ENCOUNTER_KINDS:
         return
     emit_captcha_event(
         event="captcha_encounter",
@@ -127,7 +136,9 @@ def emit_captcha_solve_outcome(
 def emit_captcha_event(event: str, **fields: Any) -> None:
     """One searchable log row plus an OTel counter for CAPTCHA telemetry."""
     payload = {key: value for key, value in fields.items() if value is not None}
-    logger.info(event, **payload)
+    # Resolve against the current structlog configuration so test capture and
+    # runtime reconfiguration cannot retain a stale bound logger.
+    structlog.get_logger("job_ftch.bypass.challenge").info(event, **payload)
     try:
         counter = _captcha_metric()
         if counter is None:

@@ -895,9 +895,7 @@ class CaptchaSolverBypass:
             if not callable(frame_eval):
                 continue
             try:
-                texts.append(
-                    str(await frame_eval("document.body ? document.body.innerText : ''"))
-                )
+                texts.append(str(await frame_eval("document.body ? document.body.innerText : ''")))
             except Exception:
                 continue
         blob = " ".join(texts).lower()
@@ -931,9 +929,7 @@ class CaptchaSolverBypass:
         height = int(viewport.get("height") or 0)
         if width <= 0 or height <= 0:
             try:
-                size = await page.evaluate(
-                    "({w: window.innerWidth, h: window.innerHeight})"
-                )
+                size = await page.evaluate("({w: window.innerWidth, h: window.innerHeight})")
                 width = int(size.get("w") or 0)
                 height = int(size.get("h") or 0)
             except Exception:
@@ -1145,15 +1141,14 @@ class CaptchaSolverBypass:
                             )
                         )
                         still_on_interstitial = bool(page_url) and is_smartcaptcha_url(page_url)
-                        detection = None
+                        widget_still_up = False
                         if html:
-                            detection = classify_challenge(
+                            widget_still_up = classify_challenge(
                                 surface="smartcaptcha_clear_check",
                                 status_code=200,
                                 body=html,
                                 page_url=page_url,
-                            )
-                        widget_still_up = bool(detection and detection.detected)
+                            ).detected
                         if not still_on_interstitial and not widget_still_up:
                             return True
                         await sleep_with_source_deadline(poll_seconds)

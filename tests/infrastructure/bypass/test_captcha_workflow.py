@@ -673,11 +673,7 @@ async def test_vision_click_order_falls_back_to_openai_on_local_401(
                 return _Response(401, {})
             return _Response(
                 200,
-                {
-                    "choices": [
-                        {"message": {"content": '{"clicks":[{"x":0.4,"y":0.5}]}'}}
-                    ]
-                },
+                {"choices": [{"message": {"content": '{"clicks":[{"x":0.4,"y":0.5}]}'}}]},
             )
 
     monkeypatch.setattr(providers.httpx, "AsyncClient", _Client)
@@ -742,7 +738,9 @@ async def test_type_not_supported_does_not_consume_paid_slot(
     register_captcha_provider("slot_second")(SecondProvider)  # type: ignore[arg-type]
     import job_ftch.infrastructure.bypass.captcha_solver as captcha_solver_mod
 
-    monkeypatch.setitem(captcha_solver_mod.CAPTCHA_PROVIDER_ENV_KEYS, "slot_first", "SLOT_FIRST_KEY")
+    monkeypatch.setitem(
+        captcha_solver_mod.CAPTCHA_PROVIDER_ENV_KEYS, "slot_first", "SLOT_FIRST_KEY"
+    )
     monkeypatch.setitem(
         captcha_solver_mod.CAPTCHA_PROVIDER_ENV_KEYS, "slot_second", "SLOT_SECOND_KEY"
     )

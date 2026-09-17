@@ -84,7 +84,7 @@ def _raise_if_yandex_captcha(response: Any, url: str) -> None:
         url=final_url,
         status_code=status_code if isinstance(status_code, int) else None,
         headers=headers,
-        body=body if isinstance(body, (bytes, bytearray)) else None,
+        body=bytes(body) if isinstance(body, (bytes, bytearray)) else None,
         challenge_type=detection.challenge_type,
         confidence=detection.confidence,
         evidence_hash=detection.evidence_hash,

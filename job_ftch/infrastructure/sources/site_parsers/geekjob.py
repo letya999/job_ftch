@@ -223,9 +223,7 @@ def _detail_payload(
         return None
     posting = _parse_job_posting_jsonld(html_text)
     scraped = parse_html(html_text, url=detail_url)
-    dom_title, dom_description, dom_company, dom_locations, dom_job_format = _dom_detail(
-        html_text
-    )
+    dom_title, dom_description, dom_company, dom_locations, dom_job_format = _dom_detail(html_text)
     title = str((posting or {}).get("title") or (posting or {}).get("name") or "").strip()
     description_value = (posting or {}).get("description")
     description = description_value if isinstance(description_value, str) else None
@@ -336,9 +334,9 @@ def _listing_cards(html_text: str, base_url: str) -> dict[str, dict[str, str]]:
         identity = _detail_identity(url)
         title = " ".join(anchor.text(separator=" ", strip=True).split())
         card: Any = anchor
-        while card is not None and "vacancy" not in str(
-            card.attributes.get("class") or ""
-        ).casefold():
+        while (
+            card is not None and "vacancy" not in str(card.attributes.get("class") or "").casefold()
+        ):
             card = card.parent
         card_text = " ".join((card or anchor).text(separator=" ", strip=True).split())
         current = cards.get(identity)
@@ -735,9 +733,7 @@ class GeekJobParser:
                     page, keywords, timeout_ms=_as_int(config.get("timeout"), 30_000)
                 ):
                     content = await page.content()
-                    page_url = urljoin(
-                        page_url, str(getattr(page, "url", page_url) or page_url)
-                    )
+                    page_url = urljoin(page_url, str(getattr(page, "url", page_url) or page_url))
                     if is_challenge_response(content):
                         raise _challenge_error(page_url, content)
                     page_cards = _listing_cards(content, page_url)
@@ -759,8 +755,12 @@ class GeekJobParser:
                     if not _is_detail_url(url) or identity in seen:
                         continue
                     card = cards.get(identity)
-                    if keywords and card and not listing_matches_keywords(
-                        card.get("title", ""), card.get("text", ""), keywords
+                    if (
+                        keywords
+                        and card
+                        and not listing_matches_keywords(
+                            card.get("title", ""), card.get("text", ""), keywords
+                        )
                     ):
                         continue
                     seen.add(identity)
@@ -794,7 +794,9 @@ class GeekJobParser:
             content = await page.content()
             if is_challenge_response(content):
                 raise _challenge_error(final_url, content)
-            if not _is_detail_url(final_url) or _detail_identity(final_url) != _detail_identity(url):
+            if not _is_detail_url(final_url) or _detail_identity(final_url) != _detail_identity(
+                url
+            ):
                 return None
             return _detail_payload(final_url, content, spec.url)
 
@@ -817,7 +819,9 @@ class GeekJobParser:
 
         if response is not None:
             final_url = _canonical_url(str(getattr(response, "url", url) or url))
-            if not _is_detail_url(final_url) or _detail_identity(final_url) != _detail_identity(url):
+            if not _is_detail_url(final_url) or _detail_identity(final_url) != _detail_identity(
+                url
+            ):
                 return None
             body = str(getattr(response, "text", "") or "")
             if is_challenge_response(body):
@@ -862,9 +866,7 @@ class GeekJobParser:
                 break
             response_url = str(getattr(response, "url", page_url) or page_url)
             body = str(getattr(response, "text", "") or "")
-            for url in extract_urls_with_limit(
-                body, detail_re, response_url, limit, seen=seen
-            ):
+            for url in extract_urls_with_limit(body, detail_re, response_url, limit, seen=seen):
                 collected.append(_canonical_url(url))
                 if len(collected) >= limit:
                     return collected[:limit]

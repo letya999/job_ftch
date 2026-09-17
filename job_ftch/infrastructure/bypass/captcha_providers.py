@@ -661,9 +661,7 @@ class CapSolverProvider(_BaseProvider):
                     if task_id:
                         break
                     last_reject = created
-                    reject_notes.append(
-                        f"{task_type}:{_provider_error_text(created, 'rejected')}"
-                    )
+                    reject_notes.append(f"{task_type}:{_provider_error_text(created, 'rejected')}")
                 if not task_id:
                     return _rejected(
                         "capsolver",
@@ -1258,9 +1256,7 @@ class CapMonsterProvider(_BaseProvider):
                     task_id = created.get("taskId")
                     if created.get("errorId", 0) == 0 and task_id:
                         break
-                    reject_notes.append(
-                        f"{task_type}:{_provider_error_text(created, 'rejected')}"
-                    )
+                    reject_notes.append(f"{task_type}:{_provider_error_text(created, 'rejected')}")
                     task_id = None
                 if not task_id:
                     return _rejected("capmonster", ";".join(reject_notes) or "createTask failed")

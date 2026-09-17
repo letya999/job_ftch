@@ -105,7 +105,7 @@ async def await_with_source_deadline[T](
         raise
 
 
-async def _drain_cancelled(task: asyncio.Future[object]) -> None:
+async def _drain_cancelled[T](task: asyncio.Future[T]) -> None:
     """Wait briefly for a cancelled child; do not block on uncancellable I/O."""
     if task.done():
         return

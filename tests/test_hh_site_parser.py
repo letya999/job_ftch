@@ -83,7 +83,9 @@ def test_explicit_limit_scales_beyond_production_page_budget() -> None:
     from types import SimpleNamespace
 
     parser = HhParser()
-    parser._manifest_entry = SimpleNamespace(extra={"max_listing_pages": 5, "listing_page_size": 50})
+    parser._manifest_entry = SimpleNamespace(
+        extra={"max_listing_pages": 5, "listing_page_size": 50}
+    )
     assert parser._max_listing_pages() == 5
     assert parser._max_listing_pages(500) == 10
     assert parser._max_listing_pages(535) == 11
@@ -102,17 +104,25 @@ async def test_discovery_adapts_to_actual_page_size() -> None:
         next_link = f'<a rel="next" href="{base}&page={index + 1}">Next</a>' if index < 5 else ""
         alias = detail.replace("hh.ru", "spb.hh.ru")
         responses[listing] = _FakeResponse(
-            f'<a href="{detail}">AI Engineer</a><a href="{alias}">Same vacancy</a>{next_link}', listing
+            f'<a href="{detail}">AI Engineer</a><a href="{alias}">Same vacancy</a>{next_link}',
+            listing,
         )
         responses[detail] = _FakeResponse(
             '<script type="application/ld+json">{"@type":"JobPosting",'
-            '"title":"AI Engineer","description":"Build models"}</script>', detail,
+            '"title":"AI Engineer","description":"Build models"}</script>',
+            detail,
         )
     parser = HhParser()
-    parser._manifest_entry = SimpleNamespace(extra={"max_listing_pages": 1, "listing_page_size": 100})
-    items = [item async for item in parser.parse(
-        CareerSiteSpec(url=base, source_name="hh", limit=6, detail_limit=6), _FakeClient(responses)
-    )]
+    parser._manifest_entry = SimpleNamespace(
+        extra={"max_listing_pages": 1, "listing_page_size": 100}
+    )
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(url=base, source_name="hh", limit=6, detail_limit=6),
+            _FakeClient(responses),
+        )
+    ]
     assert len(items) == 6
 
 
@@ -268,7 +278,8 @@ async def test_hh_parser_emits_items_from_listing_and_detail_pages() -> None:
     assert "Data Scientist" in items[0].text
     assert "ML Engineer" in items[1].text
     resumed = [
-        item async for item in parser.parse(
+        item
+        async for item in parser.parse(
             spec.model_copy(update={"monitor_config": {"_skip_detail_ids": ["123"]}}), client
         )
     ]
@@ -295,7 +306,9 @@ async def test_hh_parser_merges_browser_discovery_after_partial_http_listing(
         async def apply_http(self, value: object) -> object:
             return value
 
-    async def _discover(*args: object, **kwargs: object) -> tuple[list[str], dict[str, tuple[str, object]]]:
+    async def _discover(
+        *args: object, **kwargs: object
+    ) -> tuple[list[str], dict[str, tuple[str, object]]]:
         del args, kwargs
         return [second_url], {"456": ("Second", None)}
 
