@@ -58,6 +58,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_drop_attribution.py](test_drop_attribution.py)
 - [test_dynamic_source_pool.py](test_dynamic_source_pool.py)
 - [test_embed_profile_examples.py](test_embed_profile_examples.py)
+- [test_employer_board_discovery.py](test_employer_board_discovery.py)
 - [test_evaluate_classification.py](test_evaluate_classification.py)
 - [test_eviction_penalty.py](test_eviction_penalty.py)
 - [test_extraction.py](test_extraction.py)
