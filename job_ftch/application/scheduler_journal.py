@@ -62,7 +62,10 @@ async def _save_scheduler_journal(
 
 
 def _is_complete(record: dict[str, object]) -> bool:
-    return record.get("run_state") == "succeeded" and record.get("publish_state") == "succeeded"
+    return (
+        record.get("run_state") in {"succeeded", "skipped"}
+        and record.get("publish_state") == "succeeded"
+    )
 
 
 def _find_slot(journal: list[dict[str, object]], slot_id: str) -> dict[str, object] | None:

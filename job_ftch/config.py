@@ -241,6 +241,10 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     openai_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     openai_max_retries: int = Field(default=2, ge=0, le=10)
+    llm_preflight_enabled: bool = True
+    llm_preflight_timeout_seconds: float = Field(default=15.0, gt=0.0, le=120.0)
+    llm_quota_retry_delay_seconds: int = Field(default=1800, ge=60, le=86400)
+    llm_quota_max_retries: int = Field(default=2, ge=0, le=10)
     career_site_url: str | None = None
     career_site_default_limit: int = Field(default=50, gt=0)
     career_site_default_detail_limit: int | None = Field(default=50, ge=1)

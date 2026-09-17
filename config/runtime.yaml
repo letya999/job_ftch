@@ -57,6 +57,12 @@ relevance_llm_model: gpt-4.1-mini
 ontology_compiler_model: gpt-4.1-mini
 openai_timeout_seconds: 30.0
 openai_max_retries: 2
+# One tiny request must succeed before source fetch starts. Quota failures use
+# two 30-minute checks, then wait for the regular schedule window.
+llm_preflight_enabled: true
+llm_preflight_timeout_seconds: 15.0
+llm_quota_retry_delay_seconds: 1800
+llm_quota_max_retries: 2
 ontology_compiler_timeout_seconds: 120.0
 
 career_site_timeout_seconds: 15.0

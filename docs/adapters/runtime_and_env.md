@@ -17,6 +17,7 @@ updated: 2026-09-16
 - `config/runtime.dev.yaml` — dev-override.
 - `config/runtime.prod.yaml` — prod-override.
 - `config/runtime.cliproxy.yaml` — overlay моделей для CLIProxyAPI; включается через `JOB_FTCH_LLM_GATEWAY=cliproxy`.
+- `docs/operations/cliproxy-vps.md` — Compose sidecar, loopback ports, Google OAuth и подключение к bot.
 - `job_ftch/adapters/telegram_bot/runtime.dev.yaml` — bot-специфичный dev runtime.
 - `job_ftch/adapters/telegram_bot/runtime.prod.yaml` — bot-специфичный prod runtime.
 - `job_ftch/adapters/telegram_bot/config/tenants/*.yaml` — tenant-level sources и wiring.
@@ -28,6 +29,7 @@ updated: 2026-09-16
 - `.env.prod.example`
 - `.env.cliproxy.example` — локальный CLIProxyAPI: `JOB_FTCH_OPENAI_BASE_URL=http://127.0.0.1:8317/v1`
 - Image captcha OCR fallback: `JOB_FTCH_CAPTCHA_VISION_BASE_URL` / `JOB_FTCH_CAPTCHA_VISION_MODEL`. Auth is `JOB_FTCH_OPENAI_API_KEY` (or `OPENAI_API_KEY`). Это не `JOB_FTCH_LLM_GATEWAY`.
+- LLM preflight/quota guard: `JOB_FTCH_LLM_PREFLIGHT_ENABLED`, `JOB_FTCH_LLM_PREFLIGHT_TIMEOUT_SECONDS`, `JOB_FTCH_LLM_QUOTA_RETRY_DELAY_SECONDS`, `JOB_FTCH_LLM_QUOTA_MAX_RETRIES`.
 - Local/dev captcha allowlist: `JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=*` (see `.env.dev.example` and `config/runtime.dev.yaml`). Empty env denies every domain and overrides YAML. Prod template stays empty.
 - `job_ftch/adapters/telegram_bot/.env.dev.example`
 - `job_ftch/adapters/telegram_bot/.env.prod.example`
