@@ -73,6 +73,9 @@ class RuntimeRunReport:
     llm_cost_usd: float
     llm_usage_requests: int
     llm_cost_is_complete: bool
+    completion_state: str = "completed"
+    llm_quota_exhausted: bool = False
+    llm_health_error: str = ""
 
     @property
     def seen_dominates_drops(self) -> bool:
@@ -136,6 +139,9 @@ def build_runtime_run_report(summary: object, *, duration_seconds: int) -> Runti
         llm_cost_usd=float(getattr(summary, "llm_cost_usd", 0.0) or 0.0),
         llm_usage_requests=int(getattr(summary, "llm_usage_requests", 0) or 0),
         llm_cost_is_complete=bool(getattr(summary, "llm_cost_is_complete", True)),
+        completion_state=str(getattr(summary, "completion_state", "completed") or "completed"),
+        llm_quota_exhausted=bool(getattr(summary, "llm_quota_exhausted", False)),
+        llm_health_error=str(getattr(summary, "llm_health_error", "") or ""),
     )
 
 
@@ -168,6 +174,11 @@ def render_runtime_run_report_text(report: RuntimeRunReport) -> str:
             for item in report.source_failures
         ]
         text += "\n<i>Проблемные источники: " + "; ".join(problem_lines) + "</i>"
+    if report.llm_quota_exhausted:
+        text += "\n\n⚠️ <b>LLM: квота исчерпана.</b> "
+        text += html.escape(report.llm_health_error or "Новые обращения временно остановлены.")
+    elif report.llm_health_error:
+        text += "\n\n⚠️ <b>LLM недоступна.</b> " + html.escape(report.llm_health_error)
     return text
 
 

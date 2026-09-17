@@ -310,7 +310,13 @@ async def _send_scheduler_run_report(
         logger.warning("scheduler_owner_report_state_failed", tenant_id=tenant_id, error=str(exc))
     report = build_runtime_run_report(run_result, duration_seconds=duration_seconds)
     footer = render_runtime_run_footer(report)
-    text = f"✅ Автозапуск готов  {footer}\n\n{render_runtime_run_report_text(report)}"
+    if report.completion_state == "llm_preflight_blocked":
+        heading = "⚠️ Автозапуск пропущен: LLM недоступна"
+    elif report.llm_quota_exhausted:
+        heading = "⚠️ Автозапуск завершён с проблемой LLM"
+    else:
+        heading = "✅ Автозапуск готов"
+    text = f"{heading}  {footer}\n\n{render_runtime_run_report_text(report)}"
     if skipped_reason:
         text += f"\n\n⏭ Публикация пропущена: {skipped_reason}."
     elif publish_error:
@@ -546,6 +552,14 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                 incomplete_run = last_run is not None and (
                     last_success is None or last_success < last_run
                 )
+                llm_blocked_until = _parse_scheduler_timestamp(
+                    await _maybe_await(store.get_run_state("bot_scheduler:llm_quota_blocked_until"))
+                )
+                if llm_blocked_until is not None and now < llm_blocked_until:
+                    # A preflight-skipped run is already terminal in the journal;
+                    # do not let the legacy last-success heuristic replay it every
+                    # scheduler tick while the durable LLM backoff is active.
+                    incomplete_run = False
                 pending_since = _parse_scheduler_timestamp(pending_raw)
                 scheduler_slot = await ensure_scheduler_slot(
                     store,
@@ -696,6 +710,42 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         publish_user_id=publish_user_id,
                         duration_seconds=int(time.monotonic() - run_monotonic_start),
                         error=run_err,
+                    )
+                    continue
+                if getattr(run_result, "completion_state", "") == "llm_preflight_blocked":
+                    preflight_message = str(
+                        getattr(run_result, "llm_health_error", "llm_unavailable")
+                        or "llm_unavailable"
+                    )
+                    await update_scheduler_slot(
+                        store,
+                        scheduler_slot_id,
+                        run_state="skipped",
+                        run_id=str(getattr(run_result, "source_run_id", "") or ""),
+                        run_finished_at=datetime.now(UTC).isoformat(),
+                        run_error=preflight_message,
+                        publish_state="succeeded",
+                        publish_reason="llm_preflight_blocked",
+                        published_at=datetime.now(UTC).isoformat(),
+                    )
+                    await _maybe_await(
+                        store.set_run_state("bot_scheduler:last_error", preflight_message)
+                    )
+                    await _maybe_await(store.set_run_state("bot_scheduler:last_run_emitted", "0"))
+                    await _send_scheduler_run_report(
+                        bot,
+                        store=store,
+                        tenant_id=tenant_id,
+                        publish_user_id=publish_user_id,
+                        run_result=run_result,
+                        duration_seconds=int(time.monotonic() - run_monotonic_start),
+                        channel_sent=0,
+                        skipped_reason="ingestion не запускался",
+                    )
+                    logger.info(
+                        "scheduler_skipped_llm_preflight",
+                        tenant_id=tenant_id,
+                        retry_at=str(getattr(run_result, "next_retry_at", "") or ""),
                     )
                     continue
                 # Nothing ran (tenant lock held elsewhere): do not record a success

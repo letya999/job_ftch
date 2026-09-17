@@ -33,6 +33,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_graph_v2_contract.py](test_graph_v2_contract.py)
 - [test_ingest_queue.py](test_ingest_queue.py)
 - [test_legacy_experiment_graphs.py](test_legacy_experiment_graphs.py)
+- [test_llm_quota.py](test_llm_quota.py)
 - [test_llm_usage.py](test_llm_usage.py)
 - [test_logging.py](test_logging.py)
 - [test_logging_sanitization.py](test_logging_sanitization.py)

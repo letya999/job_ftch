@@ -44,6 +44,12 @@ except ImportError:
     AsyncOpenAI = None  # type: ignore[assignment,misc]
     _OPENAI_AVAILABLE = False
 
+from job_ftch.application.llm_quota import (
+    LLMPreflightResult,
+    LLMQuotaExhaustedError,
+    is_quota_exhausted_error,
+    safe_llm_error,
+)
 from job_ftch.application.llm_usage import record_provider_usage
 from job_ftch.application.registry import register_llm
 
@@ -149,6 +155,7 @@ class OpenAIInstructorLLMProvider:
         base_url: str | None,
         timeout_seconds: float,
         max_retries: int,
+        preflight_timeout_seconds: float | None = None,
     ) -> None:
         if not _INSTRUCTOR_AVAILABLE:
             raise ImportError(
@@ -160,6 +167,9 @@ class OpenAIInstructorLLMProvider:
         self.model_id = model
         self._max_retries = max_retries
         self._timeout_seconds = timeout_seconds
+        self._preflight_timeout_seconds = preflight_timeout_seconds or min(timeout_seconds, 15.0)
+        self._quota_exhausted = False
+        self._last_llm_error = ""
         # The SDK timeout is per HTTP attempt. Instructor may retry parsing
         # internally, so retain an outer deadline for the whole operation.
         # Without it a stalled response can hold an eval run forever.
@@ -180,7 +190,7 @@ class OpenAIInstructorLLMProvider:
             api_key=api_key,
             base_url=base_url,
             timeout=timeout_seconds,
-            max_retries=max_retries,
+            max_retries=0,
         )
         # Free-form-text client. A bare AsyncOpenAI is needed because
         # the instructor wrapper above cannot do schema-less
@@ -189,8 +199,54 @@ class OpenAIInstructorLLMProvider:
             api_key=api_key,
             base_url=base_url,
             timeout=timeout_seconds,
-            max_retries=max_retries,
+            max_retries=0,
         )
+
+    @property
+    def quota_exhausted(self) -> bool:
+        return self._quota_exhausted
+
+    @property
+    def last_error(self) -> str:
+        return self._last_llm_error
+
+    async def preflight(self) -> LLMPreflightResult:
+        """Check connectivity and quota with one deliberately tiny request."""
+        started = monotonic()
+        try:
+            async with asyncio.timeout(self._preflight_timeout_seconds):
+                response = await self._raw_client.chat.completions.create(
+                    model=self._model,
+                    messages=[{"role": "user", "content": "Reply with OK."}],
+                    **_completion_token_limit_kwargs(self._model, 8),
+                )
+        except Exception as exc:
+            self._last_llm_error = safe_llm_error(exc)
+            if is_quota_exhausted_error(exc):
+                self._quota_exhausted = True
+                return LLMPreflightResult(
+                    available=False,
+                    quota_exhausted=True,
+                    error="llm_quota_exhausted",
+                    model=self._model,
+                )
+            return LLMPreflightResult(
+                available=False,
+                error=self._last_llm_error,
+                model=self._model,
+            )
+        self._quota_exhausted = False
+        self._last_llm_error = ""
+        record_provider_usage(
+            model=self._model,
+            usage=getattr(response, "usage", None),
+            latency_ms=round((monotonic() - started) * 1000),
+        )
+        return LLMPreflightResult(available=True, model=self._model)
+
+    def _raise_if_quota_exhausted(self) -> None:
+        if self._quota_exhausted:
+            raise LLMQuotaExhaustedError("llm_quota_exhausted")
 
     async def extract(self, text: str, schema: type[Any]) -> Any:
         return await self._structured_create(
@@ -233,13 +289,14 @@ class OpenAIInstructorLLMProvider:
         max_tokens: int,
         timeout_seconds: float | None = None,
     ) -> Any:
+        self._raise_if_quota_exhausted()
         started = monotonic()
         per_attempt = timeout_seconds if timeout_seconds is not None else self._timeout_seconds
         # An explicit per-call timeout (ontology compile) is the whole deadline.
         # Multiplying by retries made CLIProxy classify wait 120s * (retries+1).
         explicit_timeout = timeout_seconds is not None
         operation_timeout = per_attempt if explicit_timeout else self._operation_timeout_seconds
-        instructor_retries = 0 if explicit_timeout else self._max_retries
+        instructor_retries = 0
         request_kwargs: dict[str, Any] = _completion_token_limit_kwargs(self._model, max_tokens)
         if timeout_seconds is not None:
             request_kwargs["timeout"] = timeout_seconds
@@ -260,6 +317,10 @@ class OpenAIInstructorLLMProvider:
                     )
                     break
                 except Exception as exc:
+                    if is_quota_exhausted_error(exc):
+                        self._quota_exhausted = True
+                        self._last_llm_error = safe_llm_error(exc)
+                        raise LLMQuotaExhaustedError("llm_quota_exhausted") from exc
                     logger.warning(
                         "openai_call_retry" if attempt < attempts - 1 else "openai_call_failed",
                         provider="openai",
@@ -286,6 +347,7 @@ class OpenAIInstructorLLMProvider:
         *,
         temperature: float = 0.2,
     ) -> str:
+        self._raise_if_quota_exhausted()
         started = monotonic()
         try:
             async with asyncio.timeout(self._operation_timeout_seconds):
@@ -299,6 +361,10 @@ class OpenAIInstructorLLMProvider:
                     **_completion_token_limit_kwargs(self._model, _GENERATE_MAX_TOKENS),
                 )
         except Exception as exc:
+            if is_quota_exhausted_error(exc):
+                self._quota_exhausted = True
+                self._last_llm_error = safe_llm_error(exc)
+                raise LLMQuotaExhaustedError("llm_quota_exhausted") from exc
             logger.warning(
                 "openai_call_failed",
                 provider="openai",
@@ -328,4 +394,5 @@ def _build_openai_llm(settings: Settings) -> OpenAIInstructorLLMProvider:
         base_url=settings.openai_base_url,
         timeout_seconds=settings.openai_timeout_seconds,
         max_retries=settings.openai_max_retries,
+        preflight_timeout_seconds=settings.llm_preflight_timeout_seconds,
     )

@@ -116,3 +116,35 @@ async def test_recovery_slot_is_complete_only_after_both_phases() -> None:
             "run_attempts": 0,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_preflight_skipped_slot_does_not_stay_incomplete() -> None:
+    store = _Store()
+    marker = datetime(2026, 8, 2, 16, 0, tzinfo=UTC)
+    slot = await ensure_scheduler_slot(
+        store,
+        now=marker,
+        interval_seconds=4 * 60 * 60,
+        recovery_marker=marker,
+    )
+    assert slot is not None
+
+    await update_scheduler_slot(
+        store,
+        str(slot["slot_id"]),
+        run_state="skipped",
+        publish_state="succeeded",
+        publish_reason="llm_preflight_blocked",
+    )
+    assert await load_scheduler_journal(store) == [
+        {
+            "slot_id": marker.isoformat(),
+            "scheduled_for": marker.isoformat(),
+            "run_state": "skipped",
+            "publish_state": "succeeded",
+            "publish_since": marker.isoformat(),
+            "run_attempts": 0,
+            "publish_reason": "llm_preflight_blocked",
+        }
+    ]
