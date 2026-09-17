@@ -38,7 +38,7 @@ browser = ["patchright>=1.49", "cloakbrowser>=0.5.1"]
 camoufox = ["camoufox>=0.5.4"]
 nodriver = ["nodriver>=0.50.2"]
 parity_lab = [
-    "cryptography==50.0.0",
+    "cryptography==50.0.1",
     "httpx[http2]>=0.28.1,<0.29",
     "hypercorn[h3]==0.18.0",
     "maxminddb==3.1.1",
