@@ -2091,7 +2091,7 @@ class TenantRunner:
                     )
                     if wait_time < source_interval:
                         logger.info(
-                            "source_rate_limited",
+                            "source_not_due",
                             source_id=sid,
                             wait_remaining=source_interval - wait_time,
                         )
@@ -2100,12 +2100,7 @@ class TenantRunner:
                                 "source_id": sid,
                                 "source_kind": str(getattr(spec, "type", "unknown")),
                                 "source_name": source_spec_name(spec),
-                                "status": (
-                                    "not_due"
-                                    if spec.interval_seconds
-                                    and wait_time < float(spec.interval_seconds)
-                                    else "rate_limited"
-                                ),
+                                "status": "not_due",
                                 "completion_state": "skipped",
                             }
                         )

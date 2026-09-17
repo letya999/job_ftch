@@ -40,6 +40,15 @@ def reset_operator_page(token: Token[Any | None]) -> None:
     _ATTACHED_OPERATOR_PAGE.reset(token)
 
 
+def _default_browser_geo(settings: Any) -> tuple[str, str | None]:
+    country = str(getattr(settings, "proxy_country_default", "") or "RU").upper()
+    locales = getattr(settings, "proxy_locale_by_country", None) or {}
+    timezones = getattr(settings, "proxy_timezone_by_country", None) or {}
+    locale = str(locales.get(country) or "en-US")
+    timezone_id = timezones.get(country)
+    return locale, str(timezone_id) if timezone_id else None
+
+
 def resolve_identity_ua(config: dict[str, Any], persona_kw: dict[str, Any]) -> str | None:
     """The identity's coherent User-Agent, or ``None`` to keep the real one.
 
@@ -885,10 +894,13 @@ async def _open_playwright_page(
         launch_kwargs["channel"] = channel
 
     persona_kw = bypass_ctx.context_kwargs() if bypass_ctx else {}
+    fallback_locale, fallback_timezone = (
+        _default_browser_geo(settings) if use_proxy else ("en-US", None)
+    )
     context_kwargs: dict[str, Any] = {
         "viewport": config.get("viewport")
         or persona_kw.get("viewport", {"width": 1440, "height": 900}),
-        "locale": config.get("locale") or persona_kw.get("locale", "en-US"),
+        "locale": config.get("locale") or persona_kw.get("locale") or fallback_locale,
         "ignore_https_errors": config.get("skip_ssl", True),
     }
     identity_ua = resolve_identity_ua(config, persona_kw)
@@ -902,8 +914,10 @@ async def _open_playwright_page(
         launch_kwargs["_process_identity_locale"] = context_kwargs["locale"]
     if config.get("timezone_id"):
         context_kwargs["timezone_id"] = config["timezone_id"]
-    if persona_kw.get("timezone_id") and "timezone_id" not in config:
+    elif persona_kw.get("timezone_id"):
         context_kwargs["timezone_id"] = persona_kw["timezone_id"]
+    elif fallback_timezone:
+        context_kwargs["timezone_id"] = fallback_timezone
 
     if use_proxy:
         proxy_url = config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY")
@@ -1028,13 +1042,16 @@ async def _open_persistent_page(
         args.append("--headless=new")
     args.append(_browser_session_switch(session_id))
 
+    fallback_locale, fallback_timezone = (
+        _default_browser_geo(settings) if use_proxy else ("en-US", None)
+    )
     launch_kwargs: dict[str, Any] = {
         "user_data_dir": user_data_dir,
         "headless": headless,
         "args": args,
         "viewport": config.get("viewport")
         or persona_kw.get("viewport", {"width": 1440, "height": 900}),
-        "locale": config.get("locale") or persona_kw.get("locale", "en-US"),
+        "locale": config.get("locale") or persona_kw.get("locale") or fallback_locale,
         "ignore_https_errors": config.get("skip_ssl", True),
         "timeout": settings.browser_context_timeout_ms,
     }
@@ -1045,8 +1062,10 @@ async def _open_persistent_page(
         launch_kwargs["channel"] = channel
     if config.get("timezone_id"):
         launch_kwargs["timezone_id"] = config["timezone_id"]
-    if persona_kw.get("timezone_id") and "timezone_id" not in config:
+    elif persona_kw.get("timezone_id"):
         launch_kwargs["timezone_id"] = persona_kw["timezone_id"]
+    elif fallback_timezone:
+        launch_kwargs["timezone_id"] = fallback_timezone
 
     if use_proxy:
         proxy_url = config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY")

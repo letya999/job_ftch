@@ -50,7 +50,9 @@ Residential proxies are a paid rescue tier, not the default route for every
 career site. The root `.env*.example` files contain a DataImpulse RU gateway
 profile (`gw.dataimpulse.com:823`) with 1 GB total per-process budget,
 0.05 GB per-domain budget, allow-domains for Habr/Higgsfield/EPAM rescue sources, and
-deny-domains for banking/government targets. Real `JOB_FTCH_PROXY_USER` and
+deny-domains for banking/government targets. An empty
+`JOB_FTCH_PROXY_RESCUE_ALLOW_DOMAINS` denies every domain; `*` allows all
+(deny-list still wins). Real `JOB_FTCH_PROXY_USER` and
 `JOB_FTCH_PROXY_PASS` values must live only in local/compose env files.
 
 ## Практическое правило

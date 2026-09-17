@@ -402,16 +402,19 @@ class AdaptiveBypassManager:
 
     def _resolve_proxy_country(self) -> str:
         """Resolve the country of the active proxy for geolocation coherence."""
+        from job_ftch.config import get_settings
+
+        default = str(get_settings().proxy_country_default or "RU").upper()
         if not self.uses_proxy or self._context is None:
-            return "US"
+            return default
         proxy_url = getattr(self._context, "current_proxy_url", None)
         if not proxy_url:
-            return "US"
+            return default
         active_proxy = getattr(self._context, "_active_proxy", None)
         country = getattr(active_proxy, "country", None)
         if country:
             return str(country).upper()
-        return "US"
+        return default
 
     _TEMPORAL_HINT_CAP: float = 2.0
 
@@ -778,6 +781,7 @@ class AdaptiveBypassManager:
                 prepared["timezone_id"] = persona_kw["timezone_id"]
             if persona_kw.get("viewport") and not prepared.get("viewport"):
                 prepared["viewport"] = persona_kw["viewport"]
+        self._overlay_proxy_geo(prepared)
         if prepared.get("persistent_context"):
             if self._profile_dir is None:
                 domain_profile = self._domain_profile_dir()
@@ -828,6 +832,36 @@ class AdaptiveBypassManager:
             prepared["cookies"] = list(by_key.values())[:_MAX_SESSION_COOKIES]
         self._maybe_add_warmup(prepared)
         return prepared
+
+    def _overlay_proxy_geo(self, prepared: dict[str, Any]) -> None:
+        """Align Playwright timezone/locale with the proxy country.
+
+        Cloak/Patchright cannot consume Camoufox ``geoip``, so the country
+        maps on Settings own timezone and locale when a proxy is active.
+        """
+        if not self.uses_proxy:
+            return
+        from job_ftch.config import get_settings
+
+        settings = get_settings()
+        country = self._resolve_proxy_country()
+        timezone_id = (settings.proxy_timezone_by_country or {}).get(country)
+        locale = (settings.proxy_locale_by_country or {}).get(country)
+        if timezone_id:
+            prepared["timezone_id"] = timezone_id
+        if locale:
+            prepared["locale"] = locale
+
+    def _js_hardening_enabled(self) -> bool:
+        family = self._capabilities[self.current_name].browser_family or ""
+        from job_ftch.config import get_settings
+
+        allowed = {
+            item.strip()
+            for item in get_settings().bypass_js_hardening_browser_families
+            if item and item.strip()
+        }
+        return family in allowed
 
     def _maybe_add_warmup(self, prepared: dict[str, Any]) -> None:
         """Inject a cold-profile-only warm-up navigation to the domain root (B3).
@@ -1148,11 +1182,14 @@ class AdaptiveBypassManager:
         preflight/monitor detector, but the live browser page later no longer
         contains an easy-to-detect site marker. Keeping the detector's typed
         observation lets the solver route to the intended provider instead of
-        falling back to an ``unknown`` DOM guess.
+        falling back to an ``unknown`` DOM guess. Pass ``None`` or blank to
+        clear a leftover stamp after a successful listing.
         """
-        if isinstance(challenge_type, str) and challenge_type.strip():
-            self._observed_challenge_type = challenge_type.strip()
-            self._challenge_solver_terminal = False
+        if not isinstance(challenge_type, str) or not challenge_type.strip():
+            self._observed_challenge_type = None
+            return
+        self._observed_challenge_type = challenge_type.strip()
+        self._challenge_solver_terminal = False
 
     @property
     def challenge_solution_requires_reload(self) -> bool:
@@ -1327,6 +1364,23 @@ class AdaptiveBypassManager:
             return kind
         if decision.action is TransitionAction.DEBOUNCED_PROXY:
             self._record_failure(source_id, kind)
+            from job_ftch.config import get_settings
+
+            keep_proxy = bool(get_settings().bypass_keep_proxy_on_engine_connect_error)
+            if (
+                self.adaptive_enabled
+                and keep_proxy
+                and kind is FailureKind.CONNECT_ERROR
+                and self.uses_proxy
+                and self.escalate()
+            ):
+                logger.info(
+                    "bypass_engine_connect_error_keep_proxy",
+                    failure_kind=kind,
+                    engine=self.current_name,
+                    network=self._route_state.network.value,
+                )
+                return kind
             if (
                 self.adaptive_enabled
                 and kind in self.DEBOUNCED_NETWORK_KINDS
@@ -1461,16 +1515,13 @@ class AdaptiveBypassManager:
         # ``self._context.apply_page(page)`` call has been removed because it
         # injected a second, conflicting copy of the persona hardening blob.
         await self._current_strategy.apply_page(page)
-        family = self._capabilities[self.current_name].browser_family or "chromium"
-        is_chromium = family.startswith("chromium")
-        # The reCAPTCHA action probe and the Chromium stealth blob are
-        # Blink-specific. Injecting them into a Firefox engine (camoufox) both
-        # fails and destroys camoufox's own C++-level fingerprint coherence, so
-        # they are gated to Chromium-family engines only.
-        if is_chromium:
+        harden_js = self._js_hardening_enabled()
+        # JS stealth is allowlisted (chromium / chromium_patchright by default).
+        # Cloak (chromium_patched) and Firefox (camoufox) keep native identity.
+        if harden_js:
             await self._install_recaptcha_action_probe(page)
         await self._behavior_sim.apply_page(page)
-        if is_chromium:
+        if harden_js:
             await self._apply_per_request_hardening(page)
 
         from job_ftch.infrastructure.bypass.multi_layer_obfuscation import ObfuscationContext

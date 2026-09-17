@@ -34,6 +34,25 @@ class AtsRedirectException(Exception):
         self.url = url
 
 
+class ListingHostMismatchError(Exception):
+    """Listing HTTP followed onto a different host (geo or classifieds hop)."""
+
+    kind = "listing_redirected"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        url: str | None = None,
+        origin_host: str | None = None,
+        final_host: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.url = url
+        self.origin_host = origin_host
+        self.final_host = final_host
+
+
 class BrowserChallengeError(Exception):
     """The browser loaded an anti-bot challenge instead of the requested board."""
 

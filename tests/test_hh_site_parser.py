@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,7 @@ from job_ftch.infrastructure.sources.site_parsers.hh import (
     _item_from_detail_html,
     _listing_page_url,
     _normalize_listing_url,
+    _raise_or_clear_observed_challenge,
 )
 
 
@@ -34,6 +36,21 @@ class _FakeClient:
     async def get(self, url: str, *, follow_redirects: bool = True) -> _FakeResponse:
         del follow_redirects
         return self._responses[url]
+
+
+def test_hh_clears_leftover_challenge_stamp_on_clear_page() -> None:
+    strategy = SimpleNamespace(observed_challenge_type="smartcaptcha")
+
+    def _set(value: str | None) -> None:
+        strategy.observed_challenge_type = value
+
+    strategy.set_observed_challenge_type = _set  # type: ignore[attr-defined]
+    _raise_or_clear_observed_challenge(
+        "https://hh.ru/search/vacancy",
+        "<html><body><h1>Vacancies</h1><a href='/vacancy/1'>Python</a></body></html>",
+        strategy,
+    )
+    assert strategy.observed_challenge_type is None
 
 
 def test_hh_runtime_defaults_authorize_proxy_and_captcha_hosts() -> None:

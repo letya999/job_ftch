@@ -93,10 +93,7 @@ async def test_probe_keeps_detail_frontier_separate_from_emission_limit(
 
     assert captured["spec"].limit == 1
     assert captured["spec"].detail_limit == module._PROBE_DETAIL_CANDIDATE_LIMIT
-    assert captured["spec"].monitor_config == {
-        "captcha_authorized_domains": ["example.test"],
-        "proxy_rescue_allow_domains": ["example.test"],
-    }
+    assert captured["spec"].monitor_config == {}
 
 
 @pytest.mark.asyncio

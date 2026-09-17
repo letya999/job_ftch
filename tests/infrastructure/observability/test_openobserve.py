@@ -29,12 +29,23 @@ def test_openobserve_url_rejects_non_http_schemes() -> None:
 
 def test_openobserve_dashboard_copies_match_and_panels_have_descriptions() -> None:
     root = Path(__file__).parents[3]
-    packaged = root / "job_ftch/infrastructure/observability/dashboards/job_ftch_ingest.json"
-    deploy = root / "deploy/observability/dashboards/job_ftch_ingest.json"
-
-    assert packaged.read_bytes() == deploy.read_bytes()
-    dashboard = json.loads(packaged.read_text(encoding="utf-8"))
-    assert all(panel.get("description") for tab in dashboard["tabs"] for panel in tab["panels"])
+    for name in ("job_ftch_ingest.json", "job_ftch_captcha.json"):
+        packaged = root / "job_ftch/infrastructure/observability/dashboards" / name
+        deploy = root / "deploy/observability/dashboards" / name
+        assert packaged.read_bytes() == deploy.read_bytes()
+        dashboard = json.loads(packaged.read_text(encoding="utf-8"))
+        assert all(panel.get("description") for tab in dashboard["tabs"] for panel in tab["panels"])
+        queries = [
+            query["query"]
+            for tab in dashboard["tabs"]
+            for panel in tab["panels"]
+            for query in panel["queries"]
+        ]
+        assert queries
+        assert all(
+            "'$source_run_id' = '' OR source_run_id = '$source_run_id'" in query
+            for query in queries
+        )
 
 
 def test_context_filter_promotes_only_safe_correlation_fields() -> None:

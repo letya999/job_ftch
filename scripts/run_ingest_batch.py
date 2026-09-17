@@ -16,7 +16,6 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import yaml
 
@@ -341,13 +340,9 @@ async def _probe_one(
     The ingest eval measures whether a URL can produce at least one vacancy.
     It should not depend on how many unrelated slow URLs are queued beside it.
     """
-    hostname = urlsplit(url).hostname
     monitor_config: dict[str, Any] = {}
-    if hostname:
-        # The fixture is an operator-authorized public job-board eval set;
-        # allow its own host to use the configured proxy and paid CAPTCHA fallbacks.
-        monitor_config["captcha_authorized_domains"] = [hostname]
-        monitor_config["proxy_rescue_allow_domains"] = [hostname]
+    # Do not inject the probe hostname into paid captcha/proxy allowlists.
+    # Eval uses the same authorization policy as the runtime environment.
     if keywords:
         monitor_config["_search_keywords"] = list(keywords)
     spec = CareerSiteSpec(

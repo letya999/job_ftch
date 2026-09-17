@@ -19,6 +19,7 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     ListingPagination,
     browser_scroll_collect_urls,
     distinctive_search_tokens,
+    effective_limit,
     keywords_from_spec,
     normalize_search_keywords,
     paginate_listing,
@@ -32,6 +33,42 @@ if TYPE_CHECKING:
 
     from job_ftch.domain.models import RawItem
     from job_ftch.domain.source_spec import CareerSiteSpec
+
+
+def _host_of(url: str) -> str:
+    return (urlsplit(url).hostname or "").lower()
+
+
+def _board_item_limit(spec: CareerSiteSpec) -> int:
+    from job_ftch.config import get_settings
+
+    return effective_limit(spec, get_settings())
+
+
+class _OriginHostClient:
+    """Reject listing/detail hops onto a different host."""
+
+    def __init__(self, inner: Any, origin_host: str) -> None:
+        self._inner = inner
+        self._origin_host = origin_host.lower()
+
+    async def get(self, url: str, *args: Any, **kwargs: Any) -> Any:
+        from job_ftch.infrastructure.sources.monitors.shared import ListingHostMismatchError
+
+        response = await self._inner.get(url, *args, **kwargs)
+        final = str(getattr(response, "url", url) or url)
+        final_host = _host_of(final)
+        if self._origin_host and final_host and final_host != self._origin_host:
+            raise ListingHostMismatchError(
+                f"listing left {self._origin_host} for {final_host}",
+                url=final,
+                origin_host=self._origin_host,
+                final_host=final_host,
+            )
+        return response
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
 
 
 def _listing_cards_from_html(
@@ -75,7 +112,10 @@ async def _cian_listing_html(
         classify_challenge,
         emit_challenge_detection,
     )
-    from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
+    from job_ftch.infrastructure.sources.monitors.shared import (
+        BrowserChallengeError,
+        ListingHostMismatchError,
+    )
 
     try:
         response = await client.get(url, follow_redirects=True)
@@ -103,9 +143,15 @@ async def _cian_listing_html(
             confidence=detection.confidence,
             evidence_hash=detection.evidence_hash,
         )
-    final_host = (urlsplit(final).hostname or "").lower()
-    if origin_host and final_host and final_host != origin_host:
-        return None
+    final_host = _host_of(final)
+    origin = origin_host.lower()
+    if origin and final_host and final_host != origin:
+        raise ListingHostMismatchError(
+            f"listing left {origin} for {final_host}",
+            url=final,
+            origin_host=origin,
+            final_host=final_host,
+        )
     raise_for_status = getattr(response, "raise_for_status", None)
     if callable(raise_for_status):
         raise_for_status()
@@ -133,7 +179,7 @@ async def _parse_detail_board(
         fetch,
         extract,
         spec.url,
-        limit=spec.limit or 50,
+        limit=_board_item_limit(spec),
         pagination=ListingPagination(),
         identity=lambda card: card[0],
     )
@@ -186,7 +232,7 @@ async def _discover_detail_board(
     *,
     href_pattern: re.Pattern[str],
 ) -> list[str]:
-    limit = spec.detail_limit or spec.limit or 50
+    limit = _board_item_limit(spec)
     try:
 
         async def fetch(url: str) -> str:
@@ -557,34 +603,55 @@ class CianCareerParser(_EmployerBoardParser):
             for extra in ("https://career.cian.ru/vacancies", "https://career.cian.ru/"):
                 if extra.rstrip("/") not in {item.rstrip("/") for item in candidates}:
                     candidates.append(extra)
-        limit = spec.detail_limit or spec.limit or 50
-        from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
+        limit = _board_item_limit(spec)
+        from job_ftch.infrastructure.sources.monitors.shared import (
+            BrowserChallengeError,
+            ListingHostMismatchError,
+        )
 
+        hop_error: ListingHostMismatchError | None = None
         for listing_url in candidates:
             try:
                 html_and_final = await _cian_listing_html(client, listing_url, origin_host)
             except BrowserChallengeError:
-                break
-            if html_and_final is None:
+                raise
+            except ListingHostMismatchError as exc:
+                hop_error = exc
                 continue
             html, final_url = html_and_final
             cards = _listing_cards_from_html(html, final_url, self.detail_pattern)
+            origin_cards = [
+                card for card in cards if not origin_host or _host_of(card[0]) == origin_host
+            ]
+            if origin_cards:
+                return [card[0] for card in origin_cards][:limit]
             if cards:
-                return [card[0] for card in cards][:limit]
-        return await _discover_detail_board(spec, client, href_pattern=self.detail_pattern)
+                off_host = _host_of(cards[0][0])
+                raise ListingHostMismatchError(
+                    f"listing left {origin_host} for {off_host}",
+                    url=final_url,
+                    origin_host=origin_host,
+                    final_host=off_host,
+                )
+            # Same-host 200 with no vacancy cards is a real empty board.
+            return []
+        if hop_error is not None:
+            raise hop_error
+        return []
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
         origin_host = (urlsplit(spec.url).hostname or "").lower()
-        html_and_final = await _cian_listing_html(client, spec.url, origin_host)
-        if html_and_final is None:
-            return
+        await _cian_listing_html(client, spec.url, origin_host)
+        guarded = _OriginHostClient(client, origin_host) if origin_host else client
         async for item in _parse_detail_board(
             spec,
-            client,
+            guarded,
             href_pattern=self.detail_pattern,
             parser_name=self.parser_name,
             company=self.company,
         ):
+            if origin_host and _host_of(str(item.url or "")) != origin_host:
+                continue
             yield item
 
 

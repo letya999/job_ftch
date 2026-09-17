@@ -19,7 +19,7 @@ Proxies can be tagged with country codes for geo-aware selection.
 
 Gateway format: residential providers (BrightData, Oxylabs, SmartProxy)
 use a gateway URL with session/country encoded in the username:
-``http://user-country-us-session-abc123:pass@gate.provider.com:7777``.
+``http://user-country-us-session-abc123:pass@gate.provider.com:7777``.  # pragma: allowlist secret -- example gateway URL, not a credential
 
 Cost accounting: tracks bytes transferred per domain for GB budget caps.
 
@@ -227,7 +227,7 @@ class GatewayProxyProvider:
 
     Providers like BrightData, Oxylabs, SmartProxy use a single gateway
     endpoint with session/country encoded in the username:
-    ``http://user-country-us-session-abc123:pass@gate.provider.com:7777``
+    ``http://user-country-us-session-abc123:pass@gate.provider.com:7777``  # pragma: allowlist secret -- example gateway URL, not a credential
     """
 
     def __init__(
@@ -713,6 +713,7 @@ class ResidentialProxyBypass(ProxyBypass):
             domain,
             allow_domains=self._rescue_allow_domains,
             deny_domains=self._rescue_deny_domains,
+            empty_allow="deny",
         )
 
     def _get_proxy_url_for_domain(

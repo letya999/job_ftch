@@ -514,6 +514,12 @@ def test_looks_like_spa_shell_detects_common_shell_markers() -> None:
         _looks_like_spa_shell('<script type="application/ld+json">{"@type":"JobPosting"}</script>')
         is False
     )
+    populated = (
+        "<html><body>"
+        + "<p>Vacancy description with enough visible text for a real posting.</p>" * 8
+        + "<script>window.__NEXT_DATA__={}</script></body></html>"
+    )
+    assert _looks_like_spa_shell(populated) is False
 
 
 def test_editorial_article_metadata_is_detected() -> None:

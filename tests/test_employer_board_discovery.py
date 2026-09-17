@@ -105,6 +105,8 @@ async def test_cian_listing_html_raises_on_smartcaptcha() -> None:
 
 @pytest.mark.asyncio
 async def test_cian_listing_html_drops_classifieds_host() -> None:
+    from job_ftch.infrastructure.sources.monitors.shared import ListingHostMismatchError
+
     class _Client:
         async def get(self, url: str, follow_redirects: bool = True) -> SimpleNamespace:
             del follow_redirects
@@ -117,7 +119,10 @@ async def test_cian_listing_html_drops_classifieds_host() -> None:
                 raise_for_status=lambda: None,
             )
 
-    assert await _cian_listing_html(_Client(), "https://career.cian.ru/", "career.cian.ru") is None
+    with pytest.raises(ListingHostMismatchError) as exc_info:
+        await _cian_listing_html(_Client(), "https://career.cian.ru/", "career.cian.ru")
+    assert exc_info.value.origin_host == "career.cian.ru"
+    assert exc_info.value.final_host == "www.cian.ru"
 
 
 @pytest.mark.asyncio
@@ -153,9 +158,48 @@ async def test_cian_discover_reads_numeric_vacancy_cards() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cian_discover_falls_through_to_browser_on_smartcaptcha(
+async def test_cian_discover_retries_extra_candidate_after_host_hop() -> None:
+    vacancy_html = """
+    <html><body>
+      <a href="/vacancies/12345">Python Developer</a>
+    </body></html>
+    """
+
+    class _Client:
+        async def get(self, url: str, follow_redirects: bool = True) -> SimpleNamespace:
+            del follow_redirects
+            if url.rstrip("/") == "https://career.cian.ru":
+                return SimpleNamespace(
+                    text="<html><body><a href='/cat.php'>квартира</a></body></html>",
+                    url="https://www.cian.ru/",
+                    status_code=200,
+                    headers={},
+                    content=b"",
+                    raise_for_status=lambda: None,
+                )
+            return SimpleNamespace(
+                text=vacancy_html,
+                url="https://career.cian.ru/vacancies",
+                status_code=200,
+                headers={},
+                content=vacancy_html.encode(),
+                raise_for_status=lambda: None,
+            )
+
+    parser = CianCareerParser()
+    urls = await parser.discover(
+        CareerSiteSpec(url="https://career.cian.ru/", limit=10),
+        _Client(),
+    )
+    assert urls == ["https://career.cian.ru/vacancies/12345"]
+
+
+@pytest.mark.asyncio
+async def test_cian_discover_raises_on_smartcaptcha(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
+
     html = (
         '<html><body><div class="smart-captcha" data-sitekey="ysc1_abc">'
         "Yandex SmartCaptcha</div></body></html>"
@@ -173,13 +217,13 @@ async def test_cian_discover_falls_through_to_browser_on_smartcaptcha(
                 raise_for_status=lambda: None,
             )
 
-    called: dict[str, object] = {}
+    called = {"discover": False}
 
     async def _fake_discover(
         spec: CareerSiteSpec, client: object, *, href_pattern: object
     ) -> list[str]:
-        del client, href_pattern
-        called["url"] = spec.url
+        del spec, client, href_pattern
+        called["discover"] = True
         return ["https://career.cian.ru/vacancies/12345"]
 
     monkeypatch.setattr(
@@ -187,16 +231,19 @@ async def test_cian_discover_falls_through_to_browser_on_smartcaptcha(
         _fake_discover,
     )
     parser = CianCareerParser()
-    urls = await parser.discover(
-        CareerSiteSpec(url="https://career.cian.ru/", limit=10),
-        _Client(),
-    )
-    assert called["url"] == "https://career.cian.ru/"
-    assert urls == ["https://career.cian.ru/vacancies/12345"]
+    with pytest.raises(BrowserChallengeError) as exc_info:
+        await parser.discover(
+            CareerSiteSpec(url="https://career.cian.ru/", limit=10),
+            _Client(),
+        )
+    assert exc_info.value.challenge_type == "smartcaptcha"
+    assert called["discover"] is False
 
 
 @pytest.mark.asyncio
 async def test_cian_parse_drops_classifieds_host() -> None:
+    from job_ftch.infrastructure.sources.monitors.shared import ListingHostMismatchError
+
     class _Client:
         async def get(self, url: str, follow_redirects: bool = True) -> SimpleNamespace:
             del follow_redirects
@@ -210,14 +257,15 @@ async def test_cian_parse_drops_classifieds_host() -> None:
             )
 
     parser = CianCareerParser()
-    items = [
-        item
-        async for item in parser.parse(
-            CareerSiteSpec(url="https://career.cian.ru/", limit=10),
-            _Client(),
-        )
-    ]
-    assert items == []
+    with pytest.raises(ListingHostMismatchError) as exc_info:
+        _ = [
+            item
+            async for item in parser.parse(
+                CareerSiteSpec(url="https://career.cian.ru/", limit=10),
+                _Client(),
+            )
+        ]
+    assert exc_info.value.kind == "listing_redirected"
     assert parser.confirmed_empty_on_empty is True
 
 

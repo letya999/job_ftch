@@ -243,7 +243,8 @@ class Settings(BaseSettings):
     openai_max_retries: int = Field(default=2, ge=0, le=10)
     career_site_url: str | None = None
     career_site_default_limit: int = Field(default=50, gt=0)
-    career_site_default_detail_limit: int | None = Field(default=None, ge=1)
+    career_site_default_detail_limit: int | None = Field(default=50, ge=1)
+    career_site_spa_shell_max_visible_chars: int = Field(default=80, ge=0, le=10_000)
     career_site_timeout_seconds: float = Field(default=15.0, gt=0.0, le=300.0)
     career_site_connect_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     career_site_max_retries: int = Field(default=2, ge=0, le=10)
@@ -302,6 +303,13 @@ class Settings(BaseSettings):
     # Debug-only: on each page, log any identity-coherence issue (never raises in
     # prod). Off by default => zero behavior change; used with the self-check.
     bypass_identity_selfcheck: bool = False
+    # When an HTTP CONNECT/proxy transport fails on the current engine
+    # (Camoufox+HTTP is the live case), keep the network axis and try the
+    # next engine instead of dropping to direct.
+    bypass_keep_proxy_on_engine_connect_error: bool = True
+    bypass_js_hardening_browser_families: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["chromium", "chromium_patchright"]
+    )
     # CAPTCHA solving. `captcha_provider` is the external provider used when the
     # free browser-wait tier cannot clear a challenge. It only actually fires if
     # it is also listed in `captcha_enabled_providers`; paid providers
@@ -328,7 +336,27 @@ class Settings(BaseSettings):
     proxy_gateway: str = ""
     proxy_user: str = ""
     proxy_pass: str = ""
-    proxy_country_default: str = ""
+    proxy_country_default: str = "RU"
+    proxy_timezone_by_country: dict[str, str] = Field(
+        default_factory=lambda: {
+            "RU": "Europe/Moscow",
+            "KZ": "Asia/Almaty",
+            "BY": "Europe/Minsk",
+            "UZ": "Asia/Tashkent",
+            "UA": "Europe/Kyiv",
+            "US": "America/New_York",
+        }
+    )
+    proxy_locale_by_country: dict[str, str] = Field(
+        default_factory=lambda: {
+            "RU": "ru-RU",
+            "KZ": "ru-KZ",
+            "BY": "ru-BY",
+            "UZ": "ru-UZ",
+            "UA": "uk-UA",
+            "US": "en-US",
+        }
+    )
     proxy_sticky_ttl_seconds: int = Field(default=600, ge=30, le=3600)
     proxy_gb_budget: float = Field(default=0.0, ge=0.0)
     proxy_per_domain_gb_budget: float = Field(default=0.0, ge=0.0)
@@ -553,6 +581,7 @@ class Settings(BaseSettings):
         "proxy_rescue_allow_domains",
         "proxy_rescue_deny_domains",
         "captcha_authorized_domains",
+        "bypass_js_hardening_browser_families",
         "api_tenant_allowlist",
         mode="before",
     )

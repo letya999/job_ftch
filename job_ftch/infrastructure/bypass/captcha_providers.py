@@ -440,7 +440,6 @@ class CapSolverProvider(_BaseProvider):
             CaptchaChallengeType.HCAPTCHA.value,
             CaptchaChallengeType.TURNSTILE.value,
             CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value,
-            CaptchaChallengeType.SMARTCAPTCHA.value,
             CaptchaChallengeType.IMAGE.value,
         }
     )
@@ -451,8 +450,8 @@ class CapSolverProvider(_BaseProvider):
         production_candidate=True,
         browser_context_required=True,
         notes=(
-            "Primary production candidate for reCAPTCHA, Turnstile, and "
-            "Yandex SmartCaptcha; managed Cloudflare challenge remains experimental."
+            "Primary production candidate for reCAPTCHA, Turnstile, and image "
+            "CAPTCHA. Yandex SmartCaptcha is TYPE_NOT_SUPPORTED on this provider."
         ),
     )
 
@@ -1044,7 +1043,6 @@ class CapMonsterProvider(_BaseProvider):
             CaptchaChallengeType.RECAPTCHA_V3.value,
             CaptchaChallengeType.TURNSTILE.value,
             CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value,
-            CaptchaChallengeType.SMARTCAPTCHA.value,
             CaptchaChallengeType.IMAGE.value,
         }
     )
@@ -1054,7 +1052,10 @@ class CapMonsterProvider(_BaseProvider):
         result_kinds=frozenset({CaptchaResultKind.TOKEN, CaptchaResultKind.SESSION}),
         production_candidate=True,
         browser_context_required=True,
-        notes="Second production candidate; Cloudflare challenge route is experimental.",
+        notes=(
+            "Second production candidate; Cloudflare challenge route is experimental. "
+            "Yandex SmartCaptcha is TYPE_NOT_SUPPORTED on this provider."
+        ),
     )
 
     async def solve(

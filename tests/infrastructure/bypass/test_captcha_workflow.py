@@ -629,10 +629,9 @@ async def test_capsolver_smartcaptcha_retries_yandex_task_types(
         url="https://www.cian.ru/cian-captcha/",
     )
 
-    assert tried[0] == "YandexCaptchaTaskProxyLess"
-    assert tried[1] == "YandexSmartCaptchaTaskProxyLess"
-    assert result.solved is True
-    assert result.tokens.get("captcha_token") == "yandex-token"
+    assert tried == []
+    assert result.solved is False
+    assert str(result.result_kind) == "unsupported"
 
 
 @pytest.mark.asyncio
@@ -1270,8 +1269,8 @@ def test_new_captcha_providers_self_register_with_capabilities() -> None:
     assert nextcaptcha is not None and nextcaptcha.benchmark_candidate
     assert "recaptcha_v3" in capsolver.supported_challenge_types
     assert "turnstile" in capsolver.supported_challenge_types
-    assert "smartcaptcha" in capsolver.supported_challenge_types
-    assert "smartcaptcha" in capmonster.supported_challenge_types
+    assert "smartcaptcha" not in capsolver.supported_challenge_types
+    assert "smartcaptcha" not in capmonster.supported_challenge_types
     two_captcha = get_captcha_provider_capability("2captcha")
     assert two_captcha is not None
     assert "smartcaptcha" in two_captcha.supported_challenge_types
@@ -1627,6 +1626,21 @@ def test_captcha_encounter_is_a_first_class_log_event() -> None:
     assert outcome["captcha_failure_reason"] == "unauthorized_domain"
 
 
+def test_blocked_403_is_not_a_captcha_encounter() -> None:
+    from job_ftch.infrastructure.bypass.challenge_classifier import classify_challenge
+
+    detection = classify_challenge(
+        surface="http",
+        status_code=403,
+        body=b"cf-browser-verification",
+    )
+    assert detection.kind is FailureKind.BLOCKED
+    assert detection.detected is False
+    with capture_logs() as logs:
+        emit_challenge_detection("example.com", detection)
+    assert not any(entry.get("event") == "captcha_encounter" for entry in logs)
+
+
 def test_captcha_dashboard_graphs_host_and_unsolved() -> None:
     from pathlib import Path
 
@@ -1648,4 +1662,5 @@ def test_captcha_dashboard_graphs_host_and_unsolved() -> None:
     assert "event = 'captcha_solve_outcome'" in joined
     assert "captcha_host" in joined
     assert "captcha_solved" in joined
+    assert "'$source_run_id' = '' OR source_run_id = '$source_run_id'" in joined
     assert any(panel["id"] == "captcha-by-host-bar" for panel in dashboard["tabs"][0]["panels"])

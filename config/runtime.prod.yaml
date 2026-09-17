@@ -31,3 +31,13 @@ bgem3_enabled: false
 relevance_backend: keywords
 openai_model: gpt-5.4-nano
 relevance_llm_model: gpt-4.1-mini
+
+# Paid solvers do not support Yandex SmartCaptcha. Observe rather than
+# burning CapSolver/CapMonster slots. Image OCR stays observe in prod.
+captcha_provider_routes:
+  smartcaptcha:
+    - browser_wait
+    - observe
+  image:
+    - browser_wait
+    - observe

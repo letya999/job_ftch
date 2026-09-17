@@ -25,9 +25,6 @@ _CHALLENGE_KINDS = {
     FailureKind.CAPTCHA,
     FailureKind.CHALLENGE,
     FailureKind.QRATOR_CHALLENGE,
-    FailureKind.BLOCKED,
-    FailureKind.BLOCKED_IP,
-    FailureKind.BLOCKED_FINGERPRINT,
 }
 
 

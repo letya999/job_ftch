@@ -99,6 +99,38 @@ def _browser_challenge_error(url: str, body: str, challenge_type: str) -> Except
     )
 
 
+def _page_still_challenged(page_url: str, content: str) -> bool:
+    from job_ftch.infrastructure.bypass.failure_signal import is_smartcaptcha_url
+
+    if is_challenge_response(content):
+        return True
+    return bool(page_url) and is_smartcaptcha_url(page_url)
+
+
+def _raise_or_clear_observed_challenge(
+    page_url: str,
+    content: str,
+    bypass_strategy: Any,
+) -> None:
+    observed = getattr(bypass_strategy, "observed_challenge_type", None)
+    if _page_still_challenged(page_url, content):
+        if isinstance(observed, str) and observed.strip():
+            raise _browser_challenge_error(page_url, content, observed.strip())
+        from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
+
+        raise BrowserChallengeError(
+            url=page_url,
+            status_code=None,
+            headers={},
+            body=content.encode(),
+            challenge_type="captcha",
+        )
+    if isinstance(observed, str) and observed.strip():
+        setter = getattr(bypass_strategy, "set_observed_challenge_type", None)
+        if callable(setter):
+            setter(None)
+
+
 def _parse_iso_datetime(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -605,25 +637,7 @@ class HhParser:
                 await navigate(page, current_url, browser_config)
                 page_url = urljoin(current_url, str(getattr(page, "url", current_url) or current_url))
                 content = await page.content()
-                observed_challenge = getattr(bypass_strategy, "observed_challenge_type", None)
-                if isinstance(observed_challenge, str) and observed_challenge.strip():
-                    raise _browser_challenge_error(
-                        page_url,
-                        content,
-                        observed_challenge.strip(),
-                    )
-                if is_challenge_response(content):
-                    from job_ftch.infrastructure.sources.monitors.shared import (
-                        BrowserChallengeError,
-                    )
-
-                    raise BrowserChallengeError(
-                        url=page_url,
-                        status_code=None,
-                        headers={},
-                        body=content.encode(),
-                        challenge_type="captcha",
-                    )
+                _raise_or_clear_observed_challenge(page_url, content, bypass_strategy)
                 if not _extract_vacancy_urls(content, page_url, limit=1) and keywords:
                     await self._browser_search_box(
                         page,
@@ -632,25 +646,7 @@ class HhParser:
                     )
                     content = await page.content()
                     page_url = urljoin(page_url, str(getattr(page, "url", page_url) or page_url))
-                    observed_challenge = getattr(bypass_strategy, "observed_challenge_type", None)
-                    if isinstance(observed_challenge, str) and observed_challenge.strip():
-                        raise _browser_challenge_error(
-                            page_url,
-                            content,
-                            observed_challenge.strip(),
-                        )
-                    if is_challenge_response(content):
-                        from job_ftch.infrastructure.sources.monitors.shared import (
-                            BrowserChallengeError,
-                        )
-
-                        raise BrowserChallengeError(
-                            url=page_url,
-                            status_code=None,
-                            headers={},
-                            body=content.encode(),
-                            challenge_type="captcha",
-                        )
+                    _raise_or_clear_observed_challenge(page_url, content, bypass_strategy)
                 urls = await browser_scroll_collect_urls(
                     page,
                     page_url,
@@ -707,23 +703,7 @@ class HhParser:
                 urljoin(detail_url, str(getattr(page, "url", detail_url) or detail_url))
             )
             content = await page.content()
-            observed_challenge = getattr(bypass_strategy, "observed_challenge_type", None)
-            if isinstance(observed_challenge, str) and observed_challenge.strip():
-                raise _browser_challenge_error(
-                    final_url,
-                    content,
-                    observed_challenge.strip(),
-                )
-            if is_challenge_response(content):
-                from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
-
-                raise BrowserChallengeError(
-                    url=final_url,
-                    status_code=None,
-                    headers={},
-                    body=content.encode(),
-                    challenge_type="captcha",
-                )
+            _raise_or_clear_observed_challenge(final_url, content, bypass_strategy)
             return _item_from_detail_html(final_url, content, source_name, spec.url)
 
     async def _extract_detail_item(

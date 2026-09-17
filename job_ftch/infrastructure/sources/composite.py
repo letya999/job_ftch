@@ -82,6 +82,7 @@ _TECHNICAL_ZERO_REASONS = {
     "parser_error",
     "policy_not_scraped",
     "rate_limited",
+    "listing_redirected",
 }
 
 _OUTCOME_BY_ZERO_REASON = {
@@ -100,6 +101,7 @@ _OUTCOME_BY_ZERO_REASON = {
     "parser_error": "parser_error",
     "policy_not_scraped": "policy_not_scraped",
     "rate_limited": "rate_limited",
+    "listing_redirected": "listing_discovery_failed",
 }
 
 

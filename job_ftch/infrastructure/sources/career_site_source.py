@@ -105,6 +105,7 @@ class ZeroYieldReason(StrEnum):
     PARSER_ERROR = "parser_error"
     POLICY_NOT_SCRAPED = "policy_not_scraped"
     RATE_LIMITED = "rate_limited"
+    LISTING_REDIRECTED = "listing_redirected"
 
 
 _TYPED_FAILURE_REASONS = frozenset(
@@ -121,6 +122,7 @@ _TYPED_FAILURE_REASONS = frozenset(
         ZeroYieldReason.PARSER_ERROR,
         ZeroYieldReason.POLICY_NOT_SCRAPED,
         ZeroYieldReason.RATE_LIMITED,
+        ZeroYieldReason.LISTING_REDIRECTED,
     }
 )
 
@@ -197,6 +199,7 @@ class FetchStats:
             "monitor_failure_without_escalation": self.monitor_failure_without_escalation,
             "rate_limit_retry_after_seconds": self.rate_limit_retry_after_seconds,
             "rate_limit_scope": self.rate_limit_scope,
+            "browser_navigations_attempted": self.browser_navigations_attempted,
         }
         if self.zero_reason is not None:
             d["zero_reason"] = self.zero_reason.value
@@ -366,21 +369,28 @@ def _looks_like_spa_shell(html: str | None) -> bool:
     lowered = html.lower()
     if "jobposting" in lowered:
         return False
-    if "__next_data__" in lowered or "__nuxt__" in lowered:
-        return True
-    if '<div id="root"' in lowered or "<div id='root'" in lowered:
-        return True
-    if '<div id="app"' in lowered or "<div id='app'" in lowered:
-        return True
+    from job_ftch.config import get_settings
+
+    max_visible = int(get_settings().career_site_spa_shell_max_visible_chars)
     body_match = re.search(r"<body\b[^>]*>(.*?)</body>", lowered, re.DOTALL)
     body = body_match.group(1) if body_match else lowered
     visible_text = re.sub(r"<[^>]+>", " ", body)
     normalized = " ".join(visible_text.split())
     # A short but semantically populated detail page is not an SPA shell.
-    # The previous length-only rule caused valid static fixtures (and small
-    # real vacancy pages) to be replaced by an unrelated browser response.
+    # Next.js/Nuxt markers alone are not enough: many career boards ship a
+    # full vacancy in the first HTTP response alongside those shells.
     has_semantic_heading = bool(re.search(r"<(?:h1|title)\b", lowered))
-    return len(normalized) < 80 and not has_semantic_heading
+    if len(normalized) >= max_visible:
+        return False
+    spa_markers = (
+        "__next_data__" in lowered
+        or "__nuxt__" in lowered
+        or '<div id="root"' in lowered
+        or "<div id='root'" in lowered
+        or '<div id="app"' in lowered
+        or "<div id='app'" in lowered
+    )
+    return spa_markers or (len(normalized) < max_visible and not has_semantic_heading)
 
 
 def _visible_description_fallback(html: str | None) -> str | None:
@@ -1215,8 +1225,21 @@ class CareerSiteSource(Source["RawItem"]):
                     from job_ftch.infrastructure.sources.monitors.shared import (
                         BoardGoneError,
                         BrowserChallengeError,
+                        ListingHostMismatchError,
                     )
 
+                    if isinstance(exc, ListingHostMismatchError):
+                        self.stats.zero_reason = ZeroYieldReason.LISTING_REDIRECTED
+                        self._parser_failure_is_terminal = True
+                        logger.warning(
+                            "site_parser_listing_redirected",
+                            url=self.spec.url,
+                            origin_host=exc.origin_host,
+                            final_host=exc.final_host,
+                        )
+                        raise RuntimeError(
+                            f"listing_redirected: listing left {exc.origin_host} for {exc.final_host}"
+                        ) from exc
                     if isinstance(exc, BoardGoneError):
                         logger.info("site_parser_board_gone", url=self.spec.url)
                         self.stats.zero_reason = ZeroYieldReason.BOARD_GONE
@@ -1291,6 +1314,15 @@ class CareerSiteSource(Source["RawItem"]):
                             kind=parser_kind,
                         )
                         return
+                    if parser_kind == "listing_redirected":
+                        self.stats.zero_reason = ZeroYieldReason.LISTING_REDIRECTED
+                        self._parser_failure_is_terminal = True
+                        logger.warning(
+                            "site_parser_listing_redirected",
+                            url=self.spec.url,
+                            error=str(exc),
+                        )
+                        raise
                     if parser_kind in {
                         "layout_changed",
                         "auth_wall",
@@ -2203,17 +2235,23 @@ class CareerSiteSource(Source["RawItem"]):
         return False
 
     def _effective_limit(self) -> int | None:
-        """Return the declared detail cap or MVP default."""
+        """Return the declared detail cap.
+
+        ``career_site_window_max_details`` applies only inside a freshness
+        window. Unbounded 500-detail crawls were starving the source deadline.
+        """
         if self.spec.detail_limit is not None:
             return self.spec.detail_limit
+        if self.spec.limit is not None:
+            return self.spec.limit
         from job_ftch.config import get_settings
 
         settings = get_settings()
+        if self.spec.freshness_cutoff_utc is not None and settings.career_site_window_max_details:
+            return settings.career_site_window_max_details
         if settings.career_site_default_detail_limit is not None:
             return settings.career_site_default_detail_limit
-        if settings.career_site_window_max_details:
-            return settings.career_site_window_max_details
-        return 100  # Conservative hard default for MVP
+        return settings.career_site_default_limit
 
     async def _iter_scraped_detail_items(
         self,
@@ -2866,9 +2904,7 @@ class CareerSiteSource(Source["RawItem"]):
             # career boards).  Keep the title-only result as a safe fallback
             # if rendering is unavailable or yields nothing better.
             has_description = bool(result and (result.description or "").strip())
-            should_retry_in_browser = not rendered_with_browser and (
-                not has_description or (prefetched_html and _looks_like_spa_shell(prefetched_html))
-            )
+            should_retry_in_browser = not rendered_with_browser and not has_description
 
             if should_retry_in_browser:
                 browser_html = await self._fetch_detail_html_with_browser(url)

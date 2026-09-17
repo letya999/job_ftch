@@ -34,7 +34,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT histogram(_timestamp) AS x_axis, captcha_type, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' GROUP BY x_axis, captcha_type ORDER BY x_axis",
+              "query": "SELECT histogram(_timestamp) AS x_axis, captcha_type, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY x_axis, captcha_type ORDER BY x_axis",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -59,7 +59,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT captcha_type AS x_axis, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' GROUP BY captcha_type ORDER BY y_axis DESC",
+              "query": "SELECT captcha_type AS x_axis, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY captcha_type ORDER BY y_axis DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -84,7 +84,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT captcha_type AS x_axis, captcha_outcome, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_solve_outcome' AND (captcha_solved = false OR cast(captcha_solved as text) IN ('false', '0', 'f', 'False')) GROUP BY captcha_type, captcha_outcome ORDER BY y_axis DESC",
+              "query": "SELECT captcha_type AS x_axis, captcha_outcome, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_solve_outcome' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') AND (captcha_solved = false OR cast(captcha_solved as text) IN ('false', '0', 'f', 'False')) GROUP BY captcha_type, captcha_outcome ORDER BY y_axis DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -109,7 +109,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT captcha_host, captcha_type, captcha_surface, count(*) AS encounters FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' GROUP BY captcha_host, captcha_type, captcha_surface ORDER BY encounters DESC",
+              "query": "SELECT captcha_host, captcha_type, captcha_surface, count(*) AS encounters FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY captcha_host, captcha_type, captcha_surface ORDER BY encounters DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -134,7 +134,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT captcha_host, captcha_type, captcha_outcome, captcha_failure_reason, captcha_engine, count(*) AS n FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_solve_outcome' GROUP BY captcha_host, captcha_type, captcha_outcome, captcha_failure_reason, captcha_engine ORDER BY n DESC",
+              "query": "SELECT captcha_host, captcha_type, captcha_outcome, captcha_failure_reason, captcha_engine, count(*) AS n FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_solve_outcome' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY captcha_host, captcha_type, captcha_outcome, captcha_failure_reason, captcha_engine ORDER BY n DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -159,7 +159,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT captcha_host AS x_axis, captcha_type, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' GROUP BY captcha_host, captcha_type ORDER BY y_axis DESC",
+              "query": "SELECT captcha_host AS x_axis, captcha_type, count(*) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'captcha_encounter' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY captcha_host, captcha_type ORDER BY y_axis DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
