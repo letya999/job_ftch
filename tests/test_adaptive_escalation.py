@@ -107,8 +107,8 @@ async def test_server_errors_never_trigger_browser_escalation() -> None:
 
 
 @pytest.mark.anyio
-async def test_timeout_debounced_not_immediate() -> None:
-    """A single timeout should not escalate immediately (debounce threshold=2)."""
+async def test_timeout_without_proxy_climbs_http_engine() -> None:
+    """A timeout with no proxy uses the conservative HTTP engine fallback."""
     mgr = AdaptiveBypassManager(adaptive_enabled=True)
     if len(mgr.available_tiers) < 2:
         return
@@ -117,8 +117,8 @@ async def test_timeout_debounced_not_immediate() -> None:
         "src-1",
         error=TimeoutError("connect timed out"),
     )
-    assert mgr.current_name == initial
-    assert mgr.escalations_total == 0
+    assert mgr.current_name != initial
+    assert mgr.capability_inventory[mgr.current_name].browser_family is None
 
 
 @pytest.mark.anyio
@@ -130,8 +130,8 @@ async def test_timeout_without_proxy_does_not_trigger_browser_escalation() -> No
     initial = mgr.current_name
     await mgr.handle_failure("src-1", error=TimeoutError("t1"))
     await mgr.handle_failure("src-1", error=TimeoutError("t2"))
-    assert mgr.current_name == initial
-    assert mgr.escalations_total == 0
+    assert mgr.current_name != initial
+    assert mgr.capability_inventory[mgr.current_name].browser_family is None
 
 
 @pytest.mark.anyio

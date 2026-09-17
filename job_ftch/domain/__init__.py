@@ -30,6 +30,7 @@ from job_ftch.domain.evidence import (
 )
 from job_ftch.domain.experiment import RelevanceCard
 from job_ftch.domain.filter_profile import FilterProfile
+from job_ftch.domain.ingest_queue import IngestTask, IngestTaskState
 from job_ftch.domain.job_group import (
     JobGroup,
     SourceAttribution,
@@ -167,6 +168,8 @@ __all__ = [
     "EvidenceAtom",
     "EvidenceBundle",
     "EnrichmentTask",
+    "IngestTask",
+    "IngestTaskState",
     "EvidencePolarity",
     "ExtractedOntologyClaim",
     "ExtractedRoleSkillEdge",

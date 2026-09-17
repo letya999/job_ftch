@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from job_ftch.application.geo import normalize_geo_sources
+from job_ftch.application.geo import normalize_geo_chunk, normalize_geo_sources
 from job_ftch.domain import (
     EmploymentType,
     JobExtractionStatus,
@@ -200,6 +200,15 @@ class FullExtractionNode:
             else None
         )
         location_geo = normalize_geo_sources((location, existing_country))
+        if location_geo.corrections:
+            metadata.update(
+                {
+                    "geo_normalization_steps": location_geo.corrections,
+                    "geo_conflict_original_location": location,
+                    "geo_conflict_original_country": existing_country,
+                }
+            )
+            location = location_geo.display
         city: str | None
         country: str | None
         if location_geo.city:
@@ -207,7 +216,11 @@ class FullExtractionNode:
             country = location_geo.country or existing_country
         else:
             existing_geo = normalize_geo_sources((job.city, job.country))
-            city = existing_geo.city or job.city
+            city = existing_geo.city or (
+                job.city
+                if job.city and normalize_geo_chunk(job.city) != existing_geo.country
+                else None
+            )
             country = existing_geo.country or existing_country
 
         # Same reasoning for work mode: several sites publish schema.org's

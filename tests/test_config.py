@@ -131,12 +131,15 @@ def test_postgres_backend_valid_dsn() -> None:
         {
             "llm_backend": "heuristic",
             "store_backend": "postgres",
-            "store_dsn": "postgresql+asyncpg://user:pass@host/db",
+            "store_dsn": "postgresql+asyncpg://user:pass@host/db",  # pragma: allowlist secret -- fixture DSN
         }
     )
     assert settings.store_backend == "postgres"
     assert settings.store_dsn is not None
-    assert settings.store_dsn.get_secret_value() == "postgresql+asyncpg://user:pass@host/db"
+    assert (
+        settings.store_dsn.get_secret_value()
+        == "postgresql+asyncpg://user:pass@host/db"  # pragma: allowlist secret -- fixture DSN
+    )
 
 
 def test_store_backend_auto_default() -> None:
@@ -164,14 +167,14 @@ def test_resolve_store_backend_auto_picks_postgres_when_dsn_set() -> None:
         {
             "llm_backend": "heuristic",
             "store_backend": "auto",
-            "store_dsn": "postgresql+asyncpg://u:p@h/db",
+            "store_dsn": "postgresql+asyncpg://u:p@h/db",  # pragma: allowlist secret -- fixture DSN
         }
     )
     assert resolve_store_backend(settings) == "postgres"
 
 
 def test_store_dsn_not_in_settings_repr() -> None:
-    dsn = "postgresql://user:secret@host/db"
+    dsn = "postgresql://user:secret@host/db"  # pragma: allowlist secret -- fixture DSN
     settings = Settings.model_validate({"llm_backend": "heuristic", "store_dsn": dsn})
     rendered = repr(settings)
     assert dsn not in rendered
@@ -310,3 +313,72 @@ def test_init_kwargs_override_runtime_yaml(tmp_path, monkeypatch: pytest.MonkeyP
     settings = Settings(_env_file=None, llm_backend="heuristic", routing_accept_threshold=0.61)  # type: ignore[call-arg]
 
     assert settings.routing_accept_threshold == pytest.approx(0.61)
+
+
+def test_resolve_runtime_config_files_cliproxy_appends_overlay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from job_ftch.config import CLIPROXY_RUNTIME_OVERLAY, _resolve_runtime_config_files
+
+    monkeypatch.setenv("JOB_FTCH_LLM_GATEWAY", "cliproxy")
+    monkeypatch.delenv("JOB_FTCH_RUNTIME_CONFIG_PATH", raising=False)
+    monkeypatch.delenv("JOB_FTCH_ENV", raising=False)
+    paths = _resolve_runtime_config_files()
+    assert paths is not None
+    assert paths[-1] == CLIPROXY_RUNTIME_OVERLAY
+    assert paths[:2] == ("config/runtime.yaml", "config/runtime.dev.yaml")
+
+
+def test_resolve_runtime_config_files_cliproxy_appends_after_explicit_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from job_ftch.config import CLIPROXY_RUNTIME_OVERLAY, _resolve_runtime_config_files
+
+    monkeypatch.setenv("JOB_FTCH_LLM_GATEWAY", "cliproxy")
+    monkeypatch.setenv(
+        "JOB_FTCH_RUNTIME_CONFIG_PATH", "config/runtime.yaml;config/runtime.prod.yaml"
+    )
+    paths = _resolve_runtime_config_files()
+    assert paths == (
+        "config/runtime.yaml",
+        "config/runtime.prod.yaml",
+        CLIPROXY_RUNTIME_OVERLAY,
+    )
+
+
+def test_cliproxy_gateway_requires_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("JOB_FTCH_OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("JOB_FTCH_LLM_GATEWAY", raising=False)
+    with pytest.raises(ValueError, match="openai_base_url is required"):
+        Settings.model_validate(
+            {
+                "llm_backend": "openai",
+                "llm_gateway": "cliproxy",
+                "openai_base_url": None,
+            }
+        )
+
+
+def test_cliproxy_overlay_sets_gateway_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_ftch.config import get_settings
+
+    monkeypatch.setenv("JOB_FTCH_LLM_GATEWAY", "cliproxy")
+    monkeypatch.setenv("JOB_FTCH_OPENAI_BASE_URL", "http://127.0.0.1:8317/v1")
+    monkeypatch.delenv("JOB_FTCH_OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("JOB_FTCH_RELEVANCE_LLM_MODEL", raising=False)
+    monkeypatch.delenv("JOB_FTCH_ONTOLOGY_COMPILER_MODEL", raising=False)
+    monkeypatch.delenv("JOB_FTCH_RUNTIME_CONFIG_PATH", raising=False)
+    monkeypatch.delenv("JOB_FTCH_ENV", raising=False)
+    get_settings.cache_clear()
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.llm_gateway == "cliproxy"
+    assert settings.openai_model == "gemini-3.1-pro-low"
+    assert settings.relevance_llm_model == "gemini-3.1-pro-low"
+    assert settings.openai_base_url == "http://127.0.0.1:8317/v1"
+
+
+def test_apply_llm_gateway_rejects_unknown_value() -> None:
+    from job_ftch.config import apply_llm_gateway
+
+    with pytest.raises(ValueError, match="llm_gateway must be one of"):
+        apply_llm_gateway("anthropic")

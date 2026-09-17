@@ -24,6 +24,7 @@ from job_ftch.infrastructure.sources.site_parsers.getmatch import (
     extract_vacancy_urls_from_offers,
     extract_vacancy_urls_from_sitemap,
     item_from_detail_html,
+    item_from_offer_card,
     public_failure_code_for,
     vacancy_id_from_url,
 )
@@ -521,7 +522,7 @@ def test_build_search_urls_are_runtime_configurable() -> None:
     assert len(urls) == 1
     assert urls[0].startswith("https://getmatch.ru/vacancies")
     assert "sp=" not in urls[0]
-    assert "query=" not in urls[0]
+    assert "query=AI+engineer+OR+ML+engineer" in urls[0]
 
 
 def test_extract_vacancy_urls_from_offers_payload() -> None:
@@ -538,6 +539,55 @@ def test_extract_vacancy_urls_from_offers_payload() -> None:
         "https://getmatch.ru/vacancies/35602-team-lead-data-science-ml-promo-i",
         "https://getmatch.ru/vacancies/34714-senior-ai-ml-engineer-llm-agents",
     ]
+
+
+def test_offers_title_filter_drops_product_manager_for_project_search() -> None:
+    payload = {
+        "offers": [
+            {
+                "id": 1,
+                "position": "Product Manager",
+                "url": "/vacancies/1-product-manager",
+                "description_html": "Need a project manager in the team",
+            },
+            {
+                "id": 2,
+                "position": "Руководитель проектов",
+                "url": "/vacancies/2-project-manager",
+            },
+        ]
+    }
+    urls = extract_vacancy_urls_from_offers(payload, limit=10, keywords=["project manager"])
+    assert urls == ["https://getmatch.ru/vacancies/2-project-manager"]
+
+
+def test_getmatch_offer_card_keeps_rich_api_fields() -> None:
+    item = item_from_offer_card(
+        {
+            "id": "36244",
+            "url": "https://getmatch.ru/vacancies/36244-cpp-developer",
+            "title": "C++ Developer",
+            "description": "Build low-latency services.",
+            "description_html": "<b>Build low-latency services.</b>",
+            "company": "Acme",
+            "salary": "10 000 $/мес",
+            "locations": ["Москва"],
+            "work_modes": ["remote"],
+            "skills": ["C++"],
+            "published_at": "2026-09-15T12:00:00",
+            "offer_type": "vacancy",
+            "is_active": True,
+        },
+        "getmatch",
+        "https://getmatch.ru/vacancies",
+    )
+
+    assert item is not None
+    assert item.external_id == "36244"
+    assert "low-latency" in item.text
+    assert item.metadata["parser"] == "site_getmatch_card"
+    assert item.metadata["detail_vacancy_confirmed"] is False
+    assert item.metadata["skills"] == ["C++"]
 
 
 @pytest.mark.asyncio
@@ -576,6 +626,45 @@ async def test_parser_discovers_via_offers_api_when_sphere_is_set() -> None:
     assert len(items) == 1
     assert items[0].external_id == "35178"
     assert client.calls[0].startswith("https://getmatch.ru/api/offers")
+
+
+@pytest.mark.asyncio
+async def test_parser_scans_api_pages_until_declared_total_for_sparse_role() -> None:
+    first = {
+        "meta": {"total": 4, "offset": 0, "limit": 3},
+        "offers": [
+            {"id": 1, "position": "Backend Developer", "url": "/vacancies/1-backend"},
+            {"id": 2, "position": "QA Engineer", "url": "/vacancies/2-qa"},
+            {"id": 3, "position": "Product Manager", "url": "/vacancies/3-product"},
+        ],
+    }
+    second = {
+        "meta": {"total": 4, "offset": 3, "limit": 3},
+        "offers": [
+            {"id": 4, "position": "AI Developer", "url": "/vacancies/4-ai-developer"},
+        ],
+    }
+    api0 = "https://getmatch.ru/api/offers?sa=any&pa=all&offset=0&limit=3"
+    api3 = "https://getmatch.ru/api/offers?sa=any&pa=all&offset=3&limit=3"
+    client = _FakeClient(
+        {
+            api0: _FakeResponse(
+                json.dumps(first), api0, headers={"content-type": "application/json"}
+            ),
+            api3: _FakeResponse(
+                json.dumps(second), api3, headers={"content-type": "application/json"}
+            ),
+        }
+    )
+    spec = CareerSiteSpec(
+        url="https://getmatch.ru/vacancies",
+        source_name="getmatch",
+        monitor_config={"_search_keywords": ["AI Developer"]},
+        limit=3,
+    )
+    assert await GetmatchParser().discover(spec, client) == [
+        "https://getmatch.ru/vacancies/4-ai-developer"
+    ]
 
 
 def test_runtime_defaults_do_not_hardcode_core_host_switch() -> None:

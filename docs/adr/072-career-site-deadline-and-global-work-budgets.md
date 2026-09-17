@@ -25,8 +25,10 @@ to fetch.
 ## Decision
 
 1. `source_hard_deadline_seconds`, `source_soft_deadline_seconds`, and bounded
-   cancellation grace are operator settings.  The soft deadline moves a source
-   to the overflow queue; it is not a failure by itself.
+   cancellation grace are operator settings.  A site parser may declare a
+   finite source-local hard-deadline override when its compliant request pace
+   requires a longer budget.  The soft deadline moves a source to the overflow
+   queue; it is not a failure by itself.
 2. Every dynamic source receives one absolute monotonic deadline at start.
    Fast-lane time, overflow queue waiting, retries, and bounded browser waits
    consume that same budget.

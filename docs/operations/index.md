@@ -11,4 +11,4 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [Infrastructure](infrastructure.md) - Production-shape инфраструктура job_ftch: Docker runtime, Telegram bot compose, Postgres and Qdrant. (Updated: 2026-08-02)
 - [job_ftch_site](job_ftch_site.md) - Отдельный Next.js landing/deploy для публичной витрины job_ftch. (Updated: 2026-08-24)
 - [job_ftch_site API](job_ftch_site_api.md) - Публичный read-only API витрины, Telegram bridge и правила fair use. (Updated: 2026-08-24)
-- [Observability](observability.md) - Логи, метрики, traces, quality checks and runtime diagnostics for job_ftch. (Updated: 2026-08-02)
+- [Observability](observability.md) - Логи, метрики, traces, quality checks and runtime diagnostics for job_ftch. (Updated: 2026-09-17)

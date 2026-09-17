@@ -175,7 +175,13 @@ async def discover(
 ) -> MonitorResult | list[DiscoveredPostingPayload]:
     board_url = spec.url
     metadata = spec.monitor_config
-    preset_name = metadata.get("preset", "generic")
+    preset_name = metadata.get("preset")
+    if not preset_name:
+        preset_name = (
+            "teamtailor"
+            if re.search(r"[\w-]+\.teamtailor\.com/", board_url, re.IGNORECASE)
+            else "generic"
+        )
     feed_url = metadata.get("feed_url")
 
     if not feed_url:
@@ -246,6 +252,7 @@ register_monitor(
     assessment_hint=known_board_assessment_hint(
         "known_monitor",
         "rss_board",
+        url_patterns=(r"[\w-]+\.teamtailor\.com/",),
         has_publication_time=True,
         has_update_time=True,
         has_stable_id=True,

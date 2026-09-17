@@ -40,7 +40,9 @@ def _parse_components(url: str) -> tuple[str, str, str] | None:
         return None
     company = match.group(1)
     wd_instance = f"wd{match.group(2)}"
-    site = match.group(3)
+    # ATS redirect detection may hand us a concrete posting URL instead of
+    # the board root.  The listing API needs the tenant site only.
+    site = re.split(r"/job(?:/|$)", match.group(3), maxsplit=1, flags=re.IGNORECASE)[0]
     return company, wd_instance, site
 
 

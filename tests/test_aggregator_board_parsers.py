@@ -62,6 +62,7 @@ def test_all_requested_aggregators_are_registered() -> None:
     }.items():
         assert resolve_site_parser_by_name(name) is not None
         assert resolve_site_parser(url) is not None
+    assert isinstance(resolve_site_parser("https://www.ai-jobs.net/"), AIJobsParser)
     assert isinstance(resolve_site_parser("https://foorilla.com/hiring/"), AIJobsParser)
     assert isinstance(resolve_site_parser("https://www.aijobs.com/jobs"), AIJobsComParser)
     assert isinstance(resolve_site_parser("https://aijobs.ai/jobs"), AIJobsAiParser)

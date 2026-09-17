@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, cast
 from job_ftch.application.registry import register_store
 from job_ftch.domain import (
     DuplicateRecord,
+    IngestTask,
+    IngestTaskState,
     ObservationLedgerEntry,
     OutboxRecord,
     OutboxState,
@@ -81,6 +83,8 @@ class InMemoryStore:
         self._snapshot_seq: dict[str, int] = {}
         self._dedup_claims: dict[str, tuple[str, datetime]] = {}
         self._outbox: dict[str, OutboxRecord] = {}
+        self._ingest_tasks: dict[str, IngestTask] = {}
+        self._ingest_rate_limits: dict[str, datetime] = {}
 
     def _trim_kv(self) -> None:
         while len(self._kv) > self._max_keys:
@@ -138,6 +142,11 @@ class InMemoryStore:
             (key, value) for key, value in self._kv.items() if not key.startswith(prefix)
         )
         self._sets = {key: value for key, value in self._sets.items() if not key.startswith(prefix)}
+        tenant_id = prefix[:-1] if prefix.endswith(":") else prefix
+        for task_id, task in tuple(self._ingest_tasks.items()):
+            if task.tenant_id == tenant_id:
+                self._ingest_tasks.pop(task_id, None)
+                self._ingest_rate_limits.pop(task.rate_scope, None)
 
     async def clear_run_artifacts(self, prefix: str, tenant_id: str) -> dict[str, int]:
         """Remove run-produced state while preserving tenant configuration and profiles."""
@@ -184,6 +193,9 @@ class InMemoryStore:
         ingest_keys = [key for key in self._source_ingest_states if key[0] == tenant_id]
         dedup_claims = [key for key in self._dedup_claims if key.startswith(prefix)]
         outbox_keys = [key for key, record in self._outbox.items() if record.tenant_id == tenant_id]
+        ingest_task_keys = [
+            key for key, task in self._ingest_tasks.items() if task.tenant_id == tenant_id
+        ]
         assessment_keys = [key for key in self._source_assessments if key[0] == tenant_id]
         counts = {
             "kv": len(kv_keys),
@@ -210,6 +222,9 @@ class InMemoryStore:
             self._outbox.pop(outbox_key, None)
         for assessment_key in assessment_keys:
             self._source_assessments.pop(assessment_key, None)
+        for task_key in ingest_task_keys:
+            task = self._ingest_tasks.pop(task_key)
+            self._ingest_rate_limits.pop(task.rate_scope, None)
         return counts
 
     # Store methods — built on top of StoreConnector primitives
@@ -502,6 +517,181 @@ class InMemoryStore:
         state: SourceIngestState,
     ) -> None:
         self._source_ingest_states[(tenant_id, state.source_id)] = state
+
+    async def enqueue_ingest_task(self, task: IngestTask) -> IngestTask:
+        existing = self._ingest_tasks.get(task.task_id)
+        if existing is None or existing.state in {
+            IngestTaskState.READY,
+            IngestTaskState.WAITING_RATE_LIMIT,
+        }:
+            task = task.model_copy(update={"updated_at": datetime.now(UTC)})
+            self._ingest_tasks[task.task_id] = task
+        return self._ingest_tasks[task.task_id]
+
+    async def claim_due_ingest_tasks(
+        self,
+        tenant_id: str,
+        worker_id: str,
+        *,
+        limit: int,
+        lease_seconds: int,
+        now: datetime,
+    ) -> tuple[IngestTask, ...]:
+        now = now.astimezone(UTC)
+        await self.reap_ingest_leases(now)
+        candidates = sorted(
+            (
+                task
+                for task in self._ingest_tasks.values()
+                if task.tenant_id == tenant_id
+                and task.state in {IngestTaskState.READY, IngestTaskState.WAITING_RATE_LIMIT}
+                and task.available_at <= now
+                and self._ingest_rate_limits.get(task.rate_scope, now) <= now
+            ),
+            key=lambda task: (task.available_at, task.created_at),
+        )
+        claimed: list[IngestTask] = []
+        for task in candidates[: max(limit, 1)]:
+            leased = task.model_copy(
+                update={
+                    "state": IngestTaskState.LEASED,
+                    "attempt": task.attempt + 1,
+                    "lease_owner": worker_id,
+                    "lease_until": now + timedelta(seconds=lease_seconds),
+                    "updated_at": now,
+                }
+            )
+            self._ingest_tasks[task.task_id] = leased
+            claimed.append(leased)
+        return tuple(claimed)
+
+    async def complete_ingest_task(self, task_id: str, worker_id: str) -> IngestTask | None:
+        task = self._ingest_tasks.get(task_id)
+        if task is None or task.state != IngestTaskState.LEASED or task.lease_owner != worker_id:
+            return None
+        completed = task.model_copy(
+            update={
+                "state": IngestTaskState.SUCCEEDED,
+                "lease_owner": None,
+                "lease_until": None,
+                "completed_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        self._ingest_tasks[task_id] = completed
+        return completed
+
+    async def defer_ingest_task(
+        self,
+        task: IngestTask,
+        worker_id: str,
+        *,
+        available_at: datetime,
+        error: str | None = None,
+    ) -> IngestTask | None:
+        current = self._ingest_tasks.get(task.task_id)
+        if (
+            current is None
+            or current.state != IngestTaskState.LEASED
+            or current.lease_owner != worker_id
+        ):
+            return None
+        deferred = current.model_copy(
+            update={
+                "state": IngestTaskState.WAITING_RATE_LIMIT,
+                "available_at": available_at,
+                "lease_owner": None,
+                "lease_until": None,
+                "last_error": error,
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        self._ingest_tasks[task.task_id] = deferred
+        return deferred
+
+    async def fail_ingest_task(
+        self,
+        task: IngestTask,
+        worker_id: str,
+        *,
+        needs_operator: bool = False,
+        error: str | None = None,
+    ) -> IngestTask | None:
+        current = self._ingest_tasks.get(task.task_id)
+        if (
+            current is None
+            or current.state != IngestTaskState.LEASED
+            or current.lease_owner != worker_id
+        ):
+            return None
+        failed = current.model_copy(
+            update={
+                "state": IngestTaskState.NEEDS_OPERATOR
+                if needs_operator
+                else IngestTaskState.FAILED,
+                "lease_owner": None,
+                "lease_until": None,
+                "last_error": error,
+                "completed_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+            }
+        )
+        self._ingest_tasks[task.task_id] = failed
+        return failed
+
+    async def reap_ingest_leases(self, now: datetime) -> int:
+        now = now.astimezone(UTC)
+        count = 0
+        for task in tuple(self._ingest_tasks.values()):
+            if (
+                task.state == IngestTaskState.LEASED
+                and task.lease_until
+                and task.lease_until <= now
+            ):
+                self._ingest_tasks[task.task_id] = task.model_copy(
+                    update={
+                        "state": IngestTaskState.READY,
+                        "lease_owner": None,
+                        "lease_until": None,
+                        "updated_at": now,
+                    }
+                )
+                count += 1
+        return count
+
+    async def list_active_ingest_tasks(
+        self, tenant_id: str, *, run_id: str | None = None
+    ) -> tuple[IngestTask, ...]:
+        return tuple(
+            sorted(
+                (
+                    task
+                    for task in self._ingest_tasks.values()
+                    if task.tenant_id == tenant_id
+                    and (run_id is None or task.run_id == run_id)
+                    and task.state
+                    in {
+                        IngestTaskState.READY,
+                        IngestTaskState.WAITING_RATE_LIMIT,
+                        IngestTaskState.LEASED,
+                    }
+                ),
+                key=lambda task: (task.available_at, task.created_at),
+            )
+        )
+
+    async def record_ingest_rate_limit(
+        self,
+        scope_id: str,
+        *,
+        cooldown_until: datetime,
+        retry_after_seconds: float | None,
+        status_code: int | None = None,
+    ) -> None:
+        del retry_after_seconds, status_code
+        current = self._ingest_rate_limits.get(scope_id)
+        if current is None or cooldown_until > current:
+            self._ingest_rate_limits[scope_id] = cooldown_until.astimezone(UTC)
 
     async def get_source_operator_flag(
         self, tenant_id: str, source_key: str

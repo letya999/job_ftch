@@ -113,3 +113,34 @@ def test_payment_required_is_terminal() -> None:
 
 def test_turnstile_marker_is_normalized_for_solver_routes() -> None:
     assert _detect_captcha_type('<div class="cf-turnstile"></div>') == "turnstile"
+
+
+def test_smartcaptcha_url_and_widget_are_labeled() -> None:
+    from job_ftch.infrastructure.bypass.failure_signal import is_smartcaptcha_url
+
+    assert is_smartcaptcha_url(
+        "https://career.cian.ru/tmgrdfrend/showcaptcha?retpath=https://career.cian.ru/"
+    )
+    assert is_smartcaptcha_url(
+        "https://www.cian.ru/cian-captcha/?redirect_url=https://career.cian.ru/"
+    )
+    assert (
+        _detect_captcha_type('<div class="smart-captcha" data-sitekey="ysc1_abc"></div>')
+        == "smartcaptcha"
+    )
+    assert (
+        _detect_captcha_type(
+            "<html></html>",
+            page_url="https://career.cian.ru/tmgrdfrend/showcaptcha",
+        )
+        == "smartcaptcha"
+    )
+    outcome = HeuristicFailureSignal().classify_detailed(
+        status_code=302,
+        headers={"Location": "/tmgrdfrend/showcaptcha?retpath=https://career.cian.ru/"},
+        body=b"",
+        error=None,
+        page_url="https://career.cian.ru/",
+    )
+    assert outcome.kind is FailureKind.CAPTCHA
+    assert outcome.captcha_type == "smartcaptcha"

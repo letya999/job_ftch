@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,7 +53,49 @@ CAPTCHA_PROVIDER_ENV_KEYS = {
     "2captcha": "TWOCAPTCHA_API_KEY",
     "anticaptcha": "ANTICAPTCHA_API_KEY",
     "nopecha": "NOPECHA_API_KEY",
+    "cliproxy_image": "JOB_FTCH_OPENAI_API_KEY",
 }
+
+
+def _provider_api_key(provider_name: str) -> str:
+    """Return the env/settings key for one captcha provider.
+
+    Image OCR reuses the OpenAI-compatible client key (CLIProxy or OpenAI).
+    There is no separate ``JOB_FTCH_CAPTCHA_VISION_API_KEY``.
+    """
+    if provider_name == "cliproxy_image":
+        from job_ftch.config import get_settings
+
+        secret = get_settings().openai_api_key
+        if secret is not None:
+            value = str(secret.get_secret_value() or "").strip()
+            if value:
+                return value
+        return (
+            os.environ.get("JOB_FTCH_OPENAI_API_KEY", "").strip()
+            or os.environ.get("OPENAI_API_KEY", "").strip()
+        )
+    env_name = CAPTCHA_PROVIDER_ENV_KEYS.get(provider_name, "")
+    return os.environ.get(env_name, "").strip() if env_name else ""
+
+
+def _counts_as_paid_captcha_provider(name: str) -> bool:
+    # Subscription vision OCR must still run after the one paid CapSolver slot.
+    return name != "cliproxy_image"
+
+
+def _consumes_paid_captcha_slot(result: CaptchaSolveResult) -> bool:
+    """False when the provider never attempted a billable solve."""
+    if result.failure_reason in {
+        CaptchaFailureReason.UNSUPPORTED_CHALLENGE,
+        CaptchaFailureReason.MISSING_CREDENTIAL,
+        CaptchaFailureReason.PROVIDER_DISABLED,
+        CaptchaFailureReason.UNAUTHORIZED_DOMAIN,
+    }:
+        return False
+    blob = f"{result.raw_provider_status or ''} {result.error or ''}"
+    return "TYPE_NOT_SUPPORTED" not in blob and "TASK_NOT_SUPPORTED" not in blob
+
 
 _CF_CHALLENGE_SELECTORS = (
     "#challenge-running",
@@ -156,9 +199,13 @@ class CaptchaSolverBypass:
         self._min_provider_seconds = max(0.0, min_provider_seconds)
         self._paid_lock = asyncio.Lock()
         self._proxy_url = proxy_url
-        self._provider_routes = provider_routes or {}
+        self._provider_routes = {
+            "image": ("capsolver", "cliproxy_image", "observe"),
+            **(provider_routes or {}),
+        }
         self._backoff_seconds = max(0.0, backoff_seconds)
         self._failure_backoff: dict[tuple[str, str, str], float] = {}
+        self._last_result: CaptchaSolveResult | None = None
 
     async def apply_http(self, client: Any) -> Any:
         return client
@@ -209,11 +256,12 @@ class CaptchaSolverBypass:
             parsed_page_url = urlparse(str(page.url))
             domain = (parsed_page_url.hostname or parsed_page_url.netloc).lower()
         normalized_type = normalize_challenge_type(challenge_type)
+        manual_mode = self._provider in {"manual_required", "observe"}
         request_url = url or str(getattr(page, "url", ""))
         attempt_key = self._attempt_key(domain, normalized_type, request_url)
         backoff_key = attempt_key
         backoff_until = self._failure_backoff.get(backoff_key)
-        if domain and backoff_until and backoff_until > time.monotonic():
+        if not manual_mode and domain and backoff_until and backoff_until > time.monotonic():
             return CaptchaSolveResult(
                 solved=False,
                 method="backoff",
@@ -223,7 +271,7 @@ class CaptchaSolverBypass:
                 raw_provider_status=f"retry_after_seconds={backoff_until - time.monotonic():.1f}",
             )
 
-        cached = self._cookie_cache.get(domain)
+        cached = self._cookie_cache.get(domain) if not manual_mode else None
         if cached and not cached.expired:
             return CaptchaSolveResult(
                 solved=True,
@@ -234,7 +282,7 @@ class CaptchaSolverBypass:
                 result_kind=CaptchaResultKind.SESSION,
             )
 
-        if self._attempts.get(attempt_key, 0) >= self._max_attempts:
+        if not manual_mode and self._attempts.get(attempt_key, 0) >= self._max_attempts:
             return CaptchaSolveResult(
                 solved=False,
                 method=self._provider,
@@ -242,14 +290,19 @@ class CaptchaSolverBypass:
                 failure_reason=CaptchaFailureReason.BUDGET_EXHAUSTED,
                 challenge_type=normalized_type,
             )
-        self._attempts[attempt_key] = self._attempts.get(attempt_key, 0) + 1
+        if not manual_mode:
+            self._attempts[attempt_key] = self._attempts.get(attempt_key, 0) + 1
 
         provider_authorized = self._domain_authorized(domain)
-        provider_chain = self._provider_chain_for(challenge_type)
+        provider_chain = () if manual_mode else self._provider_chain_for(challenge_type)
         if provider_chain and not provider_authorized:
             # Off-allowlist domains keep only the free passive wait; paid/
             # external providers are dropped from the chain.
-            filtered = tuple(name for name in provider_chain if name == "browser_wait")
+            filtered = tuple(
+                name
+                for name in provider_chain
+                if name in {"browser_wait", "observe", "manual_required"}
+            )
             if filtered != provider_chain:
                 logger.info(
                     "captcha_provider_blocked_unauthorized",
@@ -257,9 +310,20 @@ class CaptchaSolverBypass:
                     dropped=[name for name in provider_chain if name != "browser_wait"],
                 )
             provider_chain = filtered
+        chain_already_verified = False
         if provider_chain:
             result = await self._solve_provider_chain(
                 page, challenge_type, url, provider_chain, attempt_key
+            )
+            chain_already_verified = True
+        elif self._provider == "manual_required":
+            result = await self._wait_for_manual_clearance(page, challenge_type, url)
+        elif self._provider == "observe":
+            result = CaptchaSolveResult(
+                solved=False,
+                method="observe",
+                challenge_type=normalized_type,
+                result_kind=CaptchaResultKind.SKIPPED_OBSERVE,
             )
         elif self._provider == "browser_wait":
             result = await self._solve_browser_wait(page, challenge_type)
@@ -311,42 +375,8 @@ class CaptchaSolverBypass:
                             self._paid_attempts.get(attempt_key, 0) + 1
                         )
                         result = await self._solve_external_api(page, challenge_type, url)
-        if result.solved and result.tokens:
-            token = result.tokens.get("captcha_token", "")
-            if token and not await self._inject_token(page, challenge_type, token):
-                result = CaptchaSolveResult(
-                    solved=False,
-                    method=result.method,
-                    error="provider token could not be injected",
-                    failure_reason=CaptchaFailureReason.INJECTION_FAILED,
-                    challenge_type=normalized_type,
-                    result_kind=CaptchaResultKind.TOKEN,
-                    provider_task_id=result.provider_task_id,
-                    raw_provider_status=result.raw_provider_status,
-                )
-            elif token and not await self._check_challenge_cleared(page, challenge_type):
-                result = CaptchaSolveResult(
-                    solved=False,
-                    method=result.method,
-                    error="challenge remained after token injection",
-                    failure_reason=CaptchaFailureReason.VERIFICATION_FAILED,
-                    challenge_type=normalized_type,
-                    result_kind=CaptchaResultKind.TOKEN,
-                    provider_task_id=result.provider_task_id,
-                    raw_provider_status=result.raw_provider_status,
-                )
-        elif result.solved and result.cookies:
-            if not await self._apply_clearance_cookies(page, domain, result.cookies):
-                result = CaptchaSolveResult(
-                    solved=False,
-                    method=result.method,
-                    error="provider cookies could not be applied",
-                    failure_reason=CaptchaFailureReason.INJECTION_FAILED,
-                    challenge_type=normalized_type,
-                    result_kind=CaptchaResultKind.SESSION,
-                    provider_task_id=result.provider_task_id,
-                    raw_provider_status=result.raw_provider_status,
-                )
+        if not chain_already_verified:
+            result = await self._apply_solved_result(page, result, challenge_type, domain)
 
         result.elapsed_seconds = time.monotonic() - start
         if result.challenge_type == CaptchaChallengeType.UNKNOWN.value:
@@ -384,6 +414,7 @@ class CaptchaSolverBypass:
         ):
             self._failure_backoff[backoff_key] = time.monotonic() + self._backoff_seconds
 
+        self._last_result = result
         return result
 
     def _provider_chain_for(self, challenge_type: str) -> tuple[str, ...]:
@@ -401,6 +432,53 @@ class CaptchaSolverBypass:
 
         return domain, challenge_type, urlparse(url).path or "/"
 
+    async def _apply_solved_result(
+        self,
+        page: Any,
+        result: CaptchaSolveResult,
+        challenge_type: str,
+        domain: str,
+    ) -> CaptchaSolveResult:
+        """Inject a provider token/session and confirm the challenge actually cleared."""
+        normalized_type = normalize_challenge_type(challenge_type)
+        if result.solved and result.tokens:
+            token = result.tokens.get("captcha_token", "")
+            if token and not await self._inject_token(page, challenge_type, token):
+                return CaptchaSolveResult(
+                    solved=False,
+                    method=result.method,
+                    error="provider token could not be injected",
+                    failure_reason=CaptchaFailureReason.INJECTION_FAILED,
+                    challenge_type=normalized_type,
+                    result_kind=CaptchaResultKind.TOKEN,
+                    provider_task_id=result.provider_task_id,
+                    raw_provider_status=result.raw_provider_status,
+                )
+            if token and not await self._check_challenge_cleared(page, challenge_type):
+                return CaptchaSolveResult(
+                    solved=False,
+                    method=result.method,
+                    error="challenge remained after token injection",
+                    failure_reason=CaptchaFailureReason.VERIFICATION_FAILED,
+                    challenge_type=normalized_type,
+                    result_kind=CaptchaResultKind.TOKEN,
+                    provider_task_id=result.provider_task_id,
+                    raw_provider_status=result.raw_provider_status,
+                )
+        elif result.solved and result.cookies:
+            if not await self._apply_clearance_cookies(page, domain, result.cookies):
+                return CaptchaSolveResult(
+                    solved=False,
+                    method=result.method,
+                    error="provider cookies could not be applied",
+                    failure_reason=CaptchaFailureReason.INJECTION_FAILED,
+                    challenge_type=normalized_type,
+                    result_kind=CaptchaResultKind.SESSION,
+                    provider_task_id=result.provider_task_id,
+                    raw_provider_status=result.raw_provider_status,
+                )
+        return result
+
     async def _solve_provider_chain(
         self,
         page: Any,
@@ -409,22 +487,36 @@ class CaptchaSolverBypass:
         provider_chain: tuple[str, ...],
         attempt_key: tuple[str, str, str],
     ) -> CaptchaSolveResult:
+        from urllib.parse import urlparse
+
         failures: list[str] = []
+        domain = (urlparse(url).hostname or urlparse(url).netloc).lower() if url else ""
         for provider_name in provider_chain:
-            if provider_name in {"observe", "manual_required"}:
+            if provider_name == "manual_required":
+                return await self._wait_for_manual_clearance(page, challenge_type, url)
+            if provider_name == "observe":
+                if failures:
+                    return CaptchaSolveResult(
+                        solved=False,
+                        method="provider_chain",
+                        error="all captcha providers failed",
+                        failure_reason=CaptchaFailureReason.PROVIDER_REJECTED,
+                        challenge_type=normalize_challenge_type(challenge_type),
+                        raw_provider_status=";".join(failures),
+                    )
                 return CaptchaSolveResult(
                     solved=False,
                     method=provider_name,
                     error=f"provider chain stopped at {provider_name}",
                     failure_reason=CaptchaFailureReason.UNSUPPORTED_CHALLENGE,
                     challenge_type=normalize_challenge_type(challenge_type),
-                    result_kind=CaptchaResultKind.UNSUPPORTED,
+                    result_kind=CaptchaResultKind.SKIPPED_OBSERVE,
                     raw_provider_status=";".join(failures),
                 )
             previous_provider = self._provider
             previous_api_key = self._api_key
             self._provider = provider_name
-            self._api_key = os.environ.get(CAPTCHA_PROVIDER_ENV_KEYS.get(provider_name, ""), "")
+            self._api_key = _provider_api_key(provider_name)
             try:
                 if provider_name == "browser_wait":
                     result = await self._solve_browser_wait(page, challenge_type)
@@ -450,6 +542,14 @@ class CaptchaSolverBypass:
                             failure_reason=CaptchaFailureReason.DEADLINE_INSUFFICIENT,
                             challenge_type=normalize_challenge_type(challenge_type),
                         )
+                    elif not self._api_key or not _counts_as_paid_captcha_provider(provider_name):
+                        # Missing credentials and cliproxy_image (subscription OCR)
+                        # do not consume the paid CapSolver slot.
+                        result = await self._solve_external_api(
+                            page,
+                            challenge_type,
+                            url,
+                        )
                     else:
                         async with self._paid_lock:
                             if self._paid_attempts.get(attempt_key, 0) >= self._max_paid_attempts:
@@ -461,26 +561,27 @@ class CaptchaSolverBypass:
                                     challenge_type=normalize_challenge_type(challenge_type),
                                 )
                             else:
-                                self._paid_attempts[attempt_key] = (
-                                    self._paid_attempts.get(attempt_key, 0) + 1
-                                )
                                 result = await self._solve_external_api(
                                     page,
                                     challenge_type,
                                     url,
                                 )
+                                if _consumes_paid_captcha_slot(result):
+                                    self._paid_attempts[attempt_key] = (
+                                        self._paid_attempts.get(attempt_key, 0) + 1
+                                    )
             finally:
                 self._provider = previous_provider
                 self._api_key = previous_api_key
             if result.solved:
-                return result
+                result = await self._apply_solved_result(page, result, challenge_type, domain)
+                if result.solved:
+                    return result
             provider_status = result.raw_provider_status or str(result.failure_reason or "failed")
             failures.append(f"{provider_name}:{provider_status}")
-            if result.failure_reason in {
-                CaptchaFailureReason.DEADLINE_INSUFFICIENT,
-                CaptchaFailureReason.BUDGET_EXHAUSTED,
-            }:
+            if result.failure_reason is CaptchaFailureReason.DEADLINE_INSUFFICIENT:
                 return result
+            # Paid budget exhaustion must not skip free OCR (cliproxy_image).
         return CaptchaSolveResult(
             solved=False,
             method="provider_chain",
@@ -503,6 +604,72 @@ class CaptchaSolverBypass:
             )
         return await self.solve(page, challenge_type=challenge_type, url=url)
 
+    async def _wait_for_manual_clearance(
+        self, page: Any, challenge_type: str, expected_url: str
+    ) -> CaptchaSolveResult:
+        """Only observe; the operator submits the form in the same open session."""
+        from urllib.parse import urlsplit
+
+        from job_ftch.infrastructure.bypass.challenge_classifier import (
+            classify_challenge,
+            emit_challenge_detection,
+        )
+        from job_ftch.infrastructure.bypass.failure_signal import FailureKind
+
+        initial_url = str(getattr(page, "url", ""))
+        initial = urlsplit(initial_url)
+        expected = urlsplit(expected_url)
+        started = time.monotonic()
+        first = True
+        while True:
+            html = await page.content()
+            current = urlsplit(str(getattr(page, "url", "")))
+            detection = classify_challenge(
+                surface="manual_captcha_wait",
+                status_code=200,
+                body=html,
+                page_url=str(getattr(page, "url", "") or ""),
+            )
+            if first:
+                emit_challenge_detection(initial.hostname or "", detection)
+                logger.info("captcha_manual_required", type=challenge_type)
+                first = False
+            target_matches = bool(expected.hostname) and (
+                current.scheme,
+                current.netloc,
+                current.path,
+                current.query,
+            ) == (expected.scheme, expected.netloc, expected.path, expected.query)
+            navigated = (current.netloc, current.path) != (initial.netloc, initial.path)
+            if (
+                detection.kind == FailureKind.OK
+                and not detection.detected
+                and current.hostname == initial.hostname
+                and (target_matches if expected_url else navigated)
+                and await page.evaluate("document.readyState") == "complete"
+                and await page.evaluate(
+                    "performance.getEntriesByType('navigation').at(-1)?.responseStatus === 200"
+                )
+                and await page.evaluate("Boolean(document.body && document.body.innerText.trim())")
+            ):
+                return CaptchaSolveResult(
+                    solved=True,
+                    method="manual_required",
+                    challenge_type=challenge_type,
+                    result_kind=CaptchaResultKind.SESSION,
+                )
+            if time.monotonic() - started >= self._wait:
+                return CaptchaSolveResult(
+                    solved=False,
+                    method="manual_required",
+                    challenge_type=challenge_type,
+                    result_kind=CaptchaResultKind.MANUAL_REQUIRED,
+                    error="manual completion not confirmed; retry in the operator session",
+                )
+            await sleep_with_source_deadline(
+                max(0.0, min(self.POLL_INTERVAL_SECONDS, self._wait - (time.monotonic() - started)))
+            )
+
     async def _detect_challenge(self, page: Any) -> str | None:
         try:
             html = ""
@@ -521,13 +688,30 @@ class CaptchaSolverBypass:
                 surface="browser_dom",
                 status_code=200,
                 body=html,
+                page_url=str(getattr(page, "url", "") or ""),
             )
             if detection.detected and detection.challenge_type:
                 normalized = normalize_challenge_type(detection.challenge_type)
                 if normalized != CaptchaChallengeType.UNKNOWN.value:
                     return normalized
-            if "recaptcha/api.js" in html_lower and "render=" in html_lower:
+            from job_ftch.infrastructure.bypass.failure_signal import _detect_captcha_type
+
+            if _detect_captcha_type(html) == "recaptcha_v3":
                 return CaptchaChallengeType.RECAPTCHA_V3.value
+
+            if any(
+                marker in html_lower
+                for marker in (
+                    "smartcaptcha",
+                    "showcaptcha",
+                    "tmgrdfrend",
+                    "cian-captcha",
+                    "smart-token",
+                    "ysc1_",
+                    "smartcaptcha.cloud.yandex.ru",
+                )
+            ):
+                return CaptchaChallengeType.SMARTCAPTCHA.value
 
             if any(
                 marker in html_lower
@@ -564,10 +748,10 @@ class CaptchaSolverBypass:
                 return "datadome"
             if "perimeterx" in html_lower or "px-captcha" in html_lower:
                 return "perimeterx"
-            if (
-                "captcha-image" in html_lower
-                or "captcha_image" in html_lower
-                or ("<img" in html_lower and "captcha" in html_lower)
+            from selectolax.parser import HTMLParser
+
+            if HTMLParser(html).css_first(
+                'img[class*="captcha-image"], img[class*="captcha_image"], img[src*="captcha"]'
             ):
                 return "image"
 
@@ -580,6 +764,10 @@ class CaptchaSolverBypass:
         page: Any,
         challenge_type: str,
     ) -> CaptchaSolveResult:
+        if normalize_challenge_type(challenge_type) == CaptchaChallengeType.SMARTCAPTCHA.value:
+            await self._click_smartcaptcha_checkbox(page)
+            await sleep_with_source_deadline(min(1.5, max(self._wait, 0.05)))
+            await self._solve_smartcaptcha_image_clicks(page)
         elapsed = 0.0
         poll = self.POLL_INTERVAL_SECONDS
 
@@ -587,7 +775,9 @@ class CaptchaSolverBypass:
             await sleep_with_source_deadline(poll)
             elapsed += poll
 
-            cleared = await self._check_challenge_cleared(page, challenge_type)
+            cleared = await self._check_challenge_cleared(
+                page, challenge_type, wait_for_redirect=False
+            )
             if cleared:
                 cookies = await self._harvest_cookies(page)
                 method = "browser_wait"
@@ -624,6 +814,159 @@ class CaptchaSolverBypass:
             challenge_type=normalize_challenge_type(challenge_type),
             result_kind=CaptchaResultKind.SESSION,
         )
+
+    async def _click_smartcaptcha_checkbox(self, page: Any) -> bool:
+        """Click the Yandex checkbox, including inside a cross-origin iframe."""
+        host_selectors = (
+            ".CheckboxCaptcha-Button",
+            ".CheckboxCaptcha",
+            '[role="checkbox"]',
+            ".smart-captcha",
+            "#smartcaptcha-container",
+            'iframe[src*="smartcaptcha"]',
+        )
+        click = getattr(page, "click", None)
+        if callable(click):
+            for selector in host_selectors:
+                try:
+                    await click(selector, timeout=2000)
+                    return True
+                except Exception:
+                    continue
+        frame_locator = getattr(page, "frame_locator", None)
+        if callable(frame_locator):
+            try:
+                inner = frame_locator('iframe[src*="smartcaptcha"]')
+                get_by_role = getattr(inner, "get_by_role", None)
+                if callable(get_by_role):
+                    await get_by_role("checkbox").click(timeout=2000)
+                    return True
+            except Exception:
+                pass
+            try:
+                inner = frame_locator('iframe[src*="smartcaptcha"]')
+                locator = getattr(inner, "locator", None)
+                if callable(locator):
+                    await locator(".CheckboxCaptcha-Button").click(timeout=2000)
+                    return True
+            except Exception:
+                pass
+        frames = getattr(page, "frames", None)
+        frame_list = frames if isinstance(frames, (list, tuple)) else ()
+        if callable(frames):
+            try:
+                frame_list = frames()
+            except Exception:
+                frame_list = ()
+        for frame in frame_list or ():
+            frame_click = getattr(frame, "click", None)
+            if not callable(frame_click):
+                continue
+            for selector in (
+                ".CheckboxCaptcha-Button",
+                ".CheckboxCaptcha",
+                '[role="checkbox"]',
+                "text=I'm not a robot",
+                "text=Я не робот",
+                "text=Press to continue",
+            ):
+                try:
+                    await frame_click(selector, timeout=2000)
+                    return True
+                except Exception:
+                    continue
+        return False
+
+    async def _smartcaptcha_puzzle_visible(self, page: Any) -> bool:
+        markers = (
+            "press in the following order",
+            "нажмите в следующем порядке",
+            "additional check",
+        )
+        texts: list[str] = []
+        evaluate = getattr(page, "evaluate", None)
+        if callable(evaluate):
+            with suppress(Exception):
+                texts.append(str(await evaluate("document.body ? document.body.innerText : ''")))
+        frames = getattr(page, "frames", None)
+        frame_list = frames if isinstance(frames, (list, tuple)) else ()
+        for frame in frame_list or ():
+            frame_eval = getattr(frame, "evaluate", None)
+            if not callable(frame_eval):
+                continue
+            try:
+                texts.append(str(await frame_eval("document.body ? document.body.innerText : ''")))
+            except Exception:
+                continue
+        blob = " ".join(texts).lower()
+        return any(marker in blob for marker in markers)
+
+    async def _solve_smartcaptcha_image_clicks(self, page: Any) -> bool:
+        """Click the SmartCaptcha image puzzle using the configured vision model."""
+        screenshot = getattr(page, "screenshot", None)
+        mouse = getattr(page, "mouse", None)
+        if not callable(screenshot) or mouse is None or not callable(getattr(mouse, "click", None)):
+            return False
+        try:
+            png = await screenshot(full_page=False)
+        except TypeError:
+            try:
+                png = await screenshot()
+            except Exception:
+                return False
+        except Exception:
+            return False
+        if not isinstance(png, (bytes, bytearray)) or not png:
+            return False
+        from job_ftch.infrastructure.bypass.captcha_providers import request_vision_click_order
+
+        points = await request_vision_click_order(bytes(png))
+        logger.info("smartcaptcha_vision_clicks", points=len(points), png_bytes=len(png))
+        if not points:
+            return False
+        viewport = getattr(page, "viewport_size", None) or {}
+        width = int(viewport.get("width") or 0)
+        height = int(viewport.get("height") or 0)
+        if width <= 0 or height <= 0:
+            try:
+                size = await page.evaluate("({w: window.innerWidth, h: window.innerHeight})")
+                width = int(size.get("w") or 0)
+                height = int(size.get("h") or 0)
+            except Exception:
+                return False
+        if width <= 0 or height <= 0:
+            return False
+        for x_frac, y_frac in points:
+            try:
+                await mouse.click(x_frac * width, y_frac * height)
+            except Exception:
+                return False
+            await sleep_with_source_deadline(0.35)
+        click = getattr(page, "click", None)
+        if callable(click):
+            for selector in (
+                "text=Submit",
+                "text=Отправить",
+                'button:has-text("Submit")',
+            ):
+                try:
+                    await click(selector, timeout=2000)
+                    break
+                except Exception:
+                    continue
+        frames = getattr(page, "frames", None)
+        frame_list = frames if isinstance(frames, (list, tuple)) else ()
+        for frame in frame_list or ():
+            frame_click = getattr(frame, "click", None)
+            if not callable(frame_click):
+                continue
+            for selector in ("text=Submit", "text=Отправить", "button"):
+                try:
+                    await frame_click(selector, timeout=2000)
+                    return True
+                except Exception:
+                    continue
+        return True
 
     async def _detect_turnstile_method(self, page: Any) -> str:
         try:
@@ -667,6 +1010,11 @@ class CaptchaSolverBypass:
                     except Exception:
                         continue
 
+            elif (
+                normalize_challenge_type(challenge_type) == CaptchaChallengeType.SMARTCAPTCHA.value
+            ):
+                await self._click_smartcaptcha_checkbox(page)
+
             extra_wait = min(self._wait, self.MAX_WAIT_SECONDS - self._wait)
             if extra_wait > 0:
                 await sleep_with_source_deadline(extra_wait)
@@ -675,9 +1023,48 @@ class CaptchaSolverBypass:
             pass
         return False
 
-    async def _check_challenge_cleared(self, page: Any, challenge_type: str) -> bool:
+    async def _check_challenge_cleared(
+        self,
+        page: Any,
+        challenge_type: str,
+        *,
+        wait_for_redirect: bool = True,
+    ) -> bool:
         try:
             normalized_type = normalize_challenge_type(challenge_type)
+            if normalized_type == CaptchaChallengeType.IMAGE.value:
+                from job_ftch.infrastructure.bypass.challenge_classifier import classify_challenge
+
+                for _ in range(10):
+                    try:
+                        html = await page.content()
+                        detection = classify_challenge(
+                            surface="image_captcha_clear_check", status_code=200, body=html
+                        )
+                        ready = await page.evaluate("document.readyState")
+                        active_image_form = await page.evaluate(
+                            "Boolean([...document.querySelectorAll('form')].some(form => "
+                            "form.querySelector('input[name=\"captchaText\"]') && "
+                            "form.querySelector('img') && form.getClientRects().length))"
+                        )
+                        successful_document = await page.evaluate(
+                            "(() => { const status = performance.getEntriesByType('navigation')"
+                            ".at(-1)?.responseStatus; return !status || (status >= 200 && status < 400); })()"
+                        )
+                        if (
+                            not detection.detected
+                            and not active_image_form
+                            and ready in ("interactive", "complete")
+                            and successful_document
+                            and await page.evaluate(
+                                "Boolean(document.body && document.body.innerText.trim().length > 100)"
+                            )
+                        ):
+                            return True
+                    except Exception:
+                        pass  # Form submission can briefly destroy the execution context.
+                    await sleep_with_source_deadline(1.0)
+                return False
             if hasattr(page, "evaluate"):
                 ready_state = await page.evaluate("document.readyState")
                 if ready_state not in ("interactive", "complete"):
@@ -721,6 +1108,7 @@ class CaptchaSolverBypass:
                             surface="browser_clear_check",
                             status_code=200,
                             body=html,
+                            page_url=str(getattr(page, "url", "") or ""),
                         )
                         if detection.detected:
                             return False
@@ -735,6 +1123,36 @@ class CaptchaSolverBypass:
                         return True
                     if len(body_text) > 100:
                         return True
+
+                elif normalized_type == CaptchaChallengeType.SMARTCAPTCHA.value:
+                    from job_ftch.infrastructure.bypass.challenge_classifier import (
+                        classify_challenge,
+                    )
+                    from job_ftch.infrastructure.bypass.failure_signal import is_smartcaptcha_url
+
+                    poll_seconds = min(1.0, max(float(self._wait or 0.01), 0.01))
+                    attempts = 10 if wait_for_redirect else 1
+                    for _ in range(attempts):
+                        page_url = str(getattr(page, "url", "") or "")
+                        html = str(
+                            await page.evaluate(
+                                "document.documentElement ? "
+                                "document.documentElement.outerHTML.substring(0, 50000) : ''"
+                            )
+                        )
+                        still_on_interstitial = bool(page_url) and is_smartcaptcha_url(page_url)
+                        widget_still_up = False
+                        if html:
+                            widget_still_up = classify_challenge(
+                                surface="smartcaptcha_clear_check",
+                                status_code=200,
+                                body=html,
+                                page_url=page_url,
+                            ).detected
+                        if not still_on_interstitial and not widget_still_up:
+                            return True
+                        await sleep_with_source_deadline(poll_seconds)
+                    return False
 
                 elif normalized_type in (
                     CaptchaChallengeType.HCAPTCHA.value,
@@ -861,14 +1279,17 @@ class CaptchaSolverBypass:
         """Whether provider-backed solving is authorized for ``domain``.
 
         Matches the domain or any parent suffix against the allowlist, so
-        ``jobs.example.com`` is covered by an ``example.com`` entry. An empty
-        allowlist authorizes nothing (safe default); ``browser_wait`` is not
-        gated by this and stays available everywhere.
+        ``jobs.example.com`` is covered by an ``example.com`` entry. ``*``
+        authorizes every domain. An empty allowlist authorizes nothing
+        (safe default); ``browser_wait`` is not gated by this and stays
+        available everywhere.
         """
         if self._authorized_domains is None:
             return True  # gate not configured -> unrestricted
         if not self._authorized_domains:
             return False  # configured but empty -> deny by default
+        if "*" in self._authorized_domains:
+            return True
         host = domain.strip().lower().lstrip(".")
         if not host:
             return False
@@ -942,10 +1363,94 @@ class CaptchaSolverBypass:
         if not token or not hasattr(page, "evaluate"):
             return False
         try:
+            if (
+                normalize_challenge_type(challenge_type) == CaptchaChallengeType.IMAGE.value
+                and callable(getattr(page, "fill", None))
+                and callable(getattr(page, "click", None))
+                and await page.evaluate(
+                    "Boolean(document.querySelector('input[name=\"captchaText\"]'))"
+                )
+            ):
+                await page.fill('input[name="captchaText"]:visible', token, timeout=10_000)
+                await page.click(
+                    'form:has(input[name="captchaText"]:visible) button[type="submit"]',
+                    timeout=10_000,
+                )
+                return True
             return bool(
                 await page.evaluate(
                     """({token, challengeType}) => {
                       const normalized = String(challengeType || '').toLowerCase();
+                      if (normalized === 'image') {
+                        const img = document.querySelector(
+                          'img[data-qa*="captcha"], img[alt="captcha" i], img[class*="captcha-image"], img[class*="captcha_image"], img[src*="captcha"]'
+                        );
+                        const form = img && (img.closest('form') ||
+                          [...document.forms].find(candidate => candidate.querySelector('input[name="captchaText"]')));
+                        if (!form) return false;
+                        const inputs = [...form.querySelectorAll('input')].filter(el =>
+                          !el.disabled && ['text', 'search', 'tel'].includes(el.type) &&
+                          /captcha/i.test(`${el.name} ${el.id} ${el.getAttribute('data-qa') || ''}`)
+                        );
+                        if (inputs.length !== 1) return false;
+                        const input = inputs[0];
+                        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+                        setter.call(input, token);
+                        input.dispatchEvent(new Event('input', {bubbles: true}));
+                        input.dispatchEvent(new Event('change', {bubbles: true}));
+                        if (!form.checkValidity()) return false;
+                        const submitter = form.querySelector('button[type="submit"], input[type="submit"]');
+                        if (submitter && submitter.disabled) return false;
+                        if (submitter) submitter.click();
+                        else form.requestSubmit();
+                        return true;
+                      }
+                      if (normalized === 'smartcaptcha') {
+                        const root = document.querySelector(
+                          '.smart-captcha, #smartcaptcha-container, [data-sitekey^="ysc1_"]'
+                        ) || document.forms[0] || document.body || document.documentElement;
+                        let input = document.querySelector(
+                          'input[name="smart-token"], textarea[name="smart-token"]'
+                        );
+                        if (!input) {
+                          input = document.createElement('input');
+                          input.type = 'hidden';
+                          input.name = 'smart-token';
+                          root.appendChild(input);
+                        }
+                        const proto = input.tagName === 'TEXTAREA'
+                          ? HTMLTextAreaElement.prototype
+                          : HTMLInputElement.prototype;
+                        const setter = Object.getOwnPropertyDescriptor(proto, 'value')
+                          && Object.getOwnPropertyDescriptor(proto, 'value').set;
+                        if (setter) setter.call(input, token);
+                        else input.value = token;
+                        input.dispatchEvent(new Event('input', {bubbles: true}));
+                        input.dispatchEvent(new Event('change', {bubbles: true}));
+                        const invoke = (fn) => {
+                          if (typeof fn !== 'function') return false;
+                          try { fn(token); return true; } catch (_) { return false; }
+                        };
+                        for (const el of document.querySelectorAll('[data-callback]')) {
+                          const name = el.getAttribute('data-callback');
+                          const fn = name && name.split('.').reduce(
+                            (obj, part) => obj && obj[part], window
+                          );
+                          invoke(fn);
+                        }
+                        invoke(window.smartCaptchaCallback);
+                        invoke(window.onSmartCaptchaSuccess);
+                        const form = input.closest('form') || document.querySelector('form');
+                        if (form) {
+                          const submitter = form.querySelector(
+                            'button[type="submit"], input[type="submit"], button:not([type])'
+                          );
+                          if (submitter && !submitter.disabled) submitter.click();
+                          else if (typeof form.requestSubmit === 'function') form.requestSubmit();
+                          else form.submit();
+                        }
+                        return true;
+                      }
                       const selectors = normalized === 'hcaptcha'
                         ? ['textarea[name="h-captcha-response"]']
                         : ['textarea[name="g-recaptcha-response"]',
@@ -1048,7 +1553,10 @@ def _authorized_domains_from_config(config: dict[str, Any], settings: Any) -> fr
     for key in ("authorized_domains", "captcha_authorized_domains"):
         collected.extend(_iter_domain_values(config.get(key)))
     collected.extend(_iter_domain_values(getattr(settings, "captcha_authorized_domains", ())))
-    return frozenset(item.strip().lower().lstrip(".") for item in collected if item.strip())
+    normalized = [item.strip().lower().lstrip(".") for item in collected if item.strip()]
+    if "*" in normalized:
+        return frozenset({"*"})
+    return frozenset(normalized)
 
 
 def _create_captcha_solver(
@@ -1065,7 +1573,7 @@ def _create_captcha_solver(
     provider_routes = _normalize_provider_routes(route_config)
     return CaptchaSolverBypass(
         provider=provider,
-        api_key=os.environ.get(CAPTCHA_PROVIDER_ENV_KEYS.get(provider, ""), ""),
+        api_key=_provider_api_key(provider),
         wait_seconds=float(config["wait_seconds"]) if "wait_seconds" in config else None,
         max_attempts=int(config.get("max_attempts", "2")),
         max_paid_attempts=int(config.get("max_paid_attempts", "1")),

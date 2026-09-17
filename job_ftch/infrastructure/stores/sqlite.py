@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -105,6 +106,70 @@ class SQLiteStore(SQLStoreAdapter):
         ON CONFLICT(tenant_id, source_id) DO UPDATE SET
             bootstrap_completed_at=excluded.bootstrap_completed_at,
             payload_json=excluded.payload_json,
+            updated_at=excluded.updated_at
+    """
+    _SQL_INGEST_TASK_GET = """
+        SELECT task_id, tenant_id, run_id, source_id, rate_scope, state, attempt,
+               max_items, user_id, bypass_override, parser_override, personal_mode,
+               trigger, available_at, lease_owner, lease_until, last_error,
+               created_at, updated_at, completed_at
+        FROM jf_ingest_tasks WHERE task_id = ?
+    """
+    _SQL_INGEST_TASK_UPSERT = """
+        INSERT INTO jf_ingest_tasks (
+            task_id, tenant_id, run_id, source_id, rate_scope, state, attempt,
+            max_items, user_id, bypass_override, parser_override, personal_mode,
+            trigger, available_at, lease_owner, lease_until, last_error,
+            created_at, updated_at, completed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(task_id) DO UPDATE SET
+            available_at=excluded.available_at,
+            updated_at=excluded.updated_at,
+            last_error=excluded.last_error
+        WHERE jf_ingest_tasks.state IN ('ready', 'waiting_rate_limit')
+    """
+    _SQL_INGEST_TASK_COMPLETE = """
+        UPDATE jf_ingest_tasks
+        SET state=?, lease_owner=NULL, lease_until=NULL, completed_at=?, updated_at=?
+        WHERE task_id=? AND lease_owner=? AND state='leased'
+    """
+    _SQL_INGEST_TASK_DEFER = """
+        UPDATE jf_ingest_tasks
+        SET state=?, available_at=?, lease_owner=NULL, lease_until=NULL,
+            last_error=?, updated_at=?
+        WHERE task_id=? AND lease_owner=? AND state='leased'
+    """
+    _SQL_INGEST_TASK_FAIL = """
+        UPDATE jf_ingest_tasks
+        SET state=?, lease_owner=NULL, lease_until=NULL, last_error=?,
+            completed_at=?, updated_at=?
+        WHERE task_id=? AND lease_owner=? AND state='leased'
+    """
+    _SQL_INGEST_TASK_REAP = """
+        UPDATE jf_ingest_tasks
+        SET state=?, lease_owner=NULL, lease_until=NULL, updated_at=?
+        WHERE state='leased' AND lease_until IS NOT NULL AND lease_until <= ?
+    """
+    _SQL_INGEST_TASK_ACTIVE = """
+        SELECT task_id, tenant_id, run_id, source_id, rate_scope, state, attempt,
+               max_items, user_id, bypass_override, parser_override, personal_mode,
+               trigger, available_at, lease_owner, lease_until, last_error,
+               created_at, updated_at, completed_at
+        FROM jf_ingest_tasks
+        WHERE tenant_id=? AND (? IS NULL OR run_id=?)
+          AND state IN ('ready', 'waiting_rate_limit', 'leased')
+        ORDER BY available_at, created_at
+    """
+    _SQL_INGEST_RATE_LIMIT_UPSERT = """
+        INSERT INTO jf_ingest_rate_limits
+            (scope_id, cooldown_until, retry_after_seconds, status_code, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(scope_id) DO UPDATE SET
+            cooldown_until=CASE
+                WHEN excluded.cooldown_until > jf_ingest_rate_limits.cooldown_until
+                THEN excluded.cooldown_until ELSE jf_ingest_rate_limits.cooldown_until END,
+            retry_after_seconds=excluded.retry_after_seconds,
+            status_code=excluded.status_code,
             updated_at=excluded.updated_at
     """
     _SQL_OPERATOR_FLAG_GET = """
@@ -230,6 +295,7 @@ class SQLiteStore(SQLStoreAdapter):
             "012_ontology_term_stats.sql",
             "013_compiled_ontology.sql",
             "014_run_stats.sql",
+            "015_ingest_queue.sql",
         ):
             path = migrations_dir / name
             if not path.exists():
@@ -285,10 +351,69 @@ class SQLiteStore(SQLStoreAdapter):
             await self._conn.close()
             self._conn = None
 
+    async def _claim_ingest_tasks(
+        self,
+        tenant_id: str,
+        worker_id: str,
+        *,
+        limit: int,
+        lease_seconds: int,
+        now: datetime,
+    ) -> list[tuple[object, ...]]:
+        conn = await self._ensure_initialized()
+        now = now.astimezone(UTC)
+        now_value = now.isoformat()
+        lease_until = (now + timedelta(seconds=lease_seconds)).isoformat()
+        async with self._init_lock:
+            try:
+                await conn.execute("BEGIN IMMEDIATE")
+                async with conn.execute(
+                    """
+                    SELECT t.task_id
+                    FROM jf_ingest_tasks AS t
+                    WHERE t.tenant_id=?
+                      AND t.state IN ('ready', 'waiting_rate_limit')
+                      AND t.available_at <= ?
+                      AND NOT EXISTS (
+                          SELECT 1 FROM jf_ingest_rate_limits AS r
+                          WHERE r.scope_id=t.rate_scope AND r.cooldown_until > ?
+                      )
+                    ORDER BY t.available_at, t.created_at
+                    LIMIT ?
+                    """,
+                    (tenant_id, now_value, now_value, max(limit, 1)),
+                ) as cursor:
+                    task_ids = [str(row[0]) for row in await cursor.fetchall()]
+                for task_id in task_ids:
+                    await conn.execute(
+                        """
+                        UPDATE jf_ingest_tasks
+                        SET state='leased', attempt=attempt+1, lease_owner=?,
+                            lease_until=?, updated_at=?
+                        WHERE task_id=? AND state IN ('ready', 'waiting_rate_limit')
+                        """,
+                        (worker_id, lease_until, now_value, task_id),
+                    )
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
+        rows: list[tuple[object, ...]] = []
+        for task_id in task_ids:
+            row = await self._fetchone(self._SQL_INGEST_TASK_GET, (task_id,))
+            if row is not None:
+                rows.append(row)
+        return rows
+
     async def reset_namespace(self, prefix: str) -> None:
         conn = await self._ensure_initialized()
         await conn.execute("DELETE FROM jf_kv WHERE key LIKE ?", (f"{prefix}%",))
         await conn.execute("DELETE FROM jf_set WHERE key LIKE ?", (f"{prefix}%",))
+        tenant_id = prefix[:-1] if prefix.endswith(":") else prefix
+        await conn.execute("DELETE FROM jf_ingest_tasks WHERE tenant_id = ?", (tenant_id,))
+        await conn.execute(
+            "DELETE FROM jf_ingest_rate_limits WHERE scope_id LIKE ?", (f"{prefix}%",)
+        )
         await conn.commit()
 
     async def clear_run_artifacts(self, prefix: str, tenant_id: str) -> dict[str, int]:
@@ -366,6 +491,10 @@ class SQLiteStore(SQLStoreAdapter):
         await conn.execute("DELETE FROM jf_dedup_claims WHERE claim_key LIKE ?", (f"{prefix}%",))
         await conn.execute("DELETE FROM jf_outbox WHERE tenant_id = ?", (tenant_id,))
         await conn.execute("DELETE FROM jf_source_assessments WHERE tenant_id = ?", (tenant_id,))
+        await conn.execute("DELETE FROM jf_ingest_tasks WHERE tenant_id = ?", (tenant_id,))
+        await conn.execute(
+            "DELETE FROM jf_ingest_rate_limits WHERE scope_id LIKE ?", (f"{tenant_id}:%",)
+        )
         await conn.commit()
         return counts
 

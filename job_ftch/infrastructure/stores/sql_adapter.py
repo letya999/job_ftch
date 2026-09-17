@@ -13,6 +13,8 @@ if TYPE_CHECKING:
 
 from job_ftch.domain import (
     DuplicateRecord,
+    IngestTask,
+    IngestTaskState,
     ObservationLedgerEntry,
     OutboxRecord,
     OutboxState,
@@ -41,6 +43,46 @@ def _as_iso(value: object) -> str:
     if callable(isoformat):
         return str(isoformat())
     return str(value)
+
+
+def _as_datetime(value: object) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            parsed = datetime.now(UTC)
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+
+def _queue_time(value: datetime | None) -> str | None:
+    return value.astimezone(UTC).isoformat() if value is not None else None
+
+
+def _ingest_task_from_row(row: tuple[object, ...]) -> IngestTask:
+    return IngestTask(
+        task_id=str(row[0]),
+        tenant_id=str(row[1]),
+        run_id=str(row[2]),
+        source_id=str(row[3]),
+        rate_scope=str(row[4]),
+        state=IngestTaskState(str(row[5])),
+        attempt=int(cast("int | str", row[6] or 0)),
+        max_items=(int(cast("int | str", row[7])) if row[7] is not None else None),
+        user_id=str(row[8]) if row[8] is not None else None,
+        bypass_override=str(row[9]) if row[9] is not None else None,
+        parser_override=str(row[10]) if row[10] is not None else None,
+        personal_mode=bool(row[11]),
+        trigger=str(row[12]),
+        available_at=_as_datetime(row[13]),
+        lease_owner=str(row[14]) if row[14] is not None else None,
+        lease_until=_as_datetime(row[15]) if row[15] is not None else None,
+        last_error=str(row[16]) if row[16] is not None else None,
+        created_at=_as_datetime(row[17]),
+        updated_at=_as_datetime(row[18]),
+        completed_at=_as_datetime(row[19]) if row[19] is not None else None,
+    )
 
 
 def _flag_from_row(row: tuple[object, ...]) -> SourceOperatorFlag:
@@ -107,6 +149,14 @@ class SQLStoreAdapter(abc.ABC):
     _SQL_OPERATOR_FLAG_LIST: str
     _SQL_PIPELINE_RUN_STATS_UPSERT: str
     _SQL_SOURCE_RUN_STATS_UPSERT: str
+    _SQL_INGEST_TASK_GET: str
+    _SQL_INGEST_TASK_UPSERT: str
+    _SQL_INGEST_TASK_COMPLETE: str
+    _SQL_INGEST_TASK_DEFER: str
+    _SQL_INGEST_TASK_FAIL: str
+    _SQL_INGEST_TASK_REAP: str
+    _SQL_INGEST_TASK_ACTIVE: str
+    _SQL_INGEST_RATE_LIMIT_UPSERT: str
 
     def __init__(self, *, processed_item_ttl_hours: int | None = 24) -> None:
         self._processed_item_ttl_hours = processed_item_ttl_hours
@@ -509,6 +559,158 @@ class SQLStoreAdapter(abc.ABC):
                 state.bootstrap_completed_at,
                 state.model_dump_json(),
                 state.updated_at,
+            ),
+        )
+
+    async def enqueue_ingest_task(self, task: IngestTask) -> IngestTask:
+        now = datetime.now(UTC)
+        normalized = task.model_copy(update={"updated_at": now})
+        await self._execute(
+            self._SQL_INGEST_TASK_UPSERT,
+            (
+                normalized.task_id,
+                normalized.tenant_id,
+                normalized.run_id,
+                normalized.source_id,
+                normalized.rate_scope,
+                normalized.state.value,
+                normalized.attempt,
+                normalized.max_items,
+                normalized.user_id,
+                normalized.bypass_override,
+                normalized.parser_override,
+                normalized.personal_mode,
+                normalized.trigger,
+                _queue_time(normalized.available_at),
+                normalized.lease_owner,
+                _queue_time(normalized.lease_until),
+                normalized.last_error,
+                _queue_time(normalized.created_at),
+                _queue_time(normalized.updated_at),
+                _queue_time(normalized.completed_at),
+            ),
+        )
+        row = await self._fetchone(self._SQL_INGEST_TASK_GET, (normalized.task_id,))
+        if row is None:
+            raise RuntimeError("ingest task disappeared after enqueue")
+        return _ingest_task_from_row(row)
+
+    async def claim_due_ingest_tasks(
+        self,
+        tenant_id: str,
+        worker_id: str,
+        *,
+        limit: int,
+        lease_seconds: int,
+        now: datetime,
+    ) -> tuple[IngestTask, ...]:
+        rows = await self._claim_ingest_tasks(
+            tenant_id,
+            worker_id,
+            limit=limit,
+            lease_seconds=lease_seconds,
+            now=now,
+        )
+        return tuple(_ingest_task_from_row(row) for row in rows)
+
+    @abc.abstractmethod
+    async def _claim_ingest_tasks(
+        self,
+        tenant_id: str,
+        worker_id: str,
+        *,
+        limit: int,
+        lease_seconds: int,
+        now: datetime,
+    ) -> list[tuple[object, ...]]:
+        """Atomically lease due tasks in the backend's native SQL dialect."""
+
+    async def complete_ingest_task(self, task_id: str, worker_id: str) -> IngestTask | None:
+        now = datetime.now(UTC)
+        await self._execute(
+            self._SQL_INGEST_TASK_COMPLETE,
+            (
+                IngestTaskState.SUCCEEDED.value,
+                _queue_time(now),
+                _queue_time(now),
+                task_id,
+                worker_id,
+            ),
+        )
+        row = await self._fetchone(self._SQL_INGEST_TASK_GET, (task_id,))
+        return _ingest_task_from_row(row) if row is not None else None
+
+    async def defer_ingest_task(
+        self,
+        task: IngestTask,
+        worker_id: str,
+        *,
+        available_at: datetime,
+        error: str | None = None,
+    ) -> IngestTask | None:
+        now = datetime.now(UTC)
+        await self._execute(
+            self._SQL_INGEST_TASK_DEFER,
+            (
+                IngestTaskState.WAITING_RATE_LIMIT.value,
+                _queue_time(available_at),
+                error,
+                _queue_time(now),
+                task.task_id,
+                worker_id,
+            ),
+        )
+        row = await self._fetchone(self._SQL_INGEST_TASK_GET, (task.task_id,))
+        return _ingest_task_from_row(row) if row is not None else None
+
+    async def fail_ingest_task(
+        self,
+        task: IngestTask,
+        worker_id: str,
+        *,
+        needs_operator: bool = False,
+        error: str | None = None,
+    ) -> IngestTask | None:
+        now = datetime.now(UTC)
+        state = IngestTaskState.NEEDS_OPERATOR if needs_operator else IngestTaskState.FAILED
+        await self._execute(
+            self._SQL_INGEST_TASK_FAIL,
+            (state.value, error, _queue_time(now), _queue_time(now), task.task_id, worker_id),
+        )
+        row = await self._fetchone(self._SQL_INGEST_TASK_GET, (task.task_id,))
+        return _ingest_task_from_row(row) if row is not None else None
+
+    async def reap_ingest_leases(self, now: datetime) -> int:
+        await self._execute(
+            self._SQL_INGEST_TASK_REAP,
+            (IngestTaskState.READY.value, _queue_time(now), _queue_time(now)),
+        )
+        row = await self._fetchone("SELECT changes()")
+        return int(cast("int | str", row[0] or 0)) if row else 0
+
+    async def list_active_ingest_tasks(
+        self, tenant_id: str, *, run_id: str | None = None
+    ) -> tuple[IngestTask, ...]:
+        params: tuple[object, ...] = (tenant_id, run_id, run_id)
+        rows = await self._fetchall(self._SQL_INGEST_TASK_ACTIVE, params)
+        return tuple(_ingest_task_from_row(row) for row in rows)
+
+    async def record_ingest_rate_limit(
+        self,
+        scope_id: str,
+        *,
+        cooldown_until: datetime,
+        retry_after_seconds: float | None,
+        status_code: int | None = None,
+    ) -> None:
+        await self._execute(
+            self._SQL_INGEST_RATE_LIMIT_UPSERT,
+            (
+                scope_id,
+                _queue_time(cooldown_until),
+                retry_after_seconds,
+                status_code,
+                _queue_time(datetime.now(UTC)),
             ),
         )
 
