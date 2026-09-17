@@ -44,7 +44,9 @@ RUN patchright install --with-deps chromium
 RUN patchright install-deps firefox
 RUN mkdir -p /opt/job-ftch-home/.cache/camoufox \
     && chown appuser:appuser /opt/job-ftch-home/.cache/camoufox
-RUN python -m camoufox fetch
+# Pin the browser asset so image builds do not depend on unauthenticated GitHub
+# release-list API quota (the CLI's fetch command syncs that API first).
+RUN python -c "from camoufox.__main__ import CamoufoxUpdate; from camoufox.pkgman import AvailableVersion, RepoConfig, Version; version = AvailableVersion(version=Version(version='152.0.4', build='beta.28'), url='https://github.com/daijro/camoufox/releases/download/v152.0.4-beta.28/camoufox-152.0.4-beta.28-lin.x86_64.zip', is_prerelease=False, sha256='924f3109ccd6d47cd6a0384d67a345fadf975d48b6319f8dbbd5954c588982bd'); CamoufoxUpdate(repo_config=RepoConfig.get_default(), selected_version=version).update()"
 RUN python -m cloakbrowser install
 
 COPY --chown=appuser:appuser . /app
