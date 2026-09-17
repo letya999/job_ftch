@@ -169,7 +169,7 @@ class PostgreSQLStore(SQLStoreAdapter):
                trigger, available_at, lease_owner, lease_until, last_error,
                created_at, updated_at, completed_at
         FROM jf_ingest_tasks
-        WHERE tenant_id=$1 AND ($2::text IS NULL OR run_id=$2)
+        WHERE tenant_id=$1 AND ($2::text IS NULL OR run_id=$3)
           AND state IN ('ready', 'waiting_rate_limit', 'leased')
         ORDER BY available_at, created_at
     """
