@@ -98,6 +98,21 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
+  # Optional CLIProxyAPI sidecar. Start with --profile cliproxy after copying
+  # deploy/cliproxy/config.yaml.example to deploy/cliproxy/config.yaml.
+  # The bot reaches it as http://cliproxy:8317/v1 on the default Compose network.
+  cliproxy:
+    profiles: ["cliproxy"]
+    image: ${JOB_FTCH_CLIPROXY_IMAGE:-eceasy/cli-proxy-api:latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${JOB_FTCH_CLIPROXY_API_PORT:-8317}:8317"
+      - "127.0.0.1:${JOB_FTCH_CLIPROXY_OAUTH_PORT:-8085}:8085"
+    volumes:
+      - ../../../deploy/cliproxy/config.yaml:/CLIProxyAPI/config.yaml:ro
+      - ../../../deploy/cliproxy/auth:/root/.cli-proxy-api
+      - ../../../deploy/cliproxy/logs:/CLIProxyAPI/logs
+
   postgres:
     image: postgres:16-alpine
     environment:

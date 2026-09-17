@@ -54,6 +54,7 @@ def _isolated_base_settings() -> Settings:
             "embedding_provider": "none",
             "relevance_backend": "keywords",
             "relevance_shot_backend": "memory",
+            "llm_preflight_enabled": False,
         }
     )
 

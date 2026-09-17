@@ -20,6 +20,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from job_ftch.application.llm_quota import LLMQuotaExhaustedError
+
 # ---------------------------------------------------------------------------
 # Stubs: we don't want to actually hit OpenAI / instructor. The
 # provider module is small enough to mock the heavy dependencies
@@ -45,6 +47,11 @@ def _install_instructor_and_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     openai_mod = types.ModuleType("openai")
     openai_mod.AsyncOpenAI = MagicMock()  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "openai", openai_mod)
+
+
+class _QuotaError(RuntimeError):
+    status_code = 429
+    body = {"code": "insufficient_quota"}
 
 
 def _build_provider(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, MagicMock, MagicMock]:
@@ -82,7 +89,7 @@ def _build_provider(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, MagicMock, Ma
     openai_provider.AsyncOpenAI = MagicMock(return_value=raw_client)  # type: ignore[assignment]
 
     provider = openai_provider.OpenAIInstructorLLMProvider(
-        api_key="sk-test",
+        api_key="sk-test",  # pragma: allowlist secret
         model="gpt-4.1-mini",
         base_url=None,
         timeout_seconds=30.0,
@@ -138,6 +145,39 @@ async def test_generate_text_handles_empty_content(
     assert out == ""
 
 
+@pytest.mark.anyio
+async def test_preflight_reports_quota_and_blocks_followup_http_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider, _, raw_client = _build_provider(monkeypatch)
+    raw_client.chat.completions.create = AsyncMock(side_effect=_QuotaError("quota"))
+
+    result = await provider.preflight()
+
+    assert result.available is False
+    assert result.quota_exhausted is True
+    with pytest.raises(LLMQuotaExhaustedError):
+        await provider.generate_text("system", "user")
+    assert raw_client.chat.completions.create.await_count == 1
+
+
+@pytest.mark.anyio
+async def test_structured_quota_error_is_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic import BaseModel
+
+    class _S(BaseModel):
+        label: str
+
+    provider, instructor_client, _ = _build_provider(monkeypatch)
+    instructor_client.create_with_completion = AsyncMock(side_effect=_QuotaError("quota"))
+
+    with pytest.raises(LLMQuotaExhaustedError):
+        await provider.classify("prompt", _S)
+    assert instructor_client.create_with_completion.await_count == 1
+
+
 # ---------------------------------------------------------------------------
 # Instructor mode: TOOLS (not TOOLS_STRICT) for gateway compatibility.
 # ---------------------------------------------------------------------------
@@ -163,7 +203,7 @@ def test_provider_uses_tools_mode_not_tools_strict(
     openai_provider.AsyncOpenAI = MagicMock(return_value=MagicMock())  # type: ignore[assignment]
 
     openai_provider.OpenAIInstructorLLMProvider(
-        api_key="sk-test",
+        api_key="sk-test",  # pragma: allowlist secret
         model="gpt-5.4-mini",
         base_url="http://127.0.0.1:8317/v1",
         timeout_seconds=30.0,

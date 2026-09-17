@@ -175,6 +175,9 @@ Thumbs.db
 # logs / temp
 *.log
 logs/
+deploy/cliproxy/config.yaml
+deploy/cliproxy/auth/
+deploy/cliproxy/logs/
 tmp/
 temp/
 .cache/

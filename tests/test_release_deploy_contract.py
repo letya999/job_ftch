@@ -46,6 +46,11 @@ def test_compose_relative_host_paths_resolve_inside_repo(compose_path: Path) -> 
     compose_dir = compose_path.parent
     runtime_mount = (ROOT / ".runtime").resolve()
     for service in compose["services"].values():
+        # Optional profiles intentionally require operator-created files (for
+        # example CLIProxy OAuth/config state) and are not part of the default
+        # checkout contract.
+        if "cliproxy" in service.get("profiles", []):
+            continue
         for volume in service.get("volumes", []):
             if not isinstance(volume, str) or ":" not in volume:
                 continue

@@ -192,6 +192,8 @@ class RunSummary(StatsBase):
     config_fingerprint: str | None = None
     completion_state: str = "completed"
     next_retry_at: datetime | None = None
+    llm_quota_exhausted: bool = False
+    llm_health_error: str | None = None
 
     def finish(self) -> RunSummary:
         self.finished_at = datetime.now(UTC)

@@ -332,6 +332,14 @@ async def run_pipeline_for_chat(
 
         footer = render_runtime_run_footer(report)
 
+        if report.completion_state == "llm_preflight_blocked":
+            delivery_status = "llm_preflight_blocked"
+            await status_msg.edit_text(
+                f"⚠️ Запуск пропущен: LLM недоступна  {footer}\n\n{funnel_text}",
+                parse_mode="HTML",
+            )
+            return
+
         if emitted == 0:
             delivery_status = "no_routing_accepts"
             await status_msg.edit_text(

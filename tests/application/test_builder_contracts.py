@@ -132,13 +132,13 @@ async def test_openai_provider_forwards_timeout_retry_and_prompt(
         "api_key": "fixture-api-key",  # pragma: allowlist secret
         "base_url": "https://api.example.test",
         "timeout": 12.5,
-        "max_retries": 3,
+        "max_retries": 0,
         "mode": __import__("instructor").Mode.TOOLS,
     }
     create_kwargs = captured["create"]
     assert isinstance(create_kwargs, dict)
     assert create_kwargs["model"] == "gpt-4.1-mini"
-    assert create_kwargs["max_retries"] == 3
+    assert create_kwargs["max_retries"] == 0
     assert "messages" in create_kwargs
     assert create_kwargs["messages"][0]["role"] == "system"
     assert create_kwargs["messages"][1]["content"] == "Extract this"
