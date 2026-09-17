@@ -72,6 +72,7 @@ def raise_if_browser_challenge(html: str, *, url: str) -> None:
         surface="monitor",
         status_code=200,
         body=body,
+        page_url=url,
     )
     if detection.detected:
         emit_challenge_detection(urlparse(url).netloc.lower(), detection)

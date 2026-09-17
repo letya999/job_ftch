@@ -104,7 +104,19 @@ _CHALLENGE_MARKERS: tuple[str, ...] = (
     "g-recaptcha",
     "smartcaptcha",
     "showcaptcha",
+    "tmgrdfrend",
+    "cian-captcha",
+    "captcha-api.yandex.ru",
+    "smartcaptcha.cloud.yandex.ru",
     "px-captcha",
+)
+
+_SMARTCAPTCHA_URL_MARKERS: tuple[str, ...] = (
+    "showcaptcha",
+    "tmgrdfrend",
+    "cian-captcha",
+    "smartcaptcha.cloud.yandex.ru",
+    "captcha-api.yandex.ru",
 )
 
 _QRATOR_HEADER_MARKERS: tuple[str, ...] = (
@@ -215,6 +227,12 @@ def is_challenge_body(text: str) -> bool:
     )
 
 
+def is_smartcaptcha_url(url: str) -> bool:
+    """True when a URL is a Yandex SmartCaptcha / Cian captcha interstitial."""
+    lowered = url.lower()
+    return any(marker in lowered for marker in _SMARTCAPTCHA_URL_MARKERS)
+
+
 def _active_captcha_type(text: str) -> str | None:
     """Recognize interactive forms, not mentions in scripts or vacancy text."""
     from selectolax.parser import HTMLParser
@@ -223,20 +241,45 @@ def _active_captcha_type(text: str) -> str | None:
     for form in tree.css("form"):
         if form.css_first('input[name="captchaText"]') and form.css_first("img"):
             return "image"
+    if (
+        tree.css_first('iframe[src*="smartcaptcha"]')
+        or tree.css_first(".smart-captcha")
+        or tree.css_first("#smartcaptcha-container")
+        or tree.css_first('input[name="smart-token"]')
+        or tree.css_first('[data-sitekey^="ysc1_"]')
+    ):
+        return "smartcaptcha"
     if tree.css_first('iframe[src*="/recaptcha/api2/anchor"]'):
         return "recaptcha"
     return None
 
 
-def _detect_captcha_type(text: str, headers: Mapping[str, str] | None = None) -> str | None:
+def _detect_captcha_type(
+    text: str,
+    headers: Mapping[str, str] | None = None,
+    *,
+    page_url: str | None = None,
+) -> str | None:
     """Return a conservative label for observed challenge evidence."""
-    lowered = text.lower()
-    active_type = _active_captcha_type(text)
-    if active_type:
-        return active_type
     lowered_headers = {
         str(key).lower(): str(value).lower() for key, value in (headers or {}).items()
     }
+    url_blob = " ".join(
+        part
+        for part in (
+            page_url or "",
+            lowered_headers.get("location", ""),
+        )
+        if part
+    )
+    if url_blob and is_smartcaptcha_url(url_blob):
+        return "smartcaptcha"
+    lowered = text.lower()
+    if "ysc1_" in lowered or "ysc1_" in url_blob.lower():
+        return "smartcaptcha"
+    active_type = _active_captcha_type(text)
+    if active_type:
+        return active_type
     if "captcha" in lowered_headers.get("x-datadome", "") or "datadome" in lowered:
         return "datadome"
     if "px-captcha" in lowered or "perimeterx" in lowered:
@@ -247,7 +290,13 @@ def _detect_captcha_type(text: str, headers: Mapping[str, str] | None = None) ->
         return "incapsula"
     if "ddos-guard" in lowered:
         return "ddos_guard"
-    if "smartcaptcha" in lowered or "showcaptcha" in lowered:
+    if (
+        "smartcaptcha" in lowered
+        or "showcaptcha" in lowered
+        or "tmgrdfrend" in lowered
+        or "cian-captcha" in lowered
+        or "captcha-api.yandex.ru" in lowered
+    ):
         return "smartcaptcha"
     if "hcaptcha" in lowered:
         return "hcaptcha"
@@ -397,6 +446,7 @@ class HeuristicFailureSignal:
         headers: Mapping[str, str] | None = None,
         body: bytes | None,
         error: BaseException | None,
+        page_url: str | None = None,
     ) -> FetchOutcome:
         if error is not None:
             kind = classify_error(error)
@@ -415,6 +465,14 @@ class HeuristicFailureSignal:
         lowered_headers = {
             str(key).lower(): str(value).lower() for key, value in (headers or {}).items()
         }
+        if is_smartcaptcha_url(
+            " ".join(part for part in (page_url or "", lowered_headers.get("location", "")) if part)
+        ):
+            return FetchOutcome(
+                kind=FailureKind.CAPTCHA,
+                challenge=True,
+                captcha_type="smartcaptcha",
+            )
         if lowered_headers.get("cf-mitigated") == "challenge":
             return FetchOutcome(
                 kind=FailureKind.CHALLENGE,
@@ -446,7 +504,7 @@ class HeuristicFailureSignal:
                     return FetchOutcome(
                         kind=FailureKind.CHALLENGE,
                         challenge=True,
-                        captcha_type=_detect_captcha_type(text, lowered_headers),
+                        captcha_type=_detect_captcha_type(text, lowered_headers, page_url=page_url),
                     )
             if any(marker in lowered for marker in _IP_BLOCK_MARKERS):
                 return FetchOutcome(kind=FailureKind.BLOCKED_IP)
@@ -466,14 +524,14 @@ class HeuristicFailureSignal:
                     return FetchOutcome(
                         kind=FailureKind.CAPTCHA,
                         challenge=True,
-                        captcha_type=_detect_captcha_type(text, lowered_headers),
+                        captcha_type=_detect_captcha_type(text, lowered_headers, page_url=page_url),
                     )
             for pattern in _PASSIVE_CHALLENGE_PATTERNS:
                 if pattern.search(text) and not substantial_content:
                     return FetchOutcome(
                         kind=FailureKind.CHALLENGE,
                         challenge=True,
-                        captcha_type=_detect_captcha_type(text, lowered_headers),
+                        captcha_type=_detect_captcha_type(text, lowered_headers, page_url=page_url),
                     )
             if not substantial_content and any(
                 pattern.search(text) for pattern in _EMBEDDABLE_CAPTCHA_PATTERNS
@@ -481,13 +539,13 @@ class HeuristicFailureSignal:
                 return FetchOutcome(
                     kind=FailureKind.CHALLENGE,
                     challenge=True,
-                    captcha_type=_detect_captcha_type(text, lowered_headers),
+                    captcha_type=_detect_captcha_type(text, lowered_headers, page_url=page_url),
                 )
             if is_challenge_body(text) and not substantial_content:
                 return FetchOutcome(
                     kind=FailureKind.CHALLENGE,
                     challenge=True,
-                    captcha_type=_detect_captcha_type(text, lowered_headers),
+                    captcha_type=_detect_captcha_type(text, lowered_headers, page_url=page_url),
                 )
 
         if status_code == 402:

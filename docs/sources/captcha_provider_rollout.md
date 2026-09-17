@@ -1,14 +1,26 @@
 ---
 title: "CAPTCHA provider rollout"
 description: "Operational rollout for observed CAPTCHA/bot-protection handling: project wiring, browser setup, provider roles, and eval gates."
-updated: 2026-09-13
+updated: 2026-09-17
 ---
 # CAPTCHA provider rollout
 
 This rollout is based on the 2026-08-02 observe run over the 300 career-site
-fixtures. The only confirmed CAPTCHA subtype in that run was `recaptcha`;
-`cloudflare_challenge` was observed separately as a browser/session challenge.
-Other types stay observe-only until a fresh run confirms them.
+fixtures plus later Cian/Yandex SmartCaptcha detections. Confirmed interactive
+types: `recaptcha`, `smartcaptcha` (Yandex, including Cian `/cian-captcha/` and
+`/tmgrdfrend/showcaptcha`). `cloudflare_challenge` is a browser/session
+challenge. Other types stay observe-only until a fresh run confirms them.
+
+`smartcaptcha` is a first-class `CaptchaChallengeType`. A paid token is injected
+into `smart-token`, the site callback is fired, and the captcha form is submitted.
+Clearance is the page leaving `/cian-captcha` / `showcaptcha` / `tmgrdfrend`.
+The SmartCaptcha route is `browser_wait` (checkbox, then vision clicks on the
+image puzzle) then CapSolver then CapMonster then 2Captcha then `observe`.
+Live CapSolver createTask returns `ERROR_TYPE_NOT_SUPPORTED` for
+`YandexCaptchaTask` / `YandexSmartCaptchaTask`; that rejection does not
+consume the paid slot. 2Captcha token (`YandexSmartCaptchaTaskProxyless`) and
+image (`SmartCaptchaTask` coordinates) need `TWOCAPTCHA_API_KEY`.
+Encounters stay in OpenObserve as `captcha_encounter` / `captcha_solve_outcome`.
 
 ## Project wiring
 
@@ -20,6 +32,7 @@ Provider roles:
 | Benchmark candidate | `nextcaptcha` for `recaptcha` and `turnstile` |
 | Free/dev contour | `browser_wait`, `nopecha`, `cliproxy_image`, manual/mock/sandbox fixtures |
 | Observe-only until confirmed | `turnstile`, `hcaptcha`, `datadome`, `perimeterx`, `unknown` |
+| Yandex SmartCaptcha | `browser_wait` (checkbox + vision clicks), then `capsolver`, `capmonster`, `2captcha` if keyed, else `observe` |
 
 Environment variables:
 

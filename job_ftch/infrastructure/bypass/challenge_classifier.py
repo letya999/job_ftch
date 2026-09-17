@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -18,6 +18,8 @@ logger = structlog.get_logger("job_ftch.bypass.challenge")
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+_counter: Any = None
 
 _CHALLENGE_KINDS = {
     FailureKind.CAPTCHA,
@@ -48,6 +50,7 @@ def classify_challenge(
     headers: Mapping[str, str] | None = None,
     body: bytes | str | None = None,
     started_at: float | None = None,
+    page_url: str | None = None,
 ) -> ChallengeDetection:
     body_bytes = _body_bytes(body)
     outcome = HeuristicFailureSignal().classify_detailed(
@@ -55,6 +58,7 @@ def classify_challenge(
         headers=headers,
         body=body_bytes,
         error=None,
+        page_url=page_url,
     )
     detected = outcome.kind in _CHALLENGE_KINDS
     return ChallengeDetection(
@@ -70,19 +74,97 @@ def classify_challenge(
 
 
 def emit_challenge_detection(domain: str, detection: ChallengeDetection) -> None:
-    """Emit token/cookie-safe challenge telemetry."""
+    """Emit a first-class OpenObserve CAPTCHA encounter (token/cookie-safe)."""
     if not detection.detected:
         return
-    logger.info(
-        "challenge_detected",
-        domain=domain,
-        type=detection.challenge_type or detection.kind.value,
-        confidence=detection.confidence,
-        surface=detection.surface,
+    emit_captcha_event(
+        event="captcha_encounter",
+        captcha_host=domain,
+        captcha_type=detection.challenge_type or detection.kind.value,
+        captcha_kind=detection.kind.value,
+        captcha_surface=detection.surface,
+        captcha_outcome="observed",
+        captcha_solved=False,
         status_code=detection.status_code,
-        latency_ms=round(detection.latency_ms, 1) if detection.latency_ms is not None else None,
         evidence_hash=detection.evidence_hash,
+        latency_ms=round(detection.latency_ms, 1) if detection.latency_ms is not None else None,
     )
+
+
+def emit_captcha_solve_outcome(
+    *,
+    host: str,
+    captcha_type: str | None,
+    solved: bool,
+    result_kind: str | None = None,
+    failure_reason: str | None = None,
+    engine: str | None = None,
+    provider: str | None = None,
+    source_url: str | None = None,
+) -> None:
+    """Record whether a detected challenge was solved or left unsolved."""
+    if solved:
+        outcome = "solved"
+    elif result_kind == "unsupported" or failure_reason in {
+        "unsupported_challenge",
+        "unauthorized_domain",
+        "provider_disabled",
+    }:
+        outcome = "unsupported"
+    else:
+        outcome = "failed"
+    emit_captcha_event(
+        event="captcha_solve_outcome",
+        captcha_host=host,
+        captcha_type=captcha_type or "unknown",
+        captcha_outcome=outcome,
+        captcha_solved=solved,
+        captcha_result_kind=result_kind,
+        captcha_failure_reason=failure_reason,
+        captcha_engine=engine,
+        captcha_provider=provider,
+        source_url=source_url,
+    )
+
+
+def emit_captcha_event(event: str, **fields: Any) -> None:
+    """One searchable log row plus an OTel counter for CAPTCHA telemetry."""
+    payload = {key: value for key, value in fields.items() if value is not None}
+    logger.info(event, **payload)
+    try:
+        counter = _captcha_metric()
+        if counter is None:
+            return
+        counter.add(
+            1,
+            {
+                "event": event,
+                "captcha_type": str(payload.get("captcha_type") or "unknown"),
+                "captcha_outcome": str(payload.get("captcha_outcome") or "observed"),
+                "captcha_host": str(payload.get("captcha_host") or "unknown")[:120],
+            },
+        )
+    except Exception:
+        return
+
+
+def _captcha_metric() -> Any:
+    global _counter
+    if _counter is False:
+        return None
+    if _counter is not None:
+        return _counter
+    try:
+        from opentelemetry import metrics
+
+        _counter = metrics.get_meter("job_ftch.bypass").create_counter(
+            "job_ftch.bypass.captcha_events",
+            description="CAPTCHA encounters and solve outcomes by type and host",
+        )
+    except Exception:
+        _counter = False
+        return None
+    return _counter
 
 
 def _body_bytes(body: bytes | str | None) -> bytes | None:

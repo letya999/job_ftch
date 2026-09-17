@@ -183,6 +183,52 @@ def test_strong_job_detail_url_can_back_generic_body_without_headings():
         ScrapedPostingPayload(title="Engineer", description="Apply now: Python role."),
         url="https://example.test/careers/vacancy_1234_engineer",
     )
+    assert _has_vacancy_page_evidence(
+        ScrapedPostingPayload(title="Senior Java Developer", description="A full posting body."),
+        url="https://jobs.allegro.eu/offer/senior-java-developer",
+    )
+    assert _has_vacancy_page_evidence(
+        ScrapedPostingPayload(title="Python Developer", description="A full posting body."),
+        url="https://career.t1.ru/vacancies/python-developer",
+    )
+    assert not _has_vacancy_page_evidence(
+        ScrapedPostingPayload(title="Benefits", description="Health insurance and perks. " * 20),
+        url="https://example.test/careers/benefits",
+    )
+
+
+def test_cis_heading_tokens_are_vacancy_page_evidence():
+    from job_ftch.domain.site_models import ScrapedPostingPayload
+
+    assert _has_vacancy_page_evidence(
+        ScrapedPostingPayload(
+            title="Java Developer",
+            description="Obowiązki: backend. Wymagania: Java i SQL.",
+        )
+    )
+    assert _has_vacancy_page_evidence(
+        ScrapedPostingPayload(
+            title="Inginer",
+            description="Responsabilitati: dezvoltare. Cerinte: Python.",
+        )
+    )
+
+
+def test_origin_board_stays_owned_after_ats_bind():
+    from unittest.mock import MagicMock
+
+    from job_ftch.domain.source_spec import CareerSiteSpec
+    from job_ftch.infrastructure.sources.career_site_source import CareerSiteSource
+
+    source = CareerSiteSource(
+        CareerSiteSpec(url="https://jobs.allegro.eu/offer/"), MagicMock(), MagicMock()
+    )
+    source._ownership_url = "https://jobs.smartrecruiters.com/Allegro/123"
+    source._ats_tenant_host = "jobs.smartrecruiters.com"
+    source._ats_tenant_prefix = "/allegro"
+    assert source._is_owned_candidate_url("https://jobs.allegro.eu/offer/senior-java-developer")
+    assert source._is_owned_candidate_url("https://jobs.smartrecruiters.com/Allegro/456-java")
+    assert not source._is_owned_candidate_url("https://jobs.smartrecruiters.com/OtherCo/456-java")
 
 
 def test_workday_location_segment_is_a_strong_detail_url():
@@ -190,7 +236,7 @@ def test_workday_location_segment_is_a_strong_detail_url():
 
     url = (
         "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/"
-        "job/US-CA-Remote/Applied-AI-Engineer_JR2018181-1"
+        "job/US-CA-Remote/Applied-AI-Engineer_JR2018181-1"  # pragma: allowlist secret -- public Workday job path
     )
     assert _has_vacancy_page_evidence(
         ScrapedPostingPayload(title="Applied AI Engineer", description="A full posting body."),

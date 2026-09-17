@@ -247,7 +247,7 @@ async def test_operation_attempt_budget_stops_additional_failure_actions() -> No
     finally:
         manager.end_operation(token)
 
-    assert len(manager.attempt_telemetry) == 1
+    assert len(manager.attempt_telemetry) == 2
     assert manager.current_name == tier_after_first
 
 
@@ -434,6 +434,47 @@ async def test_exhausted_http_timeout_activates_proxy_on_first_controller_report
 
     assert kind is FailureKind.TIMEOUT
     assert manager.uses_proxy
+    assert manager.current_name == "noop"
+
+
+@pytest.mark.asyncio
+async def test_timeout_without_proxy_escalates_engine() -> None:
+    manager = AdaptiveBypassManager()
+
+    kind = await manager.handle_failure("source", error=TimeoutError())
+
+    assert kind is FailureKind.TIMEOUT
+    assert manager.current_name == "curl_stealth"
+    assert not manager.uses_proxy
+
+
+@pytest.mark.asyncio
+async def test_timeout_after_failed_proxy_escalates_engine_instead_of_bouncing() -> None:
+    manager = AdaptiveBypassManager()
+    manager.bind_context(_ProxyContext())
+
+    await manager.handle_failure("source", error=TimeoutError())
+    assert manager.uses_proxy
+    assert manager.current_name == "noop"
+
+    await manager.handle_failure("source", error=TimeoutError())
+    assert not manager.uses_proxy
+    assert manager.current_name == "noop"
+
+    await manager.handle_failure("source", error=TimeoutError())
+    assert manager.current_name == "curl_stealth"
+    assert not manager.uses_proxy
+
+
+@pytest.mark.asyncio
+async def test_timeout_does_not_escalate_when_source_deadline_spent() -> None:
+    manager = AdaptiveBypassManager()
+    async with source_deadline_scope(asyncio.get_running_loop().time() - 1):
+        kind = await manager.handle_failure("source", error=TimeoutError())
+
+    assert kind is FailureKind.TIMEOUT
+    assert manager.current_name == "noop"
+    assert manager.attempt_telemetry
 
 
 @pytest.mark.asyncio

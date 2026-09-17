@@ -1172,11 +1172,22 @@ class AdaptiveBypassManager:
     ) -> tuple[str, ...]:
         if observed_type == "cloudflare_challenge":
             return ("cloudflare_challenge", "generic_challenge", "terminal")
-        if observed_type in {"recaptcha", "recaptcha_v3", "turnstile", "hcaptcha"}:
+        if observed_type in {
+            "recaptcha",
+            "recaptcha_v3",
+            "turnstile",
+            "hcaptcha",
+            "smartcaptcha",
+        }:
             return ("generic_challenge", "terminal")
         evidence = (body or b"").decode("utf-8", errors="ignore").lower()
         header_text = " ".join(f"{key}:{value}" for key, value in (headers or {}).items()).lower()
         evidence = f"{evidence} {header_text}"
+        if any(
+            marker in evidence
+            for marker in ("smartcaptcha", "showcaptcha", "tmgrdfrend", "cian-captcha")
+        ):
+            return ("generic_challenge", "terminal")
         if any(marker in evidence for marker in ("turnstile", "cf-chl", "cloudflare")):
             return ("cloudflare_challenge", "generic_challenge", "terminal")
         if any(
@@ -1218,15 +1229,8 @@ class AdaptiveBypassManager:
             FailureKind.UNKNOWN,
         }:
             kind = FailureKind.CHALLENGE
-        if self._budget.attempt_exhausted():
-            logger.info(
-                "bypass_operation_attempt_budget_exhausted",
-                tier=self.current_name,
-                failure_kind=kind,
-            )
-            return kind
+        exhausted = self._budget.attempt_exhausted()
         del retry_after  # Retry-After is consumed by the HTTP RouteBudget layer.
-        decision = self._transition_policy.decide(kind)
         capability = self._capabilities[self.current_name]
         self._budget.log_attempt(
             source_id=source_id,
@@ -1238,6 +1242,14 @@ class AdaptiveBypassManager:
             session_generation=self._route_state.generation,
             challenge_action=self._route_state.challenge.value,
         )
+        if exhausted:
+            logger.info(
+                "bypass_operation_attempt_budget_exhausted",
+                tier=self.current_name,
+                failure_kind=kind,
+            )
+            return kind
+        decision = self._transition_policy.decide(kind)
         if kind == FailureKind.OK:
             return kind
         if kind == FailureKind.UNKNOWN:
@@ -1317,7 +1329,7 @@ class AdaptiveBypassManager:
             self._record_failure(source_id, kind)
             if (
                 self.adaptive_enabled
-                and kind in {FailureKind.TIMEOUT, FailureKind.DNS_ERROR, FailureKind.CONNECT_ERROR}
+                and kind in self.DEBOUNCED_NETWORK_KINDS
                 and self._fallback_to_direct()
             ):
                 logger.info(
@@ -1325,17 +1337,33 @@ class AdaptiveBypassManager:
                     failure_kind=kind,
                 )
                 return kind
-            if (
+            if not (
                 self.adaptive_enabled
                 and self._should_escalate(source_id, threshold=self._timeout_threshold)
-                and not self.activate_proxy()
             ):
-                self._rotate_proxy(
+                return kind
+            network_moved = False
+            if self.uses_proxy:
+                network_moved = self._rotate_proxy(
                     source_id,
                     status_code=status_code,
                     body=body,
                     error=error,
                 )
+            elif self._budget.source_proxy_rotations == 0:
+                network_moved = self.activate_proxy()
+            if not network_moved:
+                # ADR-074: DNS/connect/timeout try the network axis first.
+                # When that axis cannot move (no proxy, or proxy already
+                # failed transport), the conservative fallback is the
+                # engine ladder. Staying on noop turned CIS timeouts into
+                # empty transport_error outcomes.
+                logger.info(
+                    "bypass_transport_conservative_engine_fallback",
+                    failure_kind=kind,
+                    tier=self.current_name,
+                )
+                self.escalate()
             return kind
         if decision.action is TransitionAction.RETRY_SAME_ROUTE:
             # Same-route retries belong to the caller's retry loop. Only when
@@ -1612,22 +1640,44 @@ class AdaptiveBypassManager:
             CaptchaFailureReason.DEADLINE_INSUFFICIENT,
             CaptchaFailureReason.BACKOFF_ACTIVE,
         }
+        result_kind_value = getattr(getattr(result, "result_kind", None), "value", None) or getattr(
+            result, "result_kind", None
+        )
+        failure_reason_value = getattr(
+            getattr(result, "failure_reason", None), "value", None
+        ) or getattr(result, "failure_reason", None)
+        challenge_type_value = getattr(result, "challenge_type", None) or observed_type
         logger.info(
             "bypass_captcha_solver_result",
             solved=solved,
-            challenge_type=getattr(result, "challenge_type", None),
-            result_kind=(
-                getattr(getattr(result, "result_kind", None), "value", None)
-                or getattr(result, "result_kind", None)
-            ),
-            failure_reason=(
-                getattr(getattr(result, "failure_reason", None), "value", None)
-                or getattr(result, "failure_reason", None)
-            ),
+            challenge_type=challenge_type_value,
+            result_kind=result_kind_value,
+            failure_reason=failure_reason_value,
             provider_task_id_present=bool(getattr(result, "provider_task_id", None)),
             raw_provider_status=getattr(result, "raw_provider_status", None),
             error=getattr(result, "error", None),
         )
+        try:
+            from urllib.parse import urlparse
+
+            from job_ftch.infrastructure.bypass.challenge_classifier import (
+                emit_captcha_solve_outcome,
+            )
+
+            emit_captcha_solve_outcome(
+                host=urlparse(url).hostname or "",
+                captcha_type=challenge_type_value,
+                solved=solved,
+                result_kind=str(result_kind_value) if result_kind_value is not None else None,
+                failure_reason=(
+                    str(failure_reason_value) if failure_reason_value is not None else None
+                ),
+                engine=self.current_name,
+                provider=getattr(result, "method", None),
+                source_url=url,
+            )
+        except Exception:
+            pass
         self._route_transitions.append(
             {
                 "axis": "challenge",

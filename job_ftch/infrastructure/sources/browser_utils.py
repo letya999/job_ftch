@@ -690,9 +690,16 @@ async def open_page(
     if attached is not None:
         yield attached
         return
+    if bypass_strategy is not None:
+        # navigate() solves from config["_bypass_strategy"]. Stamp it on the
+        # caller's dict so a bypass passed only to open_page still reaches
+        # the detector and the solver.
+        config["_bypass_strategy"] = bypass_strategy
     prepare_config = getattr(bypass_strategy, "prepare_browser_config", None)
     if callable(prepare_config):
         config = prepare_config(config)
+        if bypass_strategy is not None:
+            config["_bypass_strategy"] = bypass_strategy
     # All browser users (monitors, DOM/API sniffing and detail enrichment)
     # share one settings-driven limiter.  A local fixed semaphore let each
     # path create its own Chromium processes and ignored the environment.
@@ -1168,9 +1175,11 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
         )
 
     challenge_solved = False
+    solve_attempted = False
 
     async def _solve_current_challenge(controller: Any) -> bool:
-        nonlocal challenge_solved
+        nonlocal challenge_solved, solve_attempted
+        solve_attempted = True
         solved = await _solve_page_challenge(controller, page, url=url)
         challenge_solved = challenge_solved or solved
         return solved
@@ -1215,7 +1224,7 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
     await asyncio.sleep(0)
     controller = config.get("_bypass_strategy")
     observed = getattr(controller, "observed_challenge_type", None)
-    if isinstance(observed, str) and observed.strip():
+    if isinstance(observed, str) and observed.strip() and not solve_attempted:
         log.info("browser.observed_challenge_solve", url=url, challenge_type=observed)
         if (
             await _solve_current_challenge(controller)
@@ -1240,7 +1249,8 @@ async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:
                 and 200 <= current_status < 300
                 and urlsplit(str(page.url)).path == urlsplit(url).path
                 and not classify_challenge(
-                    surface="post_solve_navigation", status_code=int(current_status),
+                    surface="post_solve_navigation",
+                    status_code=int(current_status),
                     body=await page.content(),
                 ).detected
             ):
@@ -1355,10 +1365,16 @@ async def install_challenge_response_detector(
             response_url = str(getattr(response, "url", "") or url)
             response_host = (urlparse(response_url).hostname or "").lower().rstrip(".")
             target_host = (urlparse(url).hostname or "").lower().rstrip(".")
+            from job_ftch.infrastructure.sources.url_scoring import is_same_site_family
+
             same_target = bool(
                 response_host
                 and target_host
-                and (response_host == target_host or response_host.endswith(f".{target_host}"))
+                and (
+                    response_host == target_host
+                    or response_host.endswith(f".{target_host}")
+                    or is_same_site_family(response_url, board_url=url)
+                )
             )
             if not same_target:
                 return
@@ -1375,6 +1391,7 @@ async def install_challenge_response_detector(
                 headers=headers,
                 body=body,
                 started_at=started_at,
+                page_url=response_url,
             )
             if not detection.detected:
                 return
@@ -1436,9 +1453,15 @@ async def _page_has_captcha_marker(page: Page) -> bool:
                     'iframe[src*="recaptcha"]',
                     'iframe[src*="hcaptcha"]',
                     'iframe[src*="turnstile"]',
+                    'iframe[src*="smartcaptcha"]',
+                    '.smart-captcha',
+                    '#smartcaptcha-container',
+                    '[data-sitekey^="ysc1_"]',
+                    'input[name="smart-token"]',
                     'script[src*="recaptcha"]',
                     'script[src*="hcaptcha"]',
-                    'script[src*="turnstile"]'
+                    'script[src*="turnstile"]',
+                    'script[src*="smartcaptcha"]'
                   ];
                   return selectors.some((selector) => document.querySelector(selector));
                 }

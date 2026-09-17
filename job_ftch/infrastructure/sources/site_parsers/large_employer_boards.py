@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from selectolax.lexbor import LexborHTMLParser
 
 from job_ftch.application.registry import register_site_parser
 from job_ftch.domain import SourceKind
-from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
+from job_ftch.infrastructure.sources.browser_utils import navigate, open_page, safe_content
 from job_ftch.infrastructure.sources.career_site import client_for_config
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
@@ -45,7 +45,8 @@ def _listing_cards_from_html(
     for anchor in page.css("a[href]"):
         href = str(anchor.attributes.get("href") or "").strip()
         url = urljoin(board_url, href)
-        if not href_pattern.search(url) or url in seen:
+        path = urlsplit(url).path or ""
+        if not (href_pattern.search(path) or href_pattern.search(url)) or url in seen:
             continue
         if url.rstrip("/") == board_url.rstrip("/"):
             continue
@@ -62,6 +63,53 @@ def _listing_cards_from_html(
         text = "\n".join(part.strip() for part in text.splitlines() if part.strip())
         cards.append((url, text))
     return cards
+
+
+async def _cian_listing_html(
+    client: Any,
+    url: str,
+    origin_host: str,
+) -> tuple[str, str] | None:
+    """Fetch a Cian listing page without following onto classifieds or captcha."""
+    from job_ftch.infrastructure.bypass.challenge_classifier import (
+        classify_challenge,
+        emit_challenge_detection,
+    )
+    from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
+
+    try:
+        response = await client.get(url, follow_redirects=True)
+    except TypeError:
+        response = await client.get(url)
+    final = str(getattr(response, "url", url) or url)
+    html = str(getattr(response, "text", "") or "")
+    status_code = getattr(response, "status_code", None)
+    headers = dict(getattr(response, "headers", {}) or {})
+    detection = classify_challenge(
+        surface="cian_listing",
+        status_code=status_code if isinstance(status_code, int) else 200,
+        headers=headers,
+        body=html.encode("utf-8", errors="ignore"),
+        page_url=final,
+    )
+    if detection.detected:
+        emit_challenge_detection(urlsplit(final).hostname or origin_host, detection)
+        raise BrowserChallengeError(
+            url=final,
+            status_code=status_code if isinstance(status_code, int) else None,
+            headers=headers,
+            body=getattr(response, "content", None),
+            challenge_type=detection.challenge_type,
+            confidence=detection.confidence,
+            evidence_hash=detection.evidence_hash,
+        )
+    final_host = (urlsplit(final).hostname or "").lower()
+    if origin_host and final_host and final_host != origin_host:
+        return None
+    raise_for_status = getattr(response, "raise_for_status", None)
+    if callable(raise_for_status):
+        raise_for_status()
+    return html, final
 
 
 async def _parse_detail_board(
@@ -138,7 +186,7 @@ async def _discover_detail_board(
     *,
     href_pattern: re.Pattern[str],
 ) -> list[str]:
-    limit = spec.limit or 50
+    limit = spec.detail_limit or spec.limit or 50
     try:
 
         async def fetch(url: str) -> str:
@@ -165,6 +213,10 @@ async def _discover_detail_board(
     browser_config = resolve_browser_config(spec, bypass_strategy)
     async with open_page(browser_config, bypass_strategy=bypass_strategy) as page:
         await navigate(page, spec.url, browser_config)
+        from job_ftch.infrastructure.sources.monitors.shared import raise_if_browser_challenge
+
+        page_url = str(getattr(page, "url", spec.url) or spec.url)
+        raise_if_browser_challenge(await safe_content(page), url=page_url)
         return await browser_scroll_collect_urls(
             page,
             getattr(page, "url", spec.url) or spec.url,
@@ -492,10 +544,48 @@ class _EmployerBoardParser:
 
 
 class CianCareerParser(_EmployerBoardParser):
-    domain_pattern = r"^https?://(?:www\.)?cian\.ru/vacancies(?:/|$)"
+    domain_pattern = r"^https?://(?:(?:www\.)?cian\.ru/vacancies|career\.cian\.ru)(?:/.*)?$"
     parser_name = "cian_career"
     company = "ЦИАН"
-    detail_pattern = re.compile(r"/vacancies/(\d+)(?:/)?$")
+    detail_pattern = re.compile(r"/(?:vacancies|vacancy|jobs?)/(\d+)(?:/)?$")
+    confirmed_empty_on_empty = True
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        origin_host = (urlsplit(spec.url).hostname or "").lower()
+        candidates = [spec.url]
+        if origin_host == "career.cian.ru":
+            for extra in ("https://career.cian.ru/vacancies", "https://career.cian.ru/"):
+                if extra.rstrip("/") not in {item.rstrip("/") for item in candidates}:
+                    candidates.append(extra)
+        limit = spec.detail_limit or spec.limit or 50
+        from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
+
+        for listing_url in candidates:
+            try:
+                html_and_final = await _cian_listing_html(client, listing_url, origin_host)
+            except BrowserChallengeError:
+                break
+            if html_and_final is None:
+                continue
+            html, final_url = html_and_final
+            cards = _listing_cards_from_html(html, final_url, self.detail_pattern)
+            if cards:
+                return [card[0] for card in cards][:limit]
+        return await _discover_detail_board(spec, client, href_pattern=self.detail_pattern)
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        origin_host = (urlsplit(spec.url).hostname or "").lower()
+        html_and_final = await _cian_listing_html(client, spec.url, origin_host)
+        if html_and_final is None:
+            return
+        async for item in _parse_detail_board(
+            spec,
+            client,
+            href_pattern=self.detail_pattern,
+            parser_name=self.parser_name,
+            company=self.company,
+        ):
+            yield item
 
 
 class InnotechCareerParser(_EmployerBoardParser):

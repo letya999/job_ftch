@@ -50,6 +50,7 @@ from job_ftch.infrastructure.sources.url_scoring import (
     is_probable_job_url,
     is_same_site_family,
     rank_job_urls,
+    safe_listing_canonical,
     score_job_url,
 )
 
@@ -254,15 +255,21 @@ def _should_enable_render_on_monitor_retry(strategy: Any) -> bool:
     return bool(getattr(strategy, "requires_browser", False))
 
 
-def _should_escalate_empty_monitor(*, has_url_filter: bool, monitor_suggests_spa: bool) -> bool:
+def _should_escalate_empty_monitor(
+    *,
+    has_url_filter: bool,
+    monitor_suggests_spa: bool,
+    is_last_monitor: bool = False,
+) -> bool:
     """Return whether an empty monitor result is evidence for a render retry.
 
     A normal empty DOM extraction is not proof that a site is client-rendered.
-    Escalating every final empty monitor to a browser route starves unrelated
-    sources of the shared deadline budget. Only explicit source configuration
-    can justify the expensive retry.
+    Escalating every *first* empty monitor to a browser route starves unrelated
+    sources of the shared deadline budget. An explicit url_filter/SPA hint, or
+    the last HTTP monitor in the chain, can justify one ``passive_js`` retry
+    after the per-attempt HTTP cap has left source budget on the table.
     """
-    return has_url_filter or monitor_suggests_spa
+    return has_url_filter or monitor_suggests_spa or is_last_monitor
 
 
 def _is_protected_source_error(exc: BaseException) -> bool:
@@ -539,9 +546,37 @@ def _has_vacancy_page_evidence(
     text = html_lib.unescape(re.sub(r"<[^>]+>", " ", payload.description or "")).casefold()
     # This proves page type, not completeness. A job URL and a long body do not.
     groups = (
-        ("responsibilities", "обязанност", "what you'll do", "what you will do"),
-        ("requirements", "qualifications", "требован", "must have", "must-have"),
-        ("apply for", "apply now", "отклик", "we offer", "мы предлагаем"),
+        (
+            "responsibilities",
+            "обязанност",
+            "обов'язк",
+            "обов’язк",
+            "obowiązk",
+            "responsabilitat",
+            "what you'll do",
+            "what you will do",
+        ),
+        (
+            "requirements",
+            "qualifications",
+            "требован",
+            "must have",
+            "must-have",
+            "wymag",
+            "cerințe",
+            "cerinte",
+            "міндет",
+            "талап",
+        ),
+        (
+            "apply for",
+            "apply now",
+            "отклик",
+            "we offer",
+            "мы предлагаем",
+            "aplikuj",
+            "aplică",
+        ),
     )
     if sum(any(token in text for token in group) for group in groups) >= 2:
         return True
@@ -549,12 +584,17 @@ def _has_vacancy_page_evidence(
     # Generic DOM pages often omit section headings even though the URL is an
     # unambiguous posting locator. Require both a strong detail path and a
     # substantial body so a marketing/career landing page cannot pass merely
-    # because it contains the word "jobs".
+    # because it contains the word "jobs". Numberless slugs such as
+    # ``/offer/senior-java-developer`` are still postings: score them the same
+    # way listing triage already does, rather than requiring a digit.
     if not url or len(text) < 20:
         return False
-    strong_detail_path = _DETAIL_URL_RE.search(url)
     title = " ".join((payload.title or "").split()).casefold()
-    return bool(strong_detail_path and title and not _looks_like_http_error_title(title))
+    if not title or _looks_like_http_error_title(title):
+        return False
+    if _DETAIL_URL_RE.search(url):
+        return True
+    return score_job_url(url) >= 8
 
 
 def _is_filtered_listing_url(url: str) -> bool:
@@ -676,6 +716,50 @@ class CareerSiteSource(Source["RawItem"]):
         active_http = await self.bypass_strategy.apply_http(original_http)
         self._remember_temporary_http_client(active_http, original_http)
         return active_http
+
+    def _record_captcha_observation(
+        self,
+        *,
+        captcha_type: str | None,
+        surface: str,
+        confidence: float | None = None,
+        evidence_hash: str | None = None,
+        status_code: int | None = None,
+    ) -> None:
+        if captcha_type and captcha_type not in self.stats.detected_captcha_types:
+            self.stats.detected_captcha_types.append(captcha_type)
+        event: dict[str, Any] = {
+            "surface": surface,
+            "type": captcha_type or "challenge",
+        }
+        if confidence is not None:
+            event["confidence"] = confidence
+        if evidence_hash:
+            event["evidence_hash"] = evidence_hash
+        if status_code is not None:
+            event["status_code"] = status_code
+        self.stats.challenge_events.append(event)
+        try:
+            from job_ftch.infrastructure.bypass.challenge_classifier import (
+                ChallengeDetection,
+                emit_challenge_detection,
+            )
+            from job_ftch.infrastructure.bypass.failure_signal import FailureKind
+
+            emit_challenge_detection(
+                urlparse(self.spec.url).hostname or "",
+                ChallengeDetection(
+                    detected=True,
+                    kind=FailureKind.CAPTCHA if captcha_type else FailureKind.CHALLENGE,
+                    challenge_type=captcha_type,
+                    confidence=float(confidence or 0.82),
+                    surface=surface,
+                    status_code=status_code,
+                    evidence_hash=str(evidence_hash or ""),
+                ),
+            )
+        except Exception:
+            return
 
     def _remember_temporary_http_client(self, client: Any, parent: Any) -> None:
         if client is parent:
@@ -856,8 +940,12 @@ class CareerSiteSource(Source["RawItem"]):
                 status_code=status_code,
                 response_body=response_body,
             )
-            if captcha_type and captcha_type not in self.stats.detected_captcha_types:
-                self.stats.detected_captcha_types.append(captcha_type)
+            if captcha_type:
+                self._record_captcha_observation(
+                    captcha_type=captcha_type,
+                    surface="monitor",
+                    status_code=status_code,
+                )
             return False
 
         from job_ftch.infrastructure.bypass.failure_signal import (
@@ -905,8 +993,12 @@ class CareerSiteSource(Source["RawItem"]):
                 status_code=status,
                 response_body=body,
             )
-            if captcha_type and captcha_type not in self.stats.detected_captcha_types:
-                self.stats.detected_captcha_types.append(captcha_type)
+            if captcha_type:
+                self._record_captcha_observation(
+                    captcha_type=captcha_type,
+                    surface="monitor",
+                    status_code=status,
+                )
         return False
 
     async def _init_strategy(self) -> tuple[str, dict[str, Any] | None, Any, str]:
@@ -1042,6 +1134,7 @@ class CareerSiteSource(Source["RawItem"]):
                                 parser_monitor_config,
                             )
                             source_name = self.spec.source_name or type(site_parser).__name__
+                            discover_emitted = False
                             async for enriched_item in self._enrich_candidates(
                                 candidates, scraper_chain, source_name
                             ):
@@ -1054,65 +1147,70 @@ class CareerSiteSource(Source["RawItem"]):
                                     metadata.setdefault("company", company)
                                     metadata["company_authoritative"] = True
                                 self.stats.detail_cards_extracted += 1
+                                discover_emitted = True
                                 yield enriched_item.model_copy(update={"metadata": metadata})
+                            if discover_emitted:
+                                return
                         elif getattr(site_parser, "confirmed_empty_on_empty", False):
                             self.stats.zero_reason = ZeroYieldReason.CONFIRMED_EMPTY
                             self._parser_failure_is_terminal = True
+                            return
                         elif getattr(site_parser, "terminal_on_empty", False):
                             self.stats.zero_reason = ZeroYieldReason.POLICY_NOT_SCRAPED
                             self._parser_failure_is_terminal = True
+                            return
+                    if not callable(getattr(type(site_parser), "parse", None)):
+                        return
+                    parsed = 0
+                    async for parsed_item in site_parser.parse(parser_spec, self.http):
+                        parsed += 1
+                        if not self._passes_freshness_cutoff(_raw_item_posted_at(parsed_item)):
+                            continue
+                        key = str(
+                            getattr(parsed_item, "external_id", "")
+                            or getattr(parsed_item, "stable_id", "")
+                            or getattr(parsed_item, "url", "")
+                            or ""
+                        )
+                        if key and key in emitted_parser_keys:
+                            if key not in attempt_parser_keys:
+                                self.stats.parser_duplicates_suppressed += 1
+                            attempt_parser_keys.add(key)
+                            continue
+                        if key:
+                            emitted_parser_keys.add(key)
+                            attempt_parser_keys.add(key)
+                        attempt_items.append(parsed_item)
+                        self.stats.detail_cards_extracted += 1
+                        yield parsed_item
+                    if attempt_items:
+                        return
+                    if parsed and self.stats.freshness_filtered >= parsed:
+                        self.stats.zero_reason = ZeroYieldReason.FRESHNESS_FILTERED
+                    elif getattr(site_parser, "confirmed_empty_on_empty", False):
+                        self.stats.zero_reason = ZeroYieldReason.CONFIRMED_EMPTY
+                        # The parser consulted an authoritative listing
+                        # API.  Do not let a generic crawl overwrite this
+                        # factual empty-board result.
+                        self._parser_failure_is_terminal = True
+                        return
+                    if self.spec.site_parser:
+                        # An operator pin is an audit contract: do not
+                        # silently replace the requested special parser
+                        # with a generic monitor after a zero-yield parse.
+                        self._parser_failure_is_terminal = True
                         return
                     else:
-                        parsed = 0
-                        async for parsed_item in site_parser.parse(parser_spec, self.http):
-                            parsed += 1
-                            if not self._passes_freshness_cutoff(_raw_item_posted_at(parsed_item)):
-                                continue
-                            key = str(
-                                getattr(parsed_item, "external_id", "")
-                                or getattr(parsed_item, "stable_id", "")
-                                or getattr(parsed_item, "url", "")
-                                or ""
-                            )
-                            if key and key in emitted_parser_keys:
-                                if key not in attempt_parser_keys:
-                                    self.stats.parser_duplicates_suppressed += 1
-                                attempt_parser_keys.add(key)
-                                continue
-                            if key:
-                                emitted_parser_keys.add(key)
-                                attempt_parser_keys.add(key)
-                            attempt_items.append(parsed_item)
-                            self.stats.detail_cards_extracted += 1
-                            yield parsed_item
-                        if attempt_items:
-                            return
-                        if parsed and self.stats.freshness_filtered >= parsed:
-                            self.stats.zero_reason = ZeroYieldReason.FRESHNESS_FILTERED
-                        elif getattr(site_parser, "confirmed_empty_on_empty", False):
-                            self.stats.zero_reason = ZeroYieldReason.CONFIRMED_EMPTY
-                            # The parser consulted an authoritative listing
-                            # API.  Do not let a generic crawl overwrite this
-                            # factual empty-board result.
-                            self._parser_failure_is_terminal = True
-                            return
-                        if self.spec.site_parser:
-                            # An operator pin is an audit contract: do not
-                            # silently replace the requested special parser
-                            # with a generic monitor after a zero-yield parse.
-                            self._parser_failure_is_terminal = True
-                            return
-                        else:
-                            self.stats.zero_reason = ZeroYieldReason.MONITOR_EMPTY
-                        if getattr(site_parser, "terminal_on_empty", False):
-                            # Some registered boards intentionally expose no
-                            # public listing data when unauthenticated.  A
-                            # generic crawl after their dedicated parser adds
-                            # noise and must not be mistaken for an empty site.
-                            self.stats.zero_reason = ZeroYieldReason.POLICY_NOT_SCRAPED
-                            self._parser_failure_is_terminal = True
-                            return
-                        break  # Parsed but found 0 items, break out of bypass loop
+                        self.stats.zero_reason = ZeroYieldReason.MONITOR_EMPTY
+                    if getattr(site_parser, "terminal_on_empty", False):
+                        # Some registered boards intentionally expose no
+                        # public listing data when unauthenticated.  A
+                        # generic crawl after their dedicated parser adds
+                        # noise and must not be mistaken for an empty site.
+                        self.stats.zero_reason = ZeroYieldReason.POLICY_NOT_SCRAPED
+                        self._parser_failure_is_terminal = True
+                        return
+                    break  # Parsed but found 0 items, break out of bypass loop
                 except Exception as exc:
                     from job_ftch.infrastructure.sources.monitors.shared import (
                         BoardGoneError,
@@ -1306,6 +1404,11 @@ class CareerSiteSource(Source["RawItem"]):
                         detected_monitor_config,
                         canonical_url,
                     ) = await get_ordered_monitors(self.spec.url, _fp_client)
+                    canonical_url = safe_listing_canonical(
+                        self.spec.url,
+                        canonical_url,
+                        challenge=bool(detected_monitor_config.get("challenge")),
+                    )
                     if canonical_url and canonical_url != self.spec.url:
                         if is_same_site_family(self.spec.url, board_url=self._ownership_url):
                             self._ownership_url = canonical_url
@@ -1325,22 +1428,12 @@ class CareerSiteSource(Source["RawItem"]):
                     self.stats.recommended_monitors = list(monitors_to_try)
                     self.stats.detected_monitor_config = dict(detected_monitor_config)
                     captcha_type = detected_monitor_config.get("captcha_type")
-                    if (
-                        isinstance(captcha_type, str)
-                        and captcha_type
-                        and captcha_type not in self.stats.detected_captcha_types
-                    ):
-                        self.stats.detected_captcha_types.append(captcha_type)
-                    if detected_monitor_config.get("challenge"):
-                        self.stats.challenge_events.append(
-                            {
-                                "surface": "monitor_detector",
-                                "type": captcha_type or "challenge",
-                                "confidence": detected_monitor_config.get("challenge_confidence"),
-                                "evidence_hash": detected_monitor_config.get(
-                                    "challenge_evidence_hash"
-                                ),
-                            }
+                    if detected_monitor_config.get("challenge") or captcha_type:
+                        self._record_captcha_observation(
+                            captcha_type=captcha_type if isinstance(captcha_type, str) else None,
+                            surface="monitor_detector",
+                            confidence=detected_monitor_config.get("challenge_confidence"),
+                            evidence_hash=detected_monitor_config.get("challenge_evidence_hash"),
                         )
                     if isinstance(captcha_type, str) and captcha_type:
                         set_challenge_type = getattr(
@@ -1371,18 +1464,11 @@ class CareerSiteSource(Source["RawItem"]):
                             ZeroYieldReason.SOFT_403_WITH_CONTENT,
                             ZeroYieldReason.RATE_LIMITED,
                         }:
-                            if (
-                                captcha_type
-                                and captcha_type not in self.stats.detected_captcha_types
-                            ):
-                                self.stats.detected_captcha_types.append(captcha_type)
-                            self.stats.challenge_events.append(
-                                {
-                                    "surface": "monitor_detector",
-                                    "type": captcha_type or "challenge",
-                                    "confidence": 0.92 if captcha_type else 0.74,
-                                    "status_code": status_code,
-                                }
+                            self._record_captcha_observation(
+                                captcha_type=captcha_type,
+                                surface="monitor_detector",
+                                confidence=0.92 if captcha_type else 0.74,
+                                status_code=status_code,
                             )
                             set_challenge_type = getattr(
                                 self.bypass_strategy,
@@ -1700,6 +1786,7 @@ class CareerSiteSource(Source["RawItem"]):
                     and _should_escalate_empty_monitor(
                         has_url_filter=_has_url_filter,
                         monitor_suggests_spa=_monitor_suggests_spa,
+                        is_last_monitor=current_monitor_name == monitors_to_try[-1],
                     )
                     and self._request_bypass_capability(
                         "passive_js",
@@ -1707,6 +1794,8 @@ class CareerSiteSource(Source["RawItem"]):
                             "url_filter_matched_nothing"
                             if _has_url_filter
                             else "spa_monitor_yielded_no_links"
+                            if _monitor_suggests_spa
+                            else "last_http_monitor_empty"
                         ),
                     )
                 ):
@@ -1714,6 +1803,8 @@ class CareerSiteSource(Source["RawItem"]):
                         "url_filter_matched_nothing"
                         if _has_url_filter
                         else "spa_monitor_yielded_no_links"
+                        if _monitor_suggests_spa
+                        else "last_http_monitor_empty"
                     )
                     logger.warning(
                         "monitor_empty_escalating",
@@ -2306,6 +2397,11 @@ class CareerSiteSource(Source["RawItem"]):
 
     def _is_owned_candidate_url(self, url: str) -> bool:
         if url in self._trusted_parser_urls:
+            return True
+        # Binding an off-site ATS tenant must not drop same-site listing
+        # locators from the original board (``/offer/slug`` next to a
+        # SmartRecruiters iframe).
+        if is_same_site_family(url, board_url=self._source_origin_url):
             return True
         if not is_same_site_family(url, board_url=self._ownership_url):
             return False

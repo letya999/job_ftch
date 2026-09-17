@@ -13,6 +13,7 @@ from job_ftch.infrastructure.sources.browser_utils import (
     _effective_browser_channel,
     _launch_browser_with_recovery,
     _load_async_playwright,
+    _page_has_captcha_marker,
     _patchright_inner_send_cancellation_safe,
     _patchright_needs_legacy_cancellation_fix,
     _patchright_route_handle_cancellation_safe,
@@ -386,6 +387,53 @@ async def test_open_page_reprojects_runtime_aligned_persona_ua(
     context_kwargs = captured["context_kwargs"]
     assert isinstance(context_kwargs, dict)
     assert context_kwargs["user_agent"] == "Mozilla/5.0 Chrome/150.0.0.0"
+
+
+@pytest.mark.asyncio
+async def test_open_page_stamps_bypass_strategy_for_navigate() -> None:
+    sentinel_page = MagicMock()
+    config: dict[str, object] = {"headless": True}
+
+    class _CustomBypass:
+        async def apply_http(self, client: object) -> object:
+            return client
+
+        def apply_browser_args(self, kwargs: dict[str, object]) -> dict[str, object]:
+            return kwargs
+
+        async def apply_page(self, page: object) -> None:
+            del page
+
+        @asynccontextmanager
+        async def open_page(
+            self,
+            launched: dict[str, object],
+            *,
+            use_proxy: bool = False,
+        ) -> object:
+            del use_proxy
+            assert launched["_bypass_strategy"] is self
+            yield sentinel_page
+
+    bypass = _CustomBypass()
+    async with open_page(config, bypass_strategy=bypass) as page:
+        assert page is sentinel_page
+        assert config["_bypass_strategy"] is bypass
+
+
+@pytest.mark.asyncio
+async def test_page_has_captcha_marker_includes_smartcaptcha() -> None:
+    captured: dict[str, str] = {}
+
+    class _Page:
+        async def evaluate(self, script: str) -> bool:
+            captured["script"] = script
+            return True
+
+    assert await _page_has_captcha_marker(_Page())  # type: ignore[arg-type]
+    assert "smartcaptcha" in captured["script"]
+    assert "ysc1_" in captured["script"]
+    assert "smart-token" in captured["script"]
 
 
 @pytest.mark.asyncio

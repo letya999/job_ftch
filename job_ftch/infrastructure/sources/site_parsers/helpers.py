@@ -658,9 +658,12 @@ async def browser_scroll_collect_urls(
             )
         )
         for href in hrefs:
-            if not isinstance(href, str) or not pattern.search(href):
+            if not isinstance(href, str):
                 continue
             url = urljoin(base_url, href)
+            path = urlparse(url).path or ""
+            if not (pattern.search(path) or pattern.search(href)):
+                continue
             if url in seen:
                 continue
             seen.add(url)

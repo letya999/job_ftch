@@ -188,21 +188,26 @@ def test_should_enable_render_on_monitor_retry_for_browser_tiers() -> None:
 
 
 @pytest.mark.parametrize(
-    ("has_url_filter", "monitor_suggests_spa", "expected"),
+    ("has_url_filter", "monitor_suggests_spa", "is_last_monitor", "expected"),
     [
-        (False, False, False),
-        (True, False, True),
-        (False, True, True),
-        (True, True, True),
+        (False, False, False, False),
+        (True, False, False, True),
+        (False, True, False, True),
+        (True, True, False, True),
+        (False, False, True, True),
     ],
 )
 def test_empty_monitor_escalation_requires_explicit_render_evidence(
-    has_url_filter: bool, monitor_suggests_spa: bool, expected: bool
+    has_url_filter: bool,
+    monitor_suggests_spa: bool,
+    is_last_monitor: bool,
+    expected: bool,
 ) -> None:
     assert (
         _should_escalate_empty_monitor(
             has_url_filter=has_url_filter,
             monitor_suggests_spa=monitor_suggests_spa,
+            is_last_monitor=is_last_monitor,
         )
         is expected
     )

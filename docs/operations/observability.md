@@ -1,7 +1,7 @@
 ---
 title: "Observability"
 description: "Логи, метрики, traces, quality checks and runtime diagnostics for job_ftch."
-updated: 2026-08-02
+updated: 2026-09-17
 ---
 # Observability
 
@@ -15,8 +15,13 @@ signals are related, but owned by different runtime paths.
 | Structured logs | `structlog` wiring and runtime env |
 | OpenTelemetry | `opentelemetry-*` dependencies and tracing settings |
 | OpenObserve logs and metrics | `job_ftch/infrastructure/observability/openobserve.py` |
+| CAPTCHA encounters | log events `captcha_encounter` and `captcha_solve_outcome`; dashboard `job_ftch captcha` |
 | Compose env | `deploy/observability/.env*.example` |
 | Runtime verification | `scripts/verify_observability_run.py` |
+
+## CAPTCHA telemetry
+
+Every classified challenge emits `captcha_encounter` (host, type, surface, outcome=`observed`). Solver attempts emit `captcha_solve_outcome` with `captcha_solved` and `captcha_outcome` (`solved` / `failed` / `unsupported`). Fields are first-class OpenObserve columns (`captcha_host`, `captcha_type`, …). Dashboard `job_ftch captcha` graphs frequency by type, stacked encounters by host, and unsolved outcomes. Upserted on OpenObserve startup from `job_ftch/infrastructure/observability/dashboards/job_ftch_captcha.json`.
 
 ## Quality And Regression
 

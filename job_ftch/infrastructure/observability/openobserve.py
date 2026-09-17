@@ -75,6 +75,17 @@ _CORRELATION_FIELDS = frozenset(
         "tokens_in",
         "cached_tokens_in",
         "tokens_out",
+        "captcha_host",
+        "captcha_type",
+        "captcha_kind",
+        "captcha_surface",
+        "captcha_outcome",
+        "captcha_solved",
+        "captcha_result_kind",
+        "captcha_failure_reason",
+        "captcha_engine",
+        "captcha_provider",
+        "evidence_hash",
     }
 )
 

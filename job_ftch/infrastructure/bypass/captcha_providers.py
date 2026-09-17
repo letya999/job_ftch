@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import json
+import re
 import socket
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlparse
 
 import httpx
+import structlog
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -19,6 +23,8 @@ from job_ftch.infrastructure.bypass.captcha_models import (
     CaptchaSolveResult,
 )
 from job_ftch.infrastructure.sources.source_deadline import sleep_with_source_deadline
+
+logger = structlog.get_logger("job_ftch.bypass.captcha")
 
 
 class CaptchaProvider(Protocol):
@@ -46,6 +52,10 @@ def normalize_challenge_type(challenge_type: str) -> str:
         "recaptcha3": CaptchaChallengeType.RECAPTCHA_V3.value,
         "recaptcha-v3": CaptchaChallengeType.RECAPTCHA_V3.value,
         "recaptcha_v3": CaptchaChallengeType.RECAPTCHA_V3.value,
+        "yandex": CaptchaChallengeType.SMARTCAPTCHA.value,
+        "yandex_smartcaptcha": CaptchaChallengeType.SMARTCAPTCHA.value,
+        "yandexsmartcaptcha": CaptchaChallengeType.SMARTCAPTCHA.value,
+        "showcaptcha": CaptchaChallengeType.SMARTCAPTCHA.value,
     }
     normalized = aliases.get(challenge_type.strip().lower(), challenge_type.strip().lower())
     return normalized or CaptchaChallengeType.UNKNOWN.value
@@ -56,6 +66,15 @@ def _provider_wire_type(challenge_type: str) -> str:
     if normalized == CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value:
         return "cloudflare"
     return normalized
+
+
+async def _page_user_agent(page: Any) -> str:
+    if not hasattr(page, "evaluate"):
+        return ""
+    try:
+        return str(await page.evaluate("navigator.userAgent") or "").strip()
+    except Exception:
+        return ""
 
 
 def register_captcha_provider(
@@ -103,6 +122,17 @@ async def extract_sitekey(page: Any) -> str:
     if not hasattr(page, "evaluate"):
         return ""
     try:
+        yandex_client_key = str(
+            await page.evaluate(
+                "(()=>{const el=document.querySelector('[data-sitekey^=\"ysc1_\"]');"
+                "return el?el.getAttribute('data-sitekey'):'';})()"
+            )
+        )
+        if yandex_client_key:
+            return yandex_client_key
+    except Exception:
+        pass
+    try:
         explicit_sitekey = str(
             await page.evaluate(
                 "(()=>{const el=document.querySelector('[data-sitekey]');"
@@ -111,6 +141,28 @@ async def extract_sitekey(page: Any) -> str:
         )
         if explicit_sitekey:
             return explicit_sitekey
+    except Exception:
+        pass
+    try:
+        yandex_sitekey = str(
+            await page.evaluate(
+                r"""(()=>{
+                    const iframe=[...document.querySelectorAll('iframe[src]')].find((el)=>{
+                        const src=el.getAttribute('src')||'';
+                        return src.includes('smartcaptcha') || src.includes('ysc1_');
+                    });
+                    if(!iframe) return '';
+                    try {
+                        return new URL(iframe.src, document.baseURI).searchParams.get('sitekey')||'';
+                    } catch {
+                        const m=(iframe.getAttribute('src')||'').match(/[?&]sitekey=([^&]+)/);
+                        return m ? decodeURIComponent(m[1]) : '';
+                    }
+                })()"""
+            )
+        )
+        if yandex_sitekey:
+            return yandex_sitekey
     except Exception:
         pass
     try:
@@ -363,6 +415,13 @@ async def _wait_for_sitekey_marker(
             "script[src*='recaptcha/api.js']",
             "[data-sitekey]",
         ),
+        CaptchaChallengeType.SMARTCAPTCHA.value: (
+            ".smart-captcha",
+            "#smartcaptcha-container",
+            '[data-sitekey^="ysc1_"]',
+            "iframe[src*='smartcaptcha']",
+            'input[name="smart-token"]',
+        ),
     }.get(normalized, ("[data-sitekey]",))
     for selector in selectors:
         try:
@@ -381,6 +440,7 @@ class CapSolverProvider(_BaseProvider):
             CaptchaChallengeType.HCAPTCHA.value,
             CaptchaChallengeType.TURNSTILE.value,
             CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value,
+            CaptchaChallengeType.SMARTCAPTCHA.value,
             CaptchaChallengeType.IMAGE.value,
         }
     )
@@ -391,8 +451,8 @@ class CapSolverProvider(_BaseProvider):
         production_candidate=True,
         browser_context_required=True,
         notes=(
-            "Primary production candidate for reCAPTCHA and Turnstile; "
-            "managed Cloudflare challenge remains experimental."
+            "Primary production candidate for reCAPTCHA, Turnstile, and "
+            "Yandex SmartCaptcha; managed Cloudflare challenge remains experimental."
         ),
     )
 
@@ -521,24 +581,37 @@ class CapSolverProvider(_BaseProvider):
             )
         effective_proxy = proxy_url or self.proxy_url
         if effective_proxy:
-            task_type = {
-                "hcaptcha": "HCaptchaTask",
-                "recaptcha": "ReCaptchaV2Task",
-                "recaptcha_v3": "ReCaptchaV3Task",
-                "turnstile": "AntiTurnstileTask",
-                "cloudflare": "AntiCloudflareTask",
+            task_types = {
+                "hcaptcha": ("HCaptchaTask",),
+                "recaptcha": ("ReCaptchaV2Task",),
+                "recaptcha_v3": ("ReCaptchaV3Task",),
+                "turnstile": ("AntiTurnstileTask",),
+                "cloudflare": ("AntiCloudflareTask",),
+                "smartcaptcha": (
+                    "YandexCaptchaTask",
+                    "YandexSmartCaptchaTask",
+                    "YandexCaptchaTaskProxyLess",
+                    "YandexSmartCaptchaTaskProxyLess",
+                    "YandexSmartCaptchaTaskProxyless",
+                ),
             }[wire_type]
         else:
-            task_type = {
-                "hcaptcha": "HCaptchaTaskProxyLess",
-                "recaptcha": "ReCaptchaV2TaskProxyLess",
-                "recaptcha_v3": "ReCaptchaV3TaskProxyLess",
-                "turnstile": "AntiTurnstileTaskProxyLess",
-                "cloudflare": "AntiCloudflareTask",
+            task_types = {
+                "hcaptcha": ("HCaptchaTaskProxyLess",),
+                "recaptcha": ("ReCaptchaV2TaskProxyLess",),
+                "recaptcha_v3": ("ReCaptchaV3TaskProxyLess",),
+                "turnstile": ("AntiTurnstileTaskProxyLess",),
+                "cloudflare": ("AntiCloudflareTask",),
+                "smartcaptcha": (
+                    "YandexCaptchaTaskProxyLess",
+                    "YandexSmartCaptchaTaskProxyLess",
+                    "YandexSmartCaptchaTaskProxyless",
+                ),
             }[wire_type]
+        page_url = str(getattr(page, "url", "") or url or "")
         task_payload: dict[str, Any] = {
-            "type": task_type,
-            "websiteURL": url or str(getattr(page, "url", "")),
+            "type": task_types[0],
+            "websiteURL": page_url,
             "websiteKey": site_key,
         }
         if wire_type == CaptchaChallengeType.RECAPTCHA_V3.value:
@@ -550,24 +623,55 @@ class CapSolverProvider(_BaseProvider):
             metadata = await extract_turnstile_metadata(page)
             if metadata:
                 task_payload["metadata"] = metadata
+        elif wire_type == CaptchaChallengeType.SMARTCAPTCHA.value:
+            user_agent = await _page_user_agent(page)
+            if user_agent:
+                task_payload["userAgent"] = user_agent
         if effective_proxy:
             task_payload.update(self._proxy_task_fields())
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                created = (
-                    await client.post(
-                        "https://api.capsolver.com/createTask",
-                        json={
-                            "clientKey": self.api_key,
-                            "task": task_payload,
-                        },
+                created = None
+                task_id = None
+                last_reject = None
+                reject_notes: list[str] = []
+                proxy_fields = self._proxy_task_fields() if effective_proxy else {}
+                for task_type in task_types:
+                    task_payload["type"] = task_type
+                    proxyless = "ProxyLess" in task_type or "Proxyless" in task_type
+                    for key in (
+                        "proxyType",
+                        "proxyAddress",
+                        "proxyPort",
+                        "proxyLogin",
+                        "proxyPassword",
+                    ):
+                        task_payload.pop(key, None)
+                    if effective_proxy and not proxyless:
+                        task_payload.update(proxy_fields)
+                    created = (
+                        await client.post(
+                            "https://api.capsolver.com/createTask",
+                            json={
+                                "clientKey": self.api_key,
+                                "task": task_payload,
+                            },
+                        )
+                    ).json()
+                    task_id = created.get("taskId")
+                    if task_id:
+                        break
+                    last_reject = created
+                    reject_notes.append(
+                        f"{task_type}:{_provider_error_text(created, 'rejected')}"
                     )
-                ).json()
-                task_id = created.get("taskId")
                 if not task_id:
                     return _rejected(
                         "capsolver",
-                        _provider_error_text(created, "provider rejected createTask"),
+                        ";".join(reject_notes)
+                        or _provider_error_text(
+                            last_reject or created, "provider rejected createTask"
+                        ),
                     )
                 for _ in range(30):
                     await sleep_with_source_deadline(2.0)
@@ -602,6 +706,7 @@ class TwoCaptchaProvider(_BaseProvider):
             CaptchaChallengeType.RECAPTCHA.value,
             CaptchaChallengeType.HCAPTCHA.value,
             CaptchaChallengeType.TURNSTILE.value,
+            CaptchaChallengeType.SMARTCAPTCHA.value,
         }
     )
     capability = CaptchaProviderCapability(
@@ -609,7 +714,7 @@ class TwoCaptchaProvider(_BaseProvider):
         supported_challenge_types=supported,
         result_kinds=frozenset({CaptchaResultKind.TOKEN}),
         benchmark_candidate=True,
-        notes="Long-tail fallback candidate; not enabled by default.",
+        notes="Long-tail fallback; documents Yandex SmartCaptcha token tasks.",
     )
 
     async def solve(
@@ -623,6 +728,10 @@ class TwoCaptchaProvider(_BaseProvider):
         if unsupported := self.unsupported(challenge_type, "2captcha"):
             return unsupported
         wire_type = _provider_wire_type(challenge_type)
+        if wire_type == CaptchaChallengeType.SMARTCAPTCHA.value:
+            return await self._solve_yandex_token(
+                page, challenge_type=challenge_type, url=url, proxy_url=proxy_url
+            )
         site_key = await self._extract_sitekey_with_wait(page, challenge_type)
         task_info = {
             "cloudflare": ("turnstile", "sitekey"),
@@ -673,6 +782,85 @@ class TwoCaptchaProvider(_BaseProvider):
                         )
                     if result.get("request") != "CAPCHA_NOT_READY":
                         return _rejected("2captcha", str(result.get("request", "failed")))
+                return _timeout("2captcha")
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+            return _unavailable("2captcha", exc)
+
+    async def _solve_yandex_token(
+        self,
+        page: Any,
+        *,
+        challenge_type: str,
+        url: str,
+        proxy_url: str,
+    ) -> CaptchaSolveResult:
+        site_key = await self._extract_sitekey_with_wait(page, challenge_type)
+        if not site_key:
+            return CaptchaSolveResult(
+                solved=False,
+                method="2captcha",
+                error="no sitekey found on page",
+                failure_reason=CaptchaFailureReason.UNSUPPORTED_CHALLENGE,
+                challenge_type=normalize_challenge_type(challenge_type),
+                result_kind=CaptchaResultKind.UNSUPPORTED,
+            )
+        effective_proxy = proxy_url or self.proxy_url
+        page_url = str(getattr(page, "url", "") or url or "")
+        task_payload: dict[str, Any] = {
+            "type": (
+                "YandexSmartCaptchaTask" if effective_proxy else "YandexSmartCaptchaTaskProxyless"
+            ),
+            "websiteURL": page_url,
+            "websiteKey": site_key,
+        }
+        user_agent = await _page_user_agent(page)
+        if user_agent:
+            task_payload["userAgent"] = user_agent
+        if effective_proxy:
+            task_payload.update(self._proxy_task_fields())
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                created = (
+                    await client.post(
+                        "https://api.2captcha.com/createTask",
+                        json={"clientKey": self.api_key, "task": task_payload},
+                    )
+                ).json()
+                task_id = created.get("taskId")
+                if created.get("errorId", 0) != 0 or not task_id:
+                    return _rejected(
+                        "2captcha",
+                        str(
+                            created.get("errorDescription")
+                            or created.get("errorCode")
+                            or "createTask failed"
+                        ),
+                    )
+                for _ in range(40):
+                    await sleep_with_source_deadline(3.0)
+                    result = (
+                        await client.post(
+                            "https://api.2captcha.com/getTaskResult",
+                            json={"clientKey": self.api_key, "taskId": task_id},
+                        )
+                    ).json()
+                    if result.get("status") == "ready":
+                        solution = result.get("solution") or {}
+                        return _token_result(
+                            "2captcha",
+                            solution.get("token") if isinstance(solution, dict) else "",
+                            challenge_type=challenge_type,
+                            task_id=str(task_id),
+                        )
+                    if result.get("errorId", 0) != 0:
+                        return _rejected(
+                            "2captcha",
+                            str(
+                                result.get("errorDescription")
+                                or result.get("errorCode")
+                                or "failed"
+                            ),
+                        )
                 return _timeout("2captcha")
         except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
             return _unavailable("2captcha", exc)
@@ -856,6 +1044,7 @@ class CapMonsterProvider(_BaseProvider):
             CaptchaChallengeType.RECAPTCHA_V3.value,
             CaptchaChallengeType.TURNSTILE.value,
             CaptchaChallengeType.CLOUDFLARE_CHALLENGE.value,
+            CaptchaChallengeType.SMARTCAPTCHA.value,
             CaptchaChallengeType.IMAGE.value,
         }
     )
@@ -899,7 +1088,8 @@ class CapMonsterProvider(_BaseProvider):
                     for _ in range(30):
                         if result.get("errorId", 0) != 0:
                             return _rejected(
-                                "capmonster", _provider_error_text(result, "image recognition failed")
+                                "capmonster",
+                                _provider_error_text(result, "image recognition failed"),
                             )
                         if result.get("status") == "ready":
                             solution = result.get("solution") or {}
@@ -930,6 +1120,10 @@ class CapMonsterProvider(_BaseProvider):
                 failure_reason=CaptchaFailureReason.UNSUPPORTED_CHALLENGE,
                 challenge_type=normalize_challenge_type(challenge_type),
                 result_kind=CaptchaResultKind.UNSUPPORTED,
+            )
+        if wire_type == CaptchaChallengeType.SMARTCAPTCHA.value:
+            return await self._solve_yandex_token(
+                page, challenge_type=challenge_type, url=url, proxy_url=proxy_url
             )
         site_key = await self._extract_sitekey_with_wait(page, challenge_type)
         if not site_key:
@@ -998,6 +1192,101 @@ class CapMonsterProvider(_BaseProvider):
                         return _rejected(
                             "capmonster",
                             str(result.get("errorDescription", "failed")),
+                        )
+                return _timeout("capmonster")
+        except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+            return _unavailable("capmonster", exc)
+
+    async def _solve_yandex_token(
+        self,
+        page: Any,
+        *,
+        challenge_type: str,
+        url: str,
+        proxy_url: str,
+    ) -> CaptchaSolveResult:
+        site_key = await self._extract_sitekey_with_wait(page, challenge_type)
+        if not site_key:
+            return CaptchaSolveResult(
+                solved=False,
+                method="capmonster",
+                error="no sitekey found on page",
+                failure_reason=CaptchaFailureReason.UNSUPPORTED_CHALLENGE,
+                challenge_type=normalize_challenge_type(challenge_type),
+                result_kind=CaptchaResultKind.UNSUPPORTED,
+            )
+        effective_proxy = proxy_url or self.proxy_url
+        page_url = str(getattr(page, "url", "") or url or "")
+        task_types = (
+            ("YandexSmartCaptchaTask", "YandexCaptchaTask")
+            if effective_proxy
+            else ("YandexSmartCaptchaTaskProxyless", "YandexCaptchaTaskProxyless")
+        )
+        task_payload: dict[str, Any] = {
+            "type": task_types[0],
+            "websiteURL": page_url,
+            "websiteKey": site_key,
+        }
+        user_agent = await _page_user_agent(page)
+        if user_agent:
+            task_payload["userAgent"] = user_agent
+        proxy_fields = self._proxy_task_fields() if effective_proxy else {}
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                created = None
+                task_id = None
+                reject_notes: list[str] = []
+                for task_type in task_types:
+                    task_payload["type"] = task_type
+                    for key in (
+                        "proxyType",
+                        "proxyAddress",
+                        "proxyPort",
+                        "proxyLogin",
+                        "proxyPassword",
+                    ):
+                        task_payload.pop(key, None)
+                    if effective_proxy:
+                        task_payload.update(proxy_fields)
+                    created = (
+                        await client.post(
+                            "https://api.capmonster.cloud/createTask",
+                            json={"clientKey": self.api_key, "task": task_payload},
+                        )
+                    ).json()
+                    task_id = created.get("taskId")
+                    if created.get("errorId", 0) == 0 and task_id:
+                        break
+                    reject_notes.append(
+                        f"{task_type}:{_provider_error_text(created, 'rejected')}"
+                    )
+                    task_id = None
+                if not task_id:
+                    return _rejected("capmonster", ";".join(reject_notes) or "createTask failed")
+                for _ in range(40):
+                    await sleep_with_source_deadline(3.0)
+                    result = (
+                        await client.post(
+                            "https://api.capmonster.cloud/getTaskResult",
+                            json={"clientKey": self.api_key, "taskId": task_id},
+                        )
+                    ).json()
+                    if result.get("status") == "ready":
+                        solution = result.get("solution") or {}
+                        return _token_result(
+                            "capmonster",
+                            solution.get("token") or solution.get("gRecaptchaResponse") or "",
+                            challenge_type=challenge_type,
+                            task_id=str(task_id),
+                        )
+                    if result.get("errorId", 0) != 0:
+                        return _rejected(
+                            "capmonster",
+                            str(
+                                result.get("errorDescription")
+                                or result.get("errorCode")
+                                or "failed"
+                            ),
                         )
                 return _timeout("capmonster")
         except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
@@ -1181,9 +1470,7 @@ class CliproxyImageProvider(_BaseProvider):
                                     },
                                     {
                                         "type": "image_url",
-                                        "image_url": {
-                                            "url": f"data:image/png;base64,{body}"
-                                        },
+                                        "image_url": {"url": f"data:image/png;base64,{body}"},
                                     },
                                 ],
                             }
@@ -1207,6 +1494,138 @@ def _chat_completions_url(base_url: str) -> str:
     if trimmed.endswith("/v1"):
         return f"{trimmed}/chat/completions"
     return f"{trimmed}/v1/chat/completions"
+
+
+def parse_vision_click_fractions(text: str) -> list[tuple[float, float]]:
+    """Parse viewport-relative click fractions from a vision model reply."""
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+    if fenced:
+        raw = fenced.group(1)
+    else:
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start >= 0 and end > start:
+            raw = raw[start : end + 1]
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    clicks = data.get("clicks") if isinstance(data, dict) else data
+    if not isinstance(clicks, list):
+        return []
+    points: list[tuple[float, float]] = []
+    for item in clicks:
+        if isinstance(item, dict):
+            try:
+                x = float(item["x"])
+                y = float(item["y"])
+            except (KeyError, TypeError, ValueError):
+                continue
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            try:
+                x = float(item[0])
+                y = float(item[1])
+            except (TypeError, ValueError):
+                continue
+        else:
+            continue
+        if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
+            points.append((x, y))
+    return points
+
+
+async def request_vision_click_order(png: bytes) -> list[tuple[float, float]]:
+    """Ask the configured vision model for SmartCaptcha click order."""
+    import os
+
+    from job_ftch.config import get_settings
+
+    settings = get_settings()
+    secret = getattr(settings, "openai_api_key", None)
+    api_key = ""
+    if secret is not None:
+        api_key = str(secret.get_secret_value() or "").strip()
+    if not api_key:
+        api_key = (
+            os.environ.get("JOB_FTCH_OPENAI_API_KEY", "").strip()
+            or os.environ.get("OPENAI_API_KEY", "").strip()
+        )
+    base_url = str(settings.captcha_vision_base_url or "").strip()
+    model = str(settings.captcha_vision_model or "").strip()
+    if not png or not api_key or not base_url or not model:
+        return []
+    encoded = base64.b64encode(png).decode("ascii")
+    prompt = (
+        "This screenshot is a Yandex SmartCaptcha. A modal shows a painting with "
+        "overlaid icons. Next to 'Press in the following order' is the required "
+        "sequence. Click those overlay icons ON THE PAINTING in that order. Do not "
+        "click the small instruction icons. Return JSON only: "
+        '{"clicks":[{"x":0.12,"y":0.34}]} where x,y are fractions of this '
+        "screenshot (0-1), origin top-left."
+    )
+    payload_json = {
+        "model": model,
+        "temperature": 0,
+        "max_tokens": 256,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{encoded}"},
+                    },
+                ],
+            }
+        ],
+    }
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            response = await client.post(
+                _chat_completions_url(base_url),
+                headers=headers,
+                json=payload_json,
+            )
+            local_vision = "127.0.0.1" in base_url or "localhost" in base_url
+            if response.status_code == 401 and local_vision:
+                logger.info("smartcaptcha_vision_fallback_openai")
+                payload_json = dict(payload_json)
+                payload_json["model"] = "gpt-4.1-mini"
+                response = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers=headers,
+                    json=payload_json,
+                )
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        logger.info(
+            "smartcaptcha_vision_http_error",
+            status=exc.response.status_code if exc.response is not None else None,
+        )
+        return []
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        logger.info("smartcaptcha_vision_http_error", error=type(exc).__name__)
+        return []
+    text = ""
+    choices = payload.get("choices") if isinstance(payload, dict) else None
+    if isinstance(choices, list) and choices:
+        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = "".join(
+                item if isinstance(item, str) else str(item.get("text") or "")
+                for item in content
+                if isinstance(item, (str, dict))
+            )
+    return parse_vision_click_fractions(text)
 
 
 def _ocr_text_from_completion(payload: Any) -> str:

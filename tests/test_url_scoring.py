@@ -8,6 +8,7 @@ from job_ftch.infrastructure.sources.monitors.dom import (
 from job_ftch.infrastructure.sources.url_scoring import (
     is_same_site_family,
     looks_like_listing_url,
+    safe_listing_canonical,
     score_job_url,
 )
 
@@ -241,6 +242,59 @@ def test_score_job_url_rejects_cian_blogs_and_forum_slugs() -> None:
     assert score_job_url(blogs, board_url=board) < 0
     assert score_job_url(forum, board_url=board) < 8
     assert score_job_url(forum, board_url=board) < 0
+
+
+def test_safe_listing_canonical_keeps_career_cian_off_classifieds() -> None:
+    original = "https://career.cian.ru/"
+    assert safe_listing_canonical(original, "https://www.cian.ru/") is None
+    assert (
+        safe_listing_canonical(
+            original,
+            "https://www.cian.ru/cian-captcha/?redirect_url=https://career.cian.ru/",
+        )
+        is None
+    )
+    assert (
+        safe_listing_canonical(
+            original,
+            "https://career.cian.ru/tmgrdfrend/showcaptcha",
+            challenge=False,
+        )
+        is None
+    )
+    assert (
+        safe_listing_canonical(
+            original,
+            "https://career.cian.ru/vacancies",
+        )
+        == "https://career.cian.ru/vacancies"
+    )
+    assert safe_listing_canonical(original, original, challenge=True) is None
+
+
+def test_score_job_url_rejects_static_assets_from_career_pages() -> None:
+    board = "https://career.t1.ru/vacancies"
+    assert (
+        score_job_url(
+            "https://career.t1.ru/t1career/published/static/header.43cac4771fe05309.js",
+            board_url=board,
+        )
+        < 0
+    )
+    assert (
+        score_job_url(
+            "https://www.servicetitan.com/static/favicon-fbcf245208174d811075922be3499c14.ico",
+            board_url="https://careers.servicetitan.com/",
+        )
+        < 0
+    )
+    assert (
+        score_job_url(
+            "https://career.t1.ru/vacancies/python-developer",
+            board_url=board,
+        )
+        >= 8
+    )
 
 
 def test_score_job_url_keeps_kadrof_and_aijobs_details() -> None:

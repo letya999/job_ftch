@@ -48,6 +48,7 @@ captcha_enabled_providers:
   - capsolver
   - capmonster
   - nextcaptcha
+  - 2captcha
   - cliproxy_image
 captcha_provider_routes:
   image:
@@ -77,6 +78,12 @@ captcha_provider_routes:
   hcaptcha:
     - capsolver
     - manual_required
+  smartcaptcha:
+    - browser_wait
+    - capsolver
+    - capmonster
+    - 2captcha
+    - observe
   unknown:
     - observe
 

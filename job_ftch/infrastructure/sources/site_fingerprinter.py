@@ -183,23 +183,30 @@ async def fingerprint(url: str, client: httpx.AsyncClient | None = None) -> Site
         log.info("site_board_gone_detected")
         return SiteProfile(SiteClass.SSR, [], {"board_gone": True}, canonical_url=_canonical)
 
-    from job_ftch.infrastructure.bypass.challenge_classifier import classify_challenge
+    from job_ftch.infrastructure.bypass.challenge_classifier import (
+        classify_challenge,
+        emit_challenge_detection,
+    )
     from job_ftch.infrastructure.bypass.failure_signal import HeuristicFailureSignal
 
     body_bytes = body.encode("utf-8", errors="ignore")
     challenge_outcome = HeuristicFailureSignal().classify_detailed(
         status_code=response.status_code,
+        headers=dict(response.headers),
         body=body_bytes,
         error=None,
+        page_url=final_url,
     )
     if challenge_outcome.challenge:
         challenge_detection = classify_challenge(
             surface="fingerprinter",
             status_code=response.status_code,
-            headers=response.headers,
+            headers=dict(response.headers),
             body=body_bytes,
+            page_url=final_url,
         )
         log.info("site_challenge_detected", status=response.status_code)
+        emit_challenge_detection(urlparse(final_url).hostname or "", challenge_detection)
         challenge_confidence = challenge_detection.confidence or (
             0.82 if challenge_outcome.captcha_type else 0.65
         )

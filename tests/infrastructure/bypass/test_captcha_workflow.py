@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -15,6 +16,7 @@ from job_ftch.infrastructure.bypass.captcha_providers import (
     get_captcha_provider_capability,
     list_captcha_providers,
     normalize_challenge_type,
+    parse_vision_click_fractions,
     register_captcha_provider,
 )
 from job_ftch.infrastructure.bypass.captcha_solver import (
@@ -24,7 +26,12 @@ from job_ftch.infrastructure.bypass.captcha_solver import (
     _create_captcha_solver,
     _normalize_provider_routes,
 )
-from job_ftch.infrastructure.bypass.failure_signal import _detect_captcha_type
+from job_ftch.infrastructure.bypass.challenge_classifier import (
+    ChallengeDetection,
+    emit_captcha_solve_outcome,
+    emit_challenge_detection,
+)
+from job_ftch.infrastructure.bypass.failure_signal import FailureKind, _detect_captcha_type
 from job_ftch.infrastructure.sources.browser_utils import (
     install_challenge_response_detector,
     navigate,
@@ -504,6 +511,41 @@ async def test_response_detector_ignores_third_party_failure_response() -> None:
 
 
 @pytest.mark.asyncio
+async def test_response_detector_treats_cian_family_captcha_as_same_target() -> None:
+    callbacks: dict[str, object] = {}
+    controller = SimpleNamespace(set_observed_challenge_type=AsyncMock())
+
+    class _Page:
+        def on(self, event: str, callback: object) -> None:
+            callbacks[event] = callback
+
+    async def body() -> bytes:
+        return (
+            b'<html><body><div class="smart-captcha" data-sitekey="ysc1_abc"></div></body></html>'
+        )
+
+    response = SimpleNamespace(
+        status=200,
+        headers={"content-type": "text/html"},
+        url="https://www.cian.ru/cian-captcha/?redirect_url=https://career.cian.ru/",
+        request=SimpleNamespace(resource_type="document"),
+        body=body,
+    )
+
+    await install_challenge_response_detector(
+        _Page(),
+        url="https://career.cian.ru/",
+        controller=controller,
+        surface="monitor",
+    )
+    callbacks["response"](response)  # type: ignore[operator]
+    await asyncio.sleep(0)
+
+    controller.set_observed_challenge_type.assert_called()
+    assert controller.set_observed_challenge_type.await_args.args[0] == "smartcaptcha"
+
+
+@pytest.mark.asyncio
 async def test_recaptcha_v3_token_application_invokes_callbacks() -> None:
     page = SimpleNamespace(evaluate=AsyncMock(return_value=True))
     solver = CaptchaSolverBypass(wait_seconds=0.01)
@@ -514,6 +556,260 @@ async def test_recaptcha_v3_token_application_invokes_callbacks() -> None:
     assert "___grecaptcha_cfg" in script
     assert "data-callback" in script
     assert "g-recaptcha-response" in script
+
+
+@pytest.mark.asyncio
+async def test_smartcaptcha_browser_wait_clicks_checkbox_before_polling() -> None:
+    page = SimpleNamespace(
+        url="https://www.cian.ru/cian-captcha/?redirect_url=https://career.cian.ru/",
+        click=AsyncMock(),
+        frames=[],
+        evaluate=AsyncMock(
+            side_effect=["complete", "I'm not a robot", "<html>smartcaptcha ysc1_</html>"] * 12
+        ),
+    )
+    solver = CaptchaSolverBypass(wait_seconds=0.01, provider="browser_wait")
+
+    result = await solver._solve_browser_wait(page, "smartcaptcha")
+
+    assert page.click.await_count >= 1
+    assert page.click.await_args.args[0] == ".CheckboxCaptcha-Button"
+    assert result.solved is False
+
+
+@pytest.mark.asyncio
+async def test_capsolver_smartcaptcha_retries_yandex_task_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import job_ftch.infrastructure.bypass.captcha_providers as providers
+
+    tried: list[str] = []
+    responses = iter(
+        [
+            {"errorId": 1, "errorCode": "ERROR_INVALID_TASK", "errorDescription": "nope"},
+            {"errorId": 0, "taskId": "task-yandex"},
+            {"errorId": 0, "status": "ready", "solution": {"token": "yandex-token"}},
+        ]
+    )
+
+    class _Response:
+        def __init__(self, payload: dict[str, object]) -> None:
+            self._payload = payload
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    class _Client:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+        async def post(self, url: str, *, json: dict[str, object]) -> _Response:
+            del url
+            task = json.get("task")
+            if isinstance(task, dict) and task.get("type"):
+                tried.append(str(task["type"]))
+            return _Response(next(responses))
+
+    monkeypatch.setattr(providers.httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(providers, "sleep_with_source_deadline", AsyncMock())
+    page = SimpleNamespace(
+        url="https://www.cian.ru/cian-captcha/",
+        wait_for_selector=AsyncMock(),
+        evaluate=AsyncMock(return_value="ysc1_livekey"),
+    )
+    result = await CapSolverProvider("offline-key").solve(  # pragma: allowlist secret
+        page,
+        challenge_type="smartcaptcha",
+        url="https://www.cian.ru/cian-captcha/",
+    )
+
+    assert tried[0] == "YandexCaptchaTaskProxyLess"
+    assert tried[1] == "YandexSmartCaptchaTaskProxyLess"
+    assert result.solved is True
+    assert result.tokens.get("captcha_token") == "yandex-token"
+
+
+@pytest.mark.asyncio
+async def test_vision_click_order_falls_back_to_openai_on_local_401(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import job_ftch.infrastructure.bypass.captcha_providers as providers
+
+    posts: list[str] = []
+
+    class _Response:
+        def __init__(self, status_code: int, payload: dict[str, object]) -> None:
+            self.status_code = status_code
+            self._payload = payload
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise providers.httpx.HTTPStatusError(
+                    "err", request=providers.httpx.Request("POST", "https://x"), response=self
+                )
+
+        def json(self) -> dict[str, object]:
+            return self._payload
+
+    class _Client:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+        async def post(self, url: str, *, headers: object, json: dict[str, object]) -> _Response:
+            del headers, json
+            posts.append(url)
+            if "127.0.0.1" in url:
+                return _Response(401, {})
+            return _Response(
+                200,
+                {
+                    "choices": [
+                        {"message": {"content": '{"clicks":[{"x":0.4,"y":0.5}]}'}}
+                    ]
+                },
+            )
+
+    monkeypatch.setattr(providers.httpx, "AsyncClient", _Client)
+    import job_ftch.config as config_mod
+
+    monkeypatch.setattr(
+        config_mod,
+        "get_settings",
+        lambda: SimpleNamespace(
+            openai_api_key=SimpleNamespace(get_secret_value=lambda: "sk-test"),
+            captcha_vision_base_url="http://127.0.0.1:8317/v1",
+            captcha_vision_model="gemini-3-flash",
+        ),
+    )
+
+    points = await providers.request_vision_click_order(b"png-bytes")
+    assert points == [(0.4, 0.5)]
+    assert any("127.0.0.1" in url for url in posts)
+    assert any("api.openai.com" in url for url in posts)
+
+
+def test_parse_vision_click_fractions_from_fenced_json() -> None:
+    points = parse_vision_click_fractions(
+        '```json\n{"clicks":[{"x":0.2,"y":0.3},{"x":0.8,"y":0.1}]}\n```'
+    )
+    assert points == [(0.2, 0.3), (0.8, 0.1)]
+    assert parse_vision_click_fractions("not json") == []
+    assert parse_vision_click_fractions('{"clicks":[{"x":12,"y":3}]}') == []
+
+
+@pytest.mark.asyncio
+async def test_type_not_supported_does_not_consume_paid_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class FirstProvider:
+        def __init__(self, api_key: str, *, proxy_url: str = "") -> None:
+            del api_key, proxy_url
+
+        async def solve(self, page, *, challenge_type: str, url: str):
+            del page, challenge_type, url
+            calls.append("first")
+            return CaptchaSolveResult(
+                solved=False,
+                method="slot_first",
+                error="ERROR_TYPE_NOT_SUPPORTED: unsupported captcha type",
+                failure_reason=CaptchaFailureReason.PROVIDER_REJECTED,
+                raw_provider_status="ERROR_TYPE_NOT_SUPPORTED",
+            )
+
+    class SecondProvider:
+        def __init__(self, api_key: str, *, proxy_url: str = "") -> None:
+            del api_key, proxy_url
+
+        async def solve(self, page, *, challenge_type: str, url: str):
+            del page, challenge_type, url
+            calls.append("second")
+            return CaptchaSolveResult(solved=True, method="slot_second")
+
+    register_captcha_provider("slot_first")(FirstProvider)  # type: ignore[arg-type]
+    register_captcha_provider("slot_second")(SecondProvider)  # type: ignore[arg-type]
+    import job_ftch.infrastructure.bypass.captcha_solver as captcha_solver_mod
+
+    monkeypatch.setitem(captcha_solver_mod.CAPTCHA_PROVIDER_ENV_KEYS, "slot_first", "SLOT_FIRST_KEY")
+    monkeypatch.setitem(
+        captcha_solver_mod.CAPTCHA_PROVIDER_ENV_KEYS, "slot_second", "SLOT_SECOND_KEY"
+    )
+    monkeypatch.setenv("SLOT_FIRST_KEY", "first-key")
+    monkeypatch.setenv("SLOT_SECOND_KEY", "second-key")
+    solver = CaptchaSolverBypass(
+        min_provider_seconds=0,
+        max_paid_attempts=1,
+        enabled_providers=frozenset({"slot_first", "slot_second"}),
+        provider_routes={"smartcaptcha": ("slot_first", "slot_second")},
+        authorized_domains=frozenset({"*"}),
+    )
+    result = await solver.solve(
+        _FixturePage('<div class="smart-captcha" data-sitekey="ysc1_abc"></div>'),
+        challenge_type="smartcaptcha",
+        url="https://www.cian.ru/cian-captcha/",
+    )
+    assert calls == ["first", "second"]
+    assert result.solved is True
+    assert result.method == "slot_second"
+
+
+@pytest.mark.asyncio
+async def test_smartcaptcha_token_inject_creates_field_and_submits() -> None:
+    page = SimpleNamespace(evaluate=AsyncMock(return_value=True))
+    solver = CaptchaSolverBypass(wait_seconds=0.01)
+
+    assert await solver._inject_token(page, "smartcaptcha", "yandex-token")
+
+    script = page.evaluate.await_args.args[0]
+    assert "smart-token" in script
+    assert "requestSubmit" in script
+    assert "data-callback" in script
+    assert "smartCaptchaCallback" in script
+    assert page.evaluate.await_args.args[1]["token"] == "yandex-token"
+
+
+@pytest.mark.asyncio
+async def test_smartcaptcha_clear_check_rejects_interstitial_url() -> None:
+    captcha_html = (
+        '<html><body><div class="smart-captcha" data-sitekey="ysc1_abc"></div></body></html>'
+    )
+    page = SimpleNamespace(
+        url="https://www.cian.ru/cian-captcha/?redirect_url=https://career.cian.ru/",
+        evaluate=AsyncMock(side_effect=["complete", "Я не робот"] + [captcha_html] * 10),
+    )
+    solver = CaptchaSolverBypass(wait_seconds=0.01)
+
+    assert not await solver._check_challenge_cleared(page, "smartcaptcha")
+
+
+@pytest.mark.asyncio
+async def test_smartcaptcha_clear_check_accepts_listing_after_redirect() -> None:
+    page = SimpleNamespace(
+        url="https://career.cian.ru/vacancies",
+        evaluate=AsyncMock(
+            side_effect=[
+                "complete",
+                "Python Developer vacancies",
+                "<html><body><main><h1>Vacancies</h1></main></body></html>",
+            ]
+        ),
+    )
+    solver = CaptchaSolverBypass(wait_seconds=0.01)
+
+    assert await solver._check_challenge_cleared(page, "smartcaptcha")
 
 
 @pytest.mark.asyncio
@@ -974,6 +1270,11 @@ def test_new_captcha_providers_self_register_with_capabilities() -> None:
     assert nextcaptcha is not None and nextcaptcha.benchmark_candidate
     assert "recaptcha_v3" in capsolver.supported_challenge_types
     assert "turnstile" in capsolver.supported_challenge_types
+    assert "smartcaptcha" in capsolver.supported_challenge_types
+    assert "smartcaptcha" in capmonster.supported_challenge_types
+    two_captcha = get_captcha_provider_capability("2captcha")
+    assert two_captcha is not None
+    assert "smartcaptcha" in two_captcha.supported_challenge_types
     assert "recaptcha_v3" in capmonster.supported_challenge_types
     assert nextcaptcha.supported_challenge_types == frozenset(
         {"recaptcha", "recaptcha_v3", "turnstile"}
@@ -989,6 +1290,8 @@ def test_challenge_type_aliases_match_observe_labels() -> None:
     assert normalize_challenge_type("cloudflare_challenge") == "cloudflare_challenge"
     assert normalize_challenge_type("cf_turnstile") == "turnstile"
     assert normalize_challenge_type("recaptcha-v3") == "recaptcha_v3"
+    assert normalize_challenge_type("yandex") == "smartcaptcha"
+    assert normalize_challenge_type("showcaptcha") == "smartcaptcha"
 
 
 def test_provider_routes_normalize_strings_and_lists() -> None:
@@ -1064,6 +1367,27 @@ async def test_navigate_solves_embedded_captcha_on_success_status() -> None:
         url="https://example.test/jobs",
     )
     assert page.goto.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_navigate_does_not_double_solve_marker_and_observed() -> None:
+    page = SimpleNamespace(
+        goto=AsyncMock(return_value=SimpleNamespace(status=200)),
+        evaluate=AsyncMock(return_value=True),
+    )
+    controller = SimpleNamespace(
+        observed_challenge_type="smartcaptcha",
+        solve_page_challenge=AsyncMock(return_value=False),
+        challenge_solver_terminal=False,
+    )
+
+    await navigate(
+        page,
+        "https://example.test/jobs",
+        {"challenge_retries": 0, "_bypass_strategy": controller},
+    )
+
+    controller.solve_page_challenge.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1269,3 +1593,59 @@ def test_factory_unions_parser_captcha_authorized_domains(monkeypatch: pytest.Mo
     assert solver._domain_authorized("careers.higgsfield.kz")
     assert solver._domain_authorized("hh.ru")
     assert not solver._domain_authorized("evil.test")
+
+
+def test_captcha_encounter_is_a_first_class_log_event() -> None:
+    detection = ChallengeDetection(
+        detected=True,
+        kind=FailureKind.CAPTCHA,
+        challenge_type="smartcaptcha",
+        confidence=0.92,
+        surface="fingerprinter",
+        status_code=200,
+        evidence_hash="abc123",
+    )
+    with capture_logs() as logs:
+        emit_challenge_detection("career.cian.ru", detection)
+        emit_captcha_solve_outcome(
+            host="career.cian.ru",
+            captcha_type="smartcaptcha",
+            solved=False,
+            result_kind="unsupported",
+            failure_reason="unauthorized_domain",
+            engine="camoufox",
+            source_url="https://career.cian.ru/",
+        )
+    events = {entry["event"]: entry for entry in logs}
+    encounter = events["captcha_encounter"]
+    assert encounter["captcha_type"] == "smartcaptcha"
+    assert encounter["captcha_host"] == "career.cian.ru"
+    assert encounter["captcha_outcome"] == "observed"
+    assert encounter["captcha_solved"] is False
+    outcome = events["captcha_solve_outcome"]
+    assert outcome["captcha_outcome"] == "unsupported"
+    assert outcome["captcha_failure_reason"] == "unauthorized_domain"
+
+
+def test_captcha_dashboard_graphs_host_and_unsolved() -> None:
+    from pathlib import Path
+
+    dashboard = json.loads(
+        (
+            Path(__file__).resolve().parents[3]
+            / "job_ftch"
+            / "infrastructure"
+            / "observability"
+            / "dashboards"
+            / "job_ftch_captcha.json"
+        ).read_text(encoding="utf-8")
+    )
+    queries = [
+        query["query"] for panel in dashboard["tabs"][0]["panels"] for query in panel["queries"]
+    ]
+    joined = "\n".join(queries)
+    assert "event = 'captcha_encounter'" in joined
+    assert "event = 'captcha_solve_outcome'" in joined
+    assert "captcha_host" in joined
+    assert "captcha_solved" in joined
+    assert any(panel["id"] == "captcha-by-host-bar" for panel in dashboard["tabs"][0]["panels"])
