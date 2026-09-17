@@ -47,7 +47,7 @@ parity_lab = [
 # curl-cffi impersonation profiles are pinned per release so floating minors
 # cannot silently mutate the JA3/JA4 baseline. Keep this version aligned with
 # the `all` extra and regenerate uv.lock when it changes.
-stealth = ["playwright-stealth>=2.0.3", "curl-cffi==0.16.2"]
+stealth = ["playwright-stealth>=2.0.3", "curl-cffi==0.16.3"]
 tls_client = ["tls-client>=1.0.1"]
 openai = ["openai>=1.30", "instructor>=1.4"]
 telegram = ["telethon>=1.36", "aiogram>=3.7"]
@@ -104,7 +104,7 @@ all = [
     "faststream>=0.5",
     "patchright>=1.49",
     "playwright-stealth>=2.0.3",
-    "curl-cffi==0.16.2",
+    "curl-cffi==0.16.3",
     "tls-client>=1.0.1",
     "cloakbrowser>=0.5.1",
     "camoufox>=0.5.4",
