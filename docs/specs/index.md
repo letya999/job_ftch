@@ -7,6 +7,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 ## Files On This Level
 
 - [Autonomous multi-tenant Jobfetch](autonomous-multitenant-jobfetch.md) - Specification for isolated search lanes, durable high-recall storage, private pull access and optional webhook delivery. (Updated: 2026-09-06)
+- [Provider routing and production recovery](provider-routing-and-production-recovery.md) - Requirements for node-scoped LLM routing, CAPTCHA-only CLIProxyAPI, truthful Telegram delivery and source recovery. (Updated: 2026-09-18)
 - [P1 — Полный ingest и ключевые парсеры](recovery-p1-complete-ingest-parsers.md) - Спецификация P1: требования и проверяемая приёмка. (Updated: 2026-09-12)
 - [P2 — Доказательное извлечение компании, оплаты и географии](recovery-p2-evidence-field-extraction.md) - Спецификация P2: требования и проверяемая приёмка. (Updated: 2026-09-12)
 - [P3 — Прокси, CAPTCHA и бюджет доступа](recovery-p3-proxy-captcha-budget.md) - Спецификация P3: требования и проверяемая приёмка. (Updated: 2026-09-12)

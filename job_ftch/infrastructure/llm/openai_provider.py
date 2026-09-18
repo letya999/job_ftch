@@ -48,6 +48,7 @@ from job_ftch.application.llm_quota import (
     LLMPreflightResult,
     LLMQuotaExhaustedError,
     is_quota_exhausted_error,
+    llm_error_reason,
     safe_llm_error,
 )
 from job_ftch.application.llm_usage import record_provider_usage
@@ -165,6 +166,7 @@ class OpenAIInstructorLLMProvider:
             raise ImportError("openai is required. Install with: pip install 'job_ftch[openai]'")
         self._model = model
         self.model_id = model
+        self.provider_id = "openai"
         self._max_retries = max_retries
         self._timeout_seconds = timeout_seconds
         self._preflight_timeout_seconds = preflight_timeout_seconds or min(timeout_seconds, 15.0)
@@ -241,6 +243,12 @@ class OpenAIInstructorLLMProvider:
             model=self._model,
             usage=getattr(response, "usage", None),
             latency_ms=round((monotonic() - started) * 1000),
+            provider=self.provider_id,
+            operation="preflight",
+            requested_provider=getattr(self, "requested_provider", self.provider_id),
+            requested_model=getattr(self, "requested_model", self._model),
+            timeout_ms=round(self._preflight_timeout_seconds * 1000),
+            request_id=str(getattr(response, "id", "") or "") or None,
         )
         return LLMPreflightResult(available=True, model=self._model)
 
@@ -254,6 +262,7 @@ class OpenAIInstructorLLMProvider:
             schema=schema,
             system_prompt=_EXTRACT_SYSTEM_PROMPT,
             max_tokens=_EXTRACT_MAX_TOKENS,
+            operation="extract",
         )
 
     async def classify(
@@ -270,6 +279,7 @@ class OpenAIInstructorLLMProvider:
             system_prompt=_CLASSIFY_SYSTEM_PROMPT,
             max_tokens=_CLASSIFY_MAX_TOKENS if max_tokens is None else max_tokens,
             timeout_seconds=timeout_seconds,
+            operation="classify",
         )
 
     async def present(self, job_payload: str, schema: type[Any]) -> Any:
@@ -278,6 +288,7 @@ class OpenAIInstructorLLMProvider:
             schema=schema,
             system_prompt=_PRESENT_SYSTEM_PROMPT,
             max_tokens=_PRESENT_MAX_TOKENS,
+            operation="present",
         )
 
     async def _structured_create(
@@ -288,6 +299,7 @@ class OpenAIInstructorLLMProvider:
         system_prompt: str,
         max_tokens: int,
         timeout_seconds: float | None = None,
+        operation: str = "structured",
     ) -> Any:
         self._raise_if_quota_exhausted()
         started = monotonic()
@@ -321,22 +333,39 @@ class OpenAIInstructorLLMProvider:
                         self._quota_exhausted = True
                         self._last_llm_error = safe_llm_error(exc)
                         raise LLMQuotaExhaustedError("llm_quota_exhausted") from exc
+                    retry_reason = llm_error_reason(exc)
+                    retryable = retry_reason not in {"auth", "model"}
                     logger.warning(
-                        "openai_call_retry" if attempt < attempts - 1 else "openai_call_failed",
-                        provider="openai",
+                        "openai_call_retry"
+                        if attempt < attempts - 1 and retryable
+                        else "openai_call_failed",
+                        provider=self.provider_id,
+                        operation=operation,
                         model=self._model,
+                        requested_provider=getattr(self, "requested_provider", self.provider_id),
+                        resolved_provider=self.provider_id,
+                        requested_model=getattr(self, "requested_model", self._model),
+                        resolved_model=self._model,
+                        timeout_ms=round(per_attempt * 1000),
                         attempt=attempt + 1,
                         retries=max(attempts - 1, 0),
+                        retry_reason=retry_reason,
                         error_type=type(exc).__name__,
                         latency_ms=round((monotonic() - started) * 1000),
                     )
-                    if attempt >= attempts - 1:
+                    if attempt >= attempts - 1 or not retryable:
                         raise
                     await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
         record_provider_usage(
             model=self._model,
             usage=getattr(completion, "usage", None),
             latency_ms=round((monotonic() - started) * 1000),
+            provider=self.provider_id,
+            operation=operation,
+            requested_provider=getattr(self, "requested_provider", self.provider_id),
+            requested_model=getattr(self, "requested_model", self._model),
+            timeout_ms=round(per_attempt * 1000),
+            request_id=str(getattr(completion, "id", "") or "") or None,
         )
         return response
 
@@ -367,10 +396,17 @@ class OpenAIInstructorLLMProvider:
                 raise LLMQuotaExhaustedError("llm_quota_exhausted") from exc
             logger.warning(
                 "openai_call_failed",
-                provider="openai",
+                provider=self.provider_id,
                 model=self._model,
+                operation="generate",
+                requested_provider=getattr(self, "requested_provider", self.provider_id),
+                resolved_provider=self.provider_id,
+                requested_model=getattr(self, "requested_model", self._model),
+                resolved_model=self._model,
+                timeout_ms=round(self._timeout_seconds * 1000),
                 attempt=1,
                 retries=self._max_retries,
+                retry_reason=llm_error_reason(exc),
                 error_type=type(exc).__name__,
                 latency_ms=round((monotonic() - started) * 1000),
             )
@@ -379,6 +415,12 @@ class OpenAIInstructorLLMProvider:
             model=self._model,
             usage=getattr(response, "usage", None),
             latency_ms=round((monotonic() - started) * 1000),
+            provider=self.provider_id,
+            operation="generate",
+            requested_provider=getattr(self, "requested_provider", self.provider_id),
+            requested_model=getattr(self, "requested_model", self._model),
+            timeout_ms=round(self._timeout_seconds * 1000),
+            request_id=str(getattr(response, "id", "") or "") or None,
         )
         return (response.choices[0].message.content or "").strip()
 

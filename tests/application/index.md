@@ -53,6 +53,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_prefilter_artifacts.py](test_prefilter_artifacts.py)
 - [test_profile_pipeline_fixes.py](test_profile_pipeline_fixes.py)
 - [test_prompt_builder.py](test_prompt_builder.py)
+- [test_provider_routing.py](test_provider_routing.py)
 - [test_release_gates.py](test_release_gates.py)
 - [test_relevance_llm_model_wiring.py](test_relevance_llm_model_wiring.py)
 - [test_resolver_queue.py](test_resolver_queue.py)

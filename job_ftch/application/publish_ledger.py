@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, cast
 from urllib.parse import urlsplit, urlunsplit
 
@@ -18,6 +19,7 @@ class RunStateStore(Protocol):
 
 _PUBLISH_LEDGER_KEY = "bot_publish:sent_ids"
 _PUBLISH_URL_LEDGER_KEY = "bot_publish:sent_urls"
+_DELIVERY_RECEIPTS_KEY = "bot_publish:delivery_receipts"
 # Keep enough history to cover the production channel instead of forgetting
 # older URLs and re-publishing them after a restart or data migration.
 _PUBLISH_LEDGER_LIMIT = 10_000
@@ -112,3 +114,31 @@ async def load_publish_url_ledger(store: RunStateStore) -> list[str]:
 
 async def persist_publish_url_ledger(store: RunStateStore, ledger: list[str]) -> list[str]:
     return await _persist_string_list(store, _PUBLISH_URL_LEDGER_KEY, ledger)
+
+
+async def persist_delivery_receipt(store: RunStateStore, receipt: object) -> None:
+    """Append a confirmed transport receipt before publication ledgers move."""
+    raw = await _maybe_await(store.get_run_state(_DELIVERY_RECEIPTS_KEY))
+    rows: list[dict[str, object]] = []
+    if isinstance(raw, str):
+        try:
+            decoded = json.loads(raw)
+            if isinstance(decoded, list):
+                rows = [item for item in decoded if isinstance(item, dict)]
+        except json.JSONDecodeError:
+            rows = []
+    confirmed_at = getattr(receipt, "confirmed_at", datetime.now(UTC))
+    rows.append(
+        {
+            "chat_id": str(getattr(receipt, "chat_id", "")),
+            "message_id": getattr(receipt, "message_id", ""),
+            "confirmed_at": (
+                confirmed_at.isoformat()
+                if isinstance(confirmed_at, datetime)
+                else str(confirmed_at)
+            ),
+        }
+    )
+    await _maybe_await(
+        store.set_run_state(_DELIVERY_RECEIPTS_KEY, json.dumps(rows[-_PUBLISH_LEDGER_LIMIT:]))
+    )

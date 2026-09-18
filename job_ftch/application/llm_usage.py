@@ -56,6 +56,7 @@ class LLMUsageLedger:
 
 
 _ACTIVE_LEDGER: ContextVar[LLMUsageLedger | None] = ContextVar("job_ftch_llm_usage", default=None)
+_ACTIVE_NODE: ContextVar[str | None] = ContextVar("job_ftch_llm_node", default=None)
 
 
 @contextmanager
@@ -68,13 +69,37 @@ def collect_llm_usage() -> Iterator[LLMUsageLedger]:
         _ACTIVE_LEDGER.reset(token)
 
 
-def record_provider_usage(*, model: str, usage: object, latency_ms: int) -> None:
+@contextmanager
+def llm_node_context(node_id: str) -> Iterator[None]:
+    token = _ACTIVE_NODE.set(node_id)
+    try:
+        yield
+    finally:
+        _ACTIVE_NODE.reset(token)
+
+
+def record_provider_usage(
+    *,
+    model: str,
+    usage: object,
+    latency_ms: int,
+    provider: str = "openai",
+    node_id: str | None = None,
+    operation: str | None = None,
+    attempt: int | None = None,
+    requested_provider: str | None = None,
+    requested_model: str | None = None,
+    timeout_ms: int | None = None,
+    request_id: str | None = None,
+    queue_wait_ms: int | None = None,
+) -> None:
     """Record an OpenAI-compatible ``usage`` object when a run is active."""
     import structlog
 
     ledger = _ACTIVE_LEDGER.get()
-    if ledger is None or usage is None:
+    if usage is None:
         return
+    node_id = node_id or _ACTIVE_NODE.get()
     tokens_in = _int_field(usage, "prompt_tokens")
     tokens_out = _int_field(usage, "completion_tokens")
     prompt_details = getattr(usage, "prompt_tokens_details", None)
@@ -84,23 +109,50 @@ def record_provider_usage(*, model: str, usage: object, latency_ms: int) -> None
     if tokens_in is None or tokens_out is None:
         structlog.get_logger("job_ftch.llm").warning(
             "openai_call_usage_missing",
-            provider="openai",
+            provider=provider,
             model=model,
+            node_id=node_id,
+            operation=operation,
+            attempt=attempt,
+            requested_provider=requested_provider,
+            resolved_provider=provider,
+            requested_model=requested_model,
+            resolved_model=model,
+            timeout_ms=timeout_ms,
+            request_id=request_id,
+            queue_wait_ms=queue_wait_ms,
+            request_latency_ms=max(latency_ms, 0),
+            total_latency_ms=max(latency_ms, 0),
             latency_ms=max(latency_ms, 0),
             status="success_unknown_usage",
         )
-        ledger.unknown_pricing_models.add(model)
+        if ledger is not None:
+            ledger.unknown_pricing_models.add(model)
         return
     structlog.get_logger("job_ftch.llm").info(
         "openai_call",
-        provider="openai",
+        provider=provider,
         model=model,
+        node_id=node_id,
+        operation=operation,
+        attempt=attempt,
+        requested_provider=requested_provider,
+        resolved_provider=provider,
+        requested_model=requested_model,
+        resolved_model=model,
+        timeout_ms=timeout_ms,
+        request_id=request_id,
+        queue_wait_ms=queue_wait_ms,
+        request_latency_ms=max(latency_ms, 0),
+        total_latency_ms=max(latency_ms, 0),
         status="success",
         latency_ms=max(latency_ms, 0),
         tokens_in=max(tokens_in, 0),
         cached_tokens_in=max(cached_tokens_in or 0, 0),
         tokens_out=max(tokens_out, 0),
     )
+    if ledger is None:
+        return
     ledger.record(
         model=model,
         tokens_in=tokens_in,

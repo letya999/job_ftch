@@ -6,12 +6,18 @@ aiogram exceptions into the transport-neutral errors the publisher understands.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import structlog
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 
-from job_ftch.application.channel_publisher import FatalTargetError, TransientSendError
+from job_ftch.application.channel_publisher import (
+    DeliveryReceipt,
+    FatalTargetError,
+    RejectedDelivery,
+    TransientSendError,
+)
 from job_ftch.publication.card import build_card
 from job_ftch.publication.layout import CardLayout, load_layout
 from job_ftch.publication.render import render_card
@@ -89,17 +95,28 @@ class TelegramCardSender:
         self._layout = layout or load_layout()
         self._profile = profile
 
-    async def send(self, target: str, job: Job) -> None:
+    async def send(self, target: str, job: Job) -> DeliveryReceipt | RejectedDelivery:
         try:
             text = self._render(job)
             if text is None:
-                return
-            await self._bot.send_message(
+                return RejectedDelivery("card_validation_rejected")
+            message = await self._bot.send_message(
                 target,
                 text,
                 parse_mode="HTML",
                 disable_web_page_preview=True,
                 reply_markup=self._markup_for(job) if self._markup_for else None,
+            )
+            chat_id = getattr(getattr(message, "chat", None), "id", target)
+            message_id = getattr(message, "message_id", "unknown")
+            if not isinstance(chat_id, (str, int)):
+                chat_id = target
+            if not isinstance(message_id, (str, int)):
+                message_id = "unknown"
+            return DeliveryReceipt(
+                chat_id=str(chat_id),
+                message_id=message_id,
+                confirmed_at=datetime.now(UTC),
             )
         except Exception as error:
             raise _translate(error) from error
@@ -126,13 +143,18 @@ class ReplyCardSender:
         self._layout = layout or load_layout()
         self._profile = profile
 
-    async def send(self, _target: str, job: Job) -> None:
+    async def send(self, _target: str, job: Job) -> DeliveryReceipt:
         try:
             text = self._render(job)
-            await self._message.answer(
+            message = await self._message.answer(
                 text,
                 parse_mode="HTML",
                 disable_web_page_preview=True,
+            )
+            return DeliveryReceipt(
+                chat_id=str(getattr(getattr(message, "chat", None), "id", "unknown")),
+                message_id=getattr(message, "message_id", "unknown"),
+                confirmed_at=datetime.now(UTC),
             )
         except Exception as error:
             raise _translate(error) from error

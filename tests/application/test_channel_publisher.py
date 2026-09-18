@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
 from job_ftch.application.channel_publisher import (
+    DeliveryReceipt,
     FatalTargetError,
+    RejectedDelivery,
     TransientSendError,
     publish_jobs,
 )
@@ -206,3 +209,44 @@ async def test_generic_error_naming_a_dead_target_is_treated_as_fatal() -> None:
 
     assert outcome.target_unusable is True
     assert outcome.sent == 0
+
+
+async def test_card_rejection_does_not_count_as_delivery_or_ledger_entry() -> None:
+    class _RejectingSender:
+        async def send(self, _target: str, _job: Any) -> RejectedDelivery:
+            return RejectedDelivery("card_validation_rejected")
+
+    store = _Store()
+    outcome = await publish_jobs(
+        [_Job("rejected", "https://example.com/rejected")],
+        target="@chan",
+        sender=_RejectingSender(),
+        store=store,
+        send_limit=5,
+        sleep=_no_sleep,
+    )
+
+    assert outcome.sent == 0
+    assert outcome.card_validation_rejections == 1
+    assert "bot_publish:sent_ids" not in store.state
+    assert "bot_publish:sent_urls" not in store.state
+
+
+async def test_delivery_receipt_is_persisted_before_publish_ledger() -> None:
+    class _ReceiptSender:
+        async def send(self, _target: str, job: Any) -> DeliveryReceipt:
+            del job
+            return DeliveryReceipt("-100", 42, datetime.now(UTC))
+
+    store = _Store()
+    outcome = await publish_jobs(
+        [_Job("delivered", "https://example.com/delivered")],
+        target="@chan",
+        sender=_ReceiptSender(),
+        store=store,
+        send_limit=5,
+        sleep=_no_sleep,
+    )
+
+    assert outcome.sent == 1
+    assert json.loads(store.state["bot_publish:delivery_receipts"])[0]["message_id"] == 42

@@ -517,6 +517,11 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     "source_name": result.source_name,
                     "status": result.terminal_outcome
                     or ("failed" if result.failed else "partial" if result.partial else "ok"),
+                    "phase": "detail" if result.detail_started_at else "listing",
+                    "outcome": (
+                        "failed" if result.failed else "partial" if result.partial else "success"
+                    ),
+                    "reason": result.zero_reason or result.error,
                     "completion_state": result.completion_state,
                     "yielded": result.yielded,
                     "monitored": result.monitored,
@@ -536,6 +541,19 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     "detail_cards_extracted": result.detail_cards_extracted,
                     "rate_limit_retry_after_seconds": result.rate_limit_retry_after_seconds,
                     "rate_limit_scope": result.rate_limit_scope,
+                    "started_at": result.started_at,
+                    "finished_at": result.finished_at,
+                    "duration_ms": result.duration_ms,
+                    "discovery_started_at": result.discovery_started_at,
+                    "discovery_finished_at": result.discovery_finished_at,
+                    "discovery_duration_ms": result.discovery_duration_ms,
+                    "detail_started_at": result.detail_started_at,
+                    "detail_finished_at": result.detail_finished_at,
+                    "detail_duration_ms": result.detail_duration_ms,
+                    "detail_budget_seconds": result.detail_budget_seconds,
+                    "remaining_budget_ms": result.remaining_budget_ms,
+                    "monitor_attempt_records": result.monitor_attempt_records,
+                    "detail_attempt_records": result.detail_attempt_records,
                 }
             )
             if result.failed:

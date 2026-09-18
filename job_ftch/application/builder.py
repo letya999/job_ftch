@@ -1375,6 +1375,7 @@ def build_nodes(
     job_group_store: JobGroupStore,
     catalog: ProfileCatalog,
     *,
+    relevance_llm: LLMProvider | None = None,
     run_id: str | None = None,
     tenant_id: str = "default",
     user_id: str | None = None,
@@ -1866,7 +1867,7 @@ def build_nodes(
             configured=settings.pipeline_max_browser_navigations_per_run,
         )
     llm_relevance_node = LLMRelevanceClassificationNode(
-        llm=llm,
+        llm=relevance_llm or llm,
         store=store,
         catalog=catalog,
         low_threshold=settings.llm_relevance_low_threshold,

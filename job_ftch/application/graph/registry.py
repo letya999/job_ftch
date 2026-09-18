@@ -635,6 +635,8 @@ def _param_schema(node_id: str) -> dict[str, ParamSpec]:
             "w_role": ParamSpec("float", minimum=0.0, maximum=1.0),
         },
         "extraction": {
+            "provider": ParamSpec("str"),
+            "model": ParamSpec("str"),
             "extraction_mode": ParamSpec(
                 "str",
                 default="llm_or_structured",
@@ -642,6 +644,8 @@ def _param_schema(node_id: str) -> dict[str, ParamSpec]:
             ),
         },
         "llm_relevance": {
+            "provider": ParamSpec("str"),
+            "model": ParamSpec("str"),
             "low_threshold": ParamSpec("float", minimum=0.0, maximum=1.0),
             "high_threshold": ParamSpec("float", minimum=0.0, maximum=1.0),
             "max_per_run": ParamSpec("int", minimum=0),
@@ -656,6 +660,8 @@ def _param_schema(node_id: str) -> dict[str, ParamSpec]:
             ),
         },
         "llm_relevance_evidence": {
+            "provider": ParamSpec("str"),
+            "model": ParamSpec("str"),
             "low_threshold": ParamSpec("float", minimum=0.0, maximum=1.0),
             "high_threshold": ParamSpec("float", minimum=0.0, maximum=1.0),
             "max_per_run": ParamSpec("int", minimum=0),
