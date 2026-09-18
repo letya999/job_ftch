@@ -20,7 +20,7 @@ chmod 700 deploy/cliproxy/auth
 ```
 
 В `deploy/cliproxy/config.yaml` задайте случайный client key. Тот же ключ
-передайте job_ftch через `JOB_FTCH_OPENAI_API_KEY`. Секреты и файлы в
+передайте job_ftch через `JOB_FTCH_CLIPROXY_API_KEY`. Секреты и файлы в
 `deploy/cliproxy/config.yaml`, `auth/` и `logs/` не коммитятся.
 
 В production закрепите согласованный release tag или image digest вместо
@@ -76,31 +76,28 @@ docker compose --profile cliproxy -f job_ftch/adapters/telegram_bot/docker-compo
 Google OAuth/доступ к Gemini может требовать разрешений аккаунта или проекта;
 успешный запуск контейнера сам по себе этого не гарантирует.
 
-## Подключение job_ftch
+## Подключение CAPTCHA image-only
 
-Для основного extraction/relevance LLM через sidecar в env контейнера bot:
+Основной ETL всегда оставляйте на отдельно настроенном OpenAI-профиле:
 
 ```dotenv
 JOB_FTCH_LLM_BACKEND=openai
-JOB_FTCH_LLM_GATEWAY=cliproxy
-JOB_FTCH_OPENAI_BASE_URL=http://cliproxy:8317/v1
-JOB_FTCH_OPENAI_API_KEY=<same-client-key-as-config.yaml>
+JOB_FTCH_OPENAI_BASE_URL=<direct-openai-endpoint>
+JOB_FTCH_OPENAI_API_KEY=<openai-api-key>
 ```
 
-`config/runtime.cliproxy.yaml` подключится автоматически и содержит только
-пример model id. Перед запуском сверяйте его с `/v1/models`; при необходимости
-переопределите `JOB_FTCH_OPENAI_MODEL` и
-`JOB_FTCH_RELEVANCE_LLM_MODEL` в env.
-
-Для одного только image CAPTCHA OCR оставьте основной LLM на OpenAI и задайте:
+Для единственного CLIProxy-маршрута image CAPTCHA задайте отдельный client key:
 
 ```dotenv
+JOB_FTCH_CLIPROXY_API_KEY=<same-client-key-as-config.yaml>
 JOB_FTCH_CAPTCHA_VISION_BASE_URL=http://cliproxy:8317/v1
-JOB_FTCH_CAPTCHA_VISION_MODEL=<model-id-from-v1-models>
+JOB_FTCH_CAPTCHA_VISION_MODEL=gemini-3.8-flash-high
 ```
 
-В этом случае route `cliproxy_image` должен быть явно включён в runtime; один
-только `JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=*` не переключает OCR на CLIProxy.
+Не задавайте `JOB_FTCH_LLM_GATEWAY=cliproxy`: он переключает legacy global
+gateway и не должен использоваться в production CAPTCHA-only режиме. Route
+`cliproxy_image` должен быть явно включён в runtime; один только
+`JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=*` не переключает OCR на CLIProxy.
 
 ## Остановка и rollback
 
@@ -109,7 +106,7 @@ docker compose --profile cliproxy \
   -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml stop cliproxy
 ```
 
-Чтобы вернуть основной OpenAI путь, уберите `JOB_FTCH_LLM_GATEWAY=cliproxy` и
-верните обычный `JOB_FTCH_OPENAI_BASE_URL`, затем перезапустите bot. Не удаляйте
+Чтобы отключить CAPTCHA sidecar, уберите `JOB_FTCH_CLIPROXY_API_KEY` и
+`JOB_FTCH_CAPTCHA_VISION_BASE_URL`, затем перезапустите bot. Не удаляйте
 `deploy/cliproxy/auth`, если планируете восстановить CLIProxy без повторного
 OAuth.

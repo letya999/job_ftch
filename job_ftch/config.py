@@ -104,7 +104,7 @@ def _default_llm_profiles() -> dict[str, dict[str, object]]:
         },
         "cliproxy_captcha": {
             "backend": "openai",
-            "credential_ref": "JOB_FTCH_OPENAI_API_KEY",
+            "credential_ref": "JOB_FTCH_CLIPROXY_API_KEY",
             "capabilities": ("vision",),
         },
     }

@@ -1555,15 +1555,8 @@ async def request_vision_click_order(png: bytes) -> list[tuple[float, float]]:
     captcha_binding = getattr(settings, "llm_bindings", {}).get("captcha_image")
     captcha_profile = getattr(settings, "llm_provider_profiles", {}).get("cliproxy_captcha")
     model_fields_set: set[str] = getattr(settings, "model_fields_set", set())
-    secret = getattr(settings, "openai_api_key", None)
-    api_key = ""
-    if secret is not None:
-        api_key = str(secret.get_secret_value() or "").strip()
-    if not api_key:
-        api_key = (
-            os.environ.get("JOB_FTCH_OPENAI_API_KEY", "").strip()
-            or os.environ.get("OPENAI_API_KEY", "").strip()
-        )
+    credential_ref = getattr(captcha_profile, "credential_ref", "JOB_FTCH_CLIPROXY_API_KEY")
+    api_key = os.environ.get(credential_ref, "").strip()
     base_url = str(
         (
             getattr(captcha_profile, "base_url", None)

@@ -2,7 +2,7 @@
 #
 # Keep the ETL profile on its separately configured OpenAI endpoint. The
 # CAPTCHA profile reads JOB_FTCH_CAPTCHA_VISION_BASE_URL and
-# JOB_FTCH_OPENAI_API_KEY from the environment; no ETL model is overridden here.
+# JOB_FTCH_CLIPROXY_API_KEY from the environment; no ETL model is overridden here.
 #
 llm_gateway: openai
 openai_timeout_seconds: 60.0

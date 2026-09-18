@@ -53,28 +53,12 @@ CAPTCHA_PROVIDER_ENV_KEYS = {
     "2captcha": "TWOCAPTCHA_API_KEY",
     "anticaptcha": "ANTICAPTCHA_API_KEY",
     "nopecha": "NOPECHA_API_KEY",
-    "cliproxy_image": "JOB_FTCH_OPENAI_API_KEY",
+    "cliproxy_image": "JOB_FTCH_CLIPROXY_API_KEY",
 }
 
 
 def _provider_api_key(provider_name: str) -> str:
-    """Return the env/settings key for one captcha provider.
-
-    Image OCR reuses the OpenAI-compatible client key (CLIProxy or OpenAI).
-    There is no separate ``JOB_FTCH_CAPTCHA_VISION_API_KEY``.
-    """
-    if provider_name == "cliproxy_image":
-        from job_ftch.config import get_settings
-
-        secret = get_settings().openai_api_key
-        if secret is not None:
-            value = str(secret.get_secret_value() or "").strip()
-            if value:
-                return value
-        return (
-            os.environ.get("JOB_FTCH_OPENAI_API_KEY", "").strip()
-            or os.environ.get("OPENAI_API_KEY", "").strip()
-        )
+    """Return the env key for one CAPTCHA provider."""
     env_name = CAPTCHA_PROVIDER_ENV_KEYS.get(provider_name, "")
     return os.environ.get(env_name, "").strip() if env_name else ""
 
