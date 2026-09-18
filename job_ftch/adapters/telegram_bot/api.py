@@ -215,6 +215,70 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
     }
 
 
+async def _telegram_readiness(bot: Any, runner: TenantRunner) -> dict[str, Any]:
+    """Check Bot API access without sending a test message."""
+    try:
+        me = await bot.get_me()
+    except Exception as exc:  # noqa: BLE001 - readiness must never take down liveness
+        return {"status": "unhealthy", "bot_api": {"ok": False, "error": str(exc)}}
+    targets: list[dict[str, Any]] = []
+    statuses = ["ok"]
+    for tenant_id in runner.tenant_ids():
+        target: Any = None
+        try:
+            target = await runner.get_publish_channel(tenant_id)
+            if not target:
+                targets.append(
+                    {
+                        "tenant_id": tenant_id,
+                        "status": "degraded",
+                        "error": "publish_target_missing",
+                    }
+                )
+                statuses.append("degraded")
+                continue
+            chat = await bot.get_chat(target)
+            member = None
+            get_member = getattr(bot, "get_chat_member", None)
+            if callable(get_member):
+                member = await get_member(chat.id, me.id)
+            member_status = str(getattr(member, "status", "unknown")) if member else "unchecked"
+            if member_status in {"left", "kicked"}:
+                statuses.append("unhealthy")
+                targets.append(
+                    {
+                        "tenant_id": tenant_id,
+                        "target": str(target),
+                        "status": "unhealthy",
+                        "error": member_status,
+                    }
+                )
+            else:
+                targets.append(
+                    {
+                        "tenant_id": tenant_id,
+                        "target": str(target),
+                        "status": "ok",
+                        "member_status": member_status,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001 - one target must not hide other targets
+            statuses.append("unhealthy")
+            targets.append(
+                {
+                    "tenant_id": tenant_id,
+                    "target": str(target or ""),
+                    "status": "unhealthy",
+                    "error": str(exc),
+                }
+            )
+    return {
+        "status": _worst_status(statuses),
+        "bot_api": {"ok": True, "username": getattr(me, "username", None)},
+        "targets": targets,
+    }
+
+
 def create_app(
     *,
     configs_dir: str | Path | None = None,
@@ -290,6 +354,20 @@ def create_app(
     @app.get("/health/live")
     async def health_live() -> dict[str, Any]:
         return {"status": "ok"}
+
+    @app.get("/health/ready")
+    async def health_ready() -> dict[str, Any]:
+        telegram = await _telegram_readiness(bot, runner)
+        tenants = [await _tenant_health(runner, tenant_id) for tenant_id in runner.tenant_ids()]
+        status = _worst_status(
+            [str(telegram["status"]), *(str(item["status"]) for item in tenants)]
+        )
+        return {
+            "status": status,
+            "telegram": telegram,
+            "tenant_count": len(tenants),
+            "tenants": tenants,
+        }
 
     @app.get("/health")
     async def health() -> dict[str, Any]:

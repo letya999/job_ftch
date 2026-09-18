@@ -1,15 +1,12 @@
-# Optional overlay for CLIProxyAPI (ADR 079 Profile A).
+# Optional legacy overlay. CLIProxyAPI is CAPTCHA-only since ADR 100.
 #
-# Activate with JOB_FTCH_LLM_GATEWAY=cliproxy. Secrets and the HTTP endpoint
-# stay in env: JOB_FTCH_OPENAI_BASE_URL + JOB_FTCH_OPENAI_API_KEY.
-# Model ids must exist on GET {base_url}/models for this gateway.
+# Keep the ETL profile on its separately configured OpenAI endpoint. The
+# CAPTCHA profile reads JOB_FTCH_CAPTCHA_VISION_BASE_URL and
+# JOB_FTCH_OPENAI_API_KEY from the environment; no ETL model is overridden here.
 #
-# llm_backend stays `openai`: CLIProxy is an OpenAI-compatible base_url, not
-# a second provider class.
-llm_gateway: cliproxy
-# Local hermes CLIProxy catalog id. gemini-3.8-low is not published;
-# this is the only *-low model on GET /v1/models.
+llm_gateway: openai
+openai_timeout_seconds: 60.0
+# Kept readable for the migration window and ignored by named ETL bindings.
 openai_model: gemini-3.1-pro-low
 relevance_llm_model: gemini-3.1-pro-low
 ontology_compiler_model: gemini-3.1-pro-low
-openai_timeout_seconds: 60.0

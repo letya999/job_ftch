@@ -47,6 +47,7 @@ class TenantRuntime:
     store: TenantStore
     builder: PipelineBuilder
     llm_provider: LLMProvider
+    llm_bindings: dict[str, object]
     job_group_store: JobGroupStore
     search_backend: SearchBackend
     job_backend: JobPersistenceBackend

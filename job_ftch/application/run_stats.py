@@ -153,7 +153,15 @@ def build_source_run_stats(
             emitted=emitted,
             dropped=dropped,
             failed=failed,
-            duration_ms=0,
+            duration_ms=int(str(outcome.get("duration_ms") or 0)),
+            discovery_duration_ms=int(str(outcome.get("discovery_duration_ms") or 0)),
+            detail_duration_ms=int(str(outcome.get("detail_duration_ms") or 0)),
+            detail_budget_seconds=(
+                float(str(outcome["detail_budget_seconds"]))
+                if outcome.get("detail_budget_seconds") is not None
+                else None
+            ),
+            remaining_budget_ms=int(str(outcome.get("remaining_budget_ms") or 0)),
             llm_latency_ms=int(getattr(identity, "llm_latency_ms", 0) or 0),
             llm_cost_usd=float(getattr(identity, "llm_cost_usd", 0.0) or 0.0),
             conversion_accept=_ratio(emitted, denom),

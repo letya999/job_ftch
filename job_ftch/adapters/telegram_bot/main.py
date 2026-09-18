@@ -324,6 +324,18 @@ async def _send_scheduler_run_report(
     else:
         text += f"\n\n✉️ В канал отправлено: {channel_sent}"
     try:
+        binding_switches = await _maybe_await(store.get_run_state("llm:last_binding_switches"))
+    except Exception:
+        binding_switches = None
+    if binding_switches:
+        text += f"\n\n🔁 Переключение LLM binding: {binding_switches}"
+    try:
+        binding_recovery = await _maybe_await(store.get_run_state("llm:last_binding_recovery"))
+    except Exception:
+        binding_recovery = None
+    if binding_recovery:
+        text += f"\n\n✅ Восстановлены исходные LLM bindings: {binding_recovery}"
+    try:
         await bot.send_message(user_chat_id, text, parse_mode="HTML")
     except Exception as exc:
         try:

@@ -1415,10 +1415,21 @@ class CliproxyImageProvider(_BaseProvider):
             from job_ftch.config import get_settings
 
             settings = get_settings()
+            captcha_binding = getattr(settings, "llm_bindings", {}).get("captcha_image")
+            captcha_profile = getattr(settings, "llm_provider_profiles", {}).get("cliproxy_captcha")
+            model_fields_set: set[str] = getattr(settings, "model_fields_set", set())
             if base_url is None:
-                base_url = settings.captcha_vision_base_url
+                base_url = (
+                    getattr(captcha_profile, "base_url", None)
+                    if "captcha_vision_base_url" not in model_fields_set
+                    else None
+                ) or settings.captcha_vision_base_url
             if model is None:
-                model = settings.captcha_vision_model
+                model = (
+                    getattr(captcha_binding, "model", None)
+                    if "captcha_vision_model" not in model_fields_set
+                    else None
+                ) or settings.captcha_vision_model
         self._base_url = str(base_url or "").strip().rstrip("/")
         self._model = str(model or "").strip()
 
@@ -1541,6 +1552,9 @@ async def request_vision_click_order(png: bytes) -> list[tuple[float, float]]:
     from job_ftch.config import get_settings
 
     settings = get_settings()
+    captcha_binding = getattr(settings, "llm_bindings", {}).get("captcha_image")
+    captcha_profile = getattr(settings, "llm_provider_profiles", {}).get("cliproxy_captcha")
+    model_fields_set: set[str] = getattr(settings, "model_fields_set", set())
     secret = getattr(settings, "openai_api_key", None)
     api_key = ""
     if secret is not None:
@@ -1550,8 +1564,24 @@ async def request_vision_click_order(png: bytes) -> list[tuple[float, float]]:
             os.environ.get("JOB_FTCH_OPENAI_API_KEY", "").strip()
             or os.environ.get("OPENAI_API_KEY", "").strip()
         )
-    base_url = str(settings.captcha_vision_base_url or "").strip()
-    model = str(settings.captcha_vision_model or "").strip()
+    base_url = str(
+        (
+            getattr(captcha_profile, "base_url", None)
+            if "captcha_vision_base_url" not in model_fields_set
+            else None
+        )
+        or settings.captcha_vision_base_url
+        or ""
+    ).strip()
+    model = str(
+        (
+            getattr(captcha_binding, "model", None)
+            if "captcha_vision_model" not in model_fields_set
+            else None
+        )
+        or settings.captcha_vision_model
+        or ""
+    ).strip()
     if not png or not api_key or not base_url or not model:
         return []
     encoded = base64.b64encode(png).decode("ascii")

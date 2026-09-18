@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from time import monotonic
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
@@ -65,6 +67,20 @@ class SourceFetchResult:
     detail_protection_failures: int = 0
     rate_limit_retry_after_seconds: float | None = None
     rate_limit_scope: str | None = None
+    started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    finished_at: str | None = None
+    duration_ms: int = 0
+    discovery_started_at: str | None = None
+    discovery_finished_at: str | None = None
+    discovery_duration_ms: int = 0
+    detail_started_at: str | None = None
+    detail_finished_at: str | None = None
+    detail_duration_ms: int = 0
+    detail_budget_seconds: float | None = None
+    remaining_budget_ms: int | None = None
+    monitor_attempt_records: list[dict[str, Any]] = field(default_factory=list)
+    detail_attempt_records: list[dict[str, Any]] = field(default_factory=list)
+    _started_monotonic: float = field(default_factory=monotonic, repr=False, compare=False)
 
 
 _TECHNICAL_ZERO_REASONS = {
@@ -119,6 +135,27 @@ def _capture_source_stats(source: object, result: SourceFetchResult) -> None:
     """Copy adapter-owned health into the cross-source result contract."""
     stats = getattr(source, "stats", None)
     if stats is not None:
+        for name in (
+            "started_at",
+            "finished_at",
+            "discovery_started_at",
+            "discovery_finished_at",
+        ):
+            value = getattr(stats, name, None)
+            if value is not None:
+                setattr(result, name, value)
+        for name in (
+            "duration_ms",
+            "discovery_duration_ms",
+            "detail_duration_ms",
+            "remaining_budget_ms",
+        ):
+            setattr(result, name, int(getattr(stats, name, 0) or 0))
+        result.detail_started_at = getattr(stats, "detail_started_at", None)
+        result.detail_finished_at = getattr(stats, "detail_finished_at", None)
+        result.detail_budget_seconds = getattr(stats, "detail_budget_seconds", None)
+        result.monitor_attempt_records = list(getattr(stats, "monitor_attempt_records", ()) or ())
+        result.detail_attempt_records = list(getattr(stats, "detail_attempt_records", ()) or ())
         result.yielded = getattr(stats, "yielded", result.yielded)
         # A source interrupted while emitting is partial.  A configured
         # frontier cap is successful but limited; merging them made every
@@ -159,6 +196,10 @@ def _capture_source_stats(source: object, result: SourceFetchResult) -> None:
         if result.yielded == 0 and result.zero_reason in _TECHNICAL_ZERO_REASONS:
             result.failed = True
             result.error = result.error or f"source_zero_yield:{result.zero_reason}"
+    if result.finished_at is None:
+        result.finished_at = datetime.now(UTC).isoformat()
+    if result.duration_ms <= 0:
+        result.duration_ms = max(round((monotonic() - result._started_monotonic) * 1000), 1)
     if result.yielded:
         if result.partial or result.deadline_exceeded:
             result.terminal_outcome = "partial_with_items"
