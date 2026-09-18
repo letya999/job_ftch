@@ -71,6 +71,27 @@ def safe_llm_error(error: BaseException) -> str:
     return sanitize_string(str(error) or type(error).__name__).replace("\n", " ")[:240]
 
 
+def llm_error_reason(error: BaseException) -> str:
+    """Return a stable low-cardinality reason for operator telemetry."""
+    status_code = getattr(error, "status_code", None)
+    text = str(error).casefold()
+    if is_quota_exhausted_error(error):
+        return "quota"
+    if status_code in {401, 403} or any(
+        marker in text for marker in ("api key", "unauthorized", "forbidden")
+    ):
+        return "auth"
+    if status_code == 404 or ("model" in text and "not found" in text):
+        return "model"
+    if status_code == 429 or "rate limit" in text or "too many requests" in text:
+        return "rate_limit"
+    if isinstance(error, TimeoutError) or "timeout" in text:
+        return "timeout"
+    if any(marker in text for marker in ("connection", "dns", "network", "transport")):
+        return "transport"
+    return "unknown"
+
+
 async def run_llm_preflight(provider: object) -> LLMPreflightResult:
     """Call an optional provider preflight without coupling application to an adapter."""
     check = getattr(provider, "preflight", None)
@@ -216,6 +237,7 @@ async def check_llm_before_run(
     retry_delay_seconds: int = DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
     max_retries: int = DEFAULT_QUOTA_MAX_RETRIES,
     now: datetime | None = None,
+    preflight_result: LLMPreflightResult | None = None,
 ) -> LLMQuotaDecision:
     """Check the provider and schedule durable, bounded retries before any fetch."""
     now = now or datetime.now(UTC)
@@ -234,7 +256,7 @@ async def check_llm_before_run(
             retry_number=retry_count,
         )
 
-    result = await run_llm_preflight(provider)
+    result = preflight_result or await run_llm_preflight(provider)
     if result.available:
         if retry_count or blocked_until is not None:
             await _clear_state(store)

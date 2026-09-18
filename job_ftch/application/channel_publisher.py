@@ -32,6 +32,7 @@ from job_ftch.application.publish_ledger import (
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
+    from datetime import datetime
 
     from job_ftch.application.publish_ledger import RunStateStore
     from job_ftch.domain import Job
@@ -81,7 +82,19 @@ class FatalTargetError(Exception):
 class CardSender(Protocol):
     """Transport for one rendered vacancy. Implemented by the delivery adapter."""
 
-    async def send(self, target: str, job: Job) -> None: ...
+    async def send(self, target: str, job: Job) -> object: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryReceipt:
+    chat_id: str
+    message_id: int | str
+    confirmed_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class RejectedDelivery:
+    reason: str
 
 
 @dataclass
@@ -94,6 +107,8 @@ class PublishOutcome:
     had_transient_failure: bool = False
     target_unusable: bool = False
     delivered: list[Job] = field(default_factory=list)
+    receipts: list[DeliveryReceipt] = field(default_factory=list)
+    card_validation_rejections: int = 0
 
 
 def _is_fatal_target_error(error: BaseException) -> bool:
@@ -154,8 +169,19 @@ async def publish_jobs(
         sent = False
         for attempt in range(1, transient_attempts + 1):
             try:
-                await sender.send(target, job)
+                delivery = await sender.send(target, job)
+                if isinstance(delivery, RejectedDelivery):
+                    outcome.card_validation_rejections += 1
+                    outcome.error = delivery.reason
+                    logger.info(
+                        "publish_card_rejected",
+                        target=target,
+                        reason=delivery.reason,
+                    )
+                    break
                 sent = True
+                if isinstance(delivery, DeliveryReceipt):
+                    outcome.receipts.append(delivery)
                 break
             except TransientSendError as flood:
                 outcome.error = str(flood)
@@ -192,6 +218,10 @@ async def publish_jobs(
         outcome.sent += 1
         outcome.delivered.append(job)
         if store is not None:
+            if isinstance(delivery, DeliveryReceipt):
+                from job_ftch.application.publish_ledger import persist_delivery_receipt
+
+                await persist_delivery_receipt(store, delivery)
             if job_id is not None:
                 published_ids.add(job_id)
                 id_ledger.append(job_id)

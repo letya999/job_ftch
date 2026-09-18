@@ -16,6 +16,7 @@ from pydantic import (
 )
 
 from job_ftch.application.drops import RawItemDropped
+from job_ftch.application.llm_usage import llm_node_context
 from job_ftch.domain import (
     CompensationRange,
     EmploymentType,
@@ -517,6 +518,8 @@ class ExtractionNode:
         self._min_hiring_intent = 0.0
 
     def configure_graph_params(self, params: dict[str, object]) -> None:
+        self.provider_binding = str(params["provider"]) if "provider" in params else None
+        self.model_binding = str(params["model"]) if "model" in params else None
         if "extraction_mode" not in params:
             return
         mode = str(params["extraction_mode"])
@@ -886,7 +889,8 @@ class ExtractionNode:
 
             try:
                 schema = CoreExtractedJobFields if self._scope == "core" else ExtractedJobFields
-                result = await self._llm.extract(text, schema)
+                with llm_node_context("extraction"):
+                    result = await self._llm.extract(text, schema)
                 if self._capture_payloads:
                     span.set_attribute(
                         "job_ftch.llm.observation.output",

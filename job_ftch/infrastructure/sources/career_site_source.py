@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
+from time import monotonic
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import urlparse, urlsplit
 
@@ -44,6 +45,7 @@ from job_ftch.infrastructure.sources.site_utils import (
 )
 from job_ftch.infrastructure.sources.source_deadline import (
     await_with_source_deadline,
+    remaining_source_seconds,
     sleep_with_source_deadline,
 )
 from job_ftch.infrastructure.sources.url_scoring import (
@@ -129,6 +131,17 @@ _TYPED_FAILURE_REASONS = frozenset(
 
 @dataclass
 class FetchStats:
+    started_at: str | None = None
+    finished_at: str | None = None
+    duration_ms: int = 0
+    discovery_started_at: str | None = None
+    discovery_finished_at: str | None = None
+    discovery_duration_ms: int = 0
+    detail_started_at: str | None = None
+    detail_finished_at: str | None = None
+    detail_duration_ms: int = 0
+    detail_budget_seconds: float | None = None
+    remaining_budget_ms: int | None = None
     search_executor: str | None = None
     search_status: str | None = None
     search_query_mode: str | None = None
@@ -153,6 +166,8 @@ class FetchStats:
     truncated: bool = False
     recommended_monitors: list[str] = field(default_factory=list)
     monitor_attempts: list[str] = field(default_factory=list)
+    monitor_attempt_records: list[dict[str, Any]] = field(default_factory=list)
+    detail_attempt_records: list[dict[str, Any]] = field(default_factory=list)
     final_monitor: str | None = None
     successful_scraper: str | None = None
     detected_monitor_config: dict[str, Any] = field(default_factory=dict)
@@ -165,6 +180,17 @@ class FetchStats:
 
     def to_log_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "duration_ms": self.duration_ms,
+            "discovery_started_at": self.discovery_started_at,
+            "discovery_finished_at": self.discovery_finished_at,
+            "discovery_duration_ms": self.discovery_duration_ms,
+            "detail_started_at": self.detail_started_at,
+            "detail_finished_at": self.detail_finished_at,
+            "detail_duration_ms": self.detail_duration_ms,
+            "detail_budget_seconds": self.detail_budget_seconds,
+            "remaining_budget_ms": self.remaining_budget_ms,
             "search_executor": self.search_executor,
             "search_status": self.search_status,
             "search_query_mode": self.search_query_mode,
@@ -191,6 +217,8 @@ class FetchStats:
             "truncated": self.truncated,
             "recommended_monitors": self.recommended_monitors,
             "monitor_attempts": self.monitor_attempts,
+            "monitor_attempt_records": self.monitor_attempt_records,
+            "detail_attempt_records": self.detail_attempt_records,
             "final_monitor": self.final_monitor,
             "successful_scraper": self.successful_scraper,
             "detected_monitor_config": self.detected_monitor_config,
@@ -1616,12 +1644,32 @@ class CareerSiteSource(Source["RawItem"]):
                 try:
                     retry_monitor_config = self._monitor_config_for_current_retry(monitor_config)
                     monitor_spec = self._runtime_monitor_spec(retry_monitor_config)
-                    result = await run_monitor_attempt(
-                        monitor_entry,
-                        monitor_spec=monitor_spec,
-                        http=self.http,
-                        auth=self.auth,
-                        monitor_config=retry_monitor_config,
+                    monitor_started = monotonic()
+                    remaining = remaining_source_seconds()
+                    monitor_budget = None
+                    if remaining is not None and self.stats.detail_budget_seconds:
+                        monitor_budget = remaining - self.stats.detail_budget_seconds
+                        if monitor_budget <= 0:
+                            self.stats.source_partial = True
+                            self.stats.zero_reason = ZeroYieldReason.ALL_MONITORS_EXHAUSTED
+                            break
+                    result = await await_with_source_deadline(
+                        run_monitor_attempt(
+                            monitor_entry,
+                            monitor_spec=monitor_spec,
+                            http=self.http,
+                            auth=self.auth,
+                            monitor_config=retry_monitor_config,
+                        ),
+                        timeout=monitor_budget,
+                    )
+                    self.stats.monitor_attempt_records.append(
+                        {
+                            "monitor": current_monitor_name,
+                            "status": "ok",
+                            "duration_ms": max(round((monotonic() - monitor_started) * 1000), 0),
+                            "urls": len(getattr(result, "urls", ()) or ()),
+                        }
                     )
                     self._capture_observed_challenge_type()
                     observed = getattr(self.bypass_strategy, "observed_challenge_type", None)
@@ -1642,6 +1690,19 @@ class CareerSiteSource(Source["RawItem"]):
                             )
                             continue
                 except Exception as exc:
+                    self.stats.monitor_attempt_records.append(
+                        {
+                            "monitor": current_monitor_name,
+                            "status": "error",
+                            "duration_ms": max(round((monotonic() - monitor_started) * 1000), 0),
+                            "error": type(exc).__name__,
+                            "remaining_budget_ms": (
+                                None
+                                if (remaining := remaining_source_seconds()) is None
+                                else max(round(remaining * 1000), 0)
+                            ),
+                        }
+                    )
                     from job_ftch.infrastructure.sources.monitors.shared import (
                         AtsRedirectException,
                         BoardGoneError,
@@ -1977,6 +2038,25 @@ class CareerSiteSource(Source["RawItem"]):
 
     async def fetch(self) -> AsyncIterator[RawItem | QuarantinedRawItem]:
         self.stats = FetchStats()
+        started_monotonic = monotonic()
+        started_at = datetime.now(UTC)
+        self.stats.started_at = started_at.isoformat()
+        self.stats.discovery_started_at = self.stats.started_at
+        from job_ftch.config import get_settings
+
+        configured_detail_reserve = self.spec.monitor_config.get("detail_budget_seconds")
+        if configured_detail_reserve is None:
+            configured_detail_reserve = get_settings().career_site_detail_reserve_seconds
+        try:
+            hard_budget = self.spec.monitor_config.get("source_hard_deadline_seconds")
+            if hard_budget is None:
+                hard_budget = get_settings().source_hard_deadline_seconds
+            self.stats.detail_budget_seconds = min(
+                max(float(configured_detail_reserve), 0.0),
+                max(float(hard_budget) - 1.0, 0.0),
+            )
+        except (TypeError, ValueError):
+            self.stats.detail_budget_seconds = get_settings().career_site_detail_reserve_seconds
         self.http = self._base_http
         self._temporary_http_clients.clear()
         self._trusted_parser_urls.clear()
@@ -2032,6 +2112,22 @@ class CareerSiteSource(Source["RawItem"]):
             ):
                 yield item
         finally:
+            finished_at = datetime.now(UTC)
+            self.stats.finished_at = finished_at.isoformat()
+            self.stats.duration_ms = max(round((monotonic() - started_monotonic) * 1000), 0)
+            if self.stats.discovery_started_at and not self.stats.discovery_finished_at:
+                self.stats.discovery_finished_at = finished_at.isoformat()
+                self.stats.discovery_duration_ms = self.stats.duration_ms
+            if self.stats.detail_started_at and not self.stats.detail_finished_at:
+                self.stats.detail_finished_at = finished_at.isoformat()
+                detail_started = datetime.fromisoformat(self.stats.detail_started_at)
+                self.stats.detail_duration_ms = max(
+                    round((finished_at - detail_started).total_seconds() * 1000), 0
+                )
+            remaining = remaining_source_seconds()
+            self.stats.remaining_budget_ms = (
+                None if remaining is None else max(round(remaining * 1000), 0)
+            )
             end_operation = getattr(self.bypass_strategy, "end_operation", None)
             if operation_token is not None and callable(end_operation):
                 end_operation(operation_token)
@@ -2487,6 +2583,16 @@ class CareerSiteSource(Source["RawItem"]):
         if not urls_to_scrape:
             return
 
+        if self.stats.discovery_started_at and not self.stats.discovery_finished_at:
+            now = datetime.now(UTC)
+            self.stats.discovery_finished_at = now.isoformat()
+            discovery_started = datetime.fromisoformat(self.stats.discovery_started_at)
+            self.stats.discovery_duration_ms = max(
+                round((now - discovery_started).total_seconds() * 1000), 0
+            )
+        if not self.stats.detail_started_at:
+            self.stats.detail_started_at = datetime.now(UTC).isoformat()
+
         # Pre-dedup: drop URLs already persisted as processed before committing
         # to detail-page scrape requests. Fail-open so a store outage never
         # silently empties the run.
@@ -2716,6 +2822,7 @@ class CareerSiteSource(Source["RawItem"]):
         partial_fallback: ScrapedPostingPayload | None = None
         partial_fallback_index: int | None = None
         for i, scraper_name in enumerate(scraper_chain):
+            scraper_started = monotonic()
             try:
                 typed_payload, prefetched_html = await run_scraper_attempt(
                     scraper_name,
@@ -2761,16 +2868,52 @@ class CareerSiteSource(Source["RawItem"]):
                     self.stats.successful_scraper = scraper_name
                     if i > 0 or count_first_as_fallback:
                         self.stats.scrape_fallback_used += 1
+                    self.stats.detail_attempt_records.append(
+                        {
+                            "scraper": scraper_name,
+                            "attempt": i + 1,
+                            "status": "success",
+                            "duration_ms": max(round((monotonic() - scraper_started) * 1000), 0),
+                            "url": url,
+                        }
+                    )
                     return typed_payload
                 if typed_payload and typed_payload.title and title_only_fallback is None:
                     title_only_fallback = typed_payload
+                self.stats.detail_attempt_records.append(
+                    {
+                        "scraper": scraper_name,
+                        "attempt": i + 1,
+                        "status": "partial" if typed_payload else "empty",
+                        "duration_ms": max(round((monotonic() - scraper_started) * 1000), 0),
+                        "url": url,
+                    }
+                )
             except Exception as exc:
+                self.stats.detail_attempt_records.append(
+                    {
+                        "scraper": scraper_name,
+                        "attempt": i + 1,
+                        "status": "error",
+                        "duration_ms": max(round((monotonic() - scraper_started) * 1000), 0),
+                        "error": type(exc).__name__,
+                        "url": url,
+                    }
+                )
                 logger.debug(log_event, name=scraper_name, url=url, error=str(exc))
                 continue
         if partial_fallback is not None:
             self.stats.successful_scraper = scraper_chain[partial_fallback_index or 0]
             if (partial_fallback_index or 0) > 0 or count_first_as_fallback:
                 self.stats.scrape_fallback_used += 1
+            self.stats.detail_attempt_records.append(
+                {
+                    "scraper": self.stats.successful_scraper,
+                    "attempt": (partial_fallback_index or 0) + 1,
+                    "status": "partial_fallback",
+                    "url": url,
+                }
+            )
             return replace(
                 partial_fallback,
                 metadata={

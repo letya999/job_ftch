@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 import structlog
 
+from job_ftch.application.channel_publisher import DeliveryReceipt, RejectedDelivery
 from job_ftch.publication.card import build_card
 from job_ftch.publication.layout import CardLayout, load_layout
 from job_ftch.publication.render import render_card
@@ -81,15 +83,21 @@ class TelegramPostingSink:
         self._layout = layout or load_layout()
         self._profile = profile
 
-    async def emit(self, item: Job) -> None:
+    async def emit(self, item: Job) -> object:
         if self._notify_mode == "instant":
             text = _render_job(item, self._layout, self._profile)
             if text is None:
-                return
+                return RejectedDelivery("card_validation_rejected")
             async with _client_session(self._client, own_client=self._own_client) as client:
-                await client.send_message(self._entity, text, link_preview=False)
+                message = await client.send_message(self._entity, text, link_preview=False)
+                return DeliveryReceipt(
+                    chat_id=str(getattr(getattr(message, "chat", None), "id", self._entity)),
+                    message_id=getattr(message, "message_id", "unknown"),
+                    confirmed_at=datetime.now(UTC),
+                )
         else:
             self._pending_jobs.append(item)
+        return None
 
     async def flush(self) -> None:
         if not self._pending_jobs:

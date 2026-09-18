@@ -20,7 +20,6 @@ from job_ftch.application.auth import resolve_auth_provider
 from job_ftch.application.builder import (
     PipelineBuilder,
     build_delivery_targets,
-    build_llm,
     build_nodes,
     build_output_sinks,
     build_quarantine_sink,
@@ -32,20 +31,29 @@ from job_ftch.application.builder import (
     resolve_settings_source_preparation_concurrency,
     tenant_to_settings,
 )
+from job_ftch.application.builder import (
+    build_llm as _legacy_build_llm,
+)
 from job_ftch.application.llm_quota import (
     DEFAULT_QUOTA_MAX_RETRIES,
     DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
     DEFAULT_SCHEDULE_INTERVAL_SECONDS,
+    LLMQuotaDecision,
     check_llm_before_run,
     note_llm_quota_failure,
 )
 from job_ftch.application.llm_usage import collect_llm_usage, pricing_version
 from job_ftch.application.pipeline import RunSummary, SourceRunStats
+from job_ftch.application.provider_routing import (
+    BindingPreflight,
+    build_llm_bindings,
+    preflight_bindings,
+    required_binding_names,
+)
 from job_ftch.application.registry import (
     create_embedding_provider,
     create_job_backend,
     create_job_group_store,
-    create_llm,
     create_ontology_store,
     create_search_backend,
     create_store,
@@ -105,8 +113,20 @@ if TYPE_CHECKING:
     from job_ftch.nodes.snapshot_filter import SnapshotFilterNode
 
 logger = structlog.get_logger(__name__)
+# Compatibility seam retained for MCP and tenant-runner tests/plugins that
+# replace the pre-routing builder. Runtime construction uses named bindings.
+build_llm = _legacy_build_llm
 _DEFAULT_LATEST_JOBS_POOL = 200
 _PROFILE_AWARE_LATEST_JOBS_POOL = 1000
+
+
+def _sync_legacy_llm_override(runtime: TenantRuntime) -> None:
+    """Keep the old mutable ``llm_provider`` seam compatible with bindings."""
+    configured_extraction = runtime.llm_bindings.get("extraction")
+    if runtime.llm_provider is configured_extraction:
+        return
+    runtime.llm_bindings["extraction"] = runtime.llm_provider
+    runtime.llm_bindings["relevance"] = runtime.llm_provider
 
 
 class _ReplaySource:
@@ -763,7 +783,8 @@ class TenantRunner:
                 operational_outcome_max_runs=tenant.retention_runs,
             )
             job_group_store = cast("JobGroupStore", create_job_group_store(tenant_settings))
-            llm = cast("LLMProvider", create_llm(tenant_settings))
+            llm_bindings = build_llm_bindings(tenant_settings)
+            llm = cast("LLMProvider", llm_bindings["extraction"])
             embedding_provider = None
             # The generic embedding provider is only consumed by the optional
             # semantic prefilter. Do not load its heavyweight model merely to
@@ -817,6 +838,9 @@ class TenantRunner:
                 job_group_store,
                 catalog=catalog,
                 bgem3_provider=tenant_bgem3_provider,
+                relevance_llm=cast(
+                    "LLMProvider", llm_bindings.get("relevance", llm_bindings["extraction"])
+                ),
             )
             output_sink, main_sink, review_sink, posting_sink = build_output_sinks(
                 tenant_settings, store=tenant_store
@@ -853,6 +877,7 @@ class TenantRunner:
                 store=tenant_store,
                 builder=builder,
                 llm_provider=llm,
+                llm_bindings=llm_bindings,
                 job_group_store=job_group_store,
                 search_backend=cast("SearchBackend", create_search_backend(tenant_settings)),
                 job_backend=cast("JobPersistenceBackend", create_job_backend(tenant_settings)),
@@ -1174,6 +1199,7 @@ class TenantRunner:
         personal_max_items: int | None = None,
         replay_mode: bool = False,
     ) -> tuple[PipelineBuilder, SnapshotFilterNode | None]:
+        _sync_legacy_llm_override(runtime)
         # Load the live ontology from the Postgres/SQLite store
         # so the builder has both the static fixtures seed and
         # whatever the LLM has extracted from the user's recent
@@ -1242,6 +1268,9 @@ class TenantRunner:
             relevance_prompts=relevance_prompts,
             derived_ontology_override=runtime_derived_ontology,
             personal_mode=personal_mode,
+            relevance_llm=cast(
+                "LLMProvider", runtime.llm_bindings.get("relevance", runtime.llm_provider)
+            ),
         )
         if runtime.settings.pipeline_graph_path is not None:
             from job_ftch.application.graph import build_v2_executor, compile_graph, load_graph
@@ -1279,16 +1308,12 @@ class TenantRunner:
                     graph,
                     spec=replace(graph.spec, nodes=tuple(personal_nodes)),
                 )
-            if runtime.settings.llm_backend == "openai":
-                relevance_settings = runtime.settings.model_copy(
-                    update={"openai_model": runtime.settings.relevance_llm_model}
-                )
-                relevance_llm = build_llm(relevance_settings)
-            else:
-                # Non-OpenAI providers are often injected tenant adapters.
-                # Rebuilding from Settings silently discarded that runtime
-                # provider and made test/custom deployments use heuristics.
-                relevance_llm = runtime.llm_provider
+            # The graph binding is resolved once at tenant composition time;
+            # do not silently rebuild a provider from global model settings.
+            relevance_llm = cast(
+                "LLMProvider",
+                runtime.llm_bindings.get("relevance", runtime.llm_provider),
+            )
             typed_bindings = build_v2_typed_bindings(
                 nodes=list(nodes),
                 store=runtime.store,
@@ -1950,22 +1975,97 @@ class TenantRunner:
                             if runtime.tenant.schedule is not None
                             else getattr(runtime.settings, "schedule_interval_seconds", None)
                         ) or DEFAULT_SCHEDULE_INTERVAL_SECONDS
+                        binding_checks: dict[str, BindingPreflight] = {}
+                        binding_switches: list[dict[str, object]] = []
+                        extraction_preflight = None
                         if getattr(runtime.settings, "llm_preflight_enabled", True):
-                            preflight = await check_llm_before_run(
-                                runtime.store,
-                                runtime.llm_provider,
-                                normal_interval_seconds=int(llm_interval),
-                                retry_delay_seconds=getattr(
-                                    runtime.settings,
-                                    "llm_quota_retry_delay_seconds",
-                                    DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
-                                ),
-                                max_retries=getattr(
-                                    runtime.settings,
-                                    "llm_quota_max_retries",
-                                    DEFAULT_QUOTA_MAX_RETRIES,
-                                ),
+                            _sync_legacy_llm_override(runtime)
+                            binding_checks, binding_switches = await preflight_bindings(
+                                runtime.settings,
+                                runtime.llm_bindings,
+                                names=required_binding_names(runtime.settings),
                             )
+                            for binding_name, check in binding_checks.items():
+                                runtime.llm_bindings[binding_name] = check.provider
+                            if "extraction" in binding_checks:
+                                runtime.llm_provider = cast(
+                                    "LLMProvider", binding_checks["extraction"].provider
+                                )
+                                extraction_preflight = binding_checks["extraction"].result
+                            previous_switches = await runtime.store.get_run_state(
+                                "llm:last_binding_switches"
+                            )
+                            previous_recovery = await runtime.store.get_run_state(
+                                "llm:last_binding_recovery"
+                            )
+                            if binding_switches and (
+                                json.dumps(binding_switches, ensure_ascii=False, sort_keys=True)
+                                != (previous_switches or "")
+                                or bool(previous_recovery)
+                            ):
+                                await runtime.store.set_run_state(
+                                    "llm:last_binding_switches",
+                                    json.dumps(
+                                        binding_switches, ensure_ascii=False, sort_keys=True
+                                    ),
+                                )
+                                await runtime.store.set_run_state("llm:last_binding_recovery", "")
+                                logger.warning(
+                                    "llm_binding_fallback_selected",
+                                    tenant_id=tenant_id,
+                                    run_id=run_id,
+                                    switches=binding_switches,
+                                )
+                            unavailable = [
+                                (name, check.result)
+                                for name, check in binding_checks.items()
+                                if not check.result.available
+                            ]
+                            if (
+                                not unavailable
+                                and not binding_switches
+                                and previous_switches
+                                and not previous_recovery
+                            ):
+                                await runtime.store.set_run_state(
+                                    "llm:last_binding_recovery",
+                                    json.dumps(
+                                        {
+                                            "recovered_at": datetime.now(UTC).isoformat(),
+                                            "previous_switches": previous_switches,
+                                        },
+                                        ensure_ascii=False,
+                                        sort_keys=True,
+                                    ),
+                                )
+                            if unavailable:
+                                first_name, first_result = unavailable[0]
+                                preflight = LLMQuotaDecision(
+                                    allowed=False,
+                                    status="binding_unavailable",
+                                    quota_exhausted=first_result.quota_exhausted,
+                                    message=(
+                                        f"LLM binding {first_name} unavailable: "
+                                        f"{first_result.error or 'provider_unavailable'}"
+                                    ),
+                                )
+                            else:
+                                preflight = await check_llm_before_run(
+                                    runtime.store,
+                                    runtime.llm_provider,
+                                    normal_interval_seconds=int(llm_interval),
+                                    retry_delay_seconds=getattr(
+                                        runtime.settings,
+                                        "llm_quota_retry_delay_seconds",
+                                        DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
+                                    ),
+                                    max_retries=getattr(
+                                        runtime.settings,
+                                        "llm_quota_max_retries",
+                                        DEFAULT_QUOTA_MAX_RETRIES,
+                                    ),
+                                    preflight_result=extraction_preflight,
+                                )
                         else:
                             preflight = None
                         if preflight is not None and not preflight.allowed:

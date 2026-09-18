@@ -74,6 +74,8 @@ career_site_max_keepalive_connections: 5
 career_site_detail_concurrency: 8
 career_site_default_limit: 50
 career_site_default_detail_limit: 50
+# Keep this reserve available for detail pages after listing discovery.
+career_site_detail_reserve_seconds: 10.0
 career_site_spa_shell_max_visible_chars: 80
 career_site_window_max_details: 500
 

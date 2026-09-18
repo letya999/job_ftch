@@ -8,6 +8,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 
 - [Implementation plan — autonomous multi-tenant Jobfetch](autonomous-multitenant-jobfetch.md) - Minimal sequence for implementing ADRs 087–089 without changing ai_jobs behavior. (Updated: 2026-09-06)
 - [Production recovery — execution graph](production-recovery-execution.md) - Последовательные и параллельные задачи, ownership, gates и handoff. (Updated: 2026-09-12)
+- [Provider routing and production recovery — implementation plan](provider-routing-and-production-recovery.md) - Ordered implementation stages for provider routing, delivery truth, observability and source recovery. (Updated: 2026-09-18)
 - [План P1 — Полный ingest и ключевые парсеры](recovery-p1-complete-ingest-parsers.md) - Последовательность реализации и handoff P1. (Updated: 2026-09-12)
 - [План P2 — Доказательное извлечение компании, оплаты и географии](recovery-p2-evidence-field-extraction.md) - Последовательность реализации и handoff P2. (Updated: 2026-09-12)
 - [План P3 — Прокси, CAPTCHA и бюджет доступа](recovery-p3-proxy-captcha-budget.md) - Последовательность реализации и handoff P3. (Updated: 2026-09-12)
