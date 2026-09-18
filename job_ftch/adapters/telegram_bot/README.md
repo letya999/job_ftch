@@ -115,6 +115,7 @@ Set via repo-root `.env.dev` plus adapter-specific `job_ftch/adapters/telegram_b
 | `JOB_FTCH_STORE_DSN` | DSN used by the library store/job/search backends |
 | `JOB_FTCH_QDRANT_URL` | Qdrant endpoint for vector search |
 | `JOB_FTCH_OPENAI_API_KEY` | OpenAI key for extraction and embeddings |
+| `JOB_FTCH_CLIPROXY_API_KEY` | Separate CLIProxy client key for CAPTCHA image OCR |
 | `JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN` | Bot token from BotFather |
 | `JOB_FTCH_AUTH_TELEGRAM_BOT_*` allowlists | Admin/user/chat access gates and throttling |
 

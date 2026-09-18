@@ -1555,15 +1555,14 @@ async def request_vision_click_order(png: bytes) -> list[tuple[float, float]]:
     captcha_binding = getattr(settings, "llm_bindings", {}).get("captcha_image")
     captcha_profile = getattr(settings, "llm_provider_profiles", {}).get("cliproxy_captcha")
     model_fields_set: set[str] = getattr(settings, "model_fields_set", set())
-    secret = getattr(settings, "openai_api_key", None)
-    api_key = ""
-    if secret is not None:
-        api_key = str(secret.get_secret_value() or "").strip()
-    if not api_key:
-        api_key = (
-            os.environ.get("JOB_FTCH_OPENAI_API_KEY", "").strip()
-            or os.environ.get("OPENAI_API_KEY", "").strip()
-        )
+    credential_ref = getattr(captcha_profile, "credential_ref", "JOB_FTCH_CLIPROXY_API_KEY")
+    api_key = os.environ.get(credential_ref, "").strip()
+    direct_secret = getattr(settings, "openai_api_key", None)
+    direct_api_key = (
+        str(direct_secret.get_secret_value() or "").strip()
+        if direct_secret is not None
+        else os.environ.get("JOB_FTCH_OPENAI_API_KEY", "").strip()
+    )
     base_url = str(
         (
             getattr(captcha_profile, "base_url", None)
@@ -1621,11 +1620,13 @@ async def request_vision_click_order(png: bytes) -> list[tuple[float, float]]:
             local_vision = "127.0.0.1" in base_url or "localhost" in base_url
             if response.status_code == 401 and local_vision:
                 logger.info("smartcaptcha_vision_fallback_openai")
+                if not direct_api_key:
+                    return []
                 payload_json = dict(payload_json)
                 payload_json["model"] = "gpt-4.1-mini"
                 response = await client.post(
                     "https://api.openai.com/v1/chat/completions",
-                    headers=headers,
+                    headers={"Authorization": f"Bearer {direct_api_key}"},
                     json=payload_json,
                 )
             response.raise_for_status()
