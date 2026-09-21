@@ -162,3 +162,36 @@ async def test_preflight_skipped_slot_does_not_stay_incomplete() -> None:
             "publish_reason": "llm_preflight_blocked",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_terminal_publish_skip_slot_does_not_stay_incomplete() -> None:
+    store = _Store()
+    marker = datetime(2026, 8, 2, 16, 0, tzinfo=UTC)
+    slot = await ensure_scheduler_slot(
+        store,
+        now=marker,
+        interval_seconds=4 * 60 * 60,
+        recovery_marker=marker,
+    )
+    assert slot is not None
+
+    await update_scheduler_slot(
+        store,
+        str(slot["slot_id"]),
+        run_state="succeeded",
+        publish_state="skipped",
+        publish_reason="terminal_rejections:card_validation_rejected:14",
+    )
+
+    assert await load_scheduler_journal(store) == [
+        {
+            "slot_id": marker.isoformat(),
+            "scheduled_for": marker.isoformat(),
+            "run_state": "succeeded",
+            "publish_state": "skipped",
+            "publish_since": marker.isoformat(),
+            "run_attempts": 0,
+            "publish_reason": "terminal_rejections:card_validation_rejected:14",
+        }
+    ]

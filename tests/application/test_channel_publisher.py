@@ -232,6 +232,33 @@ async def test_card_rejection_does_not_count_as_delivery_or_ledger_entry() -> No
     assert "bot_publish:sent_urls" not in store.state
 
 
+async def test_terminal_card_rejection_does_not_keep_batch_retryable() -> None:
+    class _RejectThenSend:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        async def send(self, _target: str, job: Any) -> object:
+            self.calls.append(job.group_id)
+            if job.group_id == "rejected":
+                return RejectedDelivery("card_validation_rejected")
+            return None
+
+    sender = _RejectThenSend()
+    outcome = await publish_jobs(
+        [_Job("rejected"), _Job("valid")],
+        target="@chan",
+        sender=sender,
+        send_limit=5,
+        sleep=_no_sleep,
+    )
+
+    assert sender.calls == ["rejected", "valid"]
+    assert outcome.sent == 1
+    assert outcome.terminal_skips == 1
+    assert outcome.terminal_skip_reason == "terminal_rejections:card_validation_rejected:1"
+    assert outcome.error is None
+
+
 async def test_delivery_receipt_is_persisted_before_publish_ledger() -> None:
     class _ReceiptSender:
         async def send(self, _target: str, job: Any) -> DeliveryReceipt:

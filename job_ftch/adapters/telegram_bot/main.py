@@ -31,7 +31,10 @@ from job_ftch.adapters.telegram_bot.middlewares.auth import AuthMiddleware
 from job_ftch.adapters.telegram_bot.middlewares.di import DIMiddleware
 from job_ftch.adapters.telegram_bot.middlewares.throttling import ThrottlingMiddleware
 from job_ftch.adapters.telegram_bot.sender import TelegramCardSender
-from job_ftch.application.channel_publisher import publish_jobs
+from job_ftch.application.channel_publisher import (
+    publish_jobs,
+    remaining_publish_candidates,
+)
 from job_ftch.application.run_report import (
     build_runtime_run_report,
     render_runtime_run_footer,
@@ -235,7 +238,8 @@ async def _recover_pending_scheduler_publish(
         send_limit=send_limit,
         sleep=asyncio.sleep,
     )
-    remaining = max(0, len(eligible) - outcome.sent - outcome.skipped_already_published)
+    remaining = remaining_publish_candidates(len(eligible), outcome)
+    terminal_skip_reason = str(getattr(outcome, "terminal_skip_reason", "") or "")
     if remaining:
         await _maybe_await(
             store.set_run_state("bot_scheduler:pending_publish_since", publish_since.isoformat())
@@ -259,20 +263,36 @@ async def _recover_pending_scheduler_publish(
             )
         )
     else:
+        publish_state = "skipped" if terminal_skip_reason and outcome.sent == 0 else "succeeded"
         if slot_id:
             await update_scheduler_slot(
                 store,
                 slot_id,
-                publish_state="succeeded",
+                publish_state=publish_state,
+                publish_reason=terminal_skip_reason,
                 published_at=datetime.now(UTC).isoformat(),
                 publish_error="",
                 last_publish_sent=outcome.sent,
             )
-        await _maybe_await(
-            store.set_run_state(
-                "bot_scheduler:last_publish_success_at", datetime.now(UTC).isoformat()
+        if outcome.sent:
+            await _maybe_await(
+                store.set_run_state(
+                    "bot_scheduler:last_publish_success_at", datetime.now(UTC).isoformat()
+                )
             )
-        )
+        if terminal_skip_reason:
+            await _maybe_await(
+                store.set_run_state(
+                    "bot_scheduler:last_publish_skipped_at", datetime.now(UTC).isoformat()
+                )
+            )
+            await _maybe_await(
+                store.set_run_state(
+                    "bot_scheduler:last_publish_skipped_reason", terminal_skip_reason
+                )
+            )
+        else:
+            await _maybe_await(store.set_run_state("bot_scheduler:last_publish_skipped_reason", ""))
         await _maybe_await(store.set_run_state("bot_scheduler:last_publish_error", ""))
     logger.info(
         "scheduler_pending_publish_recovered",
@@ -280,6 +300,7 @@ async def _recover_pending_scheduler_publish(
         channel=publish_channel,
         sent=outcome.sent,
         remaining=remaining,
+        terminal_skipped=int(getattr(outcome, "terminal_skips", 0) or 0),
         error=outcome.error,
     )
     return remaining == 0
@@ -991,9 +1012,9 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     chan_count = publish_outcome.sent
                     publish_error = publish_outcome.error or ""
                     had_flood_failure = publish_outcome.had_transient_failure
-                    remaining = max(
-                        0,
-                        eligible_to_send - chan_count - publish_outcome.skipped_already_published,
+                    remaining = remaining_publish_candidates(eligible_to_send, publish_outcome)
+                    terminal_skip_reason = str(
+                        getattr(publish_outcome, "terminal_skip_reason", "") or ""
                     )
                     # Keep the window open for every unsent candidate. This covers
                     # network outages as well as flood waits; the publish ledger
@@ -1028,20 +1049,42 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                             )
                         )
                     else:
+                        publish_state = (
+                            "skipped" if terminal_skip_reason and chan_count == 0 else "succeeded"
+                        )
                         await update_scheduler_slot(
                             store,
                             scheduler_slot_id,
-                            publish_state="succeeded",
+                            publish_state=publish_state,
+                            publish_reason=terminal_skip_reason,
                             published_at=datetime.now(UTC).isoformat(),
                             publish_error="",
                             last_publish_sent=chan_count,
                         )
-                        await _maybe_await(
-                            store.set_run_state(
-                                "bot_scheduler:last_publish_success_at",
-                                datetime.now(UTC).isoformat(),
+                        if chan_count:
+                            await _maybe_await(
+                                store.set_run_state(
+                                    "bot_scheduler:last_publish_success_at",
+                                    datetime.now(UTC).isoformat(),
+                                )
                             )
-                        )
+                        if terminal_skip_reason:
+                            await _maybe_await(
+                                store.set_run_state(
+                                    "bot_scheduler:last_publish_skipped_at",
+                                    datetime.now(UTC).isoformat(),
+                                )
+                            )
+                            await _maybe_await(
+                                store.set_run_state(
+                                    "bot_scheduler:last_publish_skipped_reason",
+                                    terminal_skip_reason,
+                                )
+                            )
+                        else:
+                            await _maybe_await(
+                                store.set_run_state("bot_scheduler:last_publish_skipped_reason", "")
+                            )
                         await _maybe_await(
                             store.set_run_state("bot_scheduler:last_publish_error", "")
                         )
@@ -1055,6 +1098,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         channel=publish_channel,
                         sent=chan_count,
                         emitted=emitted,
+                        terminal_skipped=int(getattr(publish_outcome, "terminal_skips", 0) or 0),
                     )
                 except Exception as pub_err:
                     publish_error = str(pub_err)
