@@ -20,8 +20,8 @@ _SUPPORTED_PAIRS: dict[tuple[str, str], str] = {
 # Risk accepted for MVP: these are stable read-only NLP models with no credentials or code execution.
 # Before public release, verify SHAs and set JOB_FTCH_TRANSLATION_PINNED=true in .env.
 _MODEL_REVISIONS: dict[str, str | None] = {
-    "Helsinki-NLP/opus-mt-ru-en": "fbd6dc73284f95536648512cc21d57f19191961a",
-    "Helsinki-NLP/opus-mt-en-ru": "bb09c99d180016eac6819df3dae68edb1690fdee",
+    "Helsinki-NLP/opus-mt-ru-en": "fbd6dc73284f95536648512cc21d57f19191961a",  # pragma: allowlist secret (public model commit)
+    "Helsinki-NLP/opus-mt-en-ru": "bb09c99d180016eac6819df3dae68edb1690fdee",  # pragma: allowlist secret (public model commit)
 }
 
 
@@ -57,10 +57,10 @@ class CTranslate2Translator:
 
             revision = _MODEL_REVISIONS.get(hf_model_name)
             # Model downloads are pinned by commit via _MODEL_REVISIONS.
-            model_dir = snapshot_download(  # type: ignore[call-overload]  # nosec B615
+            model_dir = snapshot_download(  # nosec B615
                 repo_id=hf_model_name,
                 local_dir=str(self._cache_dir / hf_model_name.replace("/", "_")),
-                **({"revision": revision} if revision else {}),
+                revision=revision,
             )
             # Find the sentencepiece model file
             model_path = Path(model_dir)

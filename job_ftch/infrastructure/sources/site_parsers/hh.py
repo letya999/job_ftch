@@ -28,6 +28,7 @@ from job_ftch.application.registry import known_board_assessment_hint, register_
 from job_ftch.domain import SourceKind
 from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
+from job_ftch.infrastructure.sources.scrapers.json_ld import _extract_salary
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
     browser_scroll_collect_urls,
     is_challenge_response,
@@ -359,6 +360,13 @@ def _item_from_detail_dom(
             '[data-qa*="vacancy-address"]',
         )
     )
+    salary_text = _text(
+        (
+            '[data-qa="vacancy-salary"]',
+            '[data-qa="vacancy-salary-compensation-type-net"]',
+            '[data-qa="vacancy-salary-compensation-type-gross"]',
+        )
+    )
     external_id_match = _DETAIL_URL_RE.search(detail_url)
     external_id = external_id_match.group(1) if external_id_match else detail_url
     text_parts = [title]
@@ -366,6 +374,8 @@ def _item_from_detail_dom(
         text_parts.append(company)
     if location:
         text_parts.append(location)
+    if salary_text:
+        text_parts.append(salary_text)
     text_parts.append(description)
     return build_raw_item(
         source_kind=SourceKind.CAREER_SITE,
@@ -377,6 +387,8 @@ def _item_from_detail_dom(
             "board_url": board_url,
             "job_url": detail_url,
             "company": company,
+            "company_authoritative": bool(company),
+            "salary_text": salary_text or None,
             "locations": [location] if location else None,
             "parser": "site_hh_dom",
             "detail_vacancy_confirmed": True,
@@ -440,6 +452,7 @@ def _item_from_detail_html(
     if description:
         text_parts.append(description)
 
+    dom_item = _item_from_detail_dom(detail_url, html_text, source_name, board_url)
     return build_raw_item(
         source_kind=SourceKind.CAREER_SITE,
         source_name=source_name,
@@ -453,6 +466,11 @@ def _item_from_detail_html(
             "board_url": board_url,
             "job_url": detail_url,
             "company": company_name,
+            "company_authoritative": bool(company_name),
+            "base_salary": _extract_salary(posting),
+            "salary_text": dom_item.metadata.get("salary_text") if dom_item else None,
+            "job_location_type": posting.get("jobLocationType"),
+            "applicant_location_requirements": posting.get("applicantLocationRequirements"),
             "locations": location_values or None,
             "employment_type": posting.get("employmentType"),
             "parser": "site_hh_jobs",

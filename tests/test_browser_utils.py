@@ -743,6 +743,40 @@ async def test_cleanup_reports_failure_when_browser_close_times_out(
 
 
 @pytest.mark.asyncio
+async def test_cancelled_cleanup_still_terminates_only_its_session(monkeypatch) -> None:
+    from job_ftch.infrastructure.sources import browser_utils
+
+    killed = []
+
+    async def cancelled(*args):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(browser_utils, "_cleanup_browser_stack", cancelled)
+    monkeypatch.setattr(browser_utils, "terminate_session_browsers", killed.append)
+    monkeypatch.setattr(browser_utils, "reap_stale_browser_drivers", lambda: None)
+    with pytest.raises(asyncio.CancelledError):
+        await browser_utils._close_browser_session(None, None, None, "owned-session")
+    assert killed == ["owned-session"]
+
+
+@pytest.mark.asyncio
+async def test_browser_memory_wait_obeys_deadline_and_releases_slot(monkeypatch) -> None:
+    from job_ftch.infrastructure.sources import shared_limiters, source_deadline
+
+    monkeypatch.setattr(shared_limiters, "_container_memory_available", lambda: False)
+    token = source_deadline.set_source_deadline(asyncio.get_running_loop().time() + 0.01)
+    try:
+        with pytest.raises(TimeoutError):
+            async with shared_limiters.browser_slot(1):
+                pytest.fail("browser started without memory headroom")
+    finally:
+        source_deadline.reset_source_deadline(token)
+    monkeypatch.setattr(shared_limiters, "_container_memory_available", lambda: True)
+    async with shared_limiters.browser_slot(1):
+        pass
+
+
+@pytest.mark.asyncio
 async def test_open_page_omits_user_agent_when_identity_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

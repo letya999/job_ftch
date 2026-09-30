@@ -153,7 +153,7 @@ def _default_layout() -> CardLayout:
         ),
         footer=FooterSpec(
             template="{source_label} {link}",
-            auto_mark='🤖 <a href="https://github.com/letya999/job">job_ftch</a>',
+            auto_mark='🤖 <a href="https://github.com/letya999/job_ftch">job_ftch</a>',
             link_labels={
                 "career_site": "открыть вакансию",
                 "telegram_channel": "открыть пост",

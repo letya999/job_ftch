@@ -62,10 +62,10 @@ async def _save_scheduler_journal(
 
 
 def _is_complete(record: dict[str, object]) -> bool:
-    return (
-        record.get("run_state") in {"succeeded", "skipped"}
-        and record.get("publish_state") == "succeeded"
-    )
+    return record.get("run_state") in {"succeeded", "skipped"} and record.get("publish_state") in {
+        "succeeded",
+        "skipped",
+    }
 
 
 def _find_slot(journal: list[dict[str, object]], slot_id: str) -> dict[str, object] | None:
@@ -114,6 +114,9 @@ async def ensure_scheduler_slot(
     if now < next_due:
         return None
 
+    # Coalesce missed windows; keep the fixed cadence without replaying stale runs.
+    elapsed_slots = int((now - next_due).total_seconds()) // interval_seconds
+    next_due += timedelta(seconds=elapsed_slots * interval_seconds)
     slot_id = next_due.isoformat()
     scheduled_record: dict[str, object] = {
         "slot_id": slot_id,

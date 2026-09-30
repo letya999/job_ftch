@@ -62,7 +62,7 @@ openai_max_retries: 2
 llm_preflight_enabled: true
 llm_preflight_timeout_seconds: 15.0
 llm_quota_retry_delay_seconds: 1800
-llm_quota_max_retries: 2
+llm_quota_max_retries: 5
 ontology_compiler_timeout_seconds: 120.0
 
 career_site_timeout_seconds: 15.0

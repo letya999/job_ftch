@@ -60,6 +60,45 @@ def _isolated_base_settings() -> Settings:
 
 
 @pytest.mark.asyncio
+async def test_binding_failure_uses_durable_pause_before_next_binding_probe(monkeypatch) -> None:
+    from job_ftch.application.llm_quota import LLMPreflightResult
+
+    settings = _isolated_base_settings().model_copy(
+        update={
+            "store_backend": "memory",
+            "job_group_store_backend": "memory",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "llm_backend": "heuristic",
+            "llm_preflight_enabled": True,
+        }
+    )
+    tenant = TenantConfig(tenant_id="quota-pause", display_name="Quota pause")
+    runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    calls = []
+
+    async def unavailable(*args, **kwargs):
+        calls.append(1)
+        return {
+            "extraction": SimpleNamespace(
+                provider=runner.get_runtime("quota-pause").llm_provider,
+                result=LLMPreflightResult(False, quota_exhausted=True, error="insufficient_quota"),
+            )
+        }, []
+
+    monkeypatch.setattr(tenant_runner_module, "preflight_bindings", unavailable)
+    try:
+        first = await runner.run_tenant("quota-pause", ignore_schedule_gates=True)
+        second = await runner.run_tenant("quota-pause", ignore_schedule_gates=True)
+        assert first.completion_state == "llm_preflight_blocked"
+        assert first.next_retry_at is not None
+        assert second.next_retry_at == first.next_retry_at
+        assert calls == [1]
+    finally:
+        await runner.close()
+
+
+@pytest.mark.asyncio
 async def test_disabled_tenant_persists_terminal_run_summary() -> None:
     settings = _isolated_base_settings().model_copy(
         update={
@@ -1297,7 +1336,7 @@ async def test_tenant_runner_ignores_post_run_housekeeping_failures(
 
 
 @pytest.mark.asyncio
-async def test_tenant_runner_clears_stale_status_when_final_summary_persist_fails(
+async def test_tenant_runner_keeps_last_completed_status_when_final_summary_persist_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1371,7 +1410,7 @@ async def test_tenant_runner_clears_stale_status_when_final_summary_persist_fail
     monkeypatch.setattr(TenantRunner, "_build_runtime_builder", _fake_build_runtime_builder)
 
     runtime = runner.get_runtime("ai_jobs")
-    stale_summary = RunSummary(source_run_id="run-new", tenant_id="ai_jobs")
+    stale_summary = RunSummary(source_run_id="run-old", tenant_id="ai_jobs")
     stale_summary.finished_at = datetime.now(UTC)
     await runtime.store.set_run_state(
         "pipeline.run_summary",
@@ -1390,7 +1429,8 @@ async def test_tenant_runner_clears_stale_status_when_final_summary_persist_fail
         summary = await runner.run_tenant("ai_jobs")
         status = await runner.get_status("ai_jobs")
         assert summary.source_run_id == "run-new"
-        assert status is None
+        assert status is not None
+        assert status.source_run_id == "run-old"
     finally:
         await runner.close()
 
