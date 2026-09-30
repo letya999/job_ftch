@@ -145,6 +145,7 @@ async def test_geekjob_parser_uses_search_api_for_role_query() -> None:
             url="https://geekjob.ru/vacancies?qs=machine+learning",
             source_name="geekjob_jobs",
             limit=2,
+            monitor_config={"use_search_api": True},
         ),
         client,
     )
@@ -196,6 +197,7 @@ async def test_geekjob_parser_emits_json_rows_without_browser() -> None:
                 url="https://geekjob.ru/vacancies?qs=LLM",
                 source_name="geekjob_jobs",
                 limit=2,
+                monitor_config={"use_search_api": True},
             ),
             _ApiClient(),
         )
@@ -259,7 +261,7 @@ async def test_geekjob_parser_paginates_api_and_extracts_detail() -> None:
                 url="https://geekjob.ru/vacancies?qs=developer",
                 source_name="geekjob_jobs",
                 limit=2,
-                monitor_config={"detail_concurrency": 2},
+                monitor_config={"detail_concurrency": 2, "use_search_api": True},
             ),
             client,
         )
@@ -271,6 +273,30 @@ async def test_geekjob_parser_paginates_api_and_extracts_detail() -> None:
     assert all(item.metadata["source_platform"] == "geekjob.ru" for item in items)
     assert sum(url.endswith("/json/find/vacancy") for url, _ in client.calls) == 2
     assert sum("/vacancy/abc" in url for url, _ in client.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_geekjob_search_uses_public_html_and_preserves_query() -> None:
+    listing = "https://geekjob.ru/vacancies?qs=LLM"
+    detail = "https://geekjob.ru/vacancy/abc123"
+    client = _FakeClient(
+        {
+            listing: _FakeResponse('<a href="/vacancy/abc123">LLM Engineer</a>', listing),
+            detail: _FakeResponse(
+                '<script type="application/ld+json">{"@type":"JobPosting","title":"LLM Engineer","description":"Build LLM systems","hiringOrganization":{"name":"Acme"}}</script>',
+                detail,
+            ),
+        }
+    )
+    items = [
+        item
+        async for item in GeekJobParser().parse(
+            CareerSiteSpec(url=listing, source_name="geekjob_jobs", limit=2), client
+        )
+    ]
+    assert len(items) == 1
+    assert items[0].external_id == "abc123"
+    assert items[0].metadata["detail_vacancy_confirmed"] is True
 
 
 @pytest.mark.asyncio
@@ -464,6 +490,7 @@ async def test_geekjob_parser_filters_fuzzy_qs_hits_by_title() -> None:
             CareerSiteSpec(
                 url="https://geekjob.ru/vacancies?qs=project+manager",
                 source_name="geekjob_jobs",
+                monitor_config={"use_search_api": True},
                 limit=20,
                 detail_limit=0,
             ),

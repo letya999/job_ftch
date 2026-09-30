@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 DEFAULT_QUOTA_RETRY_DELAY_SECONDS = 30 * 60
-DEFAULT_QUOTA_MAX_RETRIES = 2
+DEFAULT_QUOTA_MAX_RETRIES = 5
 DEFAULT_SCHEDULE_INTERVAL_SECONDS = 12 * 60 * 60
 
 _RETRY_COUNT_KEY = "bot_scheduler:llm_quota_retry_count"
@@ -21,6 +21,7 @@ _BLOCKED_UNTIL_KEY = "bot_scheduler:llm_quota_blocked_until"
 _LAST_ERROR_KEY = "bot_scheduler:llm_preflight_last_error"
 _STATUS_KEY = "bot_scheduler:llm_preflight_status"
 _NEXT_DUE_KEY = "bot_scheduler:next_due_at"
+_WINDOW_END_KEY = "bot_scheduler:llm_quota_window_end"
 
 
 class LLMQuotaExhaustedError(RuntimeError):
@@ -156,6 +157,32 @@ async def _clear_state(store: Store) -> None:
     await store.set_run_state(_BLOCKED_UNTIL_KEY, "")
     await store.set_run_state(_STATUS_KEY, "ready")
     await store.set_run_state(_LAST_ERROR_KEY, "")
+    await store.set_run_state(_WINDOW_END_KEY, "")
+
+
+async def check_llm_pause(store: Store, *, now: datetime | None = None) -> LLMQuotaDecision | None:
+    """Check durable backoff before constructing or calling any provider."""
+    now = now or datetime.now(UTC)
+    blocked_until = _parse_timestamp(await store.get_run_state(_BLOCKED_UNTIL_KEY))
+    if blocked_until is None:
+        return None
+    status = await store.get_run_state(_STATUS_KEY)
+    window_end = _parse_timestamp(await store.get_run_state(_WINDOW_END_KEY))
+    if blocked_until <= now:
+        if status in {"disabled_until_schedule", "unavailable_until_schedule"} or (
+            window_end is not None and window_end <= now
+        ):
+            await _clear_state(store)
+        return None
+    count = _parse_count(await store.get_run_state(_RETRY_COUNT_KEY))
+    return LLMQuotaDecision(
+        allowed=False,
+        status="retry_wait",
+        message=await store.get_run_state(_LAST_ERROR_KEY) or "LLM на паузе до следующей проверки.",
+        retry_at=blocked_until,
+        quota_exhausted=count > 0 or status == "disabled_until_schedule",
+        retry_number=count,
+    )
 
 
 def _quota_message(
@@ -170,7 +197,7 @@ def _quota_message(
     if disabled:
         return (
             f"🤖 Квота LLM исчерпана. {prefix}. "
-            f"Две повторные проверки исчерпаны; до следующего планового окна "
+            f"Повторные проверки ({max_retries}) исчерпаны; до следующего планового окна "
             f"({retry_at.astimezone(UTC).strftime('%d.%m %H:%M UTC')}) "
             "к провайдеру не обращаемся."
         )
@@ -190,6 +217,7 @@ async def _record_quota_failure(
     now: datetime,
     run_started: bool,
 ) -> LLMQuotaDecision:
+    await check_llm_pause(store, now=now)
     current = _parse_count(await store.get_run_state(_RETRY_COUNT_KEY))
     blocked_until = _parse_timestamp(await store.get_run_state(_BLOCKED_UNTIL_KEY))
     if blocked_until is not None and blocked_until > now:
@@ -202,8 +230,16 @@ async def _record_quota_failure(
             retry_number=current,
         )
     retry_number = current + 1
-    disabled = retry_number > max_retries
-    retry_at = now + timedelta(seconds=normal_interval_seconds if disabled else retry_delay_seconds)
+    window_end = _parse_timestamp(await store.get_run_state(_WINDOW_END_KEY))
+    if window_end is None:
+        window_end = _parse_timestamp(await store.get_run_state(_NEXT_DUE_KEY))
+        if window_end is None or window_end <= now:
+            window_end = now + timedelta(seconds=normal_interval_seconds)
+        await store.set_run_state(_WINDOW_END_KEY, window_end.isoformat())
+    disabled = (
+        retry_number > max_retries or now + timedelta(seconds=retry_delay_seconds) >= window_end
+    )
+    retry_at = window_end if disabled else now + timedelta(seconds=retry_delay_seconds)
     persisted_count = max_retries if disabled else retry_number
     message = _quota_message(
         retry_at=retry_at,
@@ -244,18 +280,11 @@ async def check_llm_before_run(
     normal_interval_seconds = max(1, int(normal_interval_seconds))
     retry_delay_seconds = max(1, int(retry_delay_seconds))
     max_retries = max(0, int(max_retries))
+    pause = await check_llm_pause(store, now=now)
+    if pause is not None:
+        return pause
     blocked_until = _parse_timestamp(await store.get_run_state(_BLOCKED_UNTIL_KEY))
     retry_count = _parse_count(await store.get_run_state(_RETRY_COUNT_KEY))
-    if blocked_until is not None and blocked_until > now:
-        return LLMQuotaDecision(
-            allowed=False,
-            status="retry_wait",
-            message="Квота LLM уже на паузе до следующей проверки.",
-            retry_at=blocked_until,
-            quota_exhausted=retry_count > 0,
-            retry_number=retry_count,
-        )
-
     result = preflight_result or await run_llm_preflight(provider)
     if result.available:
         if retry_count or blocked_until is not None:

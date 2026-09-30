@@ -1523,7 +1523,16 @@ class GetmatchParser:
                     raise
                 return detail_url, None, exc
 
-        tasks = [asyncio.create_task(load_detail(url)) for url in detail_urls_to_fetch]
+        from job_ftch.config import get_settings
+        from job_ftch.infrastructure.sources.shared_limiters import detail_slot
+
+        capacity = get_settings().career_site_detail_concurrency
+
+        async def bounded_detail(url: str) -> tuple[str, RawItem | None, Exception | None]:
+            async with detail_slot(capacity):
+                return await load_detail(url)
+
+        tasks = [asyncio.create_task(bounded_detail(url)) for url in detail_urls_to_fetch]
         try:
             for task in asyncio.as_completed(tasks):
                 detail_url, item, error = await task

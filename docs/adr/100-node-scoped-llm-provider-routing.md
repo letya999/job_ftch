@@ -1,7 +1,7 @@
 ---
 title: "100 — Node-scoped LLM providers and graceful degradation"
 description: "Graph nodes select named provider/model bindings; provider outages degrade dependent work without stopping the service."
-updated: 2026-09-18
+updated: 2026-09-30
 ---
 # 100 — Node-scoped LLM providers and graceful degradation
 
@@ -44,7 +44,7 @@ an operator-visible notification.
    to an arbitrary provider or model is forbidden. Every fallback emits an
    event containing the requested binding, selected binding and reason.
 7. A provider failure after a run starts follows the binding's bounded retry
-   policy. Quota exhaustion uses at most two retries separated by 30 minutes;
+   policy. Quota exhaustion uses at most five retries separated by 30 minutes;
    authentication and unknown-model errors are not retried. After exhaustion,
    the affected run becomes blocked/degraded with a durable operator notice.
 8. Liveness, readiness and run capability are separate:

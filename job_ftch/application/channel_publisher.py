@@ -94,6 +94,8 @@ class DeliveryReceipt:
 
 @dataclass(frozen=True, slots=True)
 class RejectedDelivery:
+    """A terminal rejection of one card, not a retryable transport failure."""
+
     reason: str
 
 
@@ -109,6 +111,33 @@ class PublishOutcome:
     delivered: list[Job] = field(default_factory=list)
     receipts: list[DeliveryReceipt] = field(default_factory=list)
     card_validation_rejections: int = 0
+    terminal_skips: int = 0
+    terminal_skip_reasons: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def terminal_skip_reason(self) -> str:
+        if not self.terminal_skip_reasons:
+            return ""
+        details = ",".join(
+            f"{reason}:{count}" for reason, count in sorted(self.terminal_skip_reasons.items())
+        )
+        return f"terminal_rejections:{details}"
+
+
+def remaining_publish_candidates(total_candidates: int, outcome: PublishOutcome) -> int:
+    """Count only candidates that still need a retry.
+
+    Terminal card rejections are handled outcomes. They must never keep the
+    durable publish window open after the rest of the batch was processed.
+    ``getattr`` keeps lightweight test doubles and older callers compatible.
+    """
+    return max(
+        0,
+        total_candidates
+        - outcome.sent
+        - outcome.skipped_already_published
+        - int(getattr(outcome, "terminal_skips", 0) or 0),
+    )
 
 
 def _is_fatal_target_error(error: BaseException) -> bool:
@@ -172,7 +201,10 @@ async def publish_jobs(
                 delivery = await sender.send(target, job)
                 if isinstance(delivery, RejectedDelivery):
                     outcome.card_validation_rejections += 1
-                    outcome.error = delivery.reason
+                    outcome.terminal_skips += 1
+                    outcome.terminal_skip_reasons[delivery.reason] = (
+                        outcome.terminal_skip_reasons.get(delivery.reason, 0) + 1
+                    )
                     logger.info(
                         "publish_card_rejected",
                         target=target,

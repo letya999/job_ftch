@@ -79,10 +79,12 @@ async def test_compensation_parsing_structured_metadata():
                 "min": 130000,
                 "max": 170000,
                 "period": "year",
+                "gross": False,
             }
         },
     )
     processed = await node.process(record)
+    assert processed.compensation.gross is False
     assert processed.compensation is not None
     assert processed.compensation.currency == "USD"
     assert processed.compensation.min_amount == 130000

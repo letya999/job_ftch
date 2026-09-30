@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from job_ftch.application.contracts import Normalizer
 
 _PREFIX_RE = re.compile(r"^(hiring|vacancy|opening|role|ищем|вакансия)\s*[:\-]\s*", re.IGNORECASE)
-_COMP_SPLIT_RE = re.compile(r"\s+(?:at|@|-)\s+", re.IGNORECASE)
+_COMP_SPLIT_RE = re.compile(r"\s+(?:at|@)\s+", re.IGNORECASE)
 _CURRENCY_PATTERN = r"USD|EUR|GBP|RUB|RUR|KZT|CAD|AUD|CHF|PLN|UZS|KGS|AMD|GEL|AZN|TJS|BYN|тенге|руб(?:лей|ля|\.)?|р\.|\$|€|£|₽|₸"
 _AMOUNT_PATTERN = r"\d(?:[\d\s.,]*\d)?\s*(?:k|к|тыс(?:яч)?\.?|млн\.?)?"
 _SALARY_PREFIX_RE = re.compile(
@@ -228,6 +228,25 @@ class LocationWorkModeNormalizationNode:
         work_mode = item.work_mode
         if work_mode is WorkMode.UNKNOWN:
             work_mode = _detect_work_mode(item.description, item.title, location)
+        if (
+            work_mode is WorkMode.UNKNOWN
+            and str(item.metadata.get("job_location_type") or "").upper() == "TELECOMMUTE"
+        ):
+            work_mode = WorkMode.REMOTE
+        remote_restrictions = item.remote_restrictions
+        applicant_locations = item.metadata.get("applicant_location_requirements")
+        if not remote_restrictions and applicant_locations:
+            entries = (
+                applicant_locations
+                if isinstance(applicant_locations, list)
+                else [applicant_locations]
+            )
+            names = [
+                name
+                for entry in entries
+                if isinstance(entry, dict) and isinstance(name := entry.get("name"), str)
+            ]
+            remote_restrictions = ", ".join(names) or None
         geo = normalize_geo_sources(
             (
                 item.city,
@@ -268,6 +287,7 @@ class LocationWorkModeNormalizationNode:
                 "region": region,
                 "country": country,
                 "work_mode": work_mode,
+                "remote_restrictions": remote_restrictions,
                 "metadata": metadata,
                 "provenance": item.provenance.model_copy(
                     update={
@@ -282,6 +302,18 @@ class LocationWorkModeNormalizationNode:
 
 class CompensationParsingNode:
     async def process(self, item: JobRecord) -> JobRecord | None:
+        metadata_salary = item.metadata.get("salary_text") or item.metadata.get("base_salary_text")
+        salary_source = "\n".join(
+            part for part in (item.title, item.description, str(metadata_salary or "")) if part
+        )
+        salary_evidence = re.sub(
+            r"[\u200b-\u200f\ufeff]", "", str(metadata_salary or "") or salary_source
+        ).casefold()
+        gross = None
+        if re.search(r"\bgross\b|до\s+вычета\s+налог", salary_evidence):
+            gross = True
+        elif re.search(r"\bnet\b|на\s+руки|после\s+вычета\s+налог", salary_evidence):
+            gross = False
         base_salary = item.metadata.get("base_salary")
         if isinstance(base_salary, dict):
             try:
@@ -321,6 +353,9 @@ class CompensationParsingNode:
                         min_amount=minimum,
                         max_amount=maximum,
                         period=period,
+                        gross=base_salary.get("gross")
+                        if isinstance(base_salary.get("gross"), bool)
+                        else gross,
                     )
 
                     return item.model_copy(
@@ -339,10 +374,6 @@ class CompensationParsingNode:
             except (ValueError, TypeError, KeyError):
                 pass
 
-        metadata_salary = item.metadata.get("salary_text") or item.metadata.get("base_salary_text")
-        salary_source = "\n".join(
-            part for part in (item.title, item.description, str(metadata_salary or "")) if part
-        )
         parsed = _parse_compensation_text(str(metadata_salary or "")) or _parse_compensation_text(
             salary_source
         )
@@ -357,9 +388,6 @@ class CompensationParsingNode:
 
         from job_ftch.domain import CompensationPeriod, CompensationRange
 
-        salary_evidence = re.sub(
-            r"[\u200b-\u200f\ufeff]", "", str(metadata_salary or "")
-        ).casefold()
         period = CompensationPeriod.UNKNOWN
         for unit, pattern in (
             (CompensationPeriod.MONTH, r"/\s*(?:month|мес)|per\s+month|в\s+месяц"),
@@ -371,11 +399,6 @@ class CompensationParsingNode:
             if re.search(pattern, salary_evidence):
                 period = unit
                 break
-        gross = None
-        if re.search(r"\bgross\b|до\s+вычета\s+налог", salary_evidence):
-            gross = True
-        elif re.search(r"\bnet\b|на\s+руки|после\s+вычета\s+налог", salary_evidence):
-            gross = False
         previous = item.compensation
         if previous and (previous.currency, previous.min_amount, previous.max_amount) == parsed:
             period = period if period is not CompensationPeriod.UNKNOWN else previous.period

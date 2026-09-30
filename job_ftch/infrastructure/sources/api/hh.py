@@ -38,7 +38,27 @@ class HHAPISource(OfficialAPISource):
         super().__init__(spec, auth, store, source_kind=SourceKind.CAREER_SITE)
 
     def _map_to_raw_item(self, item: dict[str, Any]) -> RawItem:
-        return super()._map_to_raw_item(item)
+        raw = super()._map_to_raw_item(item)
+        salary = item.get("salary_range") or item.get("salary")
+        metadata = dict(raw.metadata)
+        if isinstance(salary, dict):
+            metadata["base_salary"] = {
+                "min": salary.get("from"),
+                "max": salary.get("to"),
+                "currency": salary.get("currency"),
+                "gross": salary.get("gross"),
+                "period": "month"
+                if item.get("salary") and not item.get("salary_range")
+                else "unknown",
+            }
+        employer = item.get("employer")
+        if isinstance(employer, dict) and employer.get("name"):
+            metadata.update(company=employer["name"], company_authoritative=True)
+        area = item.get("area")
+        if isinstance(area, dict) and area.get("name"):
+            metadata["locations"] = [area["name"]]
+        metadata["title"] = item.get("name")
+        return raw.model_copy(update={"metadata": metadata})
 
 
 @register_source_spec("hh_api")

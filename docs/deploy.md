@@ -1,7 +1,7 @@
 ---
 title: "Деплой Telegram bot production stack"
 description: "Production-shape деплой job_ftch: shared runtime image, Telegram bot compose, Postgres и Qdrant."
-updated: 2026-07-28
+updated: 2026-09-30
 ---
 # Деплой Telegram bot production stack
 
@@ -98,3 +98,19 @@ docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod \
 ```
 
 Перед release используйте [release_checklist](release_checklist.md).
+
+
+## Recovery checks
+
+Quota preflight runs before acquisition. After one failed initial quota check,
+allow at most five retries spaced by 30 minutes, then wait until the next
+scheduled window. State survives restarts; successful preflight or a new window
+resets the retry budget. Non-quota provider failures wait until the next window.
+Missed schedule windows coalesce into one current run; pending deliveries remain
+recoverable through the journal and receipts.
+
+The production bot permits two concurrent browser sessions. Browser acquisition
+also waits for 512 MiB of container memory headroom, within the source deadline.
+Cancellation and failures after browser launch must close the owned session.
+During release verification compare container memory and browser/driver process
+counts before and after successive runs, and check kernel logs for OOM events.

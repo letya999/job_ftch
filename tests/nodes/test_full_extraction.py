@@ -59,6 +59,9 @@ async def test_full_extraction_only_calls_llm_for_post_policy_records(make_job_r
     assert enriched.responsibilities == ("Build APIs",)
     assert enriched.benefits == ("Health insurance",)
     assert enriched.metadata["full_extraction_backend"] == "_RecordingLLM"
+    assert (
+        enriched.company == enriched.company_canonical == enriched.company_name_normalized == "Acme"
+    )
 
 
 @pytest.mark.anyio
