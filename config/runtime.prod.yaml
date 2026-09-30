@@ -15,6 +15,7 @@ source_fetch_concurrency: 2
 source_fetch_concurrency_adaptive: false
 pipeline_item_concurrency: 3
 pipeline_item_concurrency_adaptive: false
+career_site_browser_concurrency: 2
 source_soft_deadline_seconds: 60.0
 source_hard_deadline_seconds: 180.0
 

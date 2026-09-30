@@ -571,6 +571,17 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     # A preflight-skipped run is already terminal in the journal;
                     # do not let the legacy last-success heuristic replay it every
                     # scheduler tick while the durable LLM backoff is active.
+                    if not pending_publish:
+                        continue
+                    incomplete_run = False
+                llm_status = await _maybe_await(
+                    store.get_run_state("bot_scheduler:llm_preflight_status")
+                )
+                if llm_status in {
+                    "retry_scheduled",
+                    "disabled_until_schedule",
+                    "unavailable_until_schedule",
+                }:
                     incomplete_run = False
                 pending_since = _parse_scheduler_timestamp(pending_raw)
                 scheduler_slot = await ensure_scheduler_slot(
@@ -677,11 +688,6 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     )
                     await _maybe_await(
                         runner.get_runtime(tenant_id).store.set_run_state(
-                            "bot_scheduler:last_publish_sent", "0"
-                        )
-                    )
-                    await _maybe_await(
-                        runner.get_runtime(tenant_id).store.set_run_state(
                             "bot_scheduler:last_publish_error", ""
                         )
                     )
@@ -736,9 +742,8 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         run_id=str(getattr(run_result, "source_run_id", "") or ""),
                         run_finished_at=datetime.now(UTC).isoformat(),
                         run_error=preflight_message,
-                        publish_state="succeeded",
+                        publish_state="skipped",
                         publish_reason="llm_preflight_blocked",
-                        published_at=datetime.now(UTC).isoformat(),
                     )
                     await _maybe_await(
                         store.set_run_state("bot_scheduler:last_error", preflight_message)

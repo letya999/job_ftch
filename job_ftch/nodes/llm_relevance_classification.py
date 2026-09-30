@@ -217,7 +217,8 @@ _DOMAIN_NEUTRAL_TASK_RULES = (
     "offers, and recommendation pages are not hiring posts unless they explicitly recruit a "
     "person for a role. Use only the "
     "evidence IDs listed above. Positive IDs may prove a target role by title and/or duties; "
-    "negative IDs must prove a non-target role or contradictory responsibilities."
+    "negative IDs must prove a non-target role or contradictory responsibilities. "
+    "Return at most three distinct IDs in each evidence list; select the strongest evidence."
 )
 
 

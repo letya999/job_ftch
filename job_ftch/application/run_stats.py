@@ -67,10 +67,13 @@ def build_pipeline_run_stats(summary: RunSummary) -> PipelineRunStats:
         seen.add(key)
         if status in FAIL_STATUSES:
             fail_sources += 1
-        else:
+        elif status not in {"skipped", "not_due", "paused"}:
             ok_sources += 1
     extra = {
         "trigger": summary.trigger,
+        "completion_state": summary.completion_state,
+        "llm_health_error": summary.llm_health_error,
+        "next_retry_at": summary.next_retry_at,
         "config_fingerprint": summary.config_fingerprint,
         "by_source_kind": {
             kind: {

@@ -1,7 +1,7 @@
 ---
 title: "Provider routing and production recovery"
 description: "Requirements for node-scoped LLM routing, CAPTCHA-only CLIProxyAPI, truthful Telegram delivery and source recovery."
-updated: 2026-09-18
+updated: 2026-09-30
 ---
 # Provider routing and production recovery
 
@@ -44,7 +44,7 @@ routes using phase-level evidence.
   authorized fallback exists.
 - Fallback chains are explicit per binding. Every switch is persisted and
   reported; absence of a fallback means no switch.
-- OpenAI quota exhaustion receives two retries at 30-minute intervals, then
+- OpenAI quota exhaustion receives five retries at 30-minute intervals, then
   blocks the run without further provider calls.
 - Authentication failure and unknown model are reported immediately without
   repeated calls.
@@ -182,7 +182,7 @@ Legacy `status` remains during migration and is derived from the new fields.
 5. Production CAPTCHA vision resolves to `cliproxy_captcha` and
    `gemini-3.8-flash-high`; extraction, relevance and ontology resolve to their
    configured OpenAI bindings.
-6. Quota exhaustion causes no more than two retries separated by 30 minutes;
+6. Quota exhaustion causes no more than five retries separated by 30 minutes;
    auth and unknown-model failures are not retried.
 7. A card rejected by validation produces `sent=0` and no delivery-ledger
    update. A successful Telegram response stores its message receipt.

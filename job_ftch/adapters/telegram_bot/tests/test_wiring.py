@@ -440,7 +440,7 @@ async def test_scheduler_loop_skips_publish_channel_without_owner_profile(
 
 
 @pytest.mark.asyncio
-async def test_scheduler_loop_resets_stale_publish_state_on_empty_run(
+async def test_scheduler_loop_preserves_last_delivery_on_empty_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = {"sleep": 0}
@@ -498,14 +498,14 @@ async def test_scheduler_loop_resets_stale_publish_state_on_empty_run(
     assert bot.send_message.call_args.args[0] == "123"
     assert "Публикация пропущена: новых вакансий 0" in bot.send_message.call_args.args[1]
     assert store_state["bot_scheduler:last_run_emitted"] == "0"
-    assert store_state["bot_scheduler:last_publish_sent"] == "0"
+    assert store_state["bot_scheduler:last_publish_sent"] == "2"
     assert store_state["bot_scheduler:last_publish_error"] == ""
     assert store_state["bot_scheduler:last_publish_skipped_reason"] == "no_new_jobs"
     assert "bot_scheduler:last_publish_skipped_at" in store_state
 
 
 @pytest.mark.asyncio
-async def test_scheduler_loop_resets_stale_publish_state_on_failed_run(
+async def test_scheduler_loop_preserves_last_delivery_on_failed_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = {"sleep": 0}
@@ -562,7 +562,7 @@ async def test_scheduler_loop_resets_stale_publish_state_on_failed_run(
     assert bot.send_message.call_args.args[0] == "123"
     assert "Автозапуск упал" in bot.send_message.call_args.args[1]
     assert store_state["bot_scheduler:last_run_emitted"] == "0"
-    assert store_state["bot_scheduler:last_publish_sent"] == "0"
+    assert store_state["bot_scheduler:last_publish_sent"] == "2"
     assert store_state["bot_scheduler:last_publish_error"] == ""
     assert store_state["bot_scheduler:last_error"] == "run failed"
 

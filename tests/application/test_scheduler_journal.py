@@ -59,6 +59,20 @@ async def test_due_slot_is_fixed_and_next_due_is_advanced() -> None:
 
 
 @pytest.mark.asyncio
+async def test_outage_coalesces_old_windows_and_skipped_delivery_is_terminal() -> None:
+    store = _Store()
+    start = datetime(2026, 9, 28, 0, 0, tzinfo=UTC)
+    store.state["bot_scheduler:next_due_at"] = start.isoformat()
+    now = start + timedelta(hours=49)
+    slot = await ensure_scheduler_slot(store, now=now, interval_seconds=43200)
+    assert slot["scheduled_for"] == (start + timedelta(hours=48)).isoformat()
+    await update_scheduler_slot(
+        store, str(slot["slot_id"]), run_state="skipped", publish_state="skipped"
+    )
+    assert await ensure_scheduler_slot(store, now=now, interval_seconds=43200) is None
+
+
+@pytest.mark.asyncio
 async def test_incomplete_slot_wins_over_a_new_schedule_slot() -> None:
     store = _Store()
     now = datetime(2026, 8, 2, 20, 0, tzinfo=UTC)

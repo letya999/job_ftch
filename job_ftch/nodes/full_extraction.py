@@ -257,6 +257,10 @@ class FullExtractionNode:
             review_reasons.insert(0, JobReviewReason.PARTIAL_EXTRACTION.value)
 
         compensation = extracted.compensation or job.compensation
+        if job.compensation is not None and (
+            job.metadata.get("base_salary") or job.metadata.get("salary_text")
+        ):
+            compensation = job.compensation
         if (
             job.metadata.get("parser") == "sber-public-api"
             and not job.metadata.get("base_salary")
@@ -271,6 +275,8 @@ class FullExtractionNode:
             update={
                 "title": title,
                 "company": company,
+                "company_canonical": company,
+                "company_name_normalized": company,
                 "location": location,
                 "city": city,
                 "country": country,

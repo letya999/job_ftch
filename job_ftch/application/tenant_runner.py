@@ -38,8 +38,8 @@ from job_ftch.application.llm_quota import (
     DEFAULT_QUOTA_MAX_RETRIES,
     DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
     DEFAULT_SCHEDULE_INTERVAL_SECONDS,
-    LLMQuotaDecision,
     check_llm_before_run,
+    check_llm_pause,
     note_llm_quota_failure,
 )
 from job_ftch.application.llm_usage import collect_llm_usage, pricing_version
@@ -1978,7 +1978,10 @@ class TenantRunner:
                         binding_checks: dict[str, BindingPreflight] = {}
                         binding_switches: list[dict[str, object]] = []
                         extraction_preflight = None
-                        if getattr(runtime.settings, "llm_preflight_enabled", True):
+                        preflight = await check_llm_pause(runtime.store)
+                        if preflight is None and getattr(
+                            runtime.settings, "llm_preflight_enabled", True
+                        ):
                             _sync_legacy_llm_override(runtime)
                             binding_checks, binding_switches = await preflight_bindings(
                                 runtime.settings,
@@ -2039,35 +2042,31 @@ class TenantRunner:
                                     ),
                                 )
                             if unavailable:
-                                first_name, first_result = unavailable[0]
-                                preflight = LLMQuotaDecision(
-                                    allowed=False,
-                                    status="binding_unavailable",
-                                    quota_exhausted=first_result.quota_exhausted,
-                                    message=(
-                                        f"LLM binding {first_name} unavailable: "
-                                        f"{first_result.error or 'provider_unavailable'}"
+                                _, first_result = next(
+                                    (
+                                        (name, result)
+                                        for name, result in unavailable
+                                        if result.quota_exhausted
                                     ),
+                                    unavailable[0],
                                 )
-                            else:
-                                preflight = await check_llm_before_run(
-                                    runtime.store,
-                                    runtime.llm_provider,
-                                    normal_interval_seconds=int(llm_interval),
-                                    retry_delay_seconds=getattr(
-                                        runtime.settings,
-                                        "llm_quota_retry_delay_seconds",
-                                        DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
-                                    ),
-                                    max_retries=getattr(
-                                        runtime.settings,
-                                        "llm_quota_max_retries",
-                                        DEFAULT_QUOTA_MAX_RETRIES,
-                                    ),
-                                    preflight_result=extraction_preflight,
-                                )
-                        else:
-                            preflight = None
+                                extraction_preflight = first_result
+                            preflight = await check_llm_before_run(
+                                runtime.store,
+                                runtime.llm_provider,
+                                normal_interval_seconds=int(llm_interval),
+                                retry_delay_seconds=getattr(
+                                    runtime.settings,
+                                    "llm_quota_retry_delay_seconds",
+                                    DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
+                                ),
+                                max_retries=getattr(
+                                    runtime.settings,
+                                    "llm_quota_max_retries",
+                                    DEFAULT_QUOTA_MAX_RETRIES,
+                                ),
+                                preflight_result=extraction_preflight,
+                            )
                         if preflight is not None and not preflight.allowed:
                             summary = RunSummary(
                                 tenant_id=tenant_id,
@@ -2085,6 +2084,7 @@ class TenantRunner:
                                         "source_name": source_spec_name(spec),
                                         "status": "skipped",
                                         "completion_state": "llm_preflight_blocked",
+                                        "error": preflight.message,
                                     }
                                     for spec in runtime.tenant.sources
                                 ],
@@ -2369,15 +2369,6 @@ class TenantRunner:
                 else _tenant_run_lock(runtime.settings, tenant_id)
             )
             async with lock_context:
-                try:
-                    await runtime.store.set_run_state("pipeline.run_summary", "")
-                except Exception as exc:
-                    logger.warning(
-                        "tenant_run_summary_state_clear_failed",
-                        tenant_id=tenant_id,
-                        error=str(exc),
-                        exc_info=True,
-                    )
                 with collect_llm_usage() as usage:
                     catalog, relevance_prompts = await self._build_runtime_catalog(
                         runtime, user_id=user_id
