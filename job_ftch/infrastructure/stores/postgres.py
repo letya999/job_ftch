@@ -25,6 +25,10 @@ if TYPE_CHECKING:
 class PostgreSQLStore(SQLStoreAdapter):
     """PostgreSQL-backed persistent store using asyncpg."""
 
+    @staticmethod
+    def _queue_time(value: datetime | None) -> datetime | None:
+        return value.astimezone(UTC) if value is not None else None
+
     _SQL_KV_GET = "SELECT value FROM jf_kv WHERE key = $1"
     _SQL_KV_UPSERT = """
         INSERT INTO jf_kv (key, value, updated_at)
