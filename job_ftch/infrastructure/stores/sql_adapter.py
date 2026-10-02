@@ -56,10 +56,6 @@ def _as_datetime(value: object) -> datetime:
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
-def _queue_time(value: datetime | None) -> str | None:
-    return value.astimezone(UTC).isoformat() if value is not None else None
-
-
 def _ingest_task_from_row(row: tuple[object, ...]) -> IngestTask:
     return IngestTask(
         task_id=str(row[0]),
@@ -160,6 +156,11 @@ class SQLStoreAdapter(abc.ABC):
 
     def __init__(self, *, processed_item_ttl_hours: int | None = 24) -> None:
         self._processed_item_ttl_hours = processed_item_ttl_hours
+
+    @staticmethod
+    def _queue_time(value: datetime | None) -> str | datetime | None:
+        """Encode queue timestamps for the backend column type."""
+        return value.astimezone(UTC).isoformat() if value is not None else None
 
     @abc.abstractmethod
     async def _execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
@@ -581,13 +582,13 @@ class SQLStoreAdapter(abc.ABC):
                 normalized.parser_override,
                 normalized.personal_mode,
                 normalized.trigger,
-                _queue_time(normalized.available_at),
+                self._queue_time(normalized.available_at),
                 normalized.lease_owner,
-                _queue_time(normalized.lease_until),
+                self._queue_time(normalized.lease_until),
                 normalized.last_error,
-                _queue_time(normalized.created_at),
-                _queue_time(normalized.updated_at),
-                _queue_time(normalized.completed_at),
+                self._queue_time(normalized.created_at),
+                self._queue_time(normalized.updated_at),
+                self._queue_time(normalized.completed_at),
             ),
         )
         row = await self._fetchone(self._SQL_INGEST_TASK_GET, (normalized.task_id,))
@@ -631,8 +632,8 @@ class SQLStoreAdapter(abc.ABC):
             self._SQL_INGEST_TASK_COMPLETE,
             (
                 IngestTaskState.SUCCEEDED.value,
-                _queue_time(now),
-                _queue_time(now),
+                self._queue_time(now),
+                self._queue_time(now),
                 task_id,
                 worker_id,
             ),
@@ -653,9 +654,9 @@ class SQLStoreAdapter(abc.ABC):
             self._SQL_INGEST_TASK_DEFER,
             (
                 IngestTaskState.WAITING_RATE_LIMIT.value,
-                _queue_time(available_at),
+                self._queue_time(available_at),
                 error,
-                _queue_time(now),
+                self._queue_time(now),
                 task.task_id,
                 worker_id,
             ),
@@ -675,7 +676,14 @@ class SQLStoreAdapter(abc.ABC):
         state = IngestTaskState.NEEDS_OPERATOR if needs_operator else IngestTaskState.FAILED
         await self._execute(
             self._SQL_INGEST_TASK_FAIL,
-            (state.value, error, _queue_time(now), _queue_time(now), task.task_id, worker_id),
+            (
+                state.value,
+                error,
+                self._queue_time(now),
+                self._queue_time(now),
+                task.task_id,
+                worker_id,
+            ),
         )
         row = await self._fetchone(self._SQL_INGEST_TASK_GET, (task.task_id,))
         return _ingest_task_from_row(row) if row is not None else None
@@ -683,7 +691,7 @@ class SQLStoreAdapter(abc.ABC):
     async def reap_ingest_leases(self, now: datetime) -> int:
         await self._execute(
             self._SQL_INGEST_TASK_REAP,
-            (IngestTaskState.READY.value, _queue_time(now), _queue_time(now)),
+            (IngestTaskState.READY.value, self._queue_time(now), self._queue_time(now)),
         )
         row = await self._fetchone("SELECT changes()")
         return int(cast("int | str", row[0] or 0)) if row else 0
@@ -707,10 +715,10 @@ class SQLStoreAdapter(abc.ABC):
             self._SQL_INGEST_RATE_LIMIT_UPSERT,
             (
                 scope_id,
-                _queue_time(cooldown_until),
+                self._queue_time(cooldown_until),
                 retry_after_seconds,
                 status_code,
-                _queue_time(datetime.now(UTC)),
+                self._queue_time(datetime.now(UTC)),
             ),
         )
 

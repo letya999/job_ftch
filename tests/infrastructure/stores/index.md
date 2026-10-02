@@ -10,4 +10,5 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_cache_utils.py](test_cache_utils.py)
 - [test_outbox.py](test_outbox.py)
 - [test_postgres_clear_run_artifacts.py](test_postgres_clear_run_artifacts.py)
+- [test_postgres_queue_timestamps.py](test_postgres_queue_timestamps.py)
 - [test_store_contracts.py](test_store_contracts.py)
