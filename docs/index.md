@@ -31,7 +31,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [Быстрый старт](quickstart.md) - Быстрый локальный запуск job_ftch на fixture tenant без внешних сервисов. (Updated: 2026-07-28)
 - [Релизный чеклист](release_checklist.md) - Исполняемый релизный чеклист: локальные gates, docs/config parity, production recipe и deploy contract. (Updated: 2026-08-01)
 - [Правила разработки](rules.md) - Короткие рабочие правила для изменений в job_ftch: границы слоёв, зависимости, тесты, документация и release gates. (Updated: 2026-08-02)
-- [Технологический стек](tech_stack.md) - Актуальный стек зависимостей job_ftch по pyproject.toml: core dependencies, extras и запрещённые инструменты. (Updated: 2026-09-30)
+- [Технологический стек](tech_stack.md) - Актуальный стек зависимостей job_ftch по pyproject.toml: core dependencies, extras и запрещённые инструменты. (Updated: 2026-10-02)
 - [Технический долг](techdebt.md) - Полный рабочий реестр технического долга job_ftch: release hygiene, source stack, runtime adapters, observability и TD-001..TD-051. (Updated: 2026-08-25)
 - [Видение job_ftch](vision.md) - Назначение, границы и текущее состояние проекта job_ftch. (Updated: 2026-08-05)
 
