@@ -142,6 +142,7 @@ class TenantStore:
         self._store = store
         self._operational_outcome_max_runs = operational_outcome_max_runs
         self._processed_item_ttl_hours = processed_item_ttl_hours
+        self._incremental_cursor = IncrementalCursor(cast("StoreConnector", self))
 
     def _ingest_queue_store(self) -> IngestQueueStore:
         return cast("IngestQueueStore", self._store)
@@ -577,7 +578,7 @@ class TenantStore:
         await self._store.save_source_strategy(f"{self._tenant_id}:{domain}", monitor, bypass)
 
     def incremental_cursor(self) -> IncrementalCursor:
-        return IncrementalCursor(cast("StoreConnector", self))
+        return self._incremental_cursor
 
     async def save_run_summary(self, summary: RunSummary) -> None:
         connector = cast("StoreConnector", self._store)

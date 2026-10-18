@@ -110,6 +110,7 @@ _OUTCOME_BY_ZERO_REASON = {
     "parser_gap": "parser_gap",
     "monitor_empty": "unconfirmed_empty",
     "confirmed_empty": "no_open_vacancies",
+    "freshness_filtered": "no_new_vacancies",
     "board_gone": "board_gone",
     "monitor_error": "source_error",
     "transport_error": "transport_error",

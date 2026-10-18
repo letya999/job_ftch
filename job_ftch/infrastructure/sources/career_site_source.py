@@ -1225,6 +1225,8 @@ class CareerSiteSource(Source["RawItem"]):
                         return
                     if parsed and self.stats.freshness_filtered >= parsed:
                         self.stats.zero_reason = ZeroYieldReason.FRESHNESS_FILTERED
+                        self._parser_failure_is_terminal = True
+                        return
                     elif getattr(site_parser, "confirmed_empty_on_empty", False):
                         self.stats.zero_reason = ZeroYieldReason.CONFIRMED_EMPTY
                         # The parser consulted an authoritative listing
