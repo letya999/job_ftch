@@ -594,6 +594,74 @@ async def test_tenant_runner_can_scope_a_clean_canary_to_explicit_source_ids(
 
 
 @pytest.mark.asyncio
+async def test_legacy_search_clone_request_resolves_parent(monkeypatch: pytest.MonkeyPatch) -> None:
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "clone-replay",
+            "display_name": "Clone replay",
+            "sources": [
+                {
+                    "type": "career_site",
+                    "url": "https://example.com/jobs",
+                    "source_name": "hireseeker",
+                }
+            ],
+            "store_backend": "memory",
+            "job_group_store_backend": "memory",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+        }
+    )
+    runner = TenantRunner.from_tenants([tenant], base_settings=_isolated_base_settings())
+
+    class Prepared(Exception):
+        pass
+
+    async def reached_preparation(*args, **kwargs):
+        raise Prepared
+
+    monkeypatch.setattr(runner, "_prepare_effective_source", reached_preparation)
+    with pytest.raises(Prepared):
+        await runner.run_tenant("clone-replay", source_ids=("career_site:hireseeker_kw1",))
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_real_source_name_ending_kw1_is_not_rewritten(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "literal-kw1",
+            "display_name": "Literal kw1",
+            "sources": [
+                {
+                    "type": "career_site",
+                    "url": "https://example.com/jobs",
+                    "source_name": "hireseeker_kw1",
+                }
+            ],
+            "store_backend": "memory",
+            "job_group_store_backend": "memory",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+        }
+    )
+    runner = TenantRunner.from_tenants([tenant], base_settings=_isolated_base_settings())
+
+    class Prepared(Exception):
+        pass
+
+    async def reached_preparation(*args, **kwargs):
+        raise Prepared
+
+    monkeypatch.setattr(runner, "_prepare_effective_source", reached_preparation)
+    with pytest.raises(Prepared):
+        await runner.run_tenant("literal-kw1", source_ids=("career_site:hireseeker_kw1",))
+    await runner.close()
+
+
+@pytest.mark.asyncio
 async def test_tenant_runner_builds_job_lineage(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -769,13 +837,18 @@ async def test_tenant_runner_prepares_sources_with_bounded_concurrency(
         user_id=None,
         relevance_prompts=None,
     ):
-        del self, runtime, effective_sources, catalog, run_id, user_id, relevance_prompts
+        del self, effective_sources, catalog, run_id, user_id, relevance_prompts
 
         class _FakeBuilder:
             async def run_async(self, *, max_items=None):
                 del max_items
+                from job_ftch.application.watermark import IncrementalCursor
+
+                await runtime.store.incremental_cursor().set("telegram", "42")
+                assert await IncrementalCursor(runtime.store).get("telegram") is None
                 summary = RunSummary()
                 summary.source_run_id = "run-1"
+                summary.failed = 1
                 return summary
 
         class _FakeSnapshot:
@@ -811,6 +884,9 @@ async def test_tenant_runner_prepares_sources_with_bounded_concurrency(
 
     release.set()
     await task
+    from job_ftch.application.watermark import IncrementalCursor
+
+    assert await IncrementalCursor(runner.get_runtime("ai_jobs").store).get("telegram") is None
     await runner.close()
 
 

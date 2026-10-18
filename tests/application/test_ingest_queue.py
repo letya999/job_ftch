@@ -114,6 +114,40 @@ async def test_runner_schedules_rate_limited_source_with_policy_cap() -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_clones_queue_one_parent_source() -> None:
+    store = InMemoryStore()
+    runtime = SimpleNamespace(
+        store=store,
+        settings=Settings.model_validate({"ingest_queue_enabled": True}),
+        tenant=SimpleNamespace(tenant_id="tenant-1"),
+    )
+    runner = TenantRunner({})
+    summary = RunSummary(
+        tenant_id="tenant-1",
+        source_run_id="run-1",
+        source_outcomes=[
+            {"source_id": f"career_site:hireseeker_kw{i}", "status": "rate_limited"} for i in (1, 2)
+        ],
+    )
+
+    await runner._schedule_ingest_continuations(
+        runtime,
+        summary,
+        max_items=None,
+        user_id=None,
+        bypass_override=None,
+        parser_override=None,
+        personal_mode=False,
+        trigger="scheduled",
+        ingest_task_id=None,
+        ingest_worker_id=None,
+    )
+
+    tasks = await store.list_active_ingest_tasks("tenant-1")
+    assert [task.source_id for task in tasks] == ["career_site:hireseeker"]
+
+
+@pytest.mark.asyncio
 async def test_runner_does_not_retry_wait_longer_than_policy() -> None:
     store = InMemoryStore()
     settings = Settings.model_validate(
