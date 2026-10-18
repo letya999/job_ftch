@@ -98,6 +98,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_monitors.py](test_monitors.py)
 - [test_mts_site_parser.py](test_mts_site_parser.py)
 - [test_myjobs_parser.py](test_myjobs_parser.py)
+- [test_nextdata_monitor_urls.py](test_nextdata_monitor_urls.py)
 - [test_nine99_md_site_parser.py](test_nine99_md_site_parser.py)
 - [test_nokia_site_parser.py](test_nokia_site_parser.py)
 - [test_official_career_site_parsers.py](test_official_career_site_parsers.py)

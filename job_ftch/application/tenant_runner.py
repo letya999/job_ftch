@@ -331,6 +331,13 @@ def _canonical_base_source_id(
     return None
 
 
+def _search_parent_source_id(source_id: str) -> str:
+    base, marker, suffix = source_id.rpartition("_kw")
+    return (
+        base if marker and suffix.isdigit() and source_id.startswith("career_site:") else source_id
+    )
+
+
 def _listing_payload_for_source(
     payloads: list[dict[str, Any]],
     source_id: str,
@@ -2211,6 +2218,10 @@ class TenantRunner:
                 for spec in all_specs
                 if source_spec_identifier(spec) not in runtime.disabled_source_ids
             }
+            requested_source_ids = {
+                sid if sid in available_source_ids else _search_parent_source_id(sid)
+                for sid in requested_source_ids
+            }
             missing_source_ids = requested_source_ids - available_source_ids
             if missing_source_ids:
                 raise ValueError(
@@ -2385,9 +2396,12 @@ class TenantRunner:
                         builder_kwargs["personal_mode"] = True
                         builder_kwargs["personal_max_items"] = max_items
                     builder, snapshot_filter = await self._build_runtime_builder(**builder_kwargs)
-                    summary = await builder.run_async(
-                        max_items=None if personal_mode else max_items
-                    )
+                    async with runtime.store.incremental_cursor().defer() as pending_cursors:
+                        summary = await builder.run_async(
+                            max_items=None if personal_mode else max_items
+                        )
+                        if summary.failed:
+                            pending_cursors.clear()
                 summary.llm_usage_requests = usage.requests
                 summary.llm_tokens_in = usage.tokens_in
                 summary.llm_cached_tokens_in = usage.cached_tokens_in
@@ -2578,8 +2592,12 @@ class TenantRunner:
                     queue_started_at = current_task.created_at
         scheduled: list[datetime] = []
         needs_operator: list[str] = []
+        queued_sources: set[str] = set()
         for outcome in rate_limited:
-            source_id = str(outcome["source_id"])
+            source_id = _search_parent_source_id(str(outcome["source_id"]))
+            if source_id in queued_sources:
+                continue
+            queued_sources.add(source_id)
             raw_wait = outcome.get("rate_limit_retry_after_seconds")
             if isinstance(raw_wait, (int, float, str)):
                 try:
