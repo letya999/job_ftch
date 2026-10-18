@@ -314,12 +314,6 @@ def create_app(
     limiter = Limiter(key_func=get_remote_address)
     app = FastAPI(title="job_ftch telegram bridge")
 
-    @app.on_event("startup")
-    async def _start_ingest_queue() -> None:
-        start = getattr(runner, "start", None)
-        if callable(start):
-            await start()
-
     @app.on_event("shutdown")
     async def _stop_ingest_queue() -> None:
         close = getattr(runner, "close", None)

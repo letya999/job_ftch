@@ -24,6 +24,7 @@ source_hard_deadline_seconds: 180.0
 tracing_enabled: false
 tracing_capture_payloads: false
 openobserve_enabled: true
+openobserve_metric_export_interval_ms: 60000
 
 # Evaluated MVP relevance recipe. Keep this in sync with the release eval config.
 # Embeddings/BGE are outside the terminal decision path for the current graph.

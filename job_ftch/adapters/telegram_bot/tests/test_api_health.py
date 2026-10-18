@@ -240,3 +240,23 @@ def test_api_pipeline_sources_important_and_quality(monkeypatch: pytest.MonkeyPa
     assert res.status_code == 200
     body = res.json()
     assert not any(item["source_id"] == "career_site:example" for item in body["important"])
+
+
+def test_public_api_does_not_claim_bot_ingest_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    from starlette.testclient import TestClient
+
+    from job_ftch.adapters.telegram_bot.api import create_app
+
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN", "123456:test-token")
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN", "secret-token")
+
+    class Runner(_Runner):
+        started = 0
+
+        async def start(self) -> None:
+            self.started += 1
+
+    runner = Runner()
+    with TestClient(create_app(runner=runner)) as client:  # type: ignore[arg-type]
+        assert client.get("/health/live").status_code == 200
+        assert runner.started == 0
