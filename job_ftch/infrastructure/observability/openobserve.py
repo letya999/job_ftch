@@ -889,9 +889,8 @@ def _duration_seconds(summary: RunSummary) -> float:
 
 
 def _run_attrs(summary: RunSummary) -> dict[str, str]:
-    """Stable attributes shared with the terminal pipeline record."""
+    """Bounded metric dimensions; run IDs remain in per-run log records."""
     return {
         "tenant_id": summary.tenant_id or "unknown",
-        "source_run_id": summary.source_run_id or "unknown",
         "graph_hash": summary.graph_hash or "unknown",
     }

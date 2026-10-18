@@ -77,6 +77,14 @@ def test_operational_counter_helpers_fail_closed_on_malformed_runtime_stats() ->
     assert _counter_mapping([("accept", 7)]) == {}
 
 
+def test_metric_labels_do_not_include_unique_run_id() -> None:
+    from job_ftch.infrastructure.observability.openobserve import _run_attrs
+
+    attrs = _run_attrs(RunSummary(tenant_id="ai_jobs", source_run_id="run-123"))
+    assert attrs["tenant_id"] == "ai_jobs"
+    assert "source_run_id" not in attrs
+
+
 def test_runtime_state_metrics_snapshot_exposes_source_and_publish_state(monkeypatch) -> None:
     from job_ftch.infrastructure.observability import openobserve
 

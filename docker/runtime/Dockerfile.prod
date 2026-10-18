@@ -34,8 +34,11 @@ RUN mkdir -p /opt/job-ftch-home /opt/playwright && chown appuser:appuser /opt/jo
 COPY --chown=appuser:appuser pyproject.toml README.md LICENSE uv.lock ./
 RUN mkdir -p job_ftch scripts && touch job_ftch/__init__.py
 
-RUN /usr/local/bin/python -m pip install --no-cache-dir "uv==0.9.26" \
-    && uv sync --locked --no-dev --all-extras
+RUN /usr/local/bin/python -m pip install --no-cache-dir "uv==0.9.26"
+# The production graph disables local embeddings; "all" would pull CUDA into the image.
+RUN UV_NO_CACHE=1 UV_LINK_MODE=copy uv sync --locked --no-dev --all-extras \
+    --no-extra all --no-extra bgem3 --no-extra embeddings --no-extra dagster \
+    --no-extra faststream --no-extra mcp
 ENV PATH="/app/.venv/bin:$PATH"
 RUN patchright install --with-deps chromium
 # Camoufox is Firefox-based and needs GTK, which the Chromium dep set does not provide.

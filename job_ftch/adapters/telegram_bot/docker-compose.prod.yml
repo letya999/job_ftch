@@ -12,7 +12,11 @@ services:
       args:
         BASE_IMAGE: job-ftch-runtime:prod
     init: true
+    restart: unless-stopped
+    mem_limit: 3g
     command: ["uvicorn", "job_ftch.adapters.telegram_bot.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]
+    logging:
+      options: { max-size: "20m", max-file: "3" }
     env_file:
       - ../../../.env.prod
       - ./.env.prod
@@ -43,6 +47,8 @@ services:
     cap_add:
       - SYS_PTRACE
     restart: unless-stopped
+    logging:
+      options: { max-size: "20m", max-file: "3" }
     # Picked up by the autoheal service below: a wedged-but-alive process keeps
     # PID 1 running, so restart: unless-stopped never fires; autoheal restarts on
     # the unhealthy healthcheck status instead.
