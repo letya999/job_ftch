@@ -452,6 +452,38 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 )
             return [load_group(row["raw_json"]) for row in rows]
 
+    async def list_public_canonical_jobs(self, limit: int) -> list[JobRecord]:
+        """Read only fields needed by the anonymous public catalog."""
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT jsonb_build_object(
+                    'group_id', group_id,
+                    'raw_item_id', raw_json->'canonical_job'->'raw_item_id',
+                    'source_kind', raw_json->'canonical_job'->'source_kind',
+                    'source_name', raw_json->'canonical_job'->'source_name',
+                    'title', raw_json->'canonical_job'->'title',
+                    'company', raw_json->'canonical_job'->'company',
+                    'description', left(raw_json->'canonical_job'->>'description', 360),
+                    'location', raw_json->'canonical_job'->'location',
+                    'city', raw_json->'canonical_job'->'city',
+                    'region', raw_json->'canonical_job'->'region',
+                    'country', raw_json->'canonical_job'->'country',
+                    'work_mode', raw_json->'canonical_job'->'work_mode',
+                    'seniority', raw_json->'canonical_job'->'seniority',
+                    'tools_stack', raw_json->'canonical_job'->'tools_stack',
+                    'skills_explicit', raw_json->'canonical_job'->'skills_explicit',
+                    'posted_at', raw_json->'canonical_job'->'posted_at',
+                    'compensation', raw_json->'canonical_job'->'compensation',
+                    'canonical_url', raw_json->'canonical_job'->'canonical_url'
+                ) AS public_job
+                FROM jf_job_groups ORDER BY updated_at DESC LIMIT $1
+                """,
+                limit,
+            )
+        return [JobRecord.model_validate_json(row["public_job"]) for row in rows]
+
     async def count(self, since: datetime | None = None) -> int:
         pool = await self._get_pool()
         async with pool.acquire() as conn:

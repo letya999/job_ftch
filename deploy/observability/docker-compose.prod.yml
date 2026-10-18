@@ -4,10 +4,13 @@ services:
   openobserve:
     image: public.ecr.aws/zinclabs/openobserve:v0.90.3
     restart: unless-stopped
+    logging:
+      options: { max-size: "20m", max-file: "3" }
     environment:
       ZO_DATA_DIR: /data
       ZO_LOCAL_MODE: "true"
       ZO_LOCAL_MODE_STORAGE: disk
+      ZO_COMPACT_DATA_RETENTION_DAYS: "15"
       ZO_ROOT_USER_EMAIL: ${JOB_FTCH_OPENOBSERVE_USERNAME:?set JOB_FTCH_OPENOBSERVE_USERNAME}
       ZO_ROOT_USER_PASSWORD: ${JOB_FTCH_OPENOBSERVE_PASSWORD:?set JOB_FTCH_OPENOBSERVE_PASSWORD}
     ports:
