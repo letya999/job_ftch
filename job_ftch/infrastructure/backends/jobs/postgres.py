@@ -458,27 +458,34 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
+                WITH recent AS MATERIALIZED (
+                    SELECT group_id, raw_json->'canonical_job' AS job
+                    FROM (
+                        SELECT group_id, raw_json
+                        FROM jf_job_groups ORDER BY updated_at DESC LIMIT $1
+                    ) AS selected
+                )
                 SELECT jsonb_build_object(
                     'group_id', group_id,
-                    'raw_item_id', raw_json->'canonical_job'->'raw_item_id',
-                    'source_kind', raw_json->'canonical_job'->'source_kind',
-                    'source_name', raw_json->'canonical_job'->'source_name',
-                    'title', raw_json->'canonical_job'->'title',
-                    'company', raw_json->'canonical_job'->'company',
-                    'description', left(raw_json->'canonical_job'->>'description', 360),
-                    'location', raw_json->'canonical_job'->'location',
-                    'city', raw_json->'canonical_job'->'city',
-                    'region', raw_json->'canonical_job'->'region',
-                    'country', raw_json->'canonical_job'->'country',
-                    'work_mode', raw_json->'canonical_job'->'work_mode',
-                    'seniority', raw_json->'canonical_job'->'seniority',
-                    'tools_stack', raw_json->'canonical_job'->'tools_stack',
-                    'skills_explicit', raw_json->'canonical_job'->'skills_explicit',
-                    'posted_at', raw_json->'canonical_job'->'posted_at',
-                    'compensation', raw_json->'canonical_job'->'compensation',
-                    'canonical_url', raw_json->'canonical_job'->'canonical_url'
+                    'raw_item_id', job->'raw_item_id',
+                    'source_kind', job->'source_kind',
+                    'source_name', job->'source_name',
+                    'title', job->'title',
+                    'company', job->'company',
+                    'description', left(job->>'description', 360),
+                    'location', job->'location',
+                    'city', job->'city',
+                    'region', job->'region',
+                    'country', job->'country',
+                    'work_mode', job->'work_mode',
+                    'seniority', job->'seniority',
+                    'tools_stack', job->'tools_stack',
+                    'skills_explicit', job->'skills_explicit',
+                    'posted_at', job->'posted_at',
+                    'compensation', job->'compensation',
+                    'canonical_url', job->'canonical_url'
                 ) AS public_job
-                FROM jf_job_groups ORDER BY updated_at DESC LIMIT $1
+                FROM recent
                 """,
                 limit,
             )

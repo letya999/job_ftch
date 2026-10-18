@@ -64,7 +64,8 @@ async def test_public_projection_avoids_full_group_json(monkeypatch: pytest.Monk
     assert str(jobs[0].canonical_url) == "https://example.org/jobs/1"
     assert conn.limit == 1000
     assert "jsonb_build_object" in conn.query
-    assert "left(raw_json->'canonical_job'->>'description', 360)" in conn.query
+    assert conn.query.count("raw_json->'canonical_job'") == 1
+    assert "left(job->>'description', 360)" in conn.query
     for field in (
         "company",
         "location",
