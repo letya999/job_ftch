@@ -2,9 +2,9 @@ import asyncio
 import hashlib
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
-from structlog.testing import capture_logs
 
 from job_ftch.application.pipeline import RunSummary
 from job_ftch.application.tenant_runner import TenantRunner
@@ -89,7 +89,9 @@ async def test_delayed_ingest_attempt_uses_fresh_run_identity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_delayed_ingest_attempt_logs_parent_and_attempt_identity() -> None:
+async def test_delayed_ingest_attempt_logs_parent_and_attempt_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     store = InMemoryStore()
     runtime = SimpleNamespace(store=store, settings=Settings.model_validate({}))
     runner = TenantRunner({})
@@ -103,14 +105,17 @@ async def test_delayed_ingest_attempt_logs_parent_and_attempt_identity() -> None
         return RunSummary(completion_state="waiting_rate_limit")
 
     runner.run_tenant = fake_run  # type: ignore[method-assign]
-    with capture_logs() as logs:
-        await runner._process_ingest_task(runtime, task)
+    log = MagicMock()
+    monkeypatch.setattr("job_ftch.application.tenant_runner.logger", log)
+    await runner._process_ingest_task(runtime, task)
 
-    entries = [row for row in logs if row["event"] == "ingest_delayed_task_started"]
-    assert len(entries) == 1
-    entry = entries[0]
-    assert entry["parent_run_id"] == "parent"
-    assert entry["source_run_id"] == seen[0]
+    log.info.assert_called_once_with(
+        "ingest_delayed_task_started",
+        tenant_id="t",
+        parent_run_id="parent",
+        source_run_id=seen[0],
+        source_id="source",
+    )
 
 
 @pytest.mark.asyncio
