@@ -710,9 +710,17 @@ class TenantRunner:
             )
             return
         try:
+            attempt_run_id = uuid.uuid4().hex
+            logger.info(
+                "ingest_delayed_task_started",
+                tenant_id=task.tenant_id,
+                parent_run_id=task.run_id,
+                source_run_id=attempt_run_id,
+                source_id=task.source_id,
+            )
             summary = await self.run_tenant(
                 task.tenant_id,
-                run_id=task.run_id,
+                run_id=attempt_run_id,
                 max_items=task.max_items,
                 user_id=task.user_id,
                 source_ids=(task.source_id,),
@@ -2577,12 +2585,12 @@ class TenantRunner:
             return
         now = datetime.now(UTC)
         queue_started_at = summary.started_at
+        queue_run_id = str(summary.source_run_id)
         if ingest_task_id:
             list_active = getattr(runtime.store, "list_active_ingest_tasks", None)
             if callable(list_active):
                 active_tasks = await list_active(
                     runtime.tenant.tenant_id,
-                    run_id=summary.source_run_id,
                 )
                 current_task = next(
                     (task for task in active_tasks if task.task_id == ingest_task_id),
@@ -2590,6 +2598,7 @@ class TenantRunner:
                 )
                 if current_task is not None:
                     queue_started_at = current_task.created_at
+                    queue_run_id = current_task.run_id
         scheduled: list[datetime] = []
         needs_operator: list[str] = []
         queued_sources: set[str] = set()
@@ -2622,12 +2631,12 @@ class TenantRunner:
                     seconds=random.uniform(0.0, settings.ingest_queue_jitter_seconds)
                 )
             task_id = hashlib.sha256(
-                f"{runtime.tenant.tenant_id}:{summary.source_run_id}:{source_id}".encode()
+                f"{runtime.tenant.tenant_id}:{queue_run_id}:{source_id}".encode()
             ).hexdigest()
             task = IngestTask(
                 task_id=task_id,
                 tenant_id=runtime.tenant.tenant_id,
-                run_id=str(summary.source_run_id),
+                run_id=queue_run_id,
                 source_id=source_id,
                 rate_scope=scope,
                 max_items=max_items,
