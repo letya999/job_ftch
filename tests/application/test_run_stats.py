@@ -92,6 +92,10 @@ def test_source_status_category_keeps_transport_and_partial_distinct() -> None:
     assert source_status_category("unconfirmed_empty") == "unconfirmed_empty"
     assert source_status_category("source_error", "ConnectTimeout") == "transport_error"
     assert source_status_category("deadline_exceeded") == "hard_failure"
+    assert source_status_category("unknown") == "unknown"
+    assert source_status_category(None) == "unknown"
+    assert source_status_category("not_due") == "skipped"
+    assert source_status_category("skipped") == "skipped"
 
 
 @pytest.mark.asyncio

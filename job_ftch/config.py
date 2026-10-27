@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import functools
+import logging
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from pydantic_settings.sources import (
     PydanticBaseSettingsSource,
@@ -42,6 +43,125 @@ def _resolve_env_files() -> tuple[str, ...]:
     return (".env", ".env.dev")
 
 
+CLIPROXY_RUNTIME_OVERLAY = "config/runtime.cliproxy.yaml"
+_VALID_LLM_GATEWAYS = {"openai", "cliproxy"}
+logger = logging.getLogger(__name__)
+
+
+class LLMProviderProfile(BaseModel):
+    """Named, secret-free provider transport and capability policy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    backend: str = "openai"
+    base_url: str | None = None
+    credential_ref: str = "JOB_FTCH_OPENAI_API_KEY"
+    timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+    max_retries: int = Field(default=2, ge=0, le=10)
+    capabilities: tuple[str, ...] = ("text", "structured")
+    models: tuple[str, ...] = ()
+    session_dir: Path | None = None
+
+
+class LLMProviderBinding(BaseModel):
+    """Provider/model selection for one graph operation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    model: str
+    capability: str = "structured"
+    fallbacks: tuple[tuple[str, str], ...] = ()
+
+    @field_validator("fallbacks", mode="before")
+    @classmethod
+    def normalize_fallbacks(cls, value: object) -> tuple[tuple[str, str], ...]:
+        if not value:
+            return ()
+        result: list[tuple[str, str]] = []
+        for item in value if isinstance(value, (list, tuple)) else ():
+            if isinstance(item, dict):
+                provider = str(item.get("provider") or "").strip()
+                model = str(item.get("model") or "").strip()
+            elif isinstance(item, (list, tuple)) and len(item) == 2:
+                provider, model = str(item[0]).strip(), str(item[1]).strip()
+            else:
+                raise ValueError("LLM fallback must contain provider and model")
+            if not provider or not model:
+                raise ValueError("LLM fallback provider and model must not be blank")
+            result.append((provider, model))
+        return tuple(result)
+
+
+def _default_llm_profiles() -> dict[str, dict[str, object]]:
+    # Keep the factory JSON-shaped.  Some compatibility tests reload this
+    # module; returning model instances from a pre-reload factory would then
+    # belong to a different Pydantic class than the owning Settings model.
+    return {
+        "openai_main": {
+            "backend": "openai",
+            "capabilities": ("text", "structured"),
+        },
+        "cliproxy_captcha": {
+            "backend": "openai",
+            "credential_ref": "JOB_FTCH_CLIPROXY_API_KEY",
+            "capabilities": ("vision",),
+        },
+    }
+
+
+def _default_llm_bindings() -> dict[str, dict[str, object]]:
+    return {
+        "extraction": {
+            "provider": "openai_main",
+            "model": "gpt-5.4-nano",
+            "capability": "structured",
+        },
+        "relevance": {
+            "provider": "openai_main",
+            "model": "gpt-4.1-mini",
+            "capability": "structured",
+        },
+        "ontology": {
+            "provider": "openai_main",
+            "model": "gpt-4.1-mini",
+            "capability": "structured",
+        },
+        "presentation": {
+            "provider": "openai_main",
+            "model": "gpt-4.1-mini",
+            "capability": "structured",
+        },
+        "captcha_image": {
+            "provider": "cliproxy_captcha",
+            "model": "gemini-3.8-flash-high",
+            "capability": "vision",
+        },
+    }
+
+
+def _normalize_llm_gateway(value: str | None) -> str:
+    normalized = (value or "openai").strip().lower()
+    if normalized not in _VALID_LLM_GATEWAYS:
+        allowed = ", ".join(sorted(_VALID_LLM_GATEWAYS))
+        msg = f"llm_gateway must be one of: {allowed}"
+        raise ValueError(msg)
+    return normalized
+
+
+def _with_cliproxy_overlay(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Append the CLIProxy model overlay when JOB_FTCH_LLM_GATEWAY=cliproxy."""
+    if _normalize_llm_gateway(os.environ.get("JOB_FTCH_LLM_GATEWAY")) != "cliproxy":
+        return paths
+    overlay = CLIPROXY_RUNTIME_OVERLAY
+    if overlay in paths:
+        return paths
+    if not Path(overlay).exists():
+        msg = f"Missing CLIProxy runtime overlay: {overlay}"
+        raise FileNotFoundError(msg)
+    return (*paths, overlay)
+
+
 def _resolve_runtime_config_files() -> tuple[str, ...] | None:
     """Pick the global runtime YAML config file(s).
 
@@ -64,12 +184,12 @@ def _resolve_runtime_config_files() -> tuple[str, ...] | None:
             joined = ", ".join(missing)
             msg = f"Missing runtime YAML path from JOB_FTCH_RUNTIME_CONFIG_PATH: {joined}"
             raise FileNotFoundError(msg)
-        return paths or None
+        return _with_cliproxy_overlay(paths) if paths else None
 
     mode = os.environ.get("JOB_FTCH_ENV", "dev").strip().lower()
     if mode in {"prod", "production"}:
-        return ("config/runtime.yaml", "config/runtime.prod.yaml")
-    return ("config/runtime.yaml", "config/runtime.dev.yaml")
+        return _with_cliproxy_overlay(("config/runtime.yaml", "config/runtime.prod.yaml"))
+    return _with_cliproxy_overlay(("config/runtime.yaml", "config/runtime.dev.yaml"))
 
 
 class Settings(BaseSettings):
@@ -82,6 +202,7 @@ class Settings(BaseSettings):
     )
     job_group_store_backend: str = "sqlite"
     llm_backend: str = "openai"
+    llm_gateway: str = "openai"
     posting_backend: str = "none"
     notify_mode: str = "instant"  # "instant" (per job) or "digest" (once per run)
     notify_batch_size: int = 10
@@ -211,12 +332,24 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-5.4-nano"
     relevance_llm_model: str = "gpt-4.1-mini"
+    llm_provider_profiles: dict[str, LLMProviderProfile] = Field(
+        default_factory=lambda: cast("dict[str, LLMProviderProfile]", _default_llm_profiles())
+    )
+    llm_bindings: dict[str, LLMProviderBinding] = Field(
+        default_factory=lambda: cast("dict[str, LLMProviderBinding]", _default_llm_bindings())
+    )
     openai_base_url: str | None = None
     openai_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     openai_max_retries: int = Field(default=2, ge=0, le=10)
+    llm_preflight_enabled: bool = True
+    llm_preflight_timeout_seconds: float = Field(default=15.0, gt=0.0, le=120.0)
+    llm_quota_retry_delay_seconds: int = Field(default=1800, ge=60, le=86400)
+    llm_quota_max_retries: int = Field(default=5, ge=0, le=10)
     career_site_url: str | None = None
     career_site_default_limit: int = Field(default=50, gt=0)
-    career_site_default_detail_limit: int | None = Field(default=None, ge=1)
+    career_site_default_detail_limit: int | None = Field(default=50, ge=1)
+    career_site_detail_reserve_seconds: float = Field(default=10.0, ge=0.0, le=3600.0)
+    career_site_spa_shell_max_visible_chars: int = Field(default=80, ge=0, le=10_000)
     career_site_timeout_seconds: float = Field(default=15.0, gt=0.0, le=300.0)
     career_site_connect_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     career_site_max_retries: int = Field(default=2, ge=0, le=10)
@@ -275,6 +408,13 @@ class Settings(BaseSettings):
     # Debug-only: on each page, log any identity-coherence issue (never raises in
     # prod). Off by default => zero behavior change; used with the self-check.
     bypass_identity_selfcheck: bool = False
+    # When an HTTP CONNECT/proxy transport fails on the current engine
+    # (Camoufox+HTTP is the live case), keep the network axis and try the
+    # next engine instead of dropping to direct.
+    bypass_keep_proxy_on_engine_connect_error: bool = True
+    bypass_js_hardening_browser_families: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["chromium", "chromium_patchright"]
+    )
     # CAPTCHA solving. `captcha_provider` is the external provider used when the
     # free browser-wait tier cannot clear a challenge. It only actually fires if
     # it is also listed in `captcha_enabled_providers`; paid providers
@@ -292,11 +432,36 @@ class Settings(BaseSettings):
     captcha_authorized_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
     captcha_solver_timeout_budget_seconds: float = Field(default=40.0, ge=0.0, le=180.0)
     captcha_solver_backoff_seconds: float = Field(default=300.0, ge=0.0, le=3600.0)
+    # Image-OCR fallback via OpenAI-compatible CLIProxy. Empty base_url disables
+    # it. Auth is openai_api_key. Does not switch pipeline LLM
+    # (JOB_FTCH_LLM_GATEWAY). Host stays in env.
+    captcha_vision_base_url: str = ""
+    captcha_vision_model: str = "gemini-3.8-flash-high"
     proxy_provider: str = Field(default="raw")
     proxy_gateway: str = ""
     proxy_user: str = ""
     proxy_pass: str = ""
-    proxy_country_default: str = ""
+    proxy_country_default: str = "RU"
+    proxy_timezone_by_country: dict[str, str] = Field(
+        default_factory=lambda: {
+            "RU": "Europe/Moscow",
+            "KZ": "Asia/Almaty",
+            "BY": "Europe/Minsk",
+            "UZ": "Asia/Tashkent",
+            "UA": "Europe/Kyiv",
+            "US": "America/New_York",
+        }
+    )
+    proxy_locale_by_country: dict[str, str] = Field(
+        default_factory=lambda: {
+            "RU": "ru-RU",
+            "KZ": "ru-KZ",
+            "BY": "ru-BY",
+            "UZ": "ru-UZ",
+            "UA": "uk-UA",
+            "US": "en-US",
+        }
+    )
     proxy_sticky_ttl_seconds: int = Field(default=600, ge=30, le=3600)
     proxy_gb_budget: float = Field(default=0.0, ge=0.0)
     proxy_per_domain_gb_budget: float = Field(default=0.0, ge=0.0)
@@ -312,6 +477,7 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     fingerprinter_timeout_seconds: float = Field(default=8.0, gt=0.0, le=300.0)
     store_path: Path = Path(".runtime/job_ftch.db")
+    tenant_lock_dir: Path | None = None
     store_dsn: SecretStr | None = None
     http_proxy_list: Annotated[list[str], NoDecode] = Field(default_factory=list)
     store_pool_min: int = Field(default=2, gt=0)
@@ -336,6 +502,17 @@ class Settings(BaseSettings):
     source_assessment_ttl_days: int = Field(default=7, gt=0)
     career_site_window_max_details: int = Field(default=500, gt=0)
     scheduler_jitter_seconds: float = Field(default=0.0, ge=0.0)
+    # Durable source-run continuation. The default maximum wait is ten minutes:
+    # longer server cooldowns are surfaced for operator action, never retried early.
+    ingest_queue_enabled: bool = True
+    ingest_queue_poll_seconds: float = Field(default=5.0, gt=0.0, le=300.0)
+    ingest_queue_max_wait_seconds: float = Field(default=600.0, gt=0.0, le=86_400.0)
+    ingest_queue_max_run_age_seconds: float = Field(default=86_400.0, gt=0.0, le=604_800.0)
+    ingest_queue_lease_seconds: int = Field(default=300, gt=0, le=3_600)
+    ingest_queue_max_attempts: int = Field(default=8, gt=0, le=100)
+    ingest_queue_default_retry_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
+    ingest_queue_error_retry_seconds: float = Field(default=60.0, gt=0.0, le=3_600.0)
+    ingest_queue_jitter_seconds: float = Field(default=0.0, ge=0.0, le=60.0)
     job_backend: str = "sqlite"
     search_backend: str = "sqlite"
     job_store_path: Path | None = None
@@ -510,6 +687,7 @@ class Settings(BaseSettings):
         "proxy_rescue_allow_domains",
         "proxy_rescue_deny_domains",
         "captcha_authorized_domains",
+        "bypass_js_hardening_browser_families",
         "api_tenant_allowlist",
         mode="before",
     )
@@ -590,6 +768,108 @@ class Settings(BaseSettings):
         if self.llm_backend == "openai" and self.openai_model is None:
             msg = "openai_model is required when llm_backend=openai."
             raise ValueError(msg)
+        object.__setattr__(self, "llm_gateway", _normalize_llm_gateway(self.llm_gateway))
+        profiles = dict(self.llm_provider_profiles)
+        bindings = dict(self.llm_bindings)
+        explicit_profiles = "llm_provider_profiles" in self.model_fields_set
+        explicit_bindings = "llm_bindings" in self.model_fields_set
+        if not explicit_profiles and not explicit_bindings:
+            legacy_fields = sorted(
+                field
+                for field in (
+                    "llm_gateway",
+                    "openai_base_url",
+                    "openai_model",
+                    "relevance_llm_model",
+                    "ontology_compiler_model",
+                    "captcha_vision_base_url",
+                    "captcha_vision_model",
+                )
+                if field in self.model_fields_set
+            )
+            if legacy_fields:
+                logger.warning(
+                    "legacy_llm_settings_compatibility",
+                    extra={"fields": legacy_fields},
+                )
+        if not explicit_profiles:
+            profiles["openai_main"] = profiles["openai_main"].model_copy(
+                update={"base_url": self.openai_base_url}
+            )
+            profiles["cliproxy_captcha"] = profiles["cliproxy_captcha"].model_copy(
+                update={"base_url": self.captcha_vision_base_url or None}
+            )
+        if not explicit_bindings:
+            named_main_models = {
+                "extraction": self.openai_model,
+                "relevance": self.relevance_llm_model,
+                "ontology": self.ontology_compiler_model,
+            }
+            if self.llm_gateway == "cliproxy":
+                # Legacy overlay files may still expose global proxy models;
+                # keep those fields readable while named ETL bindings remain
+                # on their independent OpenAI defaults.
+                defaults = _default_llm_bindings()
+                named_main_models = {
+                    name: str(defaults[name]["model"]) for name in named_main_models
+                }
+            bindings.update(
+                {
+                    "extraction": bindings["extraction"].model_copy(
+                        update={"model": named_main_models["extraction"]}
+                    ),
+                    "relevance": bindings["relevance"].model_copy(
+                        update={"model": named_main_models["relevance"]}
+                    ),
+                    "ontology": bindings["ontology"].model_copy(
+                        update={"model": named_main_models["ontology"]}
+                    ),
+                    "captcha_image": bindings["captcha_image"].model_copy(
+                        update={"model": "gemini-3.8-flash-high"}
+                    ),
+                }
+            )
+        if not explicit_profiles and not explicit_bindings and self.llm_backend != "openai":
+            profiles["openai_main"] = profiles["openai_main"].model_copy(
+                update={"backend": self.llm_backend}
+            )
+            bindings = {
+                name: binding.model_copy(update={"provider": "openai_main"})
+                for name, binding in bindings.items()
+                if name != "captcha_image"
+            } | {"captcha_image": bindings["captcha_image"]}
+        for name, profile in profiles.items():
+            if not name.strip() or not profile.backend.strip():
+                raise ValueError("LLM provider profile names and backends must not be blank")
+            if not profile.credential_ref.strip() or any(
+                char in profile.credential_ref for char in "\\/\n\r"
+            ):
+                raise ValueError("LLM credential_ref must be an environment reference")
+        for name, binding in bindings.items():
+            if not name.strip() or not binding.provider.strip() or not binding.model.strip():
+                raise ValueError("LLM binding names, providers and models must not be blank")
+            provider_profile = profiles.get(binding.provider)
+            if provider_profile is None:
+                raise ValueError(
+                    f"LLM binding {name!r} references unknown provider profile {binding.provider!r}"
+                )
+            if binding.capability not in provider_profile.capabilities:
+                raise ValueError(
+                    f"LLM binding {name!r} requires unsupported capability "
+                    f"{binding.capability!r} from {binding.provider!r}"
+                )
+        object.__setattr__(self, "llm_provider_profiles", profiles)
+        object.__setattr__(self, "llm_bindings", bindings)
+        if self.llm_gateway == "cliproxy":
+            if self.llm_backend != "openai":
+                msg = "llm_gateway=cliproxy requires llm_backend=openai."
+                raise ValueError(msg)
+            if not self.openai_base_url:
+                msg = (
+                    "openai_base_url is required when llm_gateway=cliproxy. "
+                    "Set JOB_FTCH_OPENAI_BASE_URL to the CLIProxy /v1 endpoint."
+                )
+                raise ValueError(msg)
         if self.posting_backend == "telegram_posting":
             if self.telegram_publish_entity is None:
                 msg = "telegram_publish_entity is required when posting_backend=telegram_posting."
@@ -709,3 +989,15 @@ def resolve_outcome_lane_backend(
 @functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+def apply_llm_gateway(gateway: str) -> None:
+    """Select the OpenAI-compatible LLM gateway for the current process.
+
+    ``openai`` keeps the default cloud endpoint and runtime models.
+    ``cliproxy`` appends ``config/runtime.cliproxy.yaml`` so extract/judge
+    model ids come from the local CLIProxy catalog. The HTTP endpoint and
+    client key stay in env (``JOB_FTCH_OPENAI_BASE_URL`` / ``_API_KEY``).
+    """
+    os.environ["JOB_FTCH_LLM_GATEWAY"] = _normalize_llm_gateway(gateway)
+    get_settings.cache_clear()

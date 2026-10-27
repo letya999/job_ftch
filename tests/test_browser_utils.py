@@ -13,6 +13,7 @@ from job_ftch.infrastructure.sources.browser_utils import (
     _effective_browser_channel,
     _launch_browser_with_recovery,
     _load_async_playwright,
+    _page_has_captcha_marker,
     _patchright_inner_send_cancellation_safe,
     _patchright_needs_legacy_cancellation_fix,
     _patchright_route_handle_cancellation_safe,
@@ -389,6 +390,53 @@ async def test_open_page_reprojects_runtime_aligned_persona_ua(
 
 
 @pytest.mark.asyncio
+async def test_open_page_stamps_bypass_strategy_for_navigate() -> None:
+    sentinel_page = MagicMock()
+    config: dict[str, object] = {"headless": True}
+
+    class _CustomBypass:
+        async def apply_http(self, client: object) -> object:
+            return client
+
+        def apply_browser_args(self, kwargs: dict[str, object]) -> dict[str, object]:
+            return kwargs
+
+        async def apply_page(self, page: object) -> None:
+            del page
+
+        @asynccontextmanager
+        async def open_page(
+            self,
+            launched: dict[str, object],
+            *,
+            use_proxy: bool = False,
+        ) -> object:
+            del use_proxy
+            assert launched["_bypass_strategy"] is self
+            yield sentinel_page
+
+    bypass = _CustomBypass()
+    async with open_page(config, bypass_strategy=bypass) as page:
+        assert page is sentinel_page
+        assert config["_bypass_strategy"] is bypass
+
+
+@pytest.mark.asyncio
+async def test_page_has_captcha_marker_includes_smartcaptcha() -> None:
+    captured: dict[str, str] = {}
+
+    class _Page:
+        async def evaluate(self, script: str) -> bool:
+            captured["script"] = script
+            return True
+
+    assert await _page_has_captcha_marker(_Page())  # type: ignore[arg-type]
+    assert "smartcaptcha" in captured["script"]
+    assert "ysc1_" in captured["script"]
+    assert "smart-token" in captured["script"]
+
+
+@pytest.mark.asyncio
 async def test_open_page_delegates_to_custom_bypass() -> None:
     sentinel_page = MagicMock()
 
@@ -695,6 +743,40 @@ async def test_cleanup_reports_failure_when_browser_close_times_out(
 
 
 @pytest.mark.asyncio
+async def test_cancelled_cleanup_still_terminates_only_its_session(monkeypatch) -> None:
+    from job_ftch.infrastructure.sources import browser_utils
+
+    killed = []
+
+    async def cancelled(*args):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(browser_utils, "_cleanup_browser_stack", cancelled)
+    monkeypatch.setattr(browser_utils, "terminate_session_browsers", killed.append)
+    monkeypatch.setattr(browser_utils, "reap_stale_browser_drivers", lambda: None)
+    with pytest.raises(asyncio.CancelledError):
+        await browser_utils._close_browser_session(None, None, None, "owned-session")
+    assert killed == ["owned-session"]
+
+
+@pytest.mark.asyncio
+async def test_browser_memory_wait_obeys_deadline_and_releases_slot(monkeypatch) -> None:
+    from job_ftch.infrastructure.sources import shared_limiters, source_deadline
+
+    monkeypatch.setattr(shared_limiters, "_container_memory_available", lambda: False)
+    token = source_deadline.set_source_deadline(asyncio.get_running_loop().time() + 0.01)
+    try:
+        with pytest.raises(TimeoutError):
+            async with shared_limiters.browser_slot(1):
+                pytest.fail("browser started without memory headroom")
+    finally:
+        source_deadline.reset_source_deadline(token)
+    monkeypatch.setattr(shared_limiters, "_container_memory_available", lambda: True)
+    async with shared_limiters.browser_slot(1):
+        pass
+
+
+@pytest.mark.asyncio
 async def test_open_page_omits_user_agent_when_identity_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -774,3 +856,38 @@ async def test_navigate_falls_back_to_less_strict_commit() -> None:
     )
 
     assert waits == ["domcontentloaded", "commit"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("current_status", [200, 403])
+async def test_post_solve_navigation_checks_current_document(monkeypatch, current_status) -> None:
+    from unittest.mock import AsyncMock
+
+    target = "https://example.com/jobs"
+
+    class _Page:
+        url = target
+
+        async def goto(self, *args, **kwargs):
+            return SimpleNamespace(status=403)
+
+        async def evaluate(self, script):
+            return current_status
+
+        async def content(self):
+            return "<h1>Jobs</h1><p>" + "Open engineering roles. " * 20 + "</p>"
+
+    module = "job_ftch.infrastructure.sources.browser_utils"
+    monkeypatch.setattr(f"{module}._solve_page_challenge", AsyncMock(return_value=True))
+    monkeypatch.setattr(f"{module}._solve_settled_in_place", AsyncMock(return_value=True))
+    monkeypatch.setattr(f"{module}._page_has_captcha_marker", AsyncMock(return_value=False))
+    config = {
+        "challenge_retries": 0,
+        "_allow_private_selfcheck_fixture": True,
+        "_bypass_strategy": SimpleNamespace(observed_challenge_type=None),
+    }
+    if current_status == 200:
+        await navigate(_Page(), target, config)
+    else:
+        with pytest.raises(RuntimeError, match="blocked with status 403"):
+            await navigate(_Page(), target, config)

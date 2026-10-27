@@ -253,7 +253,10 @@ def build_default_http_client(*, verify_ssl: bool = True) -> _RetryingHttpClient
     settings = get_settings()
     timeout = httpx.Timeout(
         settings.career_site_timeout_seconds,
-        connect=settings.career_site_connect_timeout_seconds,
+        connect=min(
+            settings.career_site_connect_timeout_seconds,
+            settings.career_site_timeout_seconds,
+        ),
     )
     limits = httpx.Limits(
         max_keepalive_connections=settings.career_site_max_keepalive_connections,

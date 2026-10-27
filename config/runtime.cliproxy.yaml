@@ -1,0 +1,12 @@
+# Optional legacy overlay. CLIProxyAPI is CAPTCHA-only since ADR 100.
+#
+# Keep the ETL profile on its separately configured OpenAI endpoint. The
+# CAPTCHA profile reads JOB_FTCH_CAPTCHA_VISION_BASE_URL and
+# JOB_FTCH_CLIPROXY_API_KEY from the environment; no ETL model is overridden here.
+#
+llm_gateway: openai
+openai_timeout_seconds: 60.0
+# Kept readable for the migration window and ignored by named ETL bindings.
+openai_model: gemini-3.1-pro-low
+relevance_llm_model: gemini-3.1-pro-low
+ontology_compiler_model: gemini-3.1-pro-low

@@ -18,6 +18,7 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     detect_listing_pagination,
     distinctive_search_tokens,
     keywords_from_spec,
+    listing_matches_keywords,
     listing_page_url,
     normalize_search_keywords,
     paginate_listing,
@@ -52,7 +53,6 @@ def test_aggregators_declare_search_modes() -> None:
         VkTeamParser(),
         SberParser(),
         GetmatchParser(),
-        YandexJobsParser(),
         SuperJobRuParser(),
         TbankCareerParser(),
     ):
@@ -60,6 +60,8 @@ def test_aggregators_declare_search_modes() -> None:
         assert parser.search_mode == "combined"
     assert GeekJobParser().supports_search is True
     assert GeekJobParser().search_mode == "per_keyword"
+    assert YandexJobsParser().supports_search is True
+    assert YandexJobsParser().search_mode == "per_keyword"
     assert HireHiParser().supports_search is True
     assert HireHiParser().search_mode == "per_keyword"
 
@@ -87,6 +89,12 @@ def test_habr_uses_q_and_type_all() -> None:
     query = _query(urls[0])
     assert query["q"] == ["AI engineer OR LLM engineer OR ИИ инженер"]
     assert query["type"] == ["all"]
+
+
+def test_habr_uses_role_listing_for_single_ascii_keyword() -> None:
+    urls = HabrCareerParser().build_search_urls("https://career.habr.com/", ["developer"])
+
+    assert urls == ["https://career.habr.com/vacancies/developer"]
 
 
 def test_geekjob_builds_api_search_urls() -> None:
@@ -163,11 +171,11 @@ def test_url_has_search_query_detects_known_params() -> None:
     assert url_has_search_query("https://hh.ru/search/vacancy?text=") is False  # blank ignored
 
 
-def test_yandex_builds_text_or_query() -> None:
+def test_yandex_searches_roles_individually_instead_of_combining_or() -> None:
     urls = YandexJobsParser().build_search_urls("https://yandex.ru/jobs", ROLES)
-    assert len(urls) == 1
-    assert urlparse(urls[0]).path == "/jobs/vacancies"
-    assert _query(urls[0])["text"] == ["AI engineer OR LLM engineer OR ИИ инженер"]
+    assert len(urls) == len(ROLES)
+    assert all(urlparse(url).path == "/jobs/vacancies" for url in urls)
+    assert [_query(url)["text"][0] for url in urls] == ROLES
 
 
 def test_superjob_builds_keywords_or_query() -> None:
@@ -190,6 +198,22 @@ def test_x5_builds_per_keyword_search_from_target_roles() -> None:
     assert _query(urls[0])["search"] == ["LLM Engineer"]
     many = X5TechCareerParser().build_search_urls("https://rabota.x5.ru/vacancies", ROLES)
     assert [_query(url)["search"] for url in many] == [[role] for role in ROLES]
+
+
+def test_x5_moves_legacy_career_search_to_current_it_catalog() -> None:
+    url = X5TechCareerParser().build_search_urls("https://x5-tech.ru/career/", ["Python"])[0]
+    parsed = urlparse(url)
+    assert (parsed.scheme, parsed.netloc, parsed.path) == ("https", "rabota.x5.ru", "/vacancies")
+    assert _query(url)["vacancy_categories"] == ["it"]
+    assert _query(url)["search"] == ["Python"]
+
+
+def test_x5_preserves_catalog_filters_in_keyword_search() -> None:
+    url = X5TechCareerParser().build_search_urls(
+        "https://rabota.x5.ru/vacancies?vacancy_categories=it", ["Python"]
+    )[0]
+    assert _query(url)["vacancy_categories"] == ["it"]
+    assert _query(url)["search"] == ["Python"]
 
 
 def test_distinctive_search_tokens_drop_engineer() -> None:
@@ -231,13 +255,26 @@ def test_getmatch_keeps_listing_without_hardcoded_sphere() -> None:
     assert len(urls) == 1
     assert urls[0].startswith("https://getmatch.ru/vacancies")
     assert "sp=" not in urls[0]
-    assert "query=" not in urls[0]
+    assert _query(urls[0])["query"] == ["AI engineer OR LLM engineer OR ИИ инженер"]
 
 
 def test_text_matches_keywords_keeps_ml_titles() -> None:
     assert text_matches_keywords("ML-разработчик", ["ML Engineer"]) is True
     assert text_matches_keywords("Java developer", ["LLM Engineer"]) is False
     assert text_matches_keywords("anything", []) is True
+
+
+def test_listing_matches_keywords_uses_title_and_role_aliases() -> None:
+    assert listing_matches_keywords("Руководитель проектов", keywords=["project manager"]) is True
+    assert listing_matches_keywords("Product Manager", keywords=["project manager"]) is False
+    assert (
+        listing_matches_keywords(
+            "Product Manager",
+            "We need a project manager in the team",
+            ["project manager"],
+        )
+        is False
+    )
 
 
 def test_keywords_from_spec_read_monitor_config() -> None:

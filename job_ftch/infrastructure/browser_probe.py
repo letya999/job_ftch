@@ -230,8 +230,10 @@ class _ChallengeSink:
         self.observed_challenge_type: str | None = getattr(inner, "observed_challenge_type", None)
 
     def set_observed_challenge_type(self, challenge_type: str | None) -> None:
-        if challenge_type:
-            self.observed_challenge_type = str(challenge_type)
+        if isinstance(challenge_type, str) and challenge_type.strip():
+            self.observed_challenge_type = challenge_type.strip()
+        else:
+            self.observed_challenge_type = None
         setter = getattr(self._inner, "set_observed_challenge_type", None)
         if callable(setter) and setter is not self.set_observed_challenge_type:
             setter(challenge_type)

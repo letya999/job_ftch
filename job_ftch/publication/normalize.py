@@ -128,7 +128,11 @@ def format_work_mode(job: Job | JobRecord) -> str | None:
     value = work_mode.value if work_mode and hasattr(work_mode, "value") else ""
     if not value or value == "unknown":
         return None
-    return WORK_MODE_LABELS.get(value, value)
+    label = WORK_MODE_LABELS.get(value, value)
+    restrictions = getattr(job, "remote_restrictions", None)
+    if value in {"remote", "hybrid"} and isinstance(restrictions, str) and restrictions.strip():
+        return f"{label} · {restrictions.strip()}"
+    return label
 
 
 def resolve_card_url(job: Job | JobRecord) -> str | None:

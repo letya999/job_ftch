@@ -116,9 +116,11 @@ async def test_generic_source_defaults_exclude_geekjob_and_superjob_listing_page
     superjob = apply_runtime_defaults(
         CareerSiteSpec(url="https://www.superjob.ru/vakansii/?keywords=AI")
     )
+    hirify = apply_runtime_defaults(CareerSiteSpec(url="https://hirify.me/jobs-in-russia"))
 
     assert geekjob.url_filter == r"geekjob\.ru/(?:vacancy/[a-z0-9-]+/?|jobs/\d+/?$)"
     assert superjob.url_filter == r"superjob\.ru/vakansii/[a-z0-9-]+-\d+\.html$"
+    assert hirify.monitor_config["source_hard_deadline_seconds"] == 600.0
 
 
 def test_protected_parser_defaults_declare_only_authorized_domains() -> None:

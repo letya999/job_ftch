@@ -71,17 +71,17 @@ release-tag VERSION:
 
 docker-dev-verify:
     docker build -f docker/runtime/Dockerfile.dev -t job-ftch-runtime:dev .
-    docker compose --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml config
-    docker compose --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml up -d --build
-    docker compose --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml ps
-    docker compose --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml down
+    docker compose -p job_ftch_verify_dev --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml config
+    docker compose -p job_ftch_verify_dev --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml up -d --build
+    docker compose -p job_ftch_verify_dev --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml ps
+    docker compose -p job_ftch_verify_dev --env-file .env.dev -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml down
 
 docker-prod-verify:
     docker build -f docker/runtime/Dockerfile.prod -t job-ftch-runtime:prod .
-    docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml config
-    docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml up -d --build
-    docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml ps
-    docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml down
+    docker compose -p job_ftch_verify_prod --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml config
+    docker compose -p job_ftch_verify_prod --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml up -d --build
+    docker compose -p job_ftch_verify_prod --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml ps
+    docker compose -p job_ftch_verify_prod --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml down
 
 site-install:
     bun --cwd job_ftch_site install

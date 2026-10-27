@@ -12,20 +12,28 @@ services:
       args:
         BASE_IMAGE: job-ftch-runtime:prod
     init: true
+    restart: unless-stopped
+    mem_limit: 3g
     command: ["uvicorn", "job_ftch.adapters.telegram_bot.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]
+    logging:
+      options: { max-size: "20m", max-file: "3" }
     env_file:
       - ../../../.env.prod
       - ./.env.prod
     environment:
       JOB_FTCH_ENV: prod
+      JOB_FTCH_TENANT_LOCK_DIR: /app/.tenant_locks
       JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml
       JOB_FTCH_STORE_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-job_ftch}
       JOB_FTCH_QDRANT_URL: http://qdrant:6333
       JOB_FTCH_CONFIGS_DIR: /app/job_ftch/adapters/telegram_bot/config/tenants
+      JOB_FTCH_OPENOBSERVE_URL: http://openobserve:5080
     ports: ["127.0.0.1:8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       qdrant: { condition: service_started }
+    volumes:
+      - tenant_locks:/app/.tenant_locks
     networks:
       - default
       - public_site
@@ -43,6 +51,8 @@ services:
     cap_add:
       - SYS_PTRACE
     restart: unless-stopped
+    logging:
+      options: { max-size: "20m", max-file: "3" }
     # Picked up by the autoheal service below: a wedged-but-alive process keeps
     # PID 1 running, so restart: unless-stopped never fires; autoheal restarts on
     # the unhealthy healthcheck status instead.
@@ -53,6 +63,7 @@ services:
       - ./.env.prod
     environment:
       JOB_FTCH_ENV: prod
+      JOB_FTCH_TENANT_LOCK_DIR: /app/.tenant_locks
       JOB_FTCH_BROWSER_CHANNEL: ""
       JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml
       JOB_FTCH_STORE_DSN: postgresql://${POSTGRES_USER:-job_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-job_ftch}
@@ -82,6 +93,7 @@ services:
         condition: service_started
     volumes:
       - bot_runtime:/app/.runtime
+      - tenant_locks:/app/.tenant_locks
       - bot_cache:/opt/job-ftch-home/.cache
       - hf_cache:/opt/job-ftch-home/.cache/huggingface
     extra_hosts:
@@ -110,6 +122,23 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     mem_limit: 128m
     cpus: 0.1
+
+  # Optional CLIProxyAPI sidecar. It is deliberately not part of the default
+  # production start; enable it with --profile cliproxy after configuration
+  # and Google OAuth have been completed on the VPS.
+  cliproxy:
+    profiles: ["cliproxy"]
+    image: ${JOB_FTCH_CLIPROXY_IMAGE:-eceasy/cli-proxy-api:latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${JOB_FTCH_CLIPROXY_API_PORT:-8317}:8317"
+      - "127.0.0.1:${JOB_FTCH_CLIPROXY_OAUTH_PORT:-8085}:8085"
+    volumes:
+      - ../../../deploy/cliproxy/config.yaml:/CLIProxyAPI/config.yaml:ro
+      - ../../../deploy/cliproxy/auth:/root/.cli-proxy-api
+      - ../../../deploy/cliproxy/logs:/CLIProxyAPI/logs
+    networks:
+      - default
 
   postgres:
     image: postgres:16-alpine
@@ -143,6 +172,8 @@ volumes:
     name: telegram_bot_prod_qdrant_data
   bot_runtime:
     name: telegram_bot_prod_bot_runtime
+  tenant_locks:
+    name: telegram_bot_prod_tenant_locks
   bot_cache:
     name: telegram_bot_prod_bot_cache
   hf_cache:

@@ -34,12 +34,15 @@ def test_cliproxy_local_profile_should_align_relevance_and_openai_models() -> No
     """When both point at the same gateway id, judge and extract share catalog."""
     settings = Settings(
         llm_backend="openai",
+        llm_gateway="cliproxy",
         openai_api_key="cliproxy-local-key",  # pragma: allowlist secret
-        openai_model="gpt-5.4-mini",
-        relevance_llm_model="gpt-5.4-mini",
+        openai_model="gemini-3.1-pro-low",
+        relevance_llm_model="gemini-3.1-pro-low",
         openai_base_url="http://127.0.0.1:8317/v1",
         tracing_enabled=False,
         openobserve_enabled=False,
     )
     relevance_settings = settings.model_copy(update={"openai_model": settings.relevance_llm_model})
+    assert settings.llm_gateway == "cliproxy"
     assert relevance_settings.openai_model == settings.openai_model
+    assert relevance_settings.openai_base_url == settings.openai_base_url

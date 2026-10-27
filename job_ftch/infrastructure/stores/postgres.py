@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -24,6 +25,10 @@ if TYPE_CHECKING:
 class PostgreSQLStore(SQLStoreAdapter):
     """PostgreSQL-backed persistent store using asyncpg."""
 
+    @staticmethod
+    def _queue_time(value: datetime | None) -> datetime | None:
+        return value.astimezone(UTC) if value is not None else None
+
     _SQL_KV_GET = "SELECT value FROM jf_kv WHERE key = $1"
     _SQL_KV_UPSERT = """
         INSERT INTO jf_kv (key, value, updated_at)
@@ -37,6 +42,9 @@ class PostgreSQLStore(SQLStoreAdapter):
     _SQL_SET_MEMBERS = "SELECT member FROM jf_set WHERE key = $1"
     _SQL_OUTBOX_ENQUEUE = "INSERT INTO jf_outbox (outbox_id, tenant_id, idempotency_key, state, payload_json) VALUES ($1, $2, $3, $4, $5::jsonb) ON CONFLICT (idempotency_key) DO NOTHING"
     _SQL_OUTBOX_GET = "SELECT payload_json::text, state FROM jf_outbox WHERE idempotency_key = $1"
+    _SQL_OUTBOX_ATTEMPT = "SELECT payload_json::text, state FROM jf_outbox WHERE tenant_id = $1 AND payload_json->>'sink_name' = $2 AND payload_json->'delivery_payload'->>'attempt_id' = $3"
+    _SQL_OUTBOX_RELEASE_UNCERTAIN = "DELETE FROM jf_outbox WHERE idempotency_key = $1 AND state = $2 AND payload_json = $3::jsonb"
+    _SQL_OUTBOX_CONFIRM_UNCERTAIN = "UPDATE jf_outbox SET state = $1, payload_json = $2::jsonb, updated_at = NOW() WHERE idempotency_key = $3 AND state = $4 AND payload_json = $5::jsonb"
     _SQL_OUTBOX_PENDING = "SELECT payload_json::text, state FROM jf_outbox WHERE state = $1 AND tenant_id = $2 ORDER BY updated_at ASC LIMIT $3"
     _SQL_OUTBOX_DELIVERED = (
         "UPDATE jf_outbox SET state = $1, updated_at = NOW() WHERE idempotency_key = $2"
@@ -115,6 +123,73 @@ class PostgreSQLStore(SQLStoreAdapter):
             bootstrap_completed_at = EXCLUDED.bootstrap_completed_at,
             payload_json = EXCLUDED.payload_json,
             updated_at = EXCLUDED.updated_at
+    """
+    _SQL_INGEST_TASK_GET = """
+        SELECT task_id, tenant_id, run_id, source_id, rate_scope, state, attempt,
+               max_items, user_id, bypass_override, parser_override, personal_mode,
+               trigger, available_at, lease_owner, lease_until, last_error,
+               created_at, updated_at, completed_at
+        FROM jf_ingest_tasks WHERE task_id = $1
+    """
+    _SQL_INGEST_TASK_UPSERT = """
+        INSERT INTO jf_ingest_tasks (
+            task_id, tenant_id, run_id, source_id, rate_scope, state, attempt,
+            max_items, user_id, bypass_override, parser_override, personal_mode,
+            trigger, available_at, lease_owner, lease_until, last_error,
+            created_at, updated_at, completed_at
+        ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+            $14::timestamptz, $15, $16::timestamptz, $17, $18::timestamptz,
+            $19::timestamptz, $20::timestamptz
+        )
+        ON CONFLICT(task_id) DO UPDATE SET
+            available_at=EXCLUDED.available_at,
+            updated_at=EXCLUDED.updated_at,
+            last_error=EXCLUDED.last_error
+        WHERE jf_ingest_tasks.state IN ('ready', 'waiting_rate_limit')
+    """
+    _SQL_INGEST_TASK_COMPLETE = """
+        UPDATE jf_ingest_tasks
+        SET state=$1, lease_owner=NULL, lease_until=NULL, completed_at=$2, updated_at=$3
+        WHERE task_id=$4 AND lease_owner=$5 AND state='leased'
+    """
+    _SQL_INGEST_TASK_DEFER = """
+        UPDATE jf_ingest_tasks
+        SET attempt=CASE WHEN $1 THEN GREATEST(attempt-1, 0) ELSE attempt END,
+            state=$2, available_at=$3, lease_owner=NULL, lease_until=NULL,
+            last_error=$4, updated_at=$5
+        WHERE task_id=$6 AND lease_owner=$7 AND state='leased'
+    """
+    _SQL_INGEST_TASK_FAIL = """
+        UPDATE jf_ingest_tasks
+        SET state=$1, lease_owner=NULL, lease_until=NULL, last_error=$2,
+            completed_at=$3, updated_at=$4
+        WHERE task_id=$5 AND lease_owner=$6 AND state='leased'
+    """
+    _SQL_INGEST_TASK_REAP = """
+        UPDATE jf_ingest_tasks
+        SET state=$1, lease_owner=NULL, lease_until=NULL, updated_at=$2
+        WHERE state='leased' AND lease_until IS NOT NULL AND lease_until <= $3
+    """
+    _SQL_INGEST_TASK_ACTIVE = """
+        SELECT task_id, tenant_id, run_id, source_id, rate_scope, state, attempt,
+               max_items, user_id, bypass_override, parser_override, personal_mode,
+               trigger, available_at, lease_owner, lease_until, last_error,
+               created_at, updated_at, completed_at
+        FROM jf_ingest_tasks
+        WHERE tenant_id=$1 AND ($2::text IS NULL OR run_id=$3)
+          AND state IN ('ready', 'waiting_rate_limit', 'leased')
+        ORDER BY available_at, created_at
+    """
+    _SQL_INGEST_RATE_LIMIT_UPSERT = """
+        INSERT INTO jf_ingest_rate_limits
+            (scope_id, cooldown_until, retry_after_seconds, status_code, updated_at)
+        VALUES ($1, $2::timestamptz, $3, $4, $5::timestamptz)
+        ON CONFLICT(scope_id) DO UPDATE SET
+            cooldown_until=GREATEST(jf_ingest_rate_limits.cooldown_until, EXCLUDED.cooldown_until),
+            retry_after_seconds=EXCLUDED.retry_after_seconds,
+            status_code=EXCLUDED.status_code,
+            updated_at=EXCLUDED.updated_at
     """
     _SQL_OPERATOR_FLAG_GET = """
         SELECT source_key, important, set_by, set_at, note
@@ -256,6 +331,7 @@ class PostgreSQLStore(SQLStoreAdapter):
                     "012_ontology_term_stats_pg.sql",
                     "013_compiled_ontology_pg.sql",
                     "014_run_stats_pg.sql",
+                    "015_ingest_queue_pg.sql",
                 ):
                     path = migrations_dir / name
                     if not path.exists():
@@ -296,6 +372,69 @@ class PostgreSQLStore(SQLStoreAdapter):
             await self._pool.close()
             self._pool = None
 
+    async def _claim_ingest_tasks(
+        self,
+        tenant_id: str,
+        worker_id: str,
+        *,
+        limit: int,
+        lease_seconds: int,
+        now: datetime,
+    ) -> list[tuple[object, ...]]:
+        pool = await self._ensure_initialized()
+        now = now.astimezone(UTC)
+        lease_until = now + timedelta(seconds=lease_seconds)
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                WITH candidates AS (
+                    SELECT t.task_id
+                    FROM jf_ingest_tasks AS t
+                    WHERE t.tenant_id=$1
+                      AND t.state IN ('ready', 'waiting_rate_limit')
+                      AND t.available_at <= $2::timestamptz
+                      AND NOT EXISTS (
+                          SELECT 1 FROM jf_ingest_rate_limits AS r
+                          WHERE r.scope_id=t.rate_scope AND r.cooldown_until > $2::timestamptz
+                      )
+                    ORDER BY t.available_at, t.created_at
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT $3
+                )
+                UPDATE jf_ingest_tasks AS t
+                SET state='leased', attempt=t.attempt+1, lease_owner=$4,
+                    lease_until=$5::timestamptz, updated_at=$2::timestamptz
+                FROM candidates
+                WHERE t.task_id=candidates.task_id
+                RETURNING t.task_id, t.tenant_id, t.run_id, t.source_id, t.rate_scope,
+                          t.state, t.attempt, t.max_items, t.user_id, t.bypass_override,
+                          t.parser_override, t.personal_mode, t.trigger, t.available_at,
+                          t.lease_owner, t.lease_until, t.last_error, t.created_at,
+                          t.updated_at, t.completed_at
+                """,
+                tenant_id,
+                now,
+                max(limit, 1),
+                worker_id,
+                lease_until,
+            )
+        return [tuple(row) for row in rows]
+
+    async def reap_ingest_leases(self, now: datetime) -> int:
+        pool = await self._ensure_initialized()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                UPDATE jf_ingest_tasks
+                SET state='ready', lease_owner=NULL, lease_until=NULL, updated_at=$1::timestamptz
+                WHERE state='leased' AND lease_until IS NOT NULL AND lease_until <= $2::timestamptz
+                RETURNING task_id
+                """,
+                now.astimezone(UTC),
+                now.astimezone(UTC),
+            )
+        return len(rows)
+
     async def purge_old_snapshots(
         self,
         tenant_id: str,
@@ -321,6 +460,11 @@ class PostgreSQLStore(SQLStoreAdapter):
         async with pool.acquire() as conn:
             await conn.execute("DELETE FROM jf_kv WHERE key LIKE $1", f"{prefix}%")
             await conn.execute("DELETE FROM jf_set WHERE key LIKE $1", f"{prefix}%")
+            tenant_id = prefix[:-1] if prefix.endswith(":") else prefix
+            await conn.execute("DELETE FROM jf_ingest_tasks WHERE tenant_id = $1", tenant_id)
+            await conn.execute(
+                "DELETE FROM jf_ingest_rate_limits WHERE scope_id LIKE $1", f"{prefix}%"
+            )
 
     async def clear_run_artifacts(self, prefix: str, tenant_id: str) -> dict[str, int]:
         """Remove run-produced state while preserving tenant configuration and profiles."""
@@ -420,6 +564,10 @@ class PostgreSQLStore(SQLStoreAdapter):
             await conn.execute("DELETE FROM jf_dedup_claims WHERE claim_key LIKE $1", f"{prefix}%")
             await conn.execute("DELETE FROM jf_outbox WHERE tenant_id = $1", tenant_id)
             await conn.execute("DELETE FROM jf_source_assessments WHERE tenant_id = $1", tenant_id)
+            await conn.execute("DELETE FROM jf_ingest_tasks WHERE tenant_id = $1", tenant_id)
+            await conn.execute(
+                "DELETE FROM jf_ingest_rate_limits WHERE scope_id LIKE $1", f"{tenant_id}:%"
+            )
             return counts
 
     async def ping(self) -> bool:

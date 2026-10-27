@@ -13,6 +13,20 @@ from job_ftch.infrastructure.bypass.proxy_pool import (
 )
 
 
+def test_empty_allowlist_is_fail_closed_and_star_allows_all() -> None:
+    assert is_domain_allowed("career.habr.com")
+    assert not is_domain_allowed("career.habr.com", empty_allow="deny")
+    assert not is_domain_allowed("career.habr.com", allow_domains=(), empty_allow="deny")
+    assert not is_domain_allowed("", allow_domains=("career.habr.com",))
+    assert is_domain_allowed("career.habr.com", allow_domains=("*",), empty_allow="deny")
+    assert not is_domain_allowed(
+        "tbank.ru",
+        allow_domains=("*",),
+        deny_domains=("tbank.ru",),
+        empty_allow="deny",
+    )
+
+
 def test_domain_policy_exact_subdomain_and_wildcard_deny() -> None:
     assert domain_matches("jobs.career.habr.com", "career.habr.com")
     assert is_domain_allowed(

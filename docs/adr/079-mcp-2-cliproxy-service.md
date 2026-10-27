@@ -1,7 +1,7 @@
 ---
 title: "079 — MCP 2.0 tenant service and CLIProxyAPI LLM path"
 description: "**Status**: PROPOSED (rechecked 2026-08-07 against Claudex / multi-model MCP / z.ai patterns)"
-updated: 2026-08-07
+updated: 2026-09-16
 ---
 # 079 — MCP 2.0 tenant service and local LLM gateway path
 
@@ -205,14 +205,24 @@ Service-mode requirements:
 
 **Profile A — Codex (or multi-sub) via CLIProxyAPI**
 
+Operator switch (no second LLM class):
+
 | Setting | Value |
 |---|---|
+| `JOB_FTCH_LLM_GATEWAY` | `cliproxy` |
 | `JOB_FTCH_LLM_BACKEND` | `openai` |
 | `JOB_FTCH_OPENAI_BASE_URL` | `http://127.0.0.1:8317/v1` |
 | `JOB_FTCH_OPENAI_API_KEY` | CLIProxy client key |
-| `JOB_FTCH_OPENAI_MODEL` | id from `GET /v1/models` (extract/present) |
-| `JOB_FTCH_RELEVANCE_LLM_MODEL` | **same gateway id** (relevance judge; must not stay on cloud-only defaults like `gpt-4.1-mini` when using CLIProxy) |
+| Runtime overlay | `config/runtime.cliproxy.yaml` (appended last; extract/judge/ontology model ids) |
+| Env template | `.env.cliproxy.example` |
+| Eval flag | `--llm-gateway cliproxy` on `scripts/eval/run_pipeline_eval.py` |
 | Instructor mode | `TOOLS` (not `TOOLS_STRICT`) for OpenAI-compatible gateways that reject strict tool schemas with optional fields |
+
+`JOB_FTCH_OPENAI_MODEL` and `JOB_FTCH_RELEVANCE_LLM_MODEL` must be ids from
+`GET /v1/models` on that gateway. The overlay currently pins both to
+`gemini-3.1-pro-low` for the local hermes CLIProxy catalog (`gemini-3.8-low`
+is not published there). Cloud-only
+defaults like `gpt-4.1-mini` stay on `llm_gateway=openai`.
 
 `TenantRunner` builds a **second** `OpenAIInstructorLLMProvider` for the
 relevance judge by copying settings and setting `openai_model` to

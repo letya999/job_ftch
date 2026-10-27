@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from time import monotonic
 from typing import TYPE_CHECKING, Any, cast
 
 import anyio
@@ -63,6 +65,22 @@ class SourceFetchResult:
     detail_cards_extracted: int = 0
     detail_attempted: int = 0
     detail_protection_failures: int = 0
+    rate_limit_retry_after_seconds: float | None = None
+    rate_limit_scope: str | None = None
+    started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    finished_at: str | None = None
+    duration_ms: int = 0
+    discovery_started_at: str | None = None
+    discovery_finished_at: str | None = None
+    discovery_duration_ms: int = 0
+    detail_started_at: str | None = None
+    detail_finished_at: str | None = None
+    detail_duration_ms: int = 0
+    detail_budget_seconds: float | None = None
+    remaining_budget_ms: int | None = None
+    monitor_attempt_records: list[dict[str, Any]] = field(default_factory=list)
+    detail_attempt_records: list[dict[str, Any]] = field(default_factory=list)
+    _started_monotonic: float = field(default_factory=monotonic, repr=False, compare=False)
 
 
 _TECHNICAL_ZERO_REASONS = {
@@ -80,6 +98,7 @@ _TECHNICAL_ZERO_REASONS = {
     "parser_error",
     "policy_not_scraped",
     "rate_limited",
+    "listing_redirected",
 }
 
 _OUTCOME_BY_ZERO_REASON = {
@@ -91,6 +110,7 @@ _OUTCOME_BY_ZERO_REASON = {
     "parser_gap": "parser_gap",
     "monitor_empty": "unconfirmed_empty",
     "confirmed_empty": "no_open_vacancies",
+    "freshness_filtered": "no_new_vacancies",
     "board_gone": "board_gone",
     "monitor_error": "source_error",
     "transport_error": "transport_error",
@@ -98,6 +118,7 @@ _OUTCOME_BY_ZERO_REASON = {
     "parser_error": "parser_error",
     "policy_not_scraped": "policy_not_scraped",
     "rate_limited": "rate_limited",
+    "listing_redirected": "listing_discovery_failed",
 }
 
 
@@ -115,6 +136,27 @@ def _capture_source_stats(source: object, result: SourceFetchResult) -> None:
     """Copy adapter-owned health into the cross-source result contract."""
     stats = getattr(source, "stats", None)
     if stats is not None:
+        for name in (
+            "started_at",
+            "finished_at",
+            "discovery_started_at",
+            "discovery_finished_at",
+        ):
+            value = getattr(stats, name, None)
+            if value is not None:
+                setattr(result, name, value)
+        for name in (
+            "duration_ms",
+            "discovery_duration_ms",
+            "detail_duration_ms",
+            "remaining_budget_ms",
+        ):
+            setattr(result, name, int(getattr(stats, name, 0) or 0))
+        result.detail_started_at = getattr(stats, "detail_started_at", None)
+        result.detail_finished_at = getattr(stats, "detail_finished_at", None)
+        result.detail_budget_seconds = getattr(stats, "detail_budget_seconds", None)
+        result.monitor_attempt_records = list(getattr(stats, "monitor_attempt_records", ()) or ())
+        result.detail_attempt_records = list(getattr(stats, "detail_attempt_records", ()) or ())
         result.yielded = getattr(stats, "yielded", result.yielded)
         # A source interrupted while emitting is partial.  A configured
         # frontier cap is successful but limited; merging them made every
@@ -148,9 +190,17 @@ def _capture_source_stats(source: object, result: SourceFetchResult) -> None:
         result.generic_scraper_used = bool(getattr(stats, "scrape_fallback_used", 0))
         result.parser_urls_discovered = int(getattr(stats, "parser_urls_discovered", 0) or 0)
         result.detail_cards_extracted = int(getattr(stats, "detail_cards_extracted", 0) or 0)
+        result.rate_limit_retry_after_seconds = getattr(
+            stats, "rate_limit_retry_after_seconds", None
+        )
+        result.rate_limit_scope = getattr(stats, "rate_limit_scope", None)
         if result.yielded == 0 and result.zero_reason in _TECHNICAL_ZERO_REASONS:
             result.failed = True
             result.error = result.error or f"source_zero_yield:{result.zero_reason}"
+    if result.finished_at is None:
+        result.finished_at = datetime.now(UTC).isoformat()
+    if result.duration_ms <= 0:
+        result.duration_ms = max(round((monotonic() - result._started_monotonic) * 1000), 1)
     if result.yielded:
         if result.partial or result.deadline_exceeded:
             result.terminal_outcome = "partial_with_items"
@@ -207,6 +257,20 @@ def _source_identity(source: object) -> tuple[str, str, str]:
         or repr(source)
     )
     return f"{source_kind}:{source_name}", source_kind, source_name
+
+
+def _source_hard_deadline_seconds(source: object, default: float) -> float:
+    """Allow a source to opt into a longer bounded budget when it needs it."""
+    spec = getattr(source, "spec", None)
+    config = getattr(spec, "monitor_config", None)
+    value = config.get("source_hard_deadline_seconds") if isinstance(config, dict) else None
+    if not isinstance(value, (int, float, str)):
+        return default
+    try:
+        seconds = float(value)
+    except ValueError:
+        return default
+    return seconds if seconds > 0 else default
 
 
 def _with_canonical_source_name(
@@ -319,11 +383,14 @@ class CompositeSource:
                 ),
             )
             failed_before = result.failed
+            hard_deadline_seconds = _source_hard_deadline_seconds(
+                source, self._hard_deadline_seconds
+            )
             deadline_token = set_source_deadline(
-                asyncio.get_running_loop().time() + self._hard_deadline_seconds
+                asyncio.get_running_loop().time() + hard_deadline_seconds
             )
             try:
-                async with asyncio.timeout(self._hard_deadline_seconds):
+                async with asyncio.timeout(hard_deadline_seconds):
                     async for item in source.fetch():
                         result.yielded += 1
                         yield _with_canonical_source_name(item, source_name)
@@ -335,7 +402,7 @@ class CompositeSource:
                         "source_kind": source_kind,
                         "source_name": source_name,
                         "yielded": result.yielded,
-                        "hard_deadline_seconds": self._hard_deadline_seconds,
+                        "hard_deadline_seconds": hard_deadline_seconds,
                         "autoheal_pending": True,
                     },
                 )
@@ -386,11 +453,14 @@ class CompositeSource:
                 ),
             )
             failed_before = result.failed
+            hard_deadline_seconds = _source_hard_deadline_seconds(
+                source, self._hard_deadline_seconds
+            )
             deadline_token = set_source_deadline(
-                asyncio.get_running_loop().time() + self._hard_deadline_seconds
+                asyncio.get_running_loop().time() + hard_deadline_seconds
             )
             try:
-                async with asyncio.timeout(self._hard_deadline_seconds):
+                async with asyncio.timeout(hard_deadline_seconds):
                     async for item in source.fetch():
                         result.yielded += 1
                         await queue.put(_with_canonical_source_name(item, source_name))
@@ -402,7 +472,7 @@ class CompositeSource:
                         "source_kind": source_kind,
                         "source_name": source_name,
                         "yielded": result.yielded,
-                        "hard_deadline_seconds": self._hard_deadline_seconds,
+                        "hard_deadline_seconds": hard_deadline_seconds,
                         "autoheal_pending": True,
                     },
                 )
@@ -538,7 +608,7 @@ class CompositeSource:
                             "source_kind": source_kind,
                             "source_name": source_name,
                             "yielded": state.result.yielded,
-                            "hard_deadline_seconds": self._hard_deadline_seconds,
+                            "hard_deadline_seconds": state.deadline_at - state.started_at,
                             "autoheal_pending": True,
                         },
                     )
@@ -628,7 +698,10 @@ class CompositeSource:
                 )
                 queue: asyncio.Queue[object] = asyncio.Queue(maxsize=self._queue_capacity)
                 started_at = asyncio.get_running_loop().time()
-                deadline_at = started_at + self._hard_deadline_seconds
+                hard_deadline_seconds = _source_hard_deadline_seconds(
+                    source, self._hard_deadline_seconds
+                )
+                deadline_at = started_at + hard_deadline_seconds
                 state = _SourceStreamState(
                     source=source,
                     result=result,

@@ -41,6 +41,23 @@ def create_app(
     effective_settings = settings or get_settings()
     source_adapter: TypeAdapter[SourceSpec] = TypeAdapter(SourceSpec)
 
+    on_event = getattr(app, "on_event", None)
+    if callable(on_event):
+
+        @on_event("startup")
+        async def _start_ingest_queue() -> None:
+            if runner is not None:
+                start = getattr(runner, "start", None)
+                if callable(start):
+                    await start()
+
+        @on_event("shutdown")
+        async def _stop_ingest_queue() -> None:
+            if runner is not None:
+                close = getattr(runner, "close", None)
+                if callable(close):
+                    await close()
+
     @app.post("/pipeline/run")
     async def run_pipeline(source_spec: dict[str, Any]) -> dict[str, Any]:
         if builder is None:
@@ -241,6 +258,8 @@ def create_app(
             "skipped_already_active",
             "trigger",
             "config_fingerprint",
+            "completion_state",
+            "next_retry_at",
         }
         return {
             "tenant_id": tenant_id,
@@ -254,6 +273,8 @@ def create_app(
             "graph_node_metrics": payload.get("graph_node_metrics", {}),
             "started_at": payload.get("started_at"),
             "finished_at": payload.get("finished_at"),
+            "completion_state": payload.get("completion_state"),
+            "next_retry_at": payload.get("next_retry_at"),
             "trigger": payload.get("trigger"),
         }
 

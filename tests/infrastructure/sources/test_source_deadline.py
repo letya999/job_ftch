@@ -7,6 +7,7 @@ import pytest
 
 from job_ftch.infrastructure.sources.source_deadline import (
     await_with_source_deadline,
+    remaining_source_seconds,
     reset_source_deadline,
     set_source_deadline,
 )
@@ -47,3 +48,41 @@ async def test_timeout_cancels_and_drains_child_operation() -> None:
         reset_source_deadline(token)
 
     assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_attempt_timeout_does_not_wait_for_uncancellable_drain() -> None:
+    async def hung_operation() -> None:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            await asyncio.sleep(60)
+
+    started = asyncio.get_running_loop().time()
+    before = set(asyncio.all_tasks())
+    token = set_source_deadline(started + 2.0)
+    try:
+        with pytest.raises(TimeoutError, match="source attempt timeout"):
+            await await_with_source_deadline(hung_operation(), timeout=0.05)
+        assert asyncio.get_running_loop().time() - started < 1.0
+    finally:
+        reset_source_deadline(token)
+        leftover = [task for task in asyncio.all_tasks() if task not in before and not task.done()]
+        for task in leftover:
+            task.cancel()
+        if leftover:
+            await asyncio.gather(*leftover, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_attempt_timeout_does_not_consume_full_source_deadline() -> None:
+    started = asyncio.get_running_loop().time()
+    token = set_source_deadline(started + 2.0)
+    try:
+        with pytest.raises(TimeoutError, match="source attempt timeout"):
+            await await_with_source_deadline(asyncio.sleep(5), timeout=0.05)
+        assert remaining_source_seconds() is not None
+        assert remaining_source_seconds() > 1.0
+    finally:
+        reset_source_deadline(token)
+    assert asyncio.get_running_loop().time() - started < 0.5
