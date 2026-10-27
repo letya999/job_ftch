@@ -107,6 +107,19 @@ def test_prod_bot_image_copies_current_source_over_runtime_base() -> None:
     assert "chown -R" not in text
 
 
+def test_prod_bot_and_api_share_only_the_tenant_lock_volume() -> None:
+    compose = _read_yaml(TELEGRAM_COMPOSE_PROD)
+    for name in ("bot", "public-api"):
+        service = compose["services"][name]
+        assert service["environment"].get("JOB_FTCH_TENANT_LOCK_DIR") == "/app/.tenant_locks"
+        assert "tenant_locks:/app/.tenant_locks" in service.get("volumes", [])
+    assert "bot_runtime:/app/.runtime" not in compose["services"]["public-api"].get("volumes", [])
+    assert "tenant_locks" in compose["volumes"]
+    assert "install -d -o appuser -g appuser /app/.tenant_locks" in (
+        TELEGRAM_DOCKERFILE_PROD.read_text(encoding="utf-8")
+    )
+
+
 def test_workflow_paths_exist() -> None:
     workflow_dir = ROOT / ".github/workflows"
     for workflow in workflow_dir.glob("*.yml"):
