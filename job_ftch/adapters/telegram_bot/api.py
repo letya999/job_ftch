@@ -138,6 +138,15 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
                 "bot_scheduler:last_owner_report_error",
             )
         }
+        list_uncertain = getattr(store, "list_uncertain_outbox", None)
+        uncertain = await list_uncertain() if callable(list_uncertain) else ()
+        uncertain_count = len(
+            {
+                (item.sink_name, item.delivery_payload["attempt_id"])
+                for item in uncertain
+                if str(item.sink_name).startswith("telegram:")
+            }
+        )
     except Exception as exc:
         logger.warning("health_dependency_check_failed", tenant_id=tenant_id, error=str(exc))
         return {
@@ -159,7 +168,7 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
     ).strip()
     status = (
         "degraded"
-        if bad_sources or scheduler_error or publish_error or owner_report_error
+        if bad_sources or scheduler_error or publish_error or owner_report_error or uncertain_count
         else "ok"
     )
     last_finished = summary.finished_at.isoformat() if summary and summary.finished_at else None
@@ -195,6 +204,7 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
             "last_error": scheduler_error or None,
         },
         "publish": {
+            "uncertain_count": uncertain_count,
             "last_success_age_seconds": _age_seconds(
                 scheduler_state.get("bot_scheduler:last_publish_success_at")
             ),

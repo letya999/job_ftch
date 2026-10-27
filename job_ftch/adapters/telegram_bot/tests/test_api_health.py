@@ -134,6 +134,25 @@ async def test_tenant_health_reports_store_source_scheduler_and_publish_state() 
 
 
 @pytest.mark.asyncio
+async def test_uncertain_publication_is_visible_in_health() -> None:
+    runner = _Runner()
+    runner.store.health = []
+    runner.store.state["bot_scheduler:last_publish_error"] = ""
+
+    async def uncertain(limit: int = 100) -> tuple[SimpleNamespace, ...]:
+        return (
+            SimpleNamespace(sink_name="telegram:channel", delivery_payload={"attempt_id": "one"}),
+            SimpleNamespace(sink_name="telegram:channel", delivery_payload={"attempt_id": "one"}),
+            SimpleNamespace(sink_name="other-sink", delivery_payload={"attempt_id": "two"}),
+        )
+
+    runner.store.list_uncertain_outbox = uncertain  # type: ignore[attr-defined]
+    payload = await _tenant_health(runner, "ai_jobs")  # type: ignore[arg-type]
+    assert payload["status"] == "degraded"
+    assert payload["publish"]["uncertain_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_tenant_health_ignores_stale_search_overlay_rows() -> None:
     runner = _Runner()
     now = datetime.now(UTC)
