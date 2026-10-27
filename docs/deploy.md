@@ -138,6 +138,11 @@ resets the retry budget. Non-quota provider failures wait until the next window.
 Missed schedule windows coalesce into one current run; pending deliveries remain
 recoverable through the journal and receipts.
 
+Rate-limited ingest continuations use an increasing retry delay, capped before
+optional jitter by `JOB_FTCH_INGEST_QUEUE_MAX_WAIT_SECONDS`. An upstream `Retry-After` remains a
+minimum; values exceeding the policy limit require operator attention. Tasks
+already in `needs_operator` are not replayed automatically.
+
 The production bot permits two concurrent browser sessions. Browser acquisition
 also waits for 512 MiB of container memory headroom, within the source deadline.
 Cancellation and failures after browser launch must close the owned session.
