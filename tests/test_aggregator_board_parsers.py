@@ -62,6 +62,7 @@ def test_all_requested_aggregators_are_registered() -> None:
     }.items():
         assert resolve_site_parser_by_name(name) is not None
         assert resolve_site_parser(url) is not None
+    assert isinstance(resolve_site_parser("https://www.ai-jobs.net/"), AIJobsParser)
     assert isinstance(resolve_site_parser("https://foorilla.com/hiring/"), AIJobsParser)
     assert isinstance(resolve_site_parser("https://www.aijobs.com/jobs"), AIJobsComParser)
     assert isinstance(resolve_site_parser("https://aijobs.ai/jobs"), AIJobsAiParser)
@@ -110,6 +111,43 @@ async def test_aggregator_detail_follows_external_apply_link() -> None:
     assert items[0].metadata["aggregator_url"] == "https://quick-offer.ru/job/role-1"
     assert items[0].metadata["origin_fetched"] is True
     assert "Original vacancy text." in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_quick_offer_excludes_market_analysis_and_related_jobs() -> None:
+    url = "https://quick-offer.ru/job/role-1"
+    html = """<main><article>
+      <div class="JobTitleCard-module__abc__header"><h1>AI Engineer</h1><span>Remote</span></div>
+      <div class="JobSalaryCard-module__abc__card">Медиана 300 000 ₽ в месяц</div>
+      <div class="JobDescription-module__abc__wrapper">Зарплата обсуждается. Build models.</div>
+      <div class="JobSkills-module__abc__wrapper">Python</div>
+      <div class="JobSimilar-module__abc__wrapper">Другая вакансия 500 000 ₽</div>
+    </article></main>"""
+    client = _Client({url: _Response(html, url)})
+    spec = CareerSiteSpec(url=url, source_name="quick", limit=1)
+
+    items = [item async for item in QuickOfferParser().parse(spec, client)]
+
+    assert len(items) == 1
+    assert "Зарплата обсуждается" in items[0].text
+    assert "Python" in items[0].text
+    assert "300 000" not in items[0].text
+    assert "500 000" not in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_quick_offer_missing_description_does_not_use_market_analysis() -> None:
+    url = "https://quick-offer.ru/job/role-1"
+    html = """<main><article>
+      <div class="JobTitleCard-module__abc__header"><h1>AI Engineer</h1></div>
+      <div class="JobSalaryCard-module__abc__card">Медиана 300 000 ₽</div>
+    </article></main>"""
+    client = _Client({url: _Response(html, url)})
+    spec = CareerSiteSpec(url=url, source_name="quick", limit=1)
+
+    items = [item async for item in QuickOfferParser().parse(spec, client)]
+
+    assert items == []
 
 
 @pytest.mark.asyncio

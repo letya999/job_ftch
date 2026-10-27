@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urljoin, urlsplit
 
 from selectolax.lexbor import LexborHTMLParser
 
 from job_ftch.application.registry import register_site_parser
 from job_ftch.domain import SourceKind
-from job_ftch.infrastructure.sources.browser_utils import navigate, open_page
+from job_ftch.infrastructure.sources.browser_utils import navigate, open_page, safe_content
 from job_ftch.infrastructure.sources.career_site import client_for_config
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
@@ -19,10 +20,12 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     ListingPagination,
     browser_scroll_collect_urls,
     distinctive_search_tokens,
+    effective_limit,
     keywords_from_spec,
     normalize_search_keywords,
     paginate_listing,
     resolve_browser_config,
+    safe_fetch,
     text_matches_keywords,
     with_query_params,
 )
@@ -32,6 +35,42 @@ if TYPE_CHECKING:
 
     from job_ftch.domain.models import RawItem
     from job_ftch.domain.source_spec import CareerSiteSpec
+
+
+def _host_of(url: str) -> str:
+    return (urlsplit(url).hostname or "").lower()
+
+
+def _board_item_limit(spec: CareerSiteSpec) -> int:
+    from job_ftch.config import get_settings
+
+    return effective_limit(spec, get_settings())
+
+
+class _OriginHostClient:
+    """Reject listing/detail hops onto a different host."""
+
+    def __init__(self, inner: Any, origin_host: str) -> None:
+        self._inner = inner
+        self._origin_host = origin_host.lower()
+
+    async def get(self, url: str, *args: Any, **kwargs: Any) -> Any:
+        from job_ftch.infrastructure.sources.monitors.shared import ListingHostMismatchError
+
+        response = await self._inner.get(url, *args, **kwargs)
+        final = str(getattr(response, "url", url) or url)
+        final_host = _host_of(final)
+        if self._origin_host and final_host and final_host != self._origin_host:
+            raise ListingHostMismatchError(
+                f"listing left {self._origin_host} for {final_host}",
+                url=final,
+                origin_host=self._origin_host,
+                final_host=final_host,
+            )
+        return response
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
 
 
 def _listing_cards_from_html(
@@ -45,7 +84,8 @@ def _listing_cards_from_html(
     for anchor in page.css("a[href]"):
         href = str(anchor.attributes.get("href") or "").strip()
         url = urljoin(board_url, href)
-        if not href_pattern.search(url) or url in seen:
+        path = urlsplit(url).path or ""
+        if not (href_pattern.search(path) or href_pattern.search(url)) or url in seen:
             continue
         if url.rstrip("/") == board_url.rstrip("/"):
             continue
@@ -62,6 +102,62 @@ def _listing_cards_from_html(
         text = "\n".join(part.strip() for part in text.splitlines() if part.strip())
         cards.append((url, text))
     return cards
+
+
+async def _cian_listing_html(
+    client: Any,
+    url: str,
+    origin_host: str,
+) -> tuple[str, str]:
+    """Fetch a Cian listing page without following onto classifieds or captcha."""
+    from job_ftch.infrastructure.bypass.challenge_classifier import (
+        classify_challenge,
+        emit_challenge_detection,
+    )
+    from job_ftch.infrastructure.sources.monitors.shared import (
+        BrowserChallengeError,
+        ListingHostMismatchError,
+    )
+
+    try:
+        response = await client.get(url, follow_redirects=True)
+    except TypeError:
+        response = await client.get(url)
+    final = str(getattr(response, "url", url) or url)
+    html = str(getattr(response, "text", "") or "")
+    status_code = getattr(response, "status_code", None)
+    headers = dict(getattr(response, "headers", {}) or {})
+    detection = classify_challenge(
+        surface="cian_listing",
+        status_code=status_code if isinstance(status_code, int) else 200,
+        headers=headers,
+        body=html.encode("utf-8", errors="ignore"),
+        page_url=final,
+    )
+    if detection.detected:
+        emit_challenge_detection(urlsplit(final).hostname or origin_host, detection)
+        raise BrowserChallengeError(
+            url=final,
+            status_code=status_code if isinstance(status_code, int) else None,
+            headers=headers,
+            body=getattr(response, "content", None),
+            challenge_type=detection.challenge_type,
+            confidence=detection.confidence,
+            evidence_hash=detection.evidence_hash,
+        )
+    final_host = _host_of(final)
+    origin = origin_host.lower()
+    if origin and final_host and final_host != origin:
+        raise ListingHostMismatchError(
+            f"listing left {origin} for {final_host}",
+            url=final,
+            origin_host=origin,
+            final_host=final_host,
+        )
+    raise_for_status = getattr(response, "raise_for_status", None)
+    if callable(raise_for_status):
+        raise_for_status()
+    return html, final
 
 
 async def _parse_detail_board(
@@ -85,7 +181,7 @@ async def _parse_detail_board(
         fetch,
         extract,
         spec.url,
-        limit=spec.limit or 50,
+        limit=_board_item_limit(spec),
         pagination=ListingPagination(),
         identity=lambda card: card[0],
     )
@@ -138,7 +234,7 @@ async def _discover_detail_board(
     *,
     href_pattern: re.Pattern[str],
 ) -> list[str]:
-    limit = spec.limit or 50
+    limit = _board_item_limit(spec)
     try:
 
         async def fetch(url: str) -> str:
@@ -165,6 +261,10 @@ async def _discover_detail_board(
     browser_config = resolve_browser_config(spec, bypass_strategy)
     async with open_page(browser_config, bypass_strategy=bypass_strategy) as page:
         await navigate(page, spec.url, browser_config)
+        from job_ftch.infrastructure.sources.monitors.shared import raise_if_browser_challenge
+
+        page_url = str(getattr(page, "url", spec.url) or spec.url)
+        raise_if_browser_challenge(await safe_content(page), url=page_url)
         return await browser_scroll_collect_urls(
             page,
             getattr(page, "url", spec.url) or spec.url,
@@ -491,11 +591,220 @@ class _EmployerBoardParser:
             yield item
 
 
+class JetBrainsCareerParser(_EmployerBoardParser):
+    domain_pattern = r"^https?://(?:www\.)?jetbrains\.com/careers/jobs(?:[/?#]|$)"
+    parser_name = "jetbrains_career"
+    company = "JetBrains"
+    supports_discover = False
+    confirmed_empty_on_empty = True
+    terminal_on_error = True
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        for url in await self.discover(spec, client):
+            response = await safe_fetch(client, url, follow_redirects=False)
+            page = LexborHTMLParser(response.text)
+            title_node = page.css_first("h1")
+            description_node = page.css_first(".job__description")
+            title = title_node.text(separator=" ", strip=True) if title_node else ""
+            description = (
+                description_node.text(separator="\n", strip=True) if description_node else ""
+            )
+            if not title or not description:
+                raise ValueError("invalid JetBrains vacancy detail")
+            yield build_raw_item(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=spec.source_name or self.parser_name,
+                external_id=url.rsplit("/", 1)[-1],
+                url=url,
+                text=f"{title}\n\n{description}",
+                metadata={
+                    "board_url": spec.url,
+                    "parser": self.parser_name,
+                    "observation_kind": "vacancy_detail",
+                    "detail_vacancy_confirmed": True,
+                    "company": self.company,
+                    "company_authoritative": True,
+                },
+            )
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        response = await safe_fetch(
+            client,
+            "https://resources.jetbrains.com/storage/greenhouse/greenhouse-data.json",
+            follow_redirects=False,
+        )
+        payload = response.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+            raise ValueError("invalid JetBrains vacancy feed")
+        result: list[str] = []
+        seen: set[int] = set()
+        for job in payload["jobs"]:
+            job_id = job.get("id") if isinstance(job, dict) else None
+            if not isinstance(job_id, int) or isinstance(job_id, bool) or job_id <= 0:
+                continue
+            if job_id in seen:
+                continue
+            seen.add(job_id)
+            result.append(f"https://job-boards.eu.greenhouse.io/jetbrains/jobs/{job_id}")
+            if len(result) >= _board_item_limit(spec):
+                break
+        if payload["jobs"] and not result:
+            raise ValueError("invalid JetBrains vacancy identifiers")
+        return result
+
+
+class DataArtCareerParser(_EmployerBoardParser):
+    domain_pattern = r"^https?://(?:www\.)?dataart\.team/vacancies(?:[/?#]|$)"
+    parser_name = "dataart_career"
+    company = "DataArt"
+    supports_discover = False
+    confirmed_empty_on_empty = True
+    terminal_on_error = True
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        emitted = 0
+        page_number = 1
+        while True:
+            response = await safe_fetch(
+                client,
+                f"https://www.dataart.team/dataart-team/api/vacancies/filter-content-page?page={page_number}",
+                follow_redirects=False,
+            )
+            payload = response.json()
+            if (
+                not isinstance(payload, dict)
+                or not isinstance(payload.get("items"), list)
+                or not isinstance(payload.get("pagesTotal"), int)
+                or payload["pagesTotal"] < 0
+            ):
+                raise ValueError("invalid DataArt vacancy feed")
+            for vacancy in payload["items"]:
+                slug = vacancy.get("slug") if isinstance(vacancy, dict) else None
+                if not isinstance(slug, str) or not re.fullmatch(r"[A-Za-z0-9]+", slug):
+                    raise ValueError("invalid DataArt vacancy identifier")
+                url = f"https://www.dataart.team/vacancies/{slug.lower()}"
+                detail = await safe_fetch(client, url, follow_redirects=False)
+                page = LexborHTMLParser(detail.text)
+                postings = (
+                    json.loads(node.text())
+                    for node in page.css('script[type="application/ld+json"]')
+                )
+                posting = next(
+                    (candidate for candidate in postings if candidate.get("@type") == "JobPosting"),
+                    None,
+                )
+                if (
+                    posting is None
+                    or not isinstance(posting.get("description"), str)
+                    or not posting["description"].strip()
+                ):
+                    raise ValueError("invalid DataArt vacancy detail")
+                description = LexborHTMLParser(posting["description"]).text(
+                    separator="\n", strip=True
+                )
+                locations = ", ".join(
+                    tag["title"]
+                    for key in ("countriesTags", "locationTags")
+                    for tag in vacancy.get(key, [])
+                    if isinstance(tag, dict) and isinstance(tag.get("title"), str)
+                )
+                yield build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=spec.source_name or self.parser_name,
+                    external_id=slug,
+                    url=url,
+                    text=f"{posting['title']}\n{locations}\n\n{description}",
+                    metadata={
+                        "board_url": spec.url,
+                        "parser": self.parser_name,
+                        "observation_kind": "vacancy_detail",
+                        "detail_vacancy_confirmed": True,
+                        "company": self.company,
+                        "company_authoritative": True,
+                    },
+                )
+                emitted += 1
+                if emitted >= _board_item_limit(spec):
+                    return
+            if page_number >= payload["pagesTotal"]:
+                return
+            if not payload["items"]:
+                raise ValueError("unexpected empty DataArt vacancy page")
+            page_number += 1
+
+
 class CianCareerParser(_EmployerBoardParser):
-    domain_pattern = r"^https?://(?:www\.)?cian\.ru/vacancies(?:/|$)"
+    domain_pattern = r"^https?://(?:(?:www\.)?cian\.ru/vacancies|career\.cian\.ru)(?:/.*)?$"
     parser_name = "cian_career"
     company = "ЦИАН"
-    detail_pattern = re.compile(r"/vacancies/(\d+)(?:/)?$")
+    detail_pattern = re.compile(r"/(?:vacancies|vacancy|jobs?)/(\d+)(?:/)?$")
+    confirmed_empty_on_empty = True
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        origin_host = (urlsplit(spec.url).hostname or "").lower()
+        candidates = [spec.url]
+        if origin_host == "career.cian.ru":
+            for extra in ("https://career.cian.ru/vacancies", "https://career.cian.ru/"):
+                if extra.rstrip("/") not in {item.rstrip("/") for item in candidates}:
+                    candidates.append(extra)
+        limit = _board_item_limit(spec)
+        from job_ftch.infrastructure.sources.monitors.shared import (
+            BrowserChallengeError,
+            ListingHostMismatchError,
+        )
+
+        hop_error: ListingHostMismatchError | None = None
+        for listing_url in candidates:
+            try:
+                html_and_final = await _cian_listing_html(client, listing_url, origin_host)
+            except BrowserChallengeError:
+                raise
+            except ListingHostMismatchError as exc:
+                hop_error = exc
+                continue
+            html, final_url = html_and_final
+            cards = _listing_cards_from_html(html, final_url, self.detail_pattern)
+            origin_cards = [
+                card for card in cards if not origin_host or _host_of(card[0]) == origin_host
+            ]
+            if origin_cards:
+                return [card[0] for card in origin_cards][:limit]
+            if cards:
+                off_host = _host_of(cards[0][0])
+                raise ListingHostMismatchError(
+                    f"listing left {origin_host} for {off_host}",
+                    url=final_url,
+                    origin_host=origin_host,
+                    final_host=off_host,
+                )
+            # Same-host 200 with no vacancy cards is a real empty board.
+            return []
+        if hop_error is not None:
+            raise hop_error
+        return []
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        origin_host = (urlsplit(spec.url).hostname or "").lower()
+        await _cian_listing_html(client, spec.url, origin_host)
+        guarded = _OriginHostClient(client, origin_host) if origin_host else client
+        async for item in _parse_detail_board(
+            spec,
+            guarded,
+            href_pattern=self.detail_pattern,
+            parser_name=self.parser_name,
+            company=self.company,
+        ):
+            if origin_host and _host_of(str(item.url or "")) != origin_host:
+                continue
+            yield item
 
 
 class InnotechCareerParser(_EmployerBoardParser):
@@ -642,6 +951,23 @@ class X5TechCareerParser(_EmployerBoardParser):
     supports_search = True
     search_mode = "per_keyword"
 
+    @staticmethod
+    def _listing_spec(spec: CareerSiteSpec) -> CareerSiteSpec:
+        if _host_of(spec.url) == "x5-tech.ru":
+            url = with_query_params(
+                "https://rabota.x5.ru/vacancies?vacancy_categories=it",
+                dict(parse_qsl(urlsplit(spec.url).query, keep_blank_values=True)),
+            )
+            return spec.model_copy(update={"url": url})
+        return spec
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        return await super().discover(self._listing_spec(spec), client)
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        async for item in super().parse(self._listing_spec(spec), client):
+            yield item
+
     def build_search_urls(
         self,
         base_url: str,
@@ -653,7 +979,11 @@ class X5TechCareerParser(_EmployerBoardParser):
         terms = normalize_search_keywords(keywords)
         if not terms:
             return []
-        listing = base_url.split("?", 1)[0]
+        listing = (
+            "https://rabota.x5.ru/vacancies?vacancy_categories=it"
+            if _host_of(base_url) == "x5-tech.ru"
+            else base_url
+        )
         return [with_query_params(listing, {"search": term}) for term in terms]
 
 
@@ -855,6 +1185,8 @@ register_site_parser("t1_innotech", domain_pattern=T1InnotechParser.domain_patte
     T1InnotechParser
 )
 for _parser_class in (
+    JetBrainsCareerParser,
+    DataArtCareerParser,
     CianCareerParser,
     InnotechCareerParser,
     RostelecomCareerParser,

@@ -46,6 +46,11 @@ def test_compose_relative_host_paths_resolve_inside_repo(compose_path: Path) -> 
     compose_dir = compose_path.parent
     runtime_mount = (ROOT / ".runtime").resolve()
     for service in compose["services"].values():
+        # Optional profiles intentionally require operator-created files (for
+        # example CLIProxy OAuth/config state) and are not part of the default
+        # checkout contract.
+        if "cliproxy" in service.get("profiles", []):
+            continue
         for volume in service.get("volumes", []):
             if not isinstance(volume, str) or ":" not in volume:
                 continue
@@ -100,6 +105,19 @@ def test_prod_bot_image_copies_current_source_over_runtime_base() -> None:
     assert "camoufox fetch" not in text
     assert "cloakbrowser install" not in text
     assert "chown -R" not in text
+
+
+def test_prod_bot_and_api_share_only_the_tenant_lock_volume() -> None:
+    compose = _read_yaml(TELEGRAM_COMPOSE_PROD)
+    for name in ("bot", "public-api"):
+        service = compose["services"][name]
+        assert service["environment"].get("JOB_FTCH_TENANT_LOCK_DIR") == "/app/.tenant_locks"
+        assert "tenant_locks:/app/.tenant_locks" in service.get("volumes", [])
+    assert "bot_runtime:/app/.runtime" not in compose["services"]["public-api"].get("volumes", [])
+    assert "tenant_locks" in compose["volumes"]
+    assert "install -d -o appuser -g appuser /app/.tenant_locks" in (
+        TELEGRAM_DOCKERFILE_PROD.read_text(encoding="utf-8")
+    )
 
 
 def test_workflow_paths_exist() -> None:

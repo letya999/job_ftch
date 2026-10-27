@@ -63,7 +63,7 @@ parsers:
     has_custom_parse: true
     supports_discover: false
   - name: aijobs
-    domain_pattern: "^https?://(?:(?:www\\.)?aijobs\\.net|(?:www\\.)?foorilla\\.com)(?:/|$)"
+    domain_pattern: "^https?://(?:(?:www\\.)?ai-?jobs\\.net|(?:www\\.)?foorilla\\.com)(?:/|$)"
     has_custom_parse: true
     supports_discover: false
   - name: aijobs_com
@@ -161,7 +161,13 @@ parsers:
       stale_rounds: 3
     extra:
       listing_page_size: 20
-      max_listing_pages: 5
+      max_listing_pages: 50
+      detail_concurrency: 4
+      pagination:
+        param_name: page
+        start: 2
+        increment: 1
+        max_pages: 50
   - name: hireme
     domain_pattern: "^https?://(?:www\\.)?hireme\\.kz(?:/|$)"
     has_custom_parse: true
@@ -175,6 +181,8 @@ parsers:
     # only card chrome and tag chips.
     supports_discover: false
     include_if_detail_page: true
+    extra:
+      source_hard_deadline_seconds: 600.0
   - name: indeed
     domain_pattern: "^https?://(?:www\\.)?indeed\\.com(?:/|$)"
     has_custom_parse: true
@@ -410,7 +418,7 @@ parsers:
     wait: "domcontentloaded"
     include_if_detail_page: false
   - name: sololearn
-    domain_pattern: "^https?://(?:www\\.)?sololearn\\.com/(?:[a-z]{2}/)?career(?:/|$)"
+    domain_pattern: "^https?://(?:www\\.)?sololearn\\.com/(?:[a-z]{2}/)?careers?(?:/|$)"
     has_custom_parse: true
     supports_discover: false
     render: false

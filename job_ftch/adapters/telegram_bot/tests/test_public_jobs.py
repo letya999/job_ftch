@@ -23,7 +23,7 @@ class Runner:
 
     def get_runtime(self, tenant_id: str) -> SimpleNamespace:
         assert tenant_id == "ai_jobs"
-        return SimpleNamespace(store=self.store)
+        return SimpleNamespace(store=self.store, job_group_store=None)
 
     async def latest_jobs(self, tenant_id: str, *, limit: int) -> list[SimpleNamespace]:
         assert tenant_id == "ai_jobs"

@@ -192,6 +192,9 @@ class HtmlAggregatorParser:
     detail_pattern = re.compile(r"$^", re.IGNORECASE)
     parser_name = "aggregator"
 
+    def detail_page_text(self, html_text: str) -> tuple[str, str]:
+        return _page_text(html_text)
+
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
         return SiteRuntimeDefaults(
@@ -244,7 +247,7 @@ class HtmlAggregatorParser:
         except Exception as exc:  # noqa: BLE001 - keep listing fallback below
             logger.debug("aggregator_detail_fetch_failed", url=aggregator_url, error=str(exc))
             return None
-        title, body = _page_text(html)
+        title, body = self.detail_page_text(html)
         if not title and not body:
             return None
         origin_url = _external_url_from_html(html, final_aggregator_url)
@@ -371,6 +374,22 @@ class QuickOfferParser(HtmlAggregatorParser):
     parser_name = "quick_offer"
     detail_pattern = re.compile(r"/job/[^/?#]+/?$", re.IGNORECASE)
 
+    def detail_page_text(self, html_text: str) -> tuple[str, str]:
+        tree = LexborHTMLParser(html_text or "")
+        description = tree.css_first('[class*="JobDescription-module"][class*="wrapper"]')
+        if description is None:
+            if tree.css_first('[class*="JobTitleCard-module"]'):
+                return "", ""
+            return _page_text(html_text)
+        title = tree.css_first("h1")
+        header = tree.css_first('[class*="JobTitleCard-module"][class*="header"]')
+        skills = tree.css_first('[class*="JobSkills-module"][class*="wrapper"]')
+        parts = (header, description, skills)
+        return (
+            _clean_text(title.text(separator=" ", strip=True)) if title else "",
+            "\n".join(_clean_text(part.text(separator=" ", strip=True)) for part in parts if part),
+        )
+
 
 class DjinniAggregatorParser(HtmlAggregatorParser):
     domain_pattern = r"^https?://djinni\.co(?:/|$)"
@@ -408,7 +427,7 @@ _AIJOBS_AI_JOB_RE = re.compile(r"/job/([^/?#]+)/?", re.IGNORECASE)
 class AIJobsParser(HtmlAggregatorParser):
     """aijobs.net redirects to foorilla.com; listing is an HTMX fragment."""
 
-    domain_pattern = r"^https?://(?:(?:www\.)?aijobs\.net|(?:www\.)?foorilla\.com)(?:/|$)"
+    domain_pattern = r"^https?://(?:(?:www\.)?ai-?jobs\.net|(?:www\.)?foorilla\.com)(?:/|$)"
     parser_name = "aijobs"
     supports_search = True
     search_mode = "combined"

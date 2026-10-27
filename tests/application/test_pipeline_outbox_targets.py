@@ -124,6 +124,37 @@ async def test_pending_outbox_replays_only_its_named_target() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pending_primary_outbox_replays_without_extra_targets() -> None:
+    store = InMemoryStore()
+    job = _job()
+    await store.enqueue_outbox(
+        OutboxRecord(
+            outbox_id="outbox-primary",
+            observation_id="raw-1",
+            content_hash="a" * 64,
+            decision_version="pipeline-v1",
+            sink_name="primary:sink",
+            idempotency_key="c" * 64,
+            delivery_payload=job.model_dump(mode="json"),
+        )
+    )
+    sink = _RecordingSink()
+    pipeline = Pipeline(
+        source=_EmptySource(),
+        sanitize_node=SanitizeNode(),
+        nodes=[],
+        sink=sink,
+        store=store,
+    )
+
+    await pipeline.run()
+    await pipeline.run()
+
+    assert sink.items == [job]
+    assert await store.list_pending_outbox() == ()
+
+
+@pytest.mark.asyncio
 async def test_delivered_outbox_record_is_not_delivered_again() -> None:
     store = InMemoryStore()
     job = _job()

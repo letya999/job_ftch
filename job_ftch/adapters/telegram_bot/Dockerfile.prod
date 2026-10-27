@@ -7,6 +7,8 @@ WORKDIR /app
 # execute the exact adapter revision that was built.
 COPY --chown=appuser:appuser . /app
 
+USER root
+RUN install -d -o appuser -g appuser /app/.tenant_locks
 USER appuser
 
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app \

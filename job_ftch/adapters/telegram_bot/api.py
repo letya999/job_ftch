@@ -138,6 +138,15 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
                 "bot_scheduler:last_owner_report_error",
             )
         }
+        list_uncertain = getattr(store, "list_uncertain_outbox", None)
+        uncertain = await list_uncertain() if callable(list_uncertain) else ()
+        uncertain_count = len(
+            {
+                (item.sink_name, item.delivery_payload["attempt_id"])
+                for item in uncertain
+                if str(item.sink_name).startswith("telegram:")
+            }
+        )
     except Exception as exc:
         logger.warning("health_dependency_check_failed", tenant_id=tenant_id, error=str(exc))
         return {
@@ -159,7 +168,7 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
     ).strip()
     status = (
         "degraded"
-        if bad_sources or scheduler_error or publish_error or owner_report_error
+        if bad_sources or scheduler_error or publish_error or owner_report_error or uncertain_count
         else "ok"
     )
     last_finished = summary.finished_at.isoformat() if summary and summary.finished_at else None
@@ -195,6 +204,7 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
             "last_error": scheduler_error or None,
         },
         "publish": {
+            "uncertain_count": uncertain_count,
             "last_success_age_seconds": _age_seconds(
                 scheduler_state.get("bot_scheduler:last_publish_success_at")
             ),
@@ -212,6 +222,70 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
             or None,
             "last_error": owner_report_error or None,
         },
+    }
+
+
+async def _telegram_readiness(bot: Any, runner: TenantRunner) -> dict[str, Any]:
+    """Check Bot API access without sending a test message."""
+    try:
+        me = await bot.get_me()
+    except Exception as exc:  # noqa: BLE001 - readiness must never take down liveness
+        return {"status": "unhealthy", "bot_api": {"ok": False, "error": str(exc)}}
+    targets: list[dict[str, Any]] = []
+    statuses = ["ok"]
+    for tenant_id in runner.tenant_ids():
+        target: Any = None
+        try:
+            target = await runner.get_publish_channel(tenant_id)
+            if not target:
+                targets.append(
+                    {
+                        "tenant_id": tenant_id,
+                        "status": "degraded",
+                        "error": "publish_target_missing",
+                    }
+                )
+                statuses.append("degraded")
+                continue
+            chat = await bot.get_chat(target)
+            member = None
+            get_member = getattr(bot, "get_chat_member", None)
+            if callable(get_member):
+                member = await get_member(chat.id, me.id)
+            member_status = str(getattr(member, "status", "unknown")) if member else "unchecked"
+            if member_status in {"left", "kicked"}:
+                statuses.append("unhealthy")
+                targets.append(
+                    {
+                        "tenant_id": tenant_id,
+                        "target": str(target),
+                        "status": "unhealthy",
+                        "error": member_status,
+                    }
+                )
+            else:
+                targets.append(
+                    {
+                        "tenant_id": tenant_id,
+                        "target": str(target),
+                        "status": "ok",
+                        "member_status": member_status,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001 - one target must not hide other targets
+            statuses.append("unhealthy")
+            targets.append(
+                {
+                    "tenant_id": tenant_id,
+                    "target": str(target or ""),
+                    "status": "unhealthy",
+                    "error": str(exc),
+                }
+            )
+    return {
+        "status": _worst_status(statuses),
+        "bot_api": {"ok": True, "username": getattr(me, "username", None)},
+        "targets": targets,
     }
 
 
@@ -246,9 +320,24 @@ def create_app(
             "TELEGRAM_SECRET_TOKEN must be set; refusing to start without authentication"
         )
 
+    if settings.tracing_enabled:
+        from job_ftch.infrastructure.observability import configure_observability
+
+        try:
+            configure_observability(settings)
+        except Exception:
+            logger.warning("api_observability_unavailable")
+
     # Initialize rate limiter
     limiter = Limiter(key_func=get_remote_address)
     app = FastAPI(title="job_ftch telegram bridge")
+
+    @app.on_event("shutdown")
+    async def _stop_ingest_queue() -> None:
+        close = getattr(runner, "close", None)
+        if callable(close):
+            await close()
+
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, cast("Any", _rate_limit_exceeded_handler))
 
@@ -277,6 +366,20 @@ def create_app(
     @app.get("/health/live")
     async def health_live() -> dict[str, Any]:
         return {"status": "ok"}
+
+    @app.get("/health/ready")
+    async def health_ready() -> dict[str, Any]:
+        telegram = await _telegram_readiness(bot, runner)
+        tenants = [await _tenant_health(runner, tenant_id) for tenant_id in runner.tenant_ids()]
+        status = _worst_status(
+            [str(telegram["status"]), *(str(item["status"]) for item in tenants)]
+        )
+        return {
+            "status": status,
+            "telegram": telegram,
+            "tenant_count": len(tenants),
+            "tenants": tenants,
+        }
 
     @app.get("/health")
     async def health() -> dict[str, Any]:

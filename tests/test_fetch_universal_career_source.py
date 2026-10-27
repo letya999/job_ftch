@@ -188,21 +188,26 @@ def test_should_enable_render_on_monitor_retry_for_browser_tiers() -> None:
 
 
 @pytest.mark.parametrize(
-    ("has_url_filter", "monitor_suggests_spa", "expected"),
+    ("has_url_filter", "monitor_suggests_spa", "is_last_monitor", "expected"),
     [
-        (False, False, False),
-        (True, False, True),
-        (False, True, True),
-        (True, True, True),
+        (False, False, False, False),
+        (True, False, False, True),
+        (False, True, False, True),
+        (True, True, False, True),
+        (False, False, True, True),
     ],
 )
 def test_empty_monitor_escalation_requires_explicit_render_evidence(
-    has_url_filter: bool, monitor_suggests_spa: bool, expected: bool
+    has_url_filter: bool,
+    monitor_suggests_spa: bool,
+    is_last_monitor: bool,
+    expected: bool,
 ) -> None:
     assert (
         _should_escalate_empty_monitor(
             has_url_filter=has_url_filter,
             monitor_suggests_spa=monitor_suggests_spa,
+            is_last_monitor=is_last_monitor,
         )
         is expected
     )
@@ -310,6 +315,32 @@ async def test_discovery_parser_terminal_empty_is_policy_outcome(
     assert [item async for item in source._try_site_parser(object())] == []
     assert source._parser_failure_is_terminal is True
     assert source.stats.zero_reason == ZeroYieldReason.POLICY_NOT_SCRAPED
+
+
+@pytest.mark.asyncio
+async def test_old_parser_items_keep_freshness_outcome(monkeypatch: MonkeyPatch) -> None:
+    from job_ftch.infrastructure.sources.career_site_source import ZeroYieldReason
+
+    class _OldTerminalParser(_DatedSiteParser):
+        terminal_on_empty = True
+
+    source = CareerSiteSource(
+        spec=CareerSiteSpec(
+            url="https://example.com/jobs",
+            source_name="example",
+            freshness_cutoff_utc=datetime(2026, 8, 1, tzinfo=UTC),
+        ),
+        http_client=object(),
+        auth=MagicMock(),
+    )
+    source.bypass_strategy = _NoopBypass()
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser_for_spec",
+        lambda _: _OldTerminalParser(),
+    )
+
+    assert [item async for item in source._try_site_parser(object())] == []
+    assert source.stats.zero_reason == ZeroYieldReason.FRESHNESS_FILTERED
 
 
 @pytest.mark.asyncio
@@ -509,6 +540,12 @@ def test_looks_like_spa_shell_detects_common_shell_markers() -> None:
         _looks_like_spa_shell('<script type="application/ld+json">{"@type":"JobPosting"}</script>')
         is False
     )
+    populated = (
+        "<html><body>"
+        + "<p>Vacancy description with enough visible text for a real posting.</p>" * 8
+        + "<script>window.__NEXT_DATA__={}</script></body></html>"
+    )
+    assert _looks_like_spa_shell(populated) is False
 
 
 def test_editorial_article_metadata_is_detected() -> None:

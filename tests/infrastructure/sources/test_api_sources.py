@@ -58,6 +58,7 @@ async def test_hh_mapping():
         "snippet": {"requirement": "Strong Python knowledge"},
         "employer": {"name": "Acme Corp"},
         "area": {"name": "Moscow"},
+        "salary": {"from": 200000, "to": 300000, "currency": "RUR", "gross": False},
     }
 
     raw = adapter._map_to_raw_item(item)
@@ -66,6 +67,14 @@ async def test_hh_mapping():
     assert str(raw.url) == "https://hh.ru/vacancy/456"
     assert raw.text == "Strong Python knowledge"
     assert raw.metadata["employer"]["name"] == "Acme Corp"
+    assert raw.metadata["base_salary"] == {
+        "min": 200000,
+        "max": 300000,
+        "currency": "RUR",
+        "gross": False,
+        "period": "month",
+    }
+    assert raw.metadata["company_authoritative"] is True
 
 
 @pytest.mark.asyncio

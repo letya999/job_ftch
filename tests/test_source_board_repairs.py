@@ -16,6 +16,7 @@ from job_ftch.infrastructure.sources.site_parsers.large_employer_boards import (
 )
 from job_ftch.infrastructure.sources.site_parsers.ozon import OzonCareerParser
 from job_ftch.infrastructure.sources.site_parsers.publicis import PublicisCareerParser
+from job_ftch.infrastructure.sources.site_parsers.sololearn import SololearnParser
 from job_ftch.infrastructure.sources.site_parsers.tele2_kz import _extract_hh_employer_url
 
 
@@ -76,6 +77,10 @@ def test_company_boards_resolve_to_company_owned_parsers() -> None:
     ]
     assert resolve_site_parser("https://job.tele2.kz/").supports_search is False
     assert resolve_site_parser("https://hr.tochka.com/vacancies/it/").supports_search is False
+
+
+def test_sololearn_plural_careers_url_resolves_to_bamboo_parser() -> None:
+    assert isinstance(resolve_site_parser("https://www.sololearn.com/en/careers"), SololearnParser)
 
 
 def test_ozon_career_defaults_stay_http_only() -> None:

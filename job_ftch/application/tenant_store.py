@@ -20,13 +20,14 @@ import json
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import structlog
 
 from job_ftch.application.pipeline import RunSummary
 from job_ftch.application.watermark import IncrementalCursor
 from job_ftch.domain import (
+    IngestTask,
     ManagedCandidateProfile,
     ObservationLedgerEntry,
     OutboxRecord,
@@ -37,11 +38,33 @@ from job_ftch.domain import (
     SourceRunStatsRow,
 )
 
+
+class _UncertainOutboxStore(Protocol):
+    async def list_uncertain_outbox(
+        self, limit: int = 100, *, tenant_id: str | None = None
+    ) -> tuple[OutboxRecord, ...]: ...
+
+    async def release_uncertain_outbox(self, record: OutboxRecord) -> None: ...
+
+    async def list_outbox_attempt(
+        self, attempt_id: str, sink_name: str, *, tenant_id: str
+    ) -> tuple[OutboxRecord, ...]: ...
+
+    async def confirm_uncertain_outbox(
+        self, record: OutboxRecord, receipt: dict[str, object]
+    ) -> OutboxRecord | None: ...
+
+
 if TYPE_CHECKING:
     import builtins
     from collections.abc import Mapping, Sequence, Set
 
-    from job_ftch.application.contracts import DedupReservation, Store, StoreConnector
+    from job_ftch.application.contracts import (
+        DedupReservation,
+        IngestQueueStore,
+        Store,
+        StoreConnector,
+    )
     from job_ftch.domain.search_session import SearchSession
     from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
 
@@ -136,6 +159,10 @@ class TenantStore:
         self._store = store
         self._operational_outcome_max_runs = operational_outcome_max_runs
         self._processed_item_ttl_hours = processed_item_ttl_hours
+        self._incremental_cursor = IncrementalCursor(cast("StoreConnector", self))
+
+    def _ingest_queue_store(self) -> IngestQueueStore:
+        return cast("IngestQueueStore", self._store)
 
     def _key(self, key: str) -> str:
         return f"{self._tenant_id}:{key}"
@@ -162,6 +189,32 @@ class TenantStore:
 
     async def mark_outbox_delivered(self, idempotency_key: str) -> OutboxRecord | None:
         return await self._store.mark_outbox_delivered(idempotency_key)
+
+    async def list_uncertain_outbox(self, limit: int = 100) -> tuple[OutboxRecord, ...]:
+        return await cast("_UncertainOutboxStore", self._store).list_uncertain_outbox(
+            limit, tenant_id=self._tenant_id
+        )
+
+    async def list_outbox_attempt(
+        self, attempt_id: str, sink_name: str
+    ) -> tuple[OutboxRecord, ...]:
+        return await cast("_UncertainOutboxStore", self._store).list_outbox_attempt(
+            attempt_id, sink_name, tenant_id=self._tenant_id
+        )
+
+    async def release_uncertain_outbox(self, record: OutboxRecord) -> None:
+        if record.tenant_id != self._tenant_id:
+            raise ValueError("outbox tenant mismatch")
+        await cast("_UncertainOutboxStore", self._store).release_uncertain_outbox(record)
+
+    async def confirm_uncertain_outbox(
+        self, record: OutboxRecord, receipt: dict[str, object]
+    ) -> OutboxRecord | None:
+        if record.tenant_id != self._tenant_id:
+            raise ValueError("outbox tenant mismatch")
+        return await cast("_UncertainOutboxStore", self._store).confirm_uncertain_outbox(
+            record, receipt
+        )
 
     async def acquire_dedup_claim(self, key: str, owner_id: str, *, ttl_seconds: int) -> bool:
         return await self._store.acquire_dedup_claim(
@@ -311,6 +364,91 @@ class TenantStore:
             msg = f"tenant_id mismatch: {tenant_id} != {self._tenant_id}"
             raise ValueError(msg)
         await self._store.save_source_ingest_state(self._tenant_id, state)
+
+    async def enqueue_ingest_task(self, task: IngestTask) -> IngestTask:
+        if task.tenant_id != self._tenant_id:
+            raise ValueError(f"tenant_id mismatch: {task.tenant_id} != {self._tenant_id}")
+        return await self._ingest_queue_store().enqueue_ingest_task(
+            task.model_copy(update={"rate_scope": self._key(task.rate_scope)})
+        )
+
+    async def claim_due_ingest_tasks(
+        self,
+        tenant_id: str,
+        worker_id: str,
+        *,
+        limit: int,
+        lease_seconds: int,
+        now: datetime,
+    ) -> tuple[IngestTask, ...]:
+        if tenant_id != self._tenant_id:
+            raise ValueError(f"tenant_id mismatch: {tenant_id} != {self._tenant_id}")
+        return await self._ingest_queue_store().claim_due_ingest_tasks(
+            self._tenant_id,
+            worker_id,
+            limit=limit,
+            lease_seconds=lease_seconds,
+            now=now,
+        )
+
+    async def complete_ingest_task(self, task_id: str, worker_id: str) -> IngestTask | None:
+        return await self._ingest_queue_store().complete_ingest_task(task_id, worker_id)
+
+    async def defer_ingest_task(
+        self,
+        task: IngestTask,
+        worker_id: str,
+        *,
+        available_at: datetime,
+        error: str | None = None,
+        refund_attempt: bool = False,
+    ) -> IngestTask | None:
+        if refund_attempt:
+            return await self._ingest_queue_store().defer_ingest_task(
+                task, worker_id, available_at=available_at, error=error, refund_attempt=True
+            )
+        return await self._ingest_queue_store().defer_ingest_task(
+            task, worker_id, available_at=available_at, error=error
+        )
+
+    async def fail_ingest_task(
+        self,
+        task: IngestTask,
+        worker_id: str,
+        *,
+        needs_operator: bool = False,
+        error: str | None = None,
+    ) -> IngestTask | None:
+        return await self._ingest_queue_store().fail_ingest_task(
+            task, worker_id, needs_operator=needs_operator, error=error
+        )
+
+    async def reap_ingest_leases(self, now: datetime) -> int:
+        return await self._ingest_queue_store().reap_ingest_leases(now)
+
+    async def list_active_ingest_tasks(
+        self, tenant_id: str, *, run_id: str | None = None
+    ) -> tuple[IngestTask, ...]:
+        if tenant_id != self._tenant_id:
+            raise ValueError(f"tenant_id mismatch: {tenant_id} != {self._tenant_id}")
+        return await self._ingest_queue_store().list_active_ingest_tasks(
+            self._tenant_id, run_id=run_id
+        )
+
+    async def record_ingest_rate_limit(
+        self,
+        scope_id: str,
+        *,
+        cooldown_until: datetime,
+        retry_after_seconds: float | None,
+        status_code: int | None = None,
+    ) -> None:
+        await self._ingest_queue_store().record_ingest_rate_limit(
+            f"{self._tenant_id}:{scope_id}",
+            cooldown_until=cooldown_until,
+            retry_after_seconds=retry_after_seconds,
+            status_code=status_code,
+        )
 
     async def get_source_operator_flag(
         self, tenant_id: str, source_key: str
@@ -488,7 +626,7 @@ class TenantStore:
         await self._store.save_source_strategy(f"{self._tenant_id}:{domain}", monitor, bypass)
 
     def incremental_cursor(self) -> IncrementalCursor:
-        return IncrementalCursor(cast("StoreConnector", self))
+        return self._incremental_cursor
 
     async def save_run_summary(self, summary: RunSummary) -> None:
         connector = cast("StoreConnector", self._store)

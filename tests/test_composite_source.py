@@ -11,7 +11,14 @@ from job_ftch.infrastructure.sources.composite import (
     CompositeSource,
     SourceFetchResult,
     _source_identity,
+    _zero_yield_outcome,
 )
+
+
+def test_freshness_filtered_is_not_source_failure():
+    result = SourceFetchResult("career_site:example", "career_site", "example")
+    result.zero_reason = "freshness_filtered"
+    assert _zero_yield_outcome(result) == "no_new_vacancies"
 
 
 class FakeSource:

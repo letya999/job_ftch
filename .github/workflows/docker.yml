@@ -59,6 +59,10 @@ jobs:
           printf '\n%s=%s\n' POSTGRES_PASSWOR'D' ci_password >> job_ftch/adapters/telegram_bot/.env.prod
       - name: Build prod runtime image
         run: docker build -f docker/runtime/Dockerfile.prod -t job-ftch-runtime:prod .
+      - name: Check production dependency footprint
+        run: |
+          docker run --rm --entrypoint python job-ftch-runtime:prod -c "import importlib.util; assert importlib.util.find_spec('torch') is None"
+          docker run --rm --entrypoint sh job-ftch-runtime:prod -c "test ! -d /opt/job-ftch-home/.cache/uv"
       - name: Build prod bot image
         run: docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml build bot
 

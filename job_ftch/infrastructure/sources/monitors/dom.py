@@ -622,9 +622,15 @@ async def discover(
         if not html:
             log.warning("dom.fetch_failed", board_url=board_url)
             return set()
-        from job_ftch.infrastructure.sources.monitors.shared import raise_if_browser_challenge
+        from job_ftch.infrastructure.sources.monitors.shared import (
+            check_ats_redirect,
+            raise_if_browser_challenge,
+        )
 
         raise_if_browser_challenge(html, url=board_url)
+        # Static SSR pages can publish the actual vacancies on a separate ATS
+        # host.  Detect that before same-site URL scoring drops those links.
+        check_ats_redirect(html, board_url)
         if _has_confirmed_empty_board_message(html):
             log.info("dom.confirmed_empty_board", board_url=board_url)
             return MonitorResult(metadata_updates={"confirmed_empty": True})

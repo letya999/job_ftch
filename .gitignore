@@ -111,7 +111,6 @@ job_ftch/infrastructure/ontology/data/ontology_*.json
 .venv_dev/
 results/
 profiles/
-artifacts/
 dist/
 data/
 !tools/bot_parity_lab/data/
@@ -176,6 +175,9 @@ Thumbs.db
 # logs / temp
 *.log
 logs/
+deploy/cliproxy/config.yaml
+deploy/cliproxy/auth/
+deploy/cliproxy/logs/
 tmp/
 temp/
 .cache/

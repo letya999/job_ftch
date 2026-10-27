@@ -12,5 +12,5 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [MCP adapter](mcp_adapter.md) - FastMCP tenant server exposing pipeline tools and job resources. (Updated: 2026-09-04)
 - [MCP client setup](mcp_client_setup.md) - How to point local MCP clients at the job_ftch tenant server. (Updated: 2026-08-21)
 - [MCP deployment](mcp_deploy.md) - Local, HTTP, Docker and systemd notes for the FastMCP tenant server. (Updated: 2026-08-12)
-- [Runtime и env: где правда](runtime_and_env.md) - Короткая карта того, какие файлы являются source of truth для конфигурации и переменных окружения. (Updated: 2026-07-28)
+- [Runtime и env: где правда](runtime_and_env.md) - Короткая карта того, какие файлы являются source of truth для конфигурации и переменных окружения. (Updated: 2026-09-16)
 - [Telegram Bot Deploy](telegram_bot_deploy.md) - - Use polling mode by leaving `JOB_FTCH_AUTH_TELEGRAM_BOT_WEBHOOK_URL` unset. (Updated: 2026-07-28)

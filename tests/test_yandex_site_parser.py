@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from structlog.testing import capture_logs
 
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.site_parsers.yandex import (
@@ -8,6 +9,7 @@ from job_ftch.infrastructure.sources.site_parsers.yandex import (
     _extract_ssr_vacancy_urls,
     _item_from_api,
     _item_from_detail_html,
+    _publication_url,
 )
 
 
@@ -93,6 +95,31 @@ def test_item_from_api_resolves_slug_against_listing_origin() -> None:
 
     assert item is not None
     assert str(item.url) == "https://yandex.ru/jobs/vacancies/ml-engineer-456"
+
+
+def test_publication_url_normalizes_bare_slug_against_jobs_root() -> None:
+    assert (
+        _publication_url(
+            "https://yandex.ru/jobs/",
+            "multitrack-_-noviy-format-nayma-dlya-opitnih-bekenderov-15322",
+            15322,
+        )
+        == "https://yandex.ru/jobs/vacancies/multitrack-_-noviy-format-nayma-dlya-opitnih-bekenderov-15322"
+    )
+    assert (
+        str(
+            _item_from_api(
+                {
+                    "id": 15322,
+                    "title": "Backend",
+                    "publication_slug_url": "multitrack-_-noviy-format-nayma-dlya-opitnih-bekenderov-15322",
+                },
+                "https://yandex.ru/jobs/",
+                "yandex_jobs",
+            ).url
+        )
+        == "https://yandex.ru/jobs/vacancies/multitrack-_-noviy-format-nayma-dlya-opitnih-bekenderov-15322"
+    )
 
 
 def test_yandex_parser_rejects_career_consultation_as_vacancy() -> None:
@@ -181,6 +208,36 @@ async def test_yandex_parser_normalizes_jobs_root_to_vacancy_listing() -> None:
 
     assert len(items) == 1
     assert str(items[0].url) == "https://yandex.ru/jobs/vacancies/data-analyst-123"
+
+
+@pytest.mark.asyncio
+async def test_yandex_parser_raises_on_smartcaptcha_api_html() -> None:
+    from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
+
+    parser = YandexJobsParser()
+    client = _FakeClient(
+        {
+            "https://yandex.ru/jobs/api/publications?page_size=1": _FakeResponse(
+                '<html><body><div class="smart-captcha" data-sitekey="ysc1_abc">'
+                "Yandex SmartCaptcha</div></body></html>",
+                "https://yandex.ru/showcaptcha?retpath=https://yandex.ru/jobs/",
+            )
+        }
+    )
+    with capture_logs() as logs, pytest.raises(BrowserChallengeError) as exc_info:
+        _ = [
+            item
+            async for item in parser.parse(
+                CareerSiteSpec(url="https://yandex.ru/jobs/vacancies", limit=1),
+                client,
+            )
+        ]
+    assert exc_info.value.challenge_type == "smartcaptcha"
+    encounter = next(entry for entry in logs if entry.get("event") == "captcha_encounter")
+    assert encounter["captcha_type"] == "smartcaptcha"
+    assert encounter["captcha_host"] == "yandex.ru"
+    assert encounter["captcha_surface"] == "yandex_jobs"
+    assert YandexJobsParser.confirmed_empty_on_empty is True
 
 
 @pytest.mark.asyncio

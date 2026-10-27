@@ -34,7 +34,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT histogram(_timestamp) AS x_axis, avg(duration_ms) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' GROUP BY x_axis ORDER BY x_axis",
+              "query": "SELECT histogram(_timestamp) AS x_axis, avg(duration_ms) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY x_axis ORDER BY x_axis",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -59,7 +59,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT histogram(_timestamp) AS x_axis, avg(llm_cost_usd) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' GROUP BY x_axis ORDER BY x_axis",
+              "query": "SELECT histogram(_timestamp) AS x_axis, avg(llm_cost_usd) AS y_axis FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY x_axis ORDER BY x_axis",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -84,7 +84,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT histogram(_timestamp) AS x_axis, avg(conversion_extract) AS extract_rate, avg(conversion_accept) AS accept_rate FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' GROUP BY x_axis ORDER BY x_axis",
+              "query": "SELECT histogram(_timestamp) AS x_axis, avg(conversion_extract) AS extract_rate, avg(conversion_accept) AS accept_rate FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY x_axis ORDER BY x_axis",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -112,7 +112,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT histogram(_timestamp) AS x_axis, avg(ok_sources) AS ok_sources, avg(fail_sources) AS fail_sources FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' GROUP BY x_axis ORDER BY x_axis",
+              "query": "SELECT histogram(_timestamp) AS x_axis, avg(ok_sources) AS ok_sources, avg(fail_sources) AS fail_sources FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY x_axis ORDER BY x_axis",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -140,7 +140,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT histogram(_timestamp) AS x_axis, avg(fetched) AS fetched, avg(extracted) AS extracted, avg(emitted) AS emitted FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' GROUP BY x_axis ORDER BY x_axis",
+              "query": "SELECT histogram(_timestamp) AS x_axis, avg(fetched) AS fetched, avg(extracted) AS extracted, avg(emitted) AS emitted FROM \"__LOGS_STREAM__\" WHERE event = 'pipeline_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY x_axis ORDER BY x_axis",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -169,7 +169,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT _timestamp, source_run_id, source_key, status, yielded, emitted FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' ORDER BY _timestamp DESC, source_key ASC",
+              "query": "SELECT _timestamp, source_run_id, source_key, status, yielded, emitted FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') ORDER BY _timestamp DESC, source_key ASC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -200,7 +200,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT source_key, source_kind, status, yielded, fetched, emitted, conversion_accept, llm_cost_usd, llm_latency_ms, quality_important, quality_reliable, quality_rich, quality_high_relevance, error FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' ORDER BY emitted DESC, yielded DESC",
+              "query": "SELECT source_key, source_kind, status, yielded, fetched, emitted, conversion_accept, llm_cost_usd, llm_latency_ms, quality_important, quality_reliable, quality_rich, quality_high_relevance, error FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') ORDER BY emitted DESC, yielded DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -225,7 +225,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT status, count(*) AS sources FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' GROUP BY status ORDER BY sources DESC",
+              "query": "SELECT status, count(*) AS sources FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY status ORDER BY sources DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -250,7 +250,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT source_kind, sum(emitted) AS emitted, sum(yielded) AS yielded FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' GROUP BY source_kind ORDER BY emitted DESC",
+              "query": "SELECT source_kind, sum(emitted) AS emitted, sum(yielded) AS yielded FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') GROUP BY source_kind ORDER BY emitted DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -284,7 +284,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT source_key, source_name, status, yielded, emitted, conversion_accept, quality_reliable, quality_rich, quality_high_relevance FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' AND (quality_important = true OR cast(quality_important as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
+              "query": "SELECT source_key, source_name, status, yielded, emitted, conversion_accept, quality_reliable, quality_rich, quality_high_relevance FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') AND (quality_important = true OR cast(quality_important as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -309,7 +309,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT source_key, source_name, status, yielded, emitted FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' AND (quality_reliable = true OR cast(quality_reliable as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
+              "query": "SELECT source_key, source_name, status, yielded, emitted FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') AND (quality_reliable = true OR cast(quality_reliable as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -334,7 +334,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT source_key, source_name, status, yielded, emitted FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' AND (quality_rich = true OR cast(quality_rich as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
+              "query": "SELECT source_key, source_name, status, yielded, emitted FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') AND (quality_rich = true OR cast(quality_rich as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",
@@ -359,7 +359,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT source_key, source_name, status, yielded, emitted, conversion_accept FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND source_run_id = '$source_run_id' AND (quality_high_relevance = true OR cast(quality_high_relevance as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
+              "query": "SELECT source_key, source_name, status, yielded, emitted, conversion_accept FROM \"__LOGS_STREAM__\" WHERE event = 'source_run_stats' AND ('$source_run_id' = '' OR source_run_id = '$source_run_id') AND (quality_high_relevance = true OR cast(quality_high_relevance as text) IN ('true', '1', 't', 'True')) ORDER BY emitted DESC, yielded DESC",
               "customQuery": true,
               "fields": {
                 "stream": "__LOGS_STREAM__",

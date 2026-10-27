@@ -1,7 +1,7 @@
 ---
 title: "Bypass и escalation path"
 description: "Adaptive bypass для ingest: failure signals, route axes, proxy/session/challenge boundaries и запреты."
-updated: 2026-08-05
+updated: 2026-09-13
 ---
 # Bypass и escalation path
 
@@ -138,8 +138,44 @@ For Cloudflare browser challenges, the route is intentionally conservative:
   `residential_proxy`) unless an operator explicitly pins a persistent profile;
 - a provider response is not accepted as solved until the browser route has
   clearance cookies and no classified challenge body remains;
+- image captcha follows `capsolver -> cliproxy_image -> observe`; verification
+  failure on a CapSolver token continues the chain instead of backing off for
+  300s. HH detail pages with a listing snapshot skip per-card captcha solving
+  and keep the listing title so ingest does not stall behind `/account/captcha`;
 - CapSolver `AntiCloudflareTask` is allowed only for authorized domains and
   requires a static/sticky proxy that the provider can reach.
+
+### Provider domain authorization
+
+Paid/external solving (`capsolver`, `capmonster`, `nextcaptcha`,
+`cliproxy_image`, `manual_required`) is gated by `captcha_authorized_domains`.
+`browser_wait` is never gated by this.
+Authorization semantics (2026-09-13):
+
+- empty allowlist denies every domain (safe default and production template);
+- `*` (wildcard) authorizes every domain — operator mode for "solve anywhere";
+  env form: `JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=*`. Local docker-dev sets this
+  in `.env.dev` / `.env.dev.example` and `config/runtime.dev.yaml`. Empty env
+  overrides YAML and denies everything;
+- site parsers may still add per-source allowlists in bypass/monitor config;
+- suffix match covers subdomains (`m.hh.ru` covered by `hh.ru`).
+
+### Incapsula / Imperva
+
+Air Astana (2026-09-13 rehearsal) serves a hard Incapsula session gate:
+`/_Incap*` script + `Pardon Our Interruption` / `Security Check` bodies. Facts:
+
+- `browser_wait` does not clear it (JS cookies are set but the next request
+  still returns the gate);
+- no paid provider route exists for `incapsula` in `captcha_provider_routes`;
+- the gate page can also render with a normal-looking title and a single link,
+  so classifier confidence is split between `blocked_fingerprint` (200 paths)
+  and `incapsula` (404 probe path) — treat both signatures as non-captcha
+  session challenges, do not spend paid budget on them.
+
+Provider chain result was `chain stopped at observe` — intended fail-closed
+behavior; sites behind Incapsula need an explicit manual/HITL route until a
+provider integration is approved.
 
 ## Qrator / jsid
 

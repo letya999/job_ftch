@@ -30,4 +30,5 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_keyword_lists.py](test_keyword_lists.py)
 - [test_maintext_scraper.py](test_maintext_scraper.py)
 - [test_managed_shots.py](test_managed_shots.py)
+- [test_postgres_public_projection.py](test_postgres_public_projection.py)
 - [test_scraper_registration.py](test_scraper_registration.py)

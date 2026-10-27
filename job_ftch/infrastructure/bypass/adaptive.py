@@ -364,19 +364,32 @@ class AdaptiveBypassManager:
                 self.current_tier_index = self._tiers.index(recommended)
                 self._ensure_strategy()
                 logger.info("bypass_preflight_engine_selected", engine=recommended)
-        if getattr(preflight, "network", "direct") == "proxy":
-            if bool(getattr(context, "residential_proxy_available", False)):
+        preflight_network = getattr(preflight, "network", "direct")
+        if preflight_network in {"proxy", "residential_proxy"}:
+            if (
+                preflight_network == "residential_proxy"
+                and bool(getattr(context, "residential_proxy_available", False))
+            ) or (
+                preflight_network == "proxy" and bool(getattr(context, "proxy_available", False))
+            ):
+                network = (
+                    NetworkRoute.RESIDENTIAL_PROXY
+                    if preflight_network == "residential_proxy"
+                    else NetworkRoute.PROXY
+                )
+                self._route_state = self._route_state.transition(
+                    network=network,
+                    session=SessionMode.STICKY,
+                )
+                logger.info("bypass_preflight_network_selected", network=network.value)
+            elif preflight_network == "proxy" and bool(
+                getattr(context, "residential_proxy_available", False)
+            ):
                 self._route_state = self._route_state.transition(
                     network=NetworkRoute.RESIDENTIAL_PROXY,
                     session=SessionMode.STICKY,
                 )
                 logger.info("bypass_preflight_network_selected", network="residential_proxy")
-            elif bool(getattr(context, "proxy_available", False)):
-                self._route_state = self._route_state.transition(
-                    network=NetworkRoute.PROXY,
-                    session=SessionMode.STICKY,
-                )
-                logger.info("bypass_preflight_network_selected", network="proxy")
         self._sync_context_route()
 
     def _sync_context_route(self) -> None:
@@ -389,16 +402,19 @@ class AdaptiveBypassManager:
 
     def _resolve_proxy_country(self) -> str:
         """Resolve the country of the active proxy for geolocation coherence."""
+        from job_ftch.config import get_settings
+
+        default = str(get_settings().proxy_country_default or "RU").upper()
         if not self.uses_proxy or self._context is None:
-            return "US"
+            return default
         proxy_url = getattr(self._context, "current_proxy_url", None)
         if not proxy_url:
-            return "US"
+            return default
         active_proxy = getattr(self._context, "_active_proxy", None)
         country = getattr(active_proxy, "country", None)
         if country:
             return str(country).upper()
-        return "US"
+        return default
 
     _TEMPORAL_HINT_CAP: float = 2.0
 
@@ -682,6 +698,12 @@ class AdaptiveBypassManager:
         )
         return True
 
+    def _fallback_to_direct(self) -> bool:
+        """Drop a failing proxy route so the origin can be retried once."""
+        if self._route_state.network is NetworkRoute.DIRECT:
+            return False
+        return self._transition_network(NetworkRoute.DIRECT)
+
     def _rotate_proxy(
         self,
         source_id: str,
@@ -759,6 +781,7 @@ class AdaptiveBypassManager:
                 prepared["timezone_id"] = persona_kw["timezone_id"]
             if persona_kw.get("viewport") and not prepared.get("viewport"):
                 prepared["viewport"] = persona_kw["viewport"]
+        self._overlay_proxy_geo(prepared)
         if prepared.get("persistent_context"):
             if self._profile_dir is None:
                 domain_profile = self._domain_profile_dir()
@@ -809,6 +832,36 @@ class AdaptiveBypassManager:
             prepared["cookies"] = list(by_key.values())[:_MAX_SESSION_COOKIES]
         self._maybe_add_warmup(prepared)
         return prepared
+
+    def _overlay_proxy_geo(self, prepared: dict[str, Any]) -> None:
+        """Align Playwright timezone/locale with the proxy country.
+
+        Cloak/Patchright cannot consume Camoufox ``geoip``, so the country
+        maps on Settings own timezone and locale when a proxy is active.
+        """
+        if not self.uses_proxy:
+            return
+        from job_ftch.config import get_settings
+
+        settings = get_settings()
+        country = self._resolve_proxy_country()
+        timezone_id = (settings.proxy_timezone_by_country or {}).get(country)
+        locale = (settings.proxy_locale_by_country or {}).get(country)
+        if timezone_id:
+            prepared["timezone_id"] = timezone_id
+        if locale:
+            prepared["locale"] = locale
+
+    def _js_hardening_enabled(self) -> bool:
+        family = self._capabilities[self.current_name].browser_family or ""
+        from job_ftch.config import get_settings
+
+        allowed = {
+            item.strip()
+            for item in get_settings().bypass_js_hardening_browser_families
+            if item and item.strip()
+        }
+        return family in allowed
 
     def _maybe_add_warmup(self, prepared: dict[str, Any]) -> None:
         """Inject a cold-profile-only warm-up navigation to the domain root (B3).
@@ -1129,11 +1182,14 @@ class AdaptiveBypassManager:
         preflight/monitor detector, but the live browser page later no longer
         contains an easy-to-detect site marker. Keeping the detector's typed
         observation lets the solver route to the intended provider instead of
-        falling back to an ``unknown`` DOM guess.
+        falling back to an ``unknown`` DOM guess. Pass ``None`` or blank to
+        clear a leftover stamp after a successful listing.
         """
-        if isinstance(challenge_type, str) and challenge_type.strip():
-            self._observed_challenge_type = challenge_type.strip()
-            self._challenge_solver_terminal = False
+        if not isinstance(challenge_type, str) or not challenge_type.strip():
+            self._observed_challenge_type = None
+            return
+        self._observed_challenge_type = challenge_type.strip()
+        self._challenge_solver_terminal = False
 
     @property
     def challenge_solution_requires_reload(self) -> bool:
@@ -1153,11 +1209,22 @@ class AdaptiveBypassManager:
     ) -> tuple[str, ...]:
         if observed_type == "cloudflare_challenge":
             return ("cloudflare_challenge", "generic_challenge", "terminal")
-        if observed_type in {"recaptcha", "recaptcha_v3", "turnstile", "hcaptcha"}:
+        if observed_type in {
+            "recaptcha",
+            "recaptcha_v3",
+            "turnstile",
+            "hcaptcha",
+            "smartcaptcha",
+        }:
             return ("generic_challenge", "terminal")
         evidence = (body or b"").decode("utf-8", errors="ignore").lower()
         header_text = " ".join(f"{key}:{value}" for key, value in (headers or {}).items()).lower()
         evidence = f"{evidence} {header_text}"
+        if any(
+            marker in evidence
+            for marker in ("smartcaptcha", "showcaptcha", "tmgrdfrend", "cian-captcha")
+        ):
+            return ("generic_challenge", "terminal")
         if any(marker in evidence for marker in ("turnstile", "cf-chl", "cloudflare")):
             return ("cloudflare_challenge", "generic_challenge", "terminal")
         if any(
@@ -1199,15 +1266,8 @@ class AdaptiveBypassManager:
             FailureKind.UNKNOWN,
         }:
             kind = FailureKind.CHALLENGE
-        if self._budget.attempt_exhausted():
-            logger.info(
-                "bypass_operation_attempt_budget_exhausted",
-                tier=self.current_name,
-                failure_kind=kind,
-            )
-            return kind
+        exhausted = self._budget.attempt_exhausted()
         del retry_after  # Retry-After is consumed by the HTTP RouteBudget layer.
-        decision = self._transition_policy.decide(kind)
         capability = self._capabilities[self.current_name]
         self._budget.log_attempt(
             source_id=source_id,
@@ -1219,6 +1279,14 @@ class AdaptiveBypassManager:
             session_generation=self._route_state.generation,
             challenge_action=self._route_state.challenge.value,
         )
+        if exhausted:
+            logger.info(
+                "bypass_operation_attempt_budget_exhausted",
+                tier=self.current_name,
+                failure_kind=kind,
+            )
+            return kind
+        decision = self._transition_policy.decide(kind)
         if kind == FailureKind.OK:
             return kind
         if kind == FailureKind.UNKNOWN:
@@ -1296,17 +1364,60 @@ class AdaptiveBypassManager:
             return kind
         if decision.action is TransitionAction.DEBOUNCED_PROXY:
             self._record_failure(source_id, kind)
+            from job_ftch.config import get_settings
+
+            keep_proxy = bool(get_settings().bypass_keep_proxy_on_engine_connect_error)
             if (
                 self.adaptive_enabled
-                and self._should_escalate(source_id, threshold=self._timeout_threshold)
-                and not self.activate_proxy()
+                and keep_proxy
+                and kind is FailureKind.CONNECT_ERROR
+                and self.uses_proxy
+                and self.escalate()
             ):
-                self._rotate_proxy(
+                logger.info(
+                    "bypass_engine_connect_error_keep_proxy",
+                    failure_kind=kind,
+                    engine=self.current_name,
+                    network=self._route_state.network.value,
+                )
+                return kind
+            if (
+                self.adaptive_enabled
+                and kind in self.DEBOUNCED_NETWORK_KINDS
+                and self._fallback_to_direct()
+            ):
+                logger.info(
+                    "bypass_proxy_transport_failed_fallback_direct",
+                    failure_kind=kind,
+                )
+                return kind
+            if not (
+                self.adaptive_enabled
+                and self._should_escalate(source_id, threshold=self._timeout_threshold)
+            ):
+                return kind
+            network_moved = False
+            if self.uses_proxy:
+                network_moved = self._rotate_proxy(
                     source_id,
                     status_code=status_code,
                     body=body,
                     error=error,
                 )
+            elif self._budget.source_proxy_rotations == 0:
+                network_moved = self.activate_proxy()
+            if not network_moved:
+                # ADR-074: DNS/connect/timeout try the network axis first.
+                # When that axis cannot move (no proxy, or proxy already
+                # failed transport), the conservative fallback is the
+                # engine ladder. Staying on noop turned CIS timeouts into
+                # empty transport_error outcomes.
+                logger.info(
+                    "bypass_transport_conservative_engine_fallback",
+                    failure_kind=kind,
+                    tier=self.current_name,
+                )
+                self.escalate()
             return kind
         if decision.action is TransitionAction.RETRY_SAME_ROUTE:
             # Same-route retries belong to the caller's retry loop. Only when
@@ -1404,16 +1515,13 @@ class AdaptiveBypassManager:
         # ``self._context.apply_page(page)`` call has been removed because it
         # injected a second, conflicting copy of the persona hardening blob.
         await self._current_strategy.apply_page(page)
-        family = self._capabilities[self.current_name].browser_family or "chromium"
-        is_chromium = family.startswith("chromium")
-        # The reCAPTCHA action probe and the Chromium stealth blob are
-        # Blink-specific. Injecting them into a Firefox engine (camoufox) both
-        # fails and destroys camoufox's own C++-level fingerprint coherence, so
-        # they are gated to Chromium-family engines only.
-        if is_chromium:
+        harden_js = self._js_hardening_enabled()
+        # JS stealth is allowlisted (chromium / chromium_patchright by default).
+        # Cloak (chromium_patched) and Firefox (camoufox) keep native identity.
+        if harden_js:
             await self._install_recaptcha_action_probe(page)
         await self._behavior_sim.apply_page(page)
-        if is_chromium:
+        if harden_js:
             await self._apply_per_request_hardening(page)
 
         from job_ftch.infrastructure.bypass.multi_layer_obfuscation import ObfuscationContext
@@ -1583,22 +1691,44 @@ class AdaptiveBypassManager:
             CaptchaFailureReason.DEADLINE_INSUFFICIENT,
             CaptchaFailureReason.BACKOFF_ACTIVE,
         }
+        result_kind_value = getattr(getattr(result, "result_kind", None), "value", None) or getattr(
+            result, "result_kind", None
+        )
+        failure_reason_value = getattr(
+            getattr(result, "failure_reason", None), "value", None
+        ) or getattr(result, "failure_reason", None)
+        challenge_type_value = getattr(result, "challenge_type", None) or observed_type
         logger.info(
             "bypass_captcha_solver_result",
             solved=solved,
-            challenge_type=getattr(result, "challenge_type", None),
-            result_kind=(
-                getattr(getattr(result, "result_kind", None), "value", None)
-                or getattr(result, "result_kind", None)
-            ),
-            failure_reason=(
-                getattr(getattr(result, "failure_reason", None), "value", None)
-                or getattr(result, "failure_reason", None)
-            ),
+            challenge_type=challenge_type_value,
+            result_kind=result_kind_value,
+            failure_reason=failure_reason_value,
             provider_task_id_present=bool(getattr(result, "provider_task_id", None)),
             raw_provider_status=getattr(result, "raw_provider_status", None),
             error=getattr(result, "error", None),
         )
+        try:
+            from urllib.parse import urlparse
+
+            from job_ftch.infrastructure.bypass.challenge_classifier import (
+                emit_captcha_solve_outcome,
+            )
+
+            emit_captcha_solve_outcome(
+                host=urlparse(url).hostname or "",
+                captcha_type=challenge_type_value,
+                solved=solved,
+                result_kind=str(result_kind_value) if result_kind_value is not None else None,
+                failure_reason=(
+                    str(failure_reason_value) if failure_reason_value is not None else None
+                ),
+                engine=self.current_name,
+                provider=getattr(result, "method", None),
+                source_url=url,
+            )
+        except Exception:
+            pass
         self._route_transitions.append(
             {
                 "axis": "challenge",

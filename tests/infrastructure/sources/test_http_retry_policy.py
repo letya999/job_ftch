@@ -106,3 +106,23 @@ async def test_retry_wait_uses_twenty_percent_of_remaining_deadline(
         await fetch_with_retry(client, str(request.url))
 
     assert sleeps == [pytest.approx(2.0, abs=0.1)]
+
+
+@pytest.mark.asyncio
+async def test_http_retry_caps_hung_attempt_below_source_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = AsyncMock()
+
+    async def _hang(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        await asyncio.sleep(10)
+
+    client.get.side_effect = _hang
+    monkeypatch.setattr(http_retry, "_http_attempt_timeout", lambda: 0.05)
+    started = asyncio.get_running_loop().time()
+    async with source_deadline_scope(started + 2.0):
+        with pytest.raises(TimeoutError, match="source attempt timeout"):
+            await fetch_with_retry(client, "https://example.test/jobs", max_attempts=1)
+
+    assert asyncio.get_running_loop().time() - started < 0.5

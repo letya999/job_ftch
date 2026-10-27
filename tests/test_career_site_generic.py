@@ -328,8 +328,8 @@ def test_extract_regex_urls_preserves_host_like_paths():
     }
 
 
-def test_generic_detail_candidate_allows_external_teamtailor_ats_jobs():
-    assert _is_valid_detail_candidate(
+def test_generic_detail_candidate_requires_evidence_for_external_teamtailor_jobs():
+    assert not _is_valid_detail_candidate(
         "https://webbfontainegroup.teamtailor.com/jobs/6485764-senior-devops-engineer",
         "https://webbfontaine.com/about-us/careers",
     )
@@ -504,7 +504,7 @@ def test_yandex_api_item_uses_configured_source_name():
 
     assert item is not None
     assert item.source_name == "ru_yandex_jobs"
-    assert str(item.url) == "https://yandex.ru/jobs/ml-engineer"
+    assert str(item.url) == "https://yandex.ru/jobs/vacancies/ml-engineer"
 
 
 @pytest.mark.asyncio
@@ -1096,7 +1096,7 @@ async def test_force_monitor_overrides_explicit_spec_monitor(monkeypatch):
     items = [item async for item in source.fetch()]
 
     assert items == []
-    assert captured["names"] == ["api_sniffer", "dom"]
+    assert captured["names"] == ["api_sniffer", "dom", "dom"]
 
 
 @pytest.mark.asyncio
@@ -1146,4 +1146,7 @@ async def test_runtime_defaults_can_request_bypass_capability(monkeypatch):
     items = [item async for item in source.fetch()]
 
     assert items == []
-    assert requested == [("cloudflare_challenge", "protected_browser_defaults")]
+    assert requested == [
+        ("cloudflare_challenge", "protected_browser_defaults"),
+        ("passive_js", "last_http_monitor_empty"),
+    ]
