@@ -6,6 +6,11 @@ from job_ftch.application.tenant_store import TenantStore
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
 
+def test_incremental_cursor_is_shared_within_tenant_store():
+    store = TenantStore("tenant-a", object())
+    assert store.incremental_cursor() is store.incremental_cursor()
+
+
 @pytest.mark.asyncio
 async def test_tenant_store_get_set_delegate_with_prefix() -> None:
     backing = InMemoryStore()

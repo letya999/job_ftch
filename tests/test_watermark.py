@@ -74,3 +74,28 @@ class TestIncrementalCursorIsolation:
 
         assert await cursor_a.get("src1") is None
         assert await cursor_b.get("src1") == "val-b"
+
+    @pytest.mark.asyncio
+    async def test_deferred_cursor_discarded_on_failed_run(self):
+        connector = FakeStoreConnector()
+        cursor = IncrementalCursor(connector, namespace="tenant-a")
+
+        with pytest.raises(RuntimeError):
+            async with cursor.defer():
+                await cursor.set("telegram", "42")
+                assert await cursor.get("telegram") == "42"
+                assert connector.data == {}
+                raise RuntimeError("run interrupted")
+
+        assert await cursor.get("telegram") is None
+
+    @pytest.mark.asyncio
+    async def test_deferred_cursor_commits_after_success(self):
+        connector = FakeStoreConnector()
+        cursor = IncrementalCursor(connector, namespace="tenant-a")
+
+        async with cursor.defer():
+            await cursor.set("telegram", "42")
+            assert connector.data == {}
+
+        assert await cursor.get("telegram") == "42"

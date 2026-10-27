@@ -20,7 +20,7 @@ import json
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import structlog
 
@@ -37,6 +37,23 @@ from job_ftch.domain import (
     SourceOperatorFlag,
     SourceRunStatsRow,
 )
+
+
+class _UncertainOutboxStore(Protocol):
+    async def list_uncertain_outbox(
+        self, limit: int = 100, *, tenant_id: str | None = None
+    ) -> tuple[OutboxRecord, ...]: ...
+
+    async def release_uncertain_outbox(self, record: OutboxRecord) -> None: ...
+
+    async def list_outbox_attempt(
+        self, attempt_id: str, sink_name: str, *, tenant_id: str
+    ) -> tuple[OutboxRecord, ...]: ...
+
+    async def confirm_uncertain_outbox(
+        self, record: OutboxRecord, receipt: dict[str, object]
+    ) -> OutboxRecord | None: ...
+
 
 if TYPE_CHECKING:
     import builtins
@@ -142,6 +159,7 @@ class TenantStore:
         self._store = store
         self._operational_outcome_max_runs = operational_outcome_max_runs
         self._processed_item_ttl_hours = processed_item_ttl_hours
+        self._incremental_cursor = IncrementalCursor(cast("StoreConnector", self))
 
     def _ingest_queue_store(self) -> IngestQueueStore:
         return cast("IngestQueueStore", self._store)
@@ -171,6 +189,32 @@ class TenantStore:
 
     async def mark_outbox_delivered(self, idempotency_key: str) -> OutboxRecord | None:
         return await self._store.mark_outbox_delivered(idempotency_key)
+
+    async def list_uncertain_outbox(self, limit: int = 100) -> tuple[OutboxRecord, ...]:
+        return await cast("_UncertainOutboxStore", self._store).list_uncertain_outbox(
+            limit, tenant_id=self._tenant_id
+        )
+
+    async def list_outbox_attempt(
+        self, attempt_id: str, sink_name: str
+    ) -> tuple[OutboxRecord, ...]:
+        return await cast("_UncertainOutboxStore", self._store).list_outbox_attempt(
+            attempt_id, sink_name, tenant_id=self._tenant_id
+        )
+
+    async def release_uncertain_outbox(self, record: OutboxRecord) -> None:
+        if record.tenant_id != self._tenant_id:
+            raise ValueError("outbox tenant mismatch")
+        await cast("_UncertainOutboxStore", self._store).release_uncertain_outbox(record)
+
+    async def confirm_uncertain_outbox(
+        self, record: OutboxRecord, receipt: dict[str, object]
+    ) -> OutboxRecord | None:
+        if record.tenant_id != self._tenant_id:
+            raise ValueError("outbox tenant mismatch")
+        return await cast("_UncertainOutboxStore", self._store).confirm_uncertain_outbox(
+            record, receipt
+        )
 
     async def acquire_dedup_claim(self, key: str, owner_id: str, *, ttl_seconds: int) -> bool:
         return await self._store.acquire_dedup_claim(
@@ -357,7 +401,12 @@ class TenantStore:
         *,
         available_at: datetime,
         error: str | None = None,
+        refund_attempt: bool = False,
     ) -> IngestTask | None:
+        if refund_attempt:
+            return await self._ingest_queue_store().defer_ingest_task(
+                task, worker_id, available_at=available_at, error=error, refund_attempt=True
+            )
         return await self._ingest_queue_store().defer_ingest_task(
             task, worker_id, available_at=available_at, error=error
         )
@@ -577,7 +626,7 @@ class TenantStore:
         await self._store.save_source_strategy(f"{self._tenant_id}:{domain}", monitor, bypass)
 
     def incremental_cursor(self) -> IncrementalCursor:
-        return IncrementalCursor(cast("StoreConnector", self))
+        return self._incremental_cursor
 
     async def save_run_summary(self, summary: RunSummary) -> None:
         connector = cast("StoreConnector", self._store)

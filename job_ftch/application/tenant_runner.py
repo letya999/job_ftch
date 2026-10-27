@@ -7,7 +7,7 @@ import hashlib
 import json
 import random
 import uuid
-from contextlib import nullcontext, suppress
+from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
@@ -20,7 +20,6 @@ from job_ftch.application.auth import resolve_auth_provider
 from job_ftch.application.builder import (
     PipelineBuilder,
     build_delivery_targets,
-    build_llm,
     build_nodes,
     build_output_sinks,
     build_quarantine_sink,
@@ -32,13 +31,29 @@ from job_ftch.application.builder import (
     resolve_settings_source_preparation_concurrency,
     tenant_to_settings,
 )
+from job_ftch.application.builder import (
+    build_llm as _legacy_build_llm,
+)
+from job_ftch.application.llm_quota import (
+    DEFAULT_QUOTA_MAX_RETRIES,
+    DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
+    DEFAULT_SCHEDULE_INTERVAL_SECONDS,
+    check_llm_before_run,
+    check_llm_pause,
+    note_llm_quota_failure,
+)
 from job_ftch.application.llm_usage import collect_llm_usage, pricing_version
 from job_ftch.application.pipeline import RunSummary, SourceRunStats
+from job_ftch.application.provider_routing import (
+    BindingPreflight,
+    build_llm_bindings,
+    preflight_bindings,
+    required_binding_names,
+)
 from job_ftch.application.registry import (
     create_embedding_provider,
     create_job_backend,
     create_job_group_store,
-    create_llm,
     create_ontology_store,
     create_search_backend,
     create_store,
@@ -98,8 +113,20 @@ if TYPE_CHECKING:
     from job_ftch.nodes.snapshot_filter import SnapshotFilterNode
 
 logger = structlog.get_logger(__name__)
+# Compatibility seam retained for MCP and tenant-runner tests/plugins that
+# replace the pre-routing builder. Runtime construction uses named bindings.
+build_llm = _legacy_build_llm
 _DEFAULT_LATEST_JOBS_POOL = 200
 _PROFILE_AWARE_LATEST_JOBS_POOL = 1000
+
+
+def _sync_legacy_llm_override(runtime: TenantRuntime) -> None:
+    """Keep the old mutable ``llm_provider`` seam compatible with bindings."""
+    configured_extraction = runtime.llm_bindings.get("extraction")
+    if runtime.llm_provider is configured_extraction:
+        return
+    runtime.llm_bindings["extraction"] = runtime.llm_provider
+    runtime.llm_bindings["relevance"] = runtime.llm_provider
 
 
 class _ReplaySource:
@@ -302,6 +329,13 @@ def _canonical_base_source_id(
         if source_spec_name(spec) == name or source_spec_locator(spec) == locator:
             return ident
     return None
+
+
+def _search_parent_source_id(source_id: str) -> str:
+    base, marker, suffix = source_id.rpartition("_kw")
+    return (
+        base if marker and suffix.isdigit() and source_id.startswith("career_site:") else source_id
+    )
 
 
 def _listing_payload_for_source(
@@ -676,9 +710,17 @@ class TenantRunner:
             )
             return
         try:
+            attempt_run_id = uuid.uuid4().hex
+            logger.info(
+                "ingest_delayed_task_started",
+                tenant_id=task.tenant_id,
+                parent_run_id=task.run_id,
+                source_run_id=attempt_run_id,
+                source_id=task.source_id,
+            )
             summary = await self.run_tenant(
                 task.tenant_id,
-                run_id=task.run_id,
+                run_id=attempt_run_id,
                 max_items=task.max_items,
                 user_id=task.user_id,
                 source_ids=(task.source_id,),
@@ -716,6 +758,25 @@ class TenantRunner:
                 error=str(exc),
             )
             return
+        if summary.skipped_already_active:
+            await store.defer_ingest_task(
+                task,
+                self._ingest_worker_id,
+                available_at=datetime.now(UTC)
+                + timedelta(seconds=settings.ingest_queue_error_retry_seconds),
+                error="tenant_run_already_active",
+                refund_attempt=True,
+            )
+            return
+        if summary.drop_reasons.get("lock_error"):
+            await store.defer_ingest_task(
+                task,
+                self._ingest_worker_id,
+                available_at=datetime.now(UTC)
+                + timedelta(seconds=settings.ingest_queue_error_retry_seconds),
+                error="tenant_run_lock_error",
+            )
+            return
         if summary.completion_state == "waiting_rate_limit":
             return
         if summary.completion_state == "needs_operator":
@@ -724,6 +785,14 @@ class TenantRunner:
                 self._ingest_worker_id,
                 needs_operator=True,
                 error="ingest_queue_policy_blocked",
+            )
+            return
+        if summary.completion_state in {"llm_preflight_blocked", "llm_quota_exhausted"}:
+            await store.defer_ingest_task(
+                task,
+                self._ingest_worker_id,
+                available_at=summary.next_retry_at or datetime.now(UTC),
+                error="llm_unavailable_before_ingest",
             )
             return
         await store.complete_ingest_task(task.task_id, self._ingest_worker_id)
@@ -748,7 +817,8 @@ class TenantRunner:
                 operational_outcome_max_runs=tenant.retention_runs,
             )
             job_group_store = cast("JobGroupStore", create_job_group_store(tenant_settings))
-            llm = cast("LLMProvider", create_llm(tenant_settings))
+            llm_bindings = build_llm_bindings(tenant_settings)
+            llm = cast("LLMProvider", llm_bindings["extraction"])
             embedding_provider = None
             # The generic embedding provider is only consumed by the optional
             # semantic prefilter. Do not load its heavyweight model merely to
@@ -802,6 +872,9 @@ class TenantRunner:
                 job_group_store,
                 catalog=catalog,
                 bgem3_provider=tenant_bgem3_provider,
+                relevance_llm=cast(
+                    "LLMProvider", llm_bindings.get("relevance", llm_bindings["extraction"])
+                ),
             )
             output_sink, main_sink, review_sink, posting_sink = build_output_sinks(
                 tenant_settings, store=tenant_store
@@ -838,6 +911,7 @@ class TenantRunner:
                 store=tenant_store,
                 builder=builder,
                 llm_provider=llm,
+                llm_bindings=llm_bindings,
                 job_group_store=job_group_store,
                 search_backend=cast("SearchBackend", create_search_backend(tenant_settings)),
                 job_backend=cast("JobPersistenceBackend", create_job_backend(tenant_settings)),
@@ -1159,6 +1233,7 @@ class TenantRunner:
         personal_max_items: int | None = None,
         replay_mode: bool = False,
     ) -> tuple[PipelineBuilder, SnapshotFilterNode | None]:
+        _sync_legacy_llm_override(runtime)
         # Load the live ontology from the Postgres/SQLite store
         # so the builder has both the static fixtures seed and
         # whatever the LLM has extracted from the user's recent
@@ -1227,6 +1302,9 @@ class TenantRunner:
             relevance_prompts=relevance_prompts,
             derived_ontology_override=runtime_derived_ontology,
             personal_mode=personal_mode,
+            relevance_llm=cast(
+                "LLMProvider", runtime.llm_bindings.get("relevance", runtime.llm_provider)
+            ),
         )
         if runtime.settings.pipeline_graph_path is not None:
             from job_ftch.application.graph import build_v2_executor, compile_graph, load_graph
@@ -1264,16 +1342,12 @@ class TenantRunner:
                     graph,
                     spec=replace(graph.spec, nodes=tuple(personal_nodes)),
                 )
-            if runtime.settings.llm_backend == "openai":
-                relevance_settings = runtime.settings.model_copy(
-                    update={"openai_model": runtime.settings.relevance_llm_model}
-                )
-                relevance_llm = build_llm(relevance_settings)
-            else:
-                # Non-OpenAI providers are often injected tenant adapters.
-                # Rebuilding from Settings silently discarded that runtime
-                # provider and made test/custom deployments use heuristics.
-                relevance_llm = runtime.llm_provider
+            # The graph binding is resolved once at tenant composition time;
+            # do not silently rebuild a provider from global model settings.
+            relevance_llm = cast(
+                "LLMProvider",
+                runtime.llm_bindings.get("relevance", runtime.llm_provider),
+            )
             typed_bindings = build_v2_typed_bindings(
                 nodes=list(nodes),
                 store=runtime.store,
@@ -1808,12 +1882,42 @@ class TenantRunner:
         tracer = trace.get_tracer("job_ftch.tenant_runner")
         attach_token = None
         borrowed = False
+        run_lock = AsyncExitStack()
         try:
             with tracer.start_as_current_span("ingest.run") as span:
                 span.set_attribute("job_ftch.source_run_id", run_id)
                 span.set_attribute("job_ftch.tenant_id", tenant_id)
                 runtime = self.get_runtime(tenant_id)
                 config_fingerprint = _tenant_config_fingerprint(runtime)
+                try:
+                    await run_lock.enter_async_context(
+                        _tenant_run_lock(runtime.settings, tenant_id, timeout=0)
+                    )
+                except TenantRunAlreadyActiveError:
+                    logger.info("tenant_run_skipped_already_active", tenant_id=tenant_id)
+                    span.set_attribute("job_ftch.skipped_already_active", True)
+                    return RunSummary(
+                        tenant_id=tenant_id,
+                        source_run_id=run_id,
+                        finished_at=datetime.now(UTC),
+                        trigger=trigger,
+                        config_fingerprint=config_fingerprint,
+                        skipped_already_active=True,
+                    )
+                except TenantRunLockError as exc:
+                    logger.error(
+                        "tenant_run_skipped_lock_error", tenant_id=tenant_id, error=str(exc)
+                    )
+                    span.set_attribute("job_ftch.failed", 1)
+                    return RunSummary(
+                        tenant_id=tenant_id,
+                        source_run_id=run_id,
+                        finished_at=datetime.now(UTC),
+                        trigger=trigger,
+                        config_fingerprint=config_fingerprint,
+                        failed=1,
+                        drop_reasons={"lock_error": 1},
+                    )
                 if not _from_ingest_queue and getattr(
                     runtime.settings, "ingest_queue_enabled", False
                 ):
@@ -1929,7 +2033,125 @@ class TenantRunner:
                     borrowed = True
                     attach_token = attach_operator_page(attached.page)
                 try:
-                    async with _tenant_run_lock(runtime.settings, tenant_id):
+                    llm_interval = (
+                        runtime.tenant.schedule.interval_seconds
+                        if runtime.tenant.schedule is not None
+                        else getattr(runtime.settings, "schedule_interval_seconds", None)
+                    ) or DEFAULT_SCHEDULE_INTERVAL_SECONDS
+                    binding_checks: dict[str, BindingPreflight] = {}
+                    binding_switches: list[dict[str, object]] = []
+                    extraction_preflight = None
+                    preflight = await check_llm_pause(runtime.store)
+                    if preflight is None and getattr(
+                        runtime.settings, "llm_preflight_enabled", True
+                    ):
+                        _sync_legacy_llm_override(runtime)
+                        binding_checks, binding_switches = await preflight_bindings(
+                            runtime.settings,
+                            runtime.llm_bindings,
+                            names=required_binding_names(runtime.settings),
+                        )
+                        for binding_name, check in binding_checks.items():
+                            runtime.llm_bindings[binding_name] = check.provider
+                        if "extraction" in binding_checks:
+                            runtime.llm_provider = cast(
+                                "LLMProvider", binding_checks["extraction"].provider
+                            )
+                            extraction_preflight = binding_checks["extraction"].result
+                        previous_switches = await runtime.store.get_run_state(
+                            "llm:last_binding_switches"
+                        )
+                        previous_recovery = await runtime.store.get_run_state(
+                            "llm:last_binding_recovery"
+                        )
+                        if binding_switches and (
+                            json.dumps(binding_switches, ensure_ascii=False, sort_keys=True)
+                            != (previous_switches or "")
+                            or bool(previous_recovery)
+                        ):
+                            await runtime.store.set_run_state(
+                                "llm:last_binding_switches",
+                                json.dumps(binding_switches, ensure_ascii=False, sort_keys=True),
+                            )
+                            await runtime.store.set_run_state("llm:last_binding_recovery", "")
+                            logger.warning(
+                                "llm_binding_fallback_selected",
+                                tenant_id=tenant_id,
+                                run_id=run_id,
+                                switches=binding_switches,
+                            )
+                        unavailable = [
+                            (name, check.result)
+                            for name, check in binding_checks.items()
+                            if not check.result.available
+                        ]
+                        if (
+                            not unavailable
+                            and not binding_switches
+                            and previous_switches
+                            and not previous_recovery
+                        ):
+                            await runtime.store.set_run_state(
+                                "llm:last_binding_recovery",
+                                json.dumps(
+                                    {
+                                        "recovered_at": datetime.now(UTC).isoformat(),
+                                        "previous_switches": previous_switches,
+                                    },
+                                    ensure_ascii=False,
+                                    sort_keys=True,
+                                ),
+                            )
+                        if unavailable:
+                            _, first_result = next(
+                                (
+                                    (name, result)
+                                    for name, result in unavailable
+                                    if result.quota_exhausted
+                                ),
+                                unavailable[0],
+                            )
+                            extraction_preflight = first_result
+                        preflight = await check_llm_before_run(
+                            runtime.store,
+                            runtime.llm_provider,
+                            normal_interval_seconds=int(llm_interval),
+                            retry_delay_seconds=getattr(
+                                runtime.settings,
+                                "llm_quota_retry_delay_seconds",
+                                DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
+                            ),
+                            max_retries=getattr(
+                                runtime.settings,
+                                "llm_quota_max_retries",
+                                DEFAULT_QUOTA_MAX_RETRIES,
+                            ),
+                            preflight_result=extraction_preflight,
+                        )
+                    if preflight is not None and not preflight.allowed:
+                        summary = RunSummary(
+                            tenant_id=tenant_id,
+                            source_run_id=run_id,
+                            trigger=trigger,
+                            config_fingerprint=config_fingerprint,
+                            completion_state="llm_preflight_blocked",
+                            next_retry_at=preflight.retry_at,
+                            llm_quota_exhausted=preflight.quota_exhausted,
+                            llm_health_error=preflight.message,
+                            source_outcomes=[
+                                {
+                                    "source_id": source_spec_identifier(spec),
+                                    "source_kind": str(getattr(spec, "type", "unknown")),
+                                    "source_name": source_spec_name(spec),
+                                    "status": "skipped",
+                                    "completion_state": "llm_preflight_blocked",
+                                    "error": preflight.message,
+                                }
+                                for spec in runtime.tenant.sources
+                            ],
+                        ).finish()
+                        await self._persist_terminal_summary(runtime, summary)
+                    else:
                         summary = await self._run_tenant_bound(
                             tenant_id,
                             run_id=run_id,
@@ -1946,6 +2168,26 @@ class TenantRunner:
                             ingest_task_id=_ingest_task_id,
                             ingest_worker_id=self._ingest_worker_id if _from_ingest_queue else None,
                         )
+                        if getattr(runtime.llm_provider, "quota_exhausted", False):
+                            decision = await note_llm_quota_failure(
+                                runtime.store,
+                                normal_interval_seconds=int(llm_interval),
+                                retry_delay_seconds=getattr(
+                                    runtime.settings,
+                                    "llm_quota_retry_delay_seconds",
+                                    DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
+                                ),
+                                max_retries=getattr(
+                                    runtime.settings,
+                                    "llm_quota_max_retries",
+                                    DEFAULT_QUOTA_MAX_RETRIES,
+                                ),
+                            )
+                            summary.completion_state = "llm_quota_exhausted"
+                            summary.next_retry_at = decision.retry_at
+                            summary.llm_quota_exhausted = True
+                            summary.llm_health_error = decision.message
+                            await self._persist_terminal_summary(runtime, summary)
                 except TenantRunAlreadyActiveError:
                     logger.info("tenant_run_skipped_already_active", tenant_id=tenant_id)
                     summary = RunSummary()
@@ -1972,6 +2214,7 @@ class TenantRunner:
                 span.set_attribute("job_ftch.failed", summary.failed)
                 return summary
         finally:
+            await run_lock.aclose()
             if attach_token is not None:
                 from job_ftch.infrastructure.sources.browser_utils import (
                     reset_operator_page,
@@ -2027,6 +2270,10 @@ class TenantRunner:
                 source_spec_identifier(spec)
                 for spec in all_specs
                 if source_spec_identifier(spec) not in runtime.disabled_source_ids
+            }
+            requested_source_ids = {
+                sid if sid in available_source_ids else _search_parent_source_id(sid)
+                for sid in requested_source_ids
             }
             missing_source_ids = requested_source_ids - available_source_ids
             if missing_source_ids:
@@ -2186,15 +2433,6 @@ class TenantRunner:
                 else _tenant_run_lock(runtime.settings, tenant_id)
             )
             async with lock_context:
-                try:
-                    await runtime.store.set_run_state("pipeline.run_summary", "")
-                except Exception as exc:
-                    logger.warning(
-                        "tenant_run_summary_state_clear_failed",
-                        tenant_id=tenant_id,
-                        error=str(exc),
-                        exc_info=True,
-                    )
                 with collect_llm_usage() as usage:
                     catalog, relevance_prompts = await self._build_runtime_catalog(
                         runtime, user_id=user_id
@@ -2211,9 +2449,12 @@ class TenantRunner:
                         builder_kwargs["personal_mode"] = True
                         builder_kwargs["personal_max_items"] = max_items
                     builder, snapshot_filter = await self._build_runtime_builder(**builder_kwargs)
-                    summary = await builder.run_async(
-                        max_items=None if personal_mode else max_items
-                    )
+                    async with runtime.store.incremental_cursor().defer() as pending_cursors:
+                        summary = await builder.run_async(
+                            max_items=None if personal_mode else max_items
+                        )
+                        if summary.failed:
+                            pending_cursors.clear()
                 summary.llm_usage_requests = usage.requests
                 summary.llm_tokens_in = usage.tokens_in
                 summary.llm_cached_tokens_in = usage.cached_tokens_in
@@ -2389,12 +2630,13 @@ class TenantRunner:
             return
         now = datetime.now(UTC)
         queue_started_at = summary.started_at
+        queue_run_id = str(summary.source_run_id)
+        retry_attempt = 0
         if ingest_task_id:
             list_active = getattr(runtime.store, "list_active_ingest_tasks", None)
             if callable(list_active):
                 active_tasks = await list_active(
                     runtime.tenant.tenant_id,
-                    run_id=summary.source_run_id,
                 )
                 current_task = next(
                     (task for task in active_tasks if task.task_id == ingest_task_id),
@@ -2402,10 +2644,16 @@ class TenantRunner:
                 )
                 if current_task is not None:
                     queue_started_at = current_task.created_at
+                    queue_run_id = current_task.run_id
+                    retry_attempt = current_task.attempt
         scheduled: list[datetime] = []
         needs_operator: list[str] = []
+        queued_sources: set[str] = set()
         for outcome in rate_limited:
-            source_id = str(outcome["source_id"])
+            source_id = _search_parent_source_id(str(outcome["source_id"]))
+            if source_id in queued_sources:
+                continue
+            queued_sources.add(source_id)
             raw_wait = outcome.get("rate_limit_retry_after_seconds")
             if isinstance(raw_wait, (int, float, str)):
                 try:
@@ -2415,7 +2663,22 @@ class TenantRunner:
             else:
                 wait_seconds = 0.0
             if wait_seconds <= 0:
-                wait_seconds = settings.ingest_queue_default_retry_seconds
+                base_wait = settings.ingest_queue_default_retry_seconds
+                if base_wait > settings.ingest_queue_max_wait_seconds:
+                    wait_seconds = base_wait
+                else:
+                    wait_seconds = min(
+                        settings.ingest_queue_max_wait_seconds,
+                        base_wait * 2 ** min(retry_attempt, 20),
+                    )
+            elif retry_attempt:
+                wait_seconds = max(
+                    wait_seconds,
+                    min(
+                        settings.ingest_queue_max_wait_seconds,
+                        settings.ingest_queue_default_retry_seconds * 2 ** min(retry_attempt, 20),
+                    ),
+                )
             scope = str(outcome.get("rate_limit_scope") or source_id)
             reason = "rate_limit_delay_exceeds_policy"
             if wait_seconds > settings.ingest_queue_max_wait_seconds:
@@ -2430,12 +2693,12 @@ class TenantRunner:
                     seconds=random.uniform(0.0, settings.ingest_queue_jitter_seconds)
                 )
             task_id = hashlib.sha256(
-                f"{runtime.tenant.tenant_id}:{summary.source_run_id}:{source_id}".encode()
+                f"{runtime.tenant.tenant_id}:{queue_run_id}:{source_id}".encode()
             ).hexdigest()
             task = IngestTask(
                 task_id=task_id,
                 tenant_id=runtime.tenant.tenant_id,
-                run_id=str(summary.source_run_id),
+                run_id=queue_run_id,
                 source_id=source_id,
                 rate_scope=scope,
                 max_items=max_items,

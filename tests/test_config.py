@@ -45,6 +45,12 @@ def test_openai_backend_settings_can_load_without_api_key_for_non_llm_paths() ->
     assert settings.openai_api_key is None
 
 
+def test_named_captcha_binding_uses_the_high_flash_model() -> None:
+    settings = Settings.model_validate({"llm_backend": "heuristic"})
+
+    assert settings.llm_bindings["captcha_image"].model == "gemini-3.8-flash-high"
+
+
 def test_openai_provider_requires_api_key() -> None:
     from job_ftch.infrastructure.llm.openai_provider import _build_openai_llm
 

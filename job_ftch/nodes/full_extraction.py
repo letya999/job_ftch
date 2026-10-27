@@ -256,7 +256,12 @@ class FullExtractionNode:
         if extraction_status is JobExtractionStatus.PARTIAL:
             review_reasons.insert(0, JobReviewReason.PARTIAL_EXTRACTION.value)
 
-        compensation = extracted.compensation or job.compensation
+        from job_ftch.nodes.job_normalization import CompensationParsingNode
+
+        salary_checked = await CompensationParsingNode().process(
+            job.model_copy(update={"compensation": job.compensation or extracted.compensation})
+        )
+        compensation = salary_checked.compensation if salary_checked is not None else None
         if (
             job.metadata.get("parser") == "sber-public-api"
             and not job.metadata.get("base_salary")
@@ -271,6 +276,8 @@ class FullExtractionNode:
             update={
                 "title": title,
                 "company": company,
+                "company_canonical": company,
+                "company_name_normalized": company,
                 "location": location,
                 "city": city,
                 "country": country,

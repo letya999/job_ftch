@@ -1,7 +1,7 @@
 ---
 title: "Observability"
 description: "Логи, метрики, traces, quality checks and runtime diagnostics for job_ftch."
-updated: 2026-09-17
+updated: 2026-10-18
 ---
 # Observability
 
@@ -18,6 +18,14 @@ signals are related, but owned by different runtime paths.
 | CAPTCHA encounters | log events `captcha_encounter` and `captcha_solve_outcome`; dashboard `job_ftch captcha` |
 | Compose env | `deploy/observability/.env*.example` |
 | Runtime verification | `scripts/verify_observability_run.py` |
+
+Production exports metrics every 60 seconds with bounded labels such as tenant,
+source, stage, and outcome. The unique `source_run_id` remains on detailed run
+and source log records and in PostgreSQL run statistics; it is not a metric
+label, since cumulative export would resend a new time series for every run.
+The OpenObserve production stack retains metric and log data for at least 15
+days. Before changing retention, verify the most recent 14 complete days in
+each stream and preserve the PostgreSQL publication ledger separately.
 
 ## CAPTCHA telemetry
 

@@ -318,6 +318,32 @@ async def test_discovery_parser_terminal_empty_is_policy_outcome(
 
 
 @pytest.mark.asyncio
+async def test_old_parser_items_keep_freshness_outcome(monkeypatch: MonkeyPatch) -> None:
+    from job_ftch.infrastructure.sources.career_site_source import ZeroYieldReason
+
+    class _OldTerminalParser(_DatedSiteParser):
+        terminal_on_empty = True
+
+    source = CareerSiteSource(
+        spec=CareerSiteSpec(
+            url="https://example.com/jobs",
+            source_name="example",
+            freshness_cutoff_utc=datetime(2026, 8, 1, tzinfo=UTC),
+        ),
+        http_client=object(),
+        auth=MagicMock(),
+    )
+    source.bypass_strategy = _NoopBypass()
+    monkeypatch.setattr(
+        "job_ftch.application.registry.resolve_site_parser_for_spec",
+        lambda _: _OldTerminalParser(),
+    )
+
+    assert [item async for item in source._try_site_parser(object())] == []
+    assert source.stats.zero_reason == ZeroYieldReason.FRESHNESS_FILTERED
+
+
+@pytest.mark.asyncio
 async def test_parser_terminal_error_does_not_fall_through_to_dom(
     monkeypatch: MonkeyPatch,
 ) -> None:

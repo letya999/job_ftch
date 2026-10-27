@@ -688,6 +688,7 @@ async def test_vision_click_order_falls_back_to_openai_on_local_401(
             captcha_vision_model="gemini-3-flash",
         ),
     )
+    monkeypatch.setenv("JOB_FTCH_CLIPROXY_API_KEY", "cliproxy-test-key")
 
     points = await providers.request_vision_click_order(b"png-bytes")
     assert points == [(0.4, 0.5)]

@@ -61,6 +61,10 @@ class SourceRunStatsRow(BaseModel):
     dropped: int = 0
     failed: int = 0
     duration_ms: int = 0
+    discovery_duration_ms: int = 0
+    detail_duration_ms: int = 0
+    detail_budget_seconds: float | None = None
+    remaining_budget_ms: int | None = None
     llm_latency_ms: int = 0
     llm_cost_usd: float = 0.0
     conversion_accept: float = 0.0

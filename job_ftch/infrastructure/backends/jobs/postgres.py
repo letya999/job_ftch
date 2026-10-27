@@ -452,6 +452,45 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 )
             return [load_group(row["raw_json"]) for row in rows]
 
+    async def list_public_canonical_jobs(self, limit: int) -> list[JobRecord]:
+        """Read only fields needed by the anonymous public catalog."""
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                WITH recent AS MATERIALIZED (
+                    SELECT group_id, raw_json->'canonical_job' AS job
+                    FROM (
+                        SELECT group_id, raw_json
+                        FROM jf_job_groups ORDER BY updated_at DESC LIMIT $1
+                    ) AS selected
+                )
+                SELECT jsonb_build_object(
+                    'group_id', group_id,
+                    'raw_item_id', job->'raw_item_id',
+                    'source_kind', job->'source_kind',
+                    'source_name', job->'source_name',
+                    'title', job->'title',
+                    'company', job->'company',
+                    'description', left(job->>'description', 360),
+                    'location', job->'location',
+                    'city', job->'city',
+                    'region', job->'region',
+                    'country', job->'country',
+                    'work_mode', job->'work_mode',
+                    'seniority', job->'seniority',
+                    'tools_stack', job->'tools_stack',
+                    'skills_explicit', job->'skills_explicit',
+                    'posted_at', job->'posted_at',
+                    'compensation', job->'compensation',
+                    'canonical_url', job->'canonical_url'
+                ) AS public_job
+                FROM recent
+                """,
+                limit,
+            )
+        return [JobRecord.model_validate_json(row["public_job"]) for row in rows]
+
     async def count(self, since: datetime | None = None) -> int:
         pool = await self._get_pool()
         async with pool.acquire() as conn:

@@ -475,6 +475,17 @@ async def _cleanup_browser_stack(page: Any, context: Any, browser: Any | None = 
     return closed_ok
 
 
+async def _close_browser_session(page: Any, context: Any, browser: Any, session_id: str) -> None:
+    """Always reach scoped process cleanup, including cancellation during close."""
+    closed = False
+    try:
+        closed = await _cleanup_browser_stack(page, context, browser)
+    finally:
+        if not closed:
+            terminate_session_browsers(session_id)
+        reap_stale_browser_drivers()
+
+
 def _proc_signature(proc: Any) -> str:
     """Lower-cased ``name + cmdline`` for marker matching; psutil-error safe."""
     try:
@@ -756,11 +767,13 @@ async def open_page(
                     await await_with_source_deadline(bypass_strategy.apply_page(page))
                 yield page
             finally:
-                await _capture_session_state(bypass_strategy, page)
                 try:
-                    await manager.__aexit__(None, None, None)
-                except Exception as exc:
-                    log.warning("browser.session_bypass_cleanup_failed", error=str(exc))
+                    await _capture_session_state(bypass_strategy, page)
+                finally:
+                    try:
+                        await manager.__aexit__(None, None, None)
+                    except Exception as exc:
+                        log.warning("browser.session_bypass_cleanup_failed", error=str(exc))
             return
 
         async_playwright = _load_async_playwright(
@@ -947,42 +960,42 @@ async def _open_playwright_page(
             label="browser.launch",
         )
 
-    from job_ftch.infrastructure.sources.source_deadline import await_with_source_deadline
-
-    if bypass_ctx:
-        reported_version = str(getattr(browser, "version", ""))
-        bypass_ctx.align_browser_runtime("chromium", reported_version)
-        # The persona may be version-aligned only after the real browser has
-        # launched.  Re-project its UA into the context even when
-        # prepare_browser_config already filled an older persona UA; otherwise
-        # window headers say one Chrome major while workers expose the native
-        # runtime major.
-        if identity_ua:
-            context_kwargs["user_agent"] = bypass_ctx.persona.ua
-
-    context: BrowserContext = await await_with_source_deadline(
-        browser.new_context(**context_kwargs)
-    )
-
-    timeout_ms = normalize_browser_timeout_ms(
-        config.get("timeout", settings.browser_default_timeout_ms)
-    )
-    context.set_default_timeout(timeout_ms)
-
-    if config.get("cookies"):
-        await context.add_cookies(_json_safe_cookies(config["cookies"]))
-
-    page: Page = await await_with_source_deadline(context.new_page())
-
-    # When the adaptive controller owns page hardening it injects the persona
-    # blob itself (once) inside ``apply_page``. Calling ``bypass_ctx.on_page``
-    # as well would inject a second, possibly conflicting copy, so skip it.
-    if bypass_ctx and not getattr(bypass_strategy, "owns_page_hardening", False):
-        await bypass_ctx.on_page(page)
-    if bypass_strategy:
-        await bypass_strategy.apply_page(page)
-
+    context: BrowserContext | None = None
+    page: Page | None = None
     try:
+        from job_ftch.infrastructure.sources.source_deadline import await_with_source_deadline
+
+        if bypass_ctx:
+            reported_version = str(getattr(browser, "version", ""))
+            bypass_ctx.align_browser_runtime("chromium", reported_version)
+            # The persona may be version-aligned only after the real browser has
+            # launched.  Re-project its UA into the context even when
+            # prepare_browser_config already filled an older persona UA; otherwise
+            # window headers say one Chrome major while workers expose the native
+            # runtime major.
+            if identity_ua:
+                context_kwargs["user_agent"] = bypass_ctx.persona.ua
+
+        context = await await_with_source_deadline(browser.new_context(**context_kwargs))
+
+        timeout_ms = normalize_browser_timeout_ms(
+            config.get("timeout", settings.browser_default_timeout_ms)
+        )
+        context.set_default_timeout(timeout_ms)
+
+        if config.get("cookies"):
+            await context.add_cookies(_json_safe_cookies(config["cookies"]))
+
+        page = await await_with_source_deadline(context.new_page())
+
+        # When the adaptive controller owns page hardening it injects the persona
+        # blob itself (once) inside ``apply_page``. Calling ``bypass_ctx.on_page``
+        # as well would inject a second, possibly conflicting copy, so skip it.
+        if bypass_ctx and not getattr(bypass_strategy, "owns_page_hardening", False):
+            await bypass_ctx.on_page(page)
+        if bypass_strategy:
+            await bypass_strategy.apply_page(page)
+
         if config.get("warmup_url"):
             stats = config.get("_pipeline_stats")
             if stats is not None:
@@ -994,14 +1007,7 @@ async def _open_playwright_page(
             await page.goto(config["warmup_url"])
         yield page
     finally:
-        # Closing the browser alone leaves Page/Context transports behind on
-        # Windows when navigation was cancelled by a source deadline.  Close
-        # the innermost resources first; every close is best-effort because a
-        # target may already have been terminated by Patchright.
-        closed = await _cleanup_browser_stack(page, context, browser)
-        if not closed:
-            terminate_session_browsers(session_id)
-        reap_stale_browser_drivers()
+        await _close_browser_session(page, context, browser, session_id)
 
 
 @asynccontextmanager
@@ -1097,26 +1103,29 @@ async def _open_persistent_page(
 
     from job_ftch.infrastructure.sources.source_deadline import await_with_source_deadline
 
-    timeout_ms = normalize_browser_timeout_ms(
-        config.get("timeout", settings.browser_default_timeout_ms)
-    )
-    context.set_default_timeout(timeout_ms)
-
-    if config.get("cookies"):
-        await context.add_cookies(_json_safe_cookies(config["cookies"]))
-
-    page = (
-        context.pages[0] if context.pages else await await_with_source_deadline(context.new_page())
-    )
-
-    # See note in _open_playwright_page: skip the duplicate persona injection
-    # when the adaptive controller already owns page hardening.
-    if bypass_ctx and not getattr(bypass_strategy, "owns_page_hardening", False):
-        await bypass_ctx.on_page(page)
-    if bypass_strategy:
-        await bypass_strategy.apply_page(page)
-
+    page: Page | None = None
     try:
+        timeout_ms = normalize_browser_timeout_ms(
+            config.get("timeout", settings.browser_default_timeout_ms)
+        )
+        context.set_default_timeout(timeout_ms)
+
+        if config.get("cookies"):
+            await context.add_cookies(_json_safe_cookies(config["cookies"]))
+
+        page = (
+            context.pages[0]
+            if context.pages
+            else await await_with_source_deadline(context.new_page())
+        )
+
+        # See note in _open_playwright_page: skip the duplicate persona injection
+        # when the adaptive controller already owns page hardening.
+        if bypass_ctx and not getattr(bypass_strategy, "owns_page_hardening", False):
+            await bypass_ctx.on_page(page)
+        if bypass_strategy:
+            await bypass_strategy.apply_page(page)
+
         if config.get("warmup_url"):
             stats = config.get("_pipeline_stats")
             if stats is not None:
@@ -1128,15 +1137,14 @@ async def _open_persistent_page(
             await page.goto(config["warmup_url"])
         yield page
     finally:
-        closed = await _cleanup_browser_stack(page, context)
-        if not closed:
-            terminate_session_browsers(session_id)
-        reap_stale_browser_drivers()
-        import shutil
+        try:
+            await _close_browser_session(page, context, None, session_id)
+        finally:
+            import shutil
 
-        if owns_profile_dir:
-            with suppress(Exception):
-                shutil.rmtree(user_data_dir, ignore_errors=True)
+            if owns_profile_dir:
+                with suppress(Exception):
+                    shutil.rmtree(user_data_dir, ignore_errors=True)
 
 
 async def navigate(page: Page, url: str, config: dict[str, Any]) -> None:

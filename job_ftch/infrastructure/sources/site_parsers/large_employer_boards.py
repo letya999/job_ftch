@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit
 
 from selectolax.lexbor import LexborHTMLParser
 
@@ -24,6 +25,7 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     normalize_search_keywords,
     paginate_listing,
     resolve_browser_config,
+    safe_fetch,
     text_matches_keywords,
     with_query_params,
 )
@@ -589,6 +591,156 @@ class _EmployerBoardParser:
             yield item
 
 
+class JetBrainsCareerParser(_EmployerBoardParser):
+    domain_pattern = r"^https?://(?:www\.)?jetbrains\.com/careers/jobs(?:[/?#]|$)"
+    parser_name = "jetbrains_career"
+    company = "JetBrains"
+    supports_discover = False
+    confirmed_empty_on_empty = True
+    terminal_on_error = True
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        for url in await self.discover(spec, client):
+            response = await safe_fetch(client, url, follow_redirects=False)
+            page = LexborHTMLParser(response.text)
+            title_node = page.css_first("h1")
+            description_node = page.css_first(".job__description")
+            title = title_node.text(separator=" ", strip=True) if title_node else ""
+            description = (
+                description_node.text(separator="\n", strip=True) if description_node else ""
+            )
+            if not title or not description:
+                raise ValueError("invalid JetBrains vacancy detail")
+            yield build_raw_item(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=spec.source_name or self.parser_name,
+                external_id=url.rsplit("/", 1)[-1],
+                url=url,
+                text=f"{title}\n\n{description}",
+                metadata={
+                    "board_url": spec.url,
+                    "parser": self.parser_name,
+                    "observation_kind": "vacancy_detail",
+                    "detail_vacancy_confirmed": True,
+                    "company": self.company,
+                    "company_authoritative": True,
+                },
+            )
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        response = await safe_fetch(
+            client,
+            "https://resources.jetbrains.com/storage/greenhouse/greenhouse-data.json",
+            follow_redirects=False,
+        )
+        payload = response.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+            raise ValueError("invalid JetBrains vacancy feed")
+        result: list[str] = []
+        seen: set[int] = set()
+        for job in payload["jobs"]:
+            job_id = job.get("id") if isinstance(job, dict) else None
+            if not isinstance(job_id, int) or isinstance(job_id, bool) or job_id <= 0:
+                continue
+            if job_id in seen:
+                continue
+            seen.add(job_id)
+            result.append(f"https://job-boards.eu.greenhouse.io/jetbrains/jobs/{job_id}")
+            if len(result) >= _board_item_limit(spec):
+                break
+        if payload["jobs"] and not result:
+            raise ValueError("invalid JetBrains vacancy identifiers")
+        return result
+
+
+class DataArtCareerParser(_EmployerBoardParser):
+    domain_pattern = r"^https?://(?:www\.)?dataart\.team/vacancies(?:[/?#]|$)"
+    parser_name = "dataart_career"
+    company = "DataArt"
+    supports_discover = False
+    confirmed_empty_on_empty = True
+    terminal_on_error = True
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        emitted = 0
+        page_number = 1
+        while True:
+            response = await safe_fetch(
+                client,
+                f"https://www.dataart.team/dataart-team/api/vacancies/filter-content-page?page={page_number}",
+                follow_redirects=False,
+            )
+            payload = response.json()
+            if (
+                not isinstance(payload, dict)
+                or not isinstance(payload.get("items"), list)
+                or not isinstance(payload.get("pagesTotal"), int)
+                or payload["pagesTotal"] < 0
+            ):
+                raise ValueError("invalid DataArt vacancy feed")
+            for vacancy in payload["items"]:
+                slug = vacancy.get("slug") if isinstance(vacancy, dict) else None
+                if not isinstance(slug, str) or not re.fullmatch(r"[A-Za-z0-9]+", slug):
+                    raise ValueError("invalid DataArt vacancy identifier")
+                url = f"https://www.dataart.team/vacancies/{slug.lower()}"
+                detail = await safe_fetch(client, url, follow_redirects=False)
+                page = LexborHTMLParser(detail.text)
+                postings = (
+                    json.loads(node.text())
+                    for node in page.css('script[type="application/ld+json"]')
+                )
+                posting = next(
+                    (candidate for candidate in postings if candidate.get("@type") == "JobPosting"),
+                    None,
+                )
+                if (
+                    posting is None
+                    or not isinstance(posting.get("description"), str)
+                    or not posting["description"].strip()
+                ):
+                    raise ValueError("invalid DataArt vacancy detail")
+                description = LexborHTMLParser(posting["description"]).text(
+                    separator="\n", strip=True
+                )
+                locations = ", ".join(
+                    tag["title"]
+                    for key in ("countriesTags", "locationTags")
+                    for tag in vacancy.get(key, [])
+                    if isinstance(tag, dict) and isinstance(tag.get("title"), str)
+                )
+                yield build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=spec.source_name or self.parser_name,
+                    external_id=slug,
+                    url=url,
+                    text=f"{posting['title']}\n{locations}\n\n{description}",
+                    metadata={
+                        "board_url": spec.url,
+                        "parser": self.parser_name,
+                        "observation_kind": "vacancy_detail",
+                        "detail_vacancy_confirmed": True,
+                        "company": self.company,
+                        "company_authoritative": True,
+                    },
+                )
+                emitted += 1
+                if emitted >= _board_item_limit(spec):
+                    return
+            if page_number >= payload["pagesTotal"]:
+                return
+            if not payload["items"]:
+                raise ValueError("unexpected empty DataArt vacancy page")
+            page_number += 1
+
+
 class CianCareerParser(_EmployerBoardParser):
     domain_pattern = r"^https?://(?:(?:www\.)?cian\.ru/vacancies|career\.cian\.ru)(?:/.*)?$"
     parser_name = "cian_career"
@@ -799,6 +951,23 @@ class X5TechCareerParser(_EmployerBoardParser):
     supports_search = True
     search_mode = "per_keyword"
 
+    @staticmethod
+    def _listing_spec(spec: CareerSiteSpec) -> CareerSiteSpec:
+        if _host_of(spec.url) == "x5-tech.ru":
+            url = with_query_params(
+                "https://rabota.x5.ru/vacancies?vacancy_categories=it",
+                dict(parse_qsl(urlsplit(spec.url).query, keep_blank_values=True)),
+            )
+            return spec.model_copy(update={"url": url})
+        return spec
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        return await super().discover(self._listing_spec(spec), client)
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        async for item in super().parse(self._listing_spec(spec), client):
+            yield item
+
     def build_search_urls(
         self,
         base_url: str,
@@ -810,7 +979,11 @@ class X5TechCareerParser(_EmployerBoardParser):
         terms = normalize_search_keywords(keywords)
         if not terms:
             return []
-        listing = base_url.split("?", 1)[0]
+        listing = (
+            "https://rabota.x5.ru/vacancies?vacancy_categories=it"
+            if _host_of(base_url) == "x5-tech.ru"
+            else base_url
+        )
         return [with_query_params(listing, {"search": term}) for term in terms]
 
 
@@ -1012,6 +1185,8 @@ register_site_parser("t1_innotech", domain_pattern=T1InnotechParser.domain_patte
     T1InnotechParser
 )
 for _parser_class in (
+    JetBrainsCareerParser,
+    DataArtCareerParser,
     CianCareerParser,
     InnotechCareerParser,
     RostelecomCareerParser,
