@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, cast
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable
@@ -51,15 +51,23 @@ def normalize_publish_url(url: str) -> str | None:
     text = str(url).strip()
     if not text:
         return None
-    parts = urlsplit(text)
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return text.casefold()
     if not parts.scheme and not parts.netloc:
         return text.casefold() or None
+    query = "&".join(
+        part
+        for part in parts.query.split("&")
+        if not unquote_plus(part.partition("=")[0]).casefold().startswith("utm_")
+    )
     normalized = urlunsplit(
         (
             parts.scheme.lower(),
             parts.netloc.lower(),
             parts.path or "",
-            parts.query,
+            query,
             "",
         )
     )
@@ -109,7 +117,8 @@ async def persist_publish_ledger(store: RunStateStore, ledger: list[str]) -> lis
 
 
 async def load_publish_url_ledger(store: RunStateStore) -> list[str]:
-    return await _load_string_list(store, _PUBLISH_URL_LEDGER_KEY)
+    urls = await _load_string_list(store, _PUBLISH_URL_LEDGER_KEY)
+    return [normalized for url in urls if (normalized := normalize_publish_url(url))]
 
 
 async def persist_publish_url_ledger(store: RunStateStore, ledger: list[str]) -> list[str]:

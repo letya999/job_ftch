@@ -42,6 +42,9 @@ class PostgreSQLStore(SQLStoreAdapter):
     _SQL_SET_MEMBERS = "SELECT member FROM jf_set WHERE key = $1"
     _SQL_OUTBOX_ENQUEUE = "INSERT INTO jf_outbox (outbox_id, tenant_id, idempotency_key, state, payload_json) VALUES ($1, $2, $3, $4, $5::jsonb) ON CONFLICT (idempotency_key) DO NOTHING"
     _SQL_OUTBOX_GET = "SELECT payload_json::text, state FROM jf_outbox WHERE idempotency_key = $1"
+    _SQL_OUTBOX_ATTEMPT = "SELECT payload_json::text, state FROM jf_outbox WHERE tenant_id = $1 AND payload_json->>'sink_name' = $2 AND payload_json->'delivery_payload'->>'attempt_id' = $3"
+    _SQL_OUTBOX_RELEASE_UNCERTAIN = "DELETE FROM jf_outbox WHERE idempotency_key = $1 AND state = $2 AND payload_json = $3::jsonb"
+    _SQL_OUTBOX_CONFIRM_UNCERTAIN = "UPDATE jf_outbox SET state = $1, payload_json = $2::jsonb, updated_at = NOW() WHERE idempotency_key = $3 AND state = $4 AND payload_json = $5::jsonb"
     _SQL_OUTBOX_PENDING = "SELECT payload_json::text, state FROM jf_outbox WHERE state = $1 AND tenant_id = $2 ORDER BY updated_at ASC LIMIT $3"
     _SQL_OUTBOX_DELIVERED = (
         "UPDATE jf_outbox SET state = $1, updated_at = NOW() WHERE idempotency_key = $2"
