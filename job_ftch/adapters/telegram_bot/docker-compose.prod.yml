@@ -27,6 +27,7 @@ services:
       JOB_FTCH_STORE_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-job_ftch}
       JOB_FTCH_QDRANT_URL: http://qdrant:6333
       JOB_FTCH_CONFIGS_DIR: /app/job_ftch/adapters/telegram_bot/config/tenants
+      JOB_FTCH_OPENOBSERVE_URL: http://openobserve:5080
     ports: ["127.0.0.1:8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }
