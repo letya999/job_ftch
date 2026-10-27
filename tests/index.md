@@ -123,6 +123,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_pwc_site_parser.py](test_pwc_site_parser.py)
 - [test_qyzmet_site_parser.py](test_qyzmet_site_parser.py)
 - [test_rabota_md_site_parser.py](test_rabota_md_site_parser.py)
+- [test_reconcile_publications_script.py](test_reconcile_publications_script.py)
 - [test_registry_fallback.py](test_registry_fallback.py)
 - [test_release_deploy_contract.py](test_release_deploy_contract.py)
 - [test_reranker.py](test_reranker.py)
