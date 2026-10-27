@@ -69,6 +69,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [precise_debug_sources.yaml](precise_debug_sources.yaml)
 - [prime_domains.py](prime_domains.py)
 - [prune_sources.py](prune_sources.py)
+- [reconcile_publications.py](reconcile_publications.py)
 - [reindex_shots_bgem3.py](reindex_shots_bgem3.py)
 - [run_bot_ingest.py](run_bot_ingest.py)
 - [run_ci_checks.py](run_ci_checks.py)
