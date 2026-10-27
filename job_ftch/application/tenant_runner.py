@@ -2586,6 +2586,7 @@ class TenantRunner:
         now = datetime.now(UTC)
         queue_started_at = summary.started_at
         queue_run_id = str(summary.source_run_id)
+        retry_attempt = 0
         if ingest_task_id:
             list_active = getattr(runtime.store, "list_active_ingest_tasks", None)
             if callable(list_active):
@@ -2599,6 +2600,7 @@ class TenantRunner:
                 if current_task is not None:
                     queue_started_at = current_task.created_at
                     queue_run_id = current_task.run_id
+                    retry_attempt = current_task.attempt
         scheduled: list[datetime] = []
         needs_operator: list[str] = []
         queued_sources: set[str] = set()
@@ -2616,7 +2618,22 @@ class TenantRunner:
             else:
                 wait_seconds = 0.0
             if wait_seconds <= 0:
-                wait_seconds = settings.ingest_queue_default_retry_seconds
+                base_wait = settings.ingest_queue_default_retry_seconds
+                if base_wait > settings.ingest_queue_max_wait_seconds:
+                    wait_seconds = base_wait
+                else:
+                    wait_seconds = min(
+                        settings.ingest_queue_max_wait_seconds,
+                        base_wait * 2 ** min(retry_attempt, 20),
+                    )
+            elif retry_attempt:
+                wait_seconds = max(
+                    wait_seconds,
+                    min(
+                        settings.ingest_queue_max_wait_seconds,
+                        settings.ingest_queue_default_retry_seconds * 2 ** min(retry_attempt, 20),
+                    ),
+                )
             scope = str(outcome.get("rate_limit_scope") or source_id)
             reason = "rate_limit_delay_exceeds_policy"
             if wait_seconds > settings.ingest_queue_max_wait_seconds:

@@ -161,6 +161,61 @@ async def test_delayed_attempt_reschedules_same_parent_task() -> None:
     assert active[0].task_id == task_id
     assert active[0].run_id == "parent"
     assert active[0].state == IngestTaskState.WAITING_RATE_LIMIT
+    assert active[0].available_at >= datetime.now(UTC) + timedelta(seconds=59)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store_factory", [InMemoryStore, SQLiteStore])
+@pytest.mark.parametrize(
+    ("previous_attempts", "expected_delay", "provider_wait"),
+    [(2, 240, 10), (7, 600, 10), (2, 500, 500)],
+)
+async def test_rate_limited_retry_backs_off_up_to_policy_limit(
+    previous_attempts: int, expected_delay: int, provider_wait: int, store_factory
+) -> None:
+    store = store_factory() if store_factory is InMemoryStore else store_factory(":memory:")
+    settings = Settings.model_validate({"ingest_queue_enabled": True})
+    runtime = SimpleNamespace(store=store, settings=settings, tenant=SimpleNamespace(tenant_id="t"))
+    runner = TenantRunner({})
+    task_id = hashlib.sha256(b"t:parent:career_site:hirify").hexdigest()
+    task = IngestTask(
+        task_id=task_id,
+        tenant_id="t",
+        run_id="parent",
+        source_id="career_site:hirify",
+        rate_scope="hirify.me",
+        attempt=previous_attempts,
+    )
+    await store.enqueue_ingest_task(task)
+    await store.claim_due_ingest_tasks(
+        "t", "worker", limit=1, lease_seconds=30, now=datetime.now(UTC)
+    )
+    summary = RunSummary(
+        tenant_id="t",
+        source_run_id="attempt",
+        source_outcomes=[
+            {
+                "source_id": task.source_id,
+                "status": "rate_limited",
+                "rate_limit_retry_after_seconds": provider_wait,
+            }
+        ],
+    )
+    await runner._schedule_ingest_continuations(
+        runtime,
+        summary,
+        max_items=None,
+        user_id=None,
+        bypass_override=None,
+        parser_override=None,
+        personal_mode=False,
+        trigger="manual",
+        ingest_task_id=task_id,
+        ingest_worker_id="worker",
+    )
+    active = await store.list_active_ingest_tasks("t")
+    assert active[0].available_at >= datetime.now(UTC) + timedelta(seconds=expected_delay - 1)
+    await store.close()
 
 
 @pytest.mark.asyncio
@@ -297,6 +352,38 @@ async def test_runner_does_not_retry_wait_longer_than_policy() -> None:
     assert summary.completion_state == "needs_operator"
     assert await store.list_active_ingest_tasks("tenant-1") == ()
     await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_default_retry_exceeding_policy_requires_operator() -> None:
+    store = InMemoryStore()
+    settings = Settings.model_validate(
+        {
+            "ingest_queue_enabled": True,
+            "ingest_queue_default_retry_seconds": 300,
+            "ingest_queue_max_wait_seconds": 100,
+        }
+    )
+    runtime = SimpleNamespace(store=store, settings=settings, tenant=SimpleNamespace(tenant_id="t"))
+    summary = RunSummary(
+        tenant_id="t",
+        source_run_id="run",
+        source_outcomes=[{"source_id": "career_site:hirify", "status": "rate_limited"}],
+    )
+    await TenantRunner({})._schedule_ingest_continuations(
+        runtime,
+        summary,
+        max_items=None,
+        user_id=None,
+        bypass_override=None,
+        parser_override=None,
+        personal_mode=False,
+        trigger="manual",
+        ingest_task_id=None,
+        ingest_worker_id=None,
+    )
+    assert summary.completion_state == "needs_operator"
+    assert await store.list_active_ingest_tasks("t") == ()
 
 
 @pytest.mark.asyncio
