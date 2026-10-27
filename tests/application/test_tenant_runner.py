@@ -1907,6 +1907,120 @@ profiles:
 
 
 @pytest.mark.asyncio
+async def test_delayed_queue_precheck_cannot_start_overlapping_tenant_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    profile_path = tmp_path / "profiles.yaml"
+    profile_path.write_text(
+        "catalog_name: concurrency_test\nprofiles:\n  - profile_id: ml\n"
+        '    name: ML Engineer\n    target_roles: ["ML Engineer"]\n    preferred_skills: ["ML"]\n',
+        encoding="utf-8",
+    )
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "ai_jobs",
+            "display_name": "AI Jobs",
+            "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+            "store_backend": "sqlite",
+            "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            "job_group_store_backend": "sqlite",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "filter_profile_path": str(profile_path),
+            "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+        }
+    )
+    settings = _isolated_base_settings().model_copy(
+        update={"relevance_shot_threshold": -10.0, "ingest_queue_enabled": True}
+    )
+    first_runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    second_runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    monkeypatch.setattr(
+        tenant_runner_module, "build_llm", lambda settings: _AcceptingHeuristicLLMProvider()
+    )
+    for runner in (first_runner, second_runner):
+        runner.get_runtime("ai_jobs").llm_provider = _AcceptingHeuristicLLMProvider()
+
+    first_locked = asyncio.Event()
+    release_first = asyncio.Event()
+    release_precheck = asyncio.Event()
+    second_started = asyncio.Event()
+    first_bound = first_runner._run_tenant_bound
+    second_store = second_runner.get_runtime("ai_jobs").store
+    original_precheck = second_store.list_active_ingest_tasks
+
+    async def hold_first(*args, **kwargs):
+        first_locked.set()
+        await release_first.wait()
+        return await first_bound(*args, **kwargs)
+
+    async def delay_second_precheck(*args, **kwargs):
+        await release_precheck.wait()
+        return await original_precheck(*args, **kwargs)
+
+    async def run_second():
+        second_started.set()
+        return await second_runner.run_tenant("ai_jobs")
+
+    monkeypatch.setattr(first_runner, "_run_tenant_bound", hold_first)
+    monkeypatch.setattr(second_store, "list_active_ingest_tasks", delay_second_precheck)
+    try:
+        first_task = asyncio.create_task(first_runner.run_tenant("ai_jobs"))
+        await asyncio.wait_for(first_locked.wait(), timeout=30)
+        second_task = asyncio.create_task(run_second())
+        await second_started.wait()
+        await asyncio.sleep(0)
+        release_first.set()
+        first = await asyncio.wait_for(first_task, timeout=60)
+        release_precheck.set()
+        second = await asyncio.wait_for(second_task, timeout=60)
+        assert first.emitted == 1
+        payload = json.loads((tmp_path / "artifacts" / "ai_jobs.json").read_text(encoding="utf-8"))
+        assert len(payload["items"]) == 1
+        assert second.skipped_already_active
+    finally:
+        release_first.set()
+        release_precheck.set()
+        await first_runner.close()
+        await second_runner.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_queue_precheck_releases_tenant_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant = TenantConfig(tenant_id="cancel_precheck", display_name="Cancel precheck")
+    settings = _isolated_base_settings().model_copy(
+        update={"store_path": tmp_path / "store.db", "ingest_queue_enabled": True}
+    )
+    runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    runtime = runner.get_runtime("cancel_precheck")
+    entered = asyncio.Event()
+
+    async def stalled_precheck(*args, **kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(runtime.store, "list_active_ingest_tasks", stalled_precheck)
+    task = asyncio.create_task(runner.run_tenant("cancel_precheck"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=20)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not runner.tenant_run_is_active("cancel_precheck")
+        async with tenant_runner_module._tenant_run_lock(
+            runtime.settings, "cancel_precheck", timeout=0
+        ):
+            pass
+    finally:
+        task.cancel()
+        await runner.close()
+
+
+@pytest.mark.asyncio
 async def test_run_terminal_log_is_emitted_before_the_telemetry_flush(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

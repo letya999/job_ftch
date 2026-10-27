@@ -141,19 +141,26 @@ def _currency_amount_is_salary(value: str, match: re.Match[str]) -> bool:
     return not (_NON_SALARY_CONTEXT_RE.search(context) and not _SALARY_CONTEXT_RE.search(context))
 
 
-def _parse_compensation_text(value: str) -> tuple[str, int | None, int | None] | None:
+def _compensation_match(value: str) -> re.Match[str] | None:
     for match in (_SALARY_PREFIX_RE.search(value), _SALARY_SUFFIX_RE.search(value)):
         if match is None:
             continue
         if not _currency_amount_is_salary(value, match):
             continue
-        bounds = _compensation_bounds(match)
-        if bounds is not None:
-            minimum, maximum = bounds
-            return _normalize_currency(match.group("currency")), minimum, maximum
+        if _compensation_bounds(match) is not None:
+            return match
 
     # A number or Russian wording does not establish currency.
     return None
+
+
+def _parse_compensation_text(value: str) -> tuple[str, int | None, int | None] | None:
+    match = _compensation_match(value)
+    if match is None:
+        return None
+    bounds = _compensation_bounds(match)
+    assert bounds is not None
+    return _normalize_currency(match.group("currency")), *bounds
 
 
 class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
@@ -374,9 +381,12 @@ class CompensationParsingNode:
             except (ValueError, TypeError, KeyError):
                 pass
 
-        parsed = _parse_compensation_text(str(metadata_salary or "")) or _parse_compensation_text(
-            salary_source
-        )
+        salary_text = re.sub(r"[\u200b-\u200f\ufeff]", "", str(metadata_salary or ""))
+        match = _compensation_match(salary_text)
+        if match is None:
+            salary_text = re.sub(r"[\u200b-\u200f\ufeff]", "", salary_source)
+            match = _compensation_match(salary_text)
+        parsed = _parse_compensation_text(salary_text) if match is not None else None
         if parsed is None:
             if item.compensation is not None:
                 # LLMs sometimes turn unrelated numbers such as "от 3 лет"
@@ -384,6 +394,7 @@ class CompensationParsingNode:
                 # parser metadata provides salary evidence.
                 return item.model_copy(update={"compensation": None})
             return item
+        assert match is not None
         currency, minimum, maximum = parsed
 
         from job_ftch.domain import CompensationPeriod, CompensationRange
@@ -396,12 +407,11 @@ class CompensationParsingNode:
             (CompensationPeriod.DAY, r"/\s*(?:day|день)|per\s+day|в\s+день"),
             (CompensationPeriod.WEEK, r"/\s*(?:week|нед)|per\s+week|в\s+неделю"),
         ):
-            if re.search(pattern, salary_evidence):
+            if re.match(r"\s*" + pattern, salary_text[match.end() :], re.IGNORECASE):
                 period = unit
                 break
         previous = item.compensation
         if previous and (previous.currency, previous.min_amount, previous.max_amount) == parsed:
-            period = period if period is not CompensationPeriod.UNKNOWN else previous.period
             gross = gross if gross is not None else previous.gross
         compensation = CompensationRange(
             currency=currency,
