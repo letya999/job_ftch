@@ -1,7 +1,7 @@
 ---
 title: "Технологический стек"
 description: "Актуальный стек зависимостей job_ftch по pyproject.toml: core dependencies, extras и запрещённые инструменты."
-updated: 2026-10-02
+updated: 2026-10-27
 ---
 # Технологический стек
 
@@ -36,8 +36,8 @@ updated: 2026-10-02
 ## Extras
 
 The lockfile keeps transitive PyJWT at a patched release (2.15.1 or newer).
-Security refresh on 2026-10-02 also pins patched pypdf 6.19.0,
-sentence-transformers 5.6.0, urllib3 2.8.0 and virtualenv 21.7.13.
+The 2026-10-27 security refresh updates aiohttp, certifi, FastMCP, filelock,
+OpenTelemetry, Pillow, pypdf, setuptools and virtualenv in the lockfile.
 
 | Extra | Основные зависимости | Назначение |
 |---|---|---|
