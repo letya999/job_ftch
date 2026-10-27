@@ -1125,3 +1125,103 @@ async def test_jetbrains_emits_full_description_for_the_same_job() -> None:
     assert str(items[0].url) == "https://job-boards.eu.greenhouse.io/jetbrains/jobs/123"
     assert description.strip() in items[0].text
     assert items[0].metadata["detail_vacancy_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_dataart_catalog_paginates_and_reads_full_job_posting() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("filter-content-page"):
+            page = int(request.url.params.get("page", "1"))
+            return httpx.Response(
+                200,
+                json={
+                    "page": page,
+                    "pagesTotal": 2,
+                    "items": [
+                        {
+                            "slug": f"PYT{page:05d}",
+                            "title": "Engineer",
+                            "text": "Summary",
+                            "countriesTags": [{"title": "Georgia"}],
+                            "locationTags": [{"title": "Tbilisi"}],
+                        }
+                    ],
+                },
+            )
+        slug = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(
+            200,
+            text=f"""<script type="application/ld+json">{{"@type":"JobPosting","title":"Engineer {slug}","description":"<p>Full detailed description {slug}</p>"}}</script>""",
+        )
+
+    parser = resolve_site_parser("https://www.dataart.team/vacancies")
+    assert parser is not None
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        items = [
+            item
+            async for item in parser.parse(
+                CareerSiteSpec(url="https://www.dataart.team/vacancies", limit=2), client
+            )
+        ]
+    assert [item.external_id for item in items] == ["PYT00001", "PYT00002"]
+    assert all("Full detailed description" in item.text for item in items)
+    assert all("Georgia" in item.text and "Tbilisi" in item.text for item in items)
+    assert all(item.metadata["detail_vacancy_confirmed"] for item in items)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"items": [], "pagesTotal": -1},
+        {"items": [{"slug": "../bad"}], "pagesTotal": 1},
+        {"items": [], "pagesTotal": 2},
+    ],
+)
+async def test_dataart_invalid_catalog_is_failure(payload: object) -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.dataart.team/vacancies")
+    assert parser is not None
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    ) as client:
+        with pytest.raises(ValueError):
+            _ = [
+                item
+                async for item in parser.parse(
+                    CareerSiteSpec(url="https://www.dataart.team/vacancies"), client
+                )
+            ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "detail",
+    [
+        '<script type="application/ld+json">{"@type":"Organization"}</script>',
+        '<script type="application/ld+json">{"@type":"JobPosting","title":"Engineer"}</script>',
+        '<script type="application/ld+json">{"@type":"JobPosting","title":"Engineer","description":""}</script>',
+    ],
+)
+async def test_dataart_missing_detail_is_failure(detail: str) -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("filter-content-page"):
+            return httpx.Response(200, json={"items": [{"slug": "PYT001"}], "pagesTotal": 1})
+        return httpx.Response(200, text=detail)
+
+    parser = resolve_site_parser("https://www.dataart.team/vacancies")
+    assert parser is not None
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(ValueError):
+            _ = [
+                item
+                async for item in parser.parse(
+                    CareerSiteSpec(url="https://www.dataart.team/vacancies"), client
+                )
+            ]

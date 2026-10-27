@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl, urljoin, urlsplit
@@ -656,6 +657,90 @@ class JetBrainsCareerParser(_EmployerBoardParser):
         return result
 
 
+class DataArtCareerParser(_EmployerBoardParser):
+    domain_pattern = r"^https?://(?:www\.)?dataart\.team/vacancies(?:[/?#]|$)"
+    parser_name = "dataart_career"
+    company = "DataArt"
+    supports_discover = False
+    confirmed_empty_on_empty = True
+    terminal_on_error = True
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        emitted = 0
+        page_number = 1
+        while True:
+            response = await safe_fetch(
+                client,
+                f"https://www.dataart.team/dataart-team/api/vacancies/filter-content-page?page={page_number}",
+                follow_redirects=False,
+            )
+            payload = response.json()
+            if (
+                not isinstance(payload, dict)
+                or not isinstance(payload.get("items"), list)
+                or not isinstance(payload.get("pagesTotal"), int)
+                or payload["pagesTotal"] < 0
+            ):
+                raise ValueError("invalid DataArt vacancy feed")
+            for vacancy in payload["items"]:
+                slug = vacancy.get("slug") if isinstance(vacancy, dict) else None
+                if not isinstance(slug, str) or not re.fullmatch(r"[A-Za-z0-9]+", slug):
+                    raise ValueError("invalid DataArt vacancy identifier")
+                url = f"https://www.dataart.team/vacancies/{slug.lower()}"
+                detail = await safe_fetch(client, url, follow_redirects=False)
+                page = LexborHTMLParser(detail.text)
+                postings = (
+                    json.loads(node.text())
+                    for node in page.css('script[type="application/ld+json"]')
+                )
+                posting = next(
+                    (candidate for candidate in postings if candidate.get("@type") == "JobPosting"),
+                    None,
+                )
+                if (
+                    posting is None
+                    or not isinstance(posting.get("description"), str)
+                    or not posting["description"].strip()
+                ):
+                    raise ValueError("invalid DataArt vacancy detail")
+                description = LexborHTMLParser(posting["description"]).text(
+                    separator="\n", strip=True
+                )
+                locations = ", ".join(
+                    tag["title"]
+                    for key in ("countriesTags", "locationTags")
+                    for tag in vacancy.get(key, [])
+                    if isinstance(tag, dict) and isinstance(tag.get("title"), str)
+                )
+                yield build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=spec.source_name or self.parser_name,
+                    external_id=slug,
+                    url=url,
+                    text=f"{posting['title']}\n{locations}\n\n{description}",
+                    metadata={
+                        "board_url": spec.url,
+                        "parser": self.parser_name,
+                        "observation_kind": "vacancy_detail",
+                        "detail_vacancy_confirmed": True,
+                        "company": self.company,
+                        "company_authoritative": True,
+                    },
+                )
+                emitted += 1
+                if emitted >= _board_item_limit(spec):
+                    return
+            if page_number >= payload["pagesTotal"]:
+                return
+            if not payload["items"]:
+                raise ValueError("unexpected empty DataArt vacancy page")
+            page_number += 1
+
+
 class CianCareerParser(_EmployerBoardParser):
     domain_pattern = r"^https?://(?:(?:www\.)?cian\.ru/vacancies|career\.cian\.ru)(?:/.*)?$"
     parser_name = "cian_career"
@@ -1101,6 +1186,7 @@ register_site_parser("t1_innotech", domain_pattern=T1InnotechParser.domain_patte
 )
 for _parser_class in (
     JetBrainsCareerParser,
+    DataArtCareerParser,
     CianCareerParser,
     InnotechCareerParser,
     RostelecomCareerParser,
