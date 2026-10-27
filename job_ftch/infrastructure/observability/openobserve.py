@@ -40,6 +40,7 @@ _runtime_state_snapshots: dict[str, list[tuple[float, dict[str, str]]]] = {}
 _CORRELATION_FIELDS = frozenset(
     {
         "source_run_id",
+        "parent_run_id",
         "tenant_id",
         "graph_hash",
         "source_id",

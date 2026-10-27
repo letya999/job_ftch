@@ -53,7 +53,6 @@ def test_aggregators_declare_search_modes() -> None:
         VkTeamParser(),
         SberParser(),
         GetmatchParser(),
-        YandexJobsParser(),
         SuperJobRuParser(),
         TbankCareerParser(),
     ):
@@ -61,6 +60,8 @@ def test_aggregators_declare_search_modes() -> None:
         assert parser.search_mode == "combined"
     assert GeekJobParser().supports_search is True
     assert GeekJobParser().search_mode == "per_keyword"
+    assert YandexJobsParser().supports_search is True
+    assert YandexJobsParser().search_mode == "per_keyword"
     assert HireHiParser().supports_search is True
     assert HireHiParser().search_mode == "per_keyword"
 
@@ -170,11 +171,11 @@ def test_url_has_search_query_detects_known_params() -> None:
     assert url_has_search_query("https://hh.ru/search/vacancy?text=") is False  # blank ignored
 
 
-def test_yandex_builds_text_or_query() -> None:
+def test_yandex_searches_roles_individually_instead_of_combining_or() -> None:
     urls = YandexJobsParser().build_search_urls("https://yandex.ru/jobs", ROLES)
-    assert len(urls) == 1
-    assert urlparse(urls[0]).path == "/jobs/vacancies"
-    assert _query(urls[0])["text"] == ["AI engineer OR LLM engineer OR ИИ инженер"]
+    assert len(urls) == len(ROLES)
+    assert all(urlparse(url).path == "/jobs/vacancies" for url in urls)
+    assert [_query(url)["text"][0] for url in urls] == ROLES
 
 
 def test_superjob_builds_keywords_or_query() -> None:
