@@ -1,7 +1,7 @@
 ---
 title: "Технологический стек"
 description: "Актуальный стек зависимостей job_ftch по pyproject.toml: core dependencies, extras и запрещённые инструменты."
-updated: 2026-08-03
+updated: 2026-10-27
 ---
 # Технологический стек
 
@@ -14,7 +14,7 @@ updated: 2026-08-03
 |---|---|
 | Python 3.12+ | Основной runtime |
 | `uv` | Установка, venv, запуск команд |
-| `asyncio` / `anyio` | Async execution и concurrency limiting |
+| `asyncio` / `anyio>=4.14.2` | Async execution и concurrency limiting; patched process-pool and TLS behavior |
 
 ## Core dependencies
 
@@ -34,6 +34,10 @@ updated: 2026-08-03
 | `psutil` | Browser child-process cleanup |
 
 ## Extras
+
+The lockfile keeps transitive PyJWT at a patched release (2.15.1 or newer).
+The 2026-10-27 security refresh updates aiohttp, certifi, FastMCP, filelock,
+OpenTelemetry, Pillow, pypdf, setuptools and virtualenv in the lockfile.
 
 | Extra | Основные зависимости | Назначение |
 |---|---|---|

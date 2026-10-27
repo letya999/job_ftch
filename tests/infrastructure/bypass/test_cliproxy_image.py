@@ -20,14 +20,16 @@ from job_ftch.infrastructure.bypass.captcha_solver import (
 )
 
 
-def test_cliproxy_image_reuses_openai_compatible_key(
+def test_cliproxy_image_uses_dedicated_client_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert CAPTCHA_PROVIDER_ENV_KEYS["cliproxy_image"] == "JOB_FTCH_OPENAI_API_KEY"
+    assert CAPTCHA_PROVIDER_ENV_KEYS["cliproxy_image"] == "JOB_FTCH_CLIPROXY_API_KEY"
     assert "CAPTCHA_VISION_API_KEY" not in CAPTCHA_PROVIDER_ENV_KEYS.values()
+    monkeypatch.setenv("JOB_FTCH_OPENAI_API_KEY", "direct-openai-key")
+    monkeypatch.setenv("JOB_FTCH_CLIPROXY_API_KEY", "cliproxy-client-key")
     monkeypatch.setenv("JOB_FTCH_CAPTCHA_VISION_API_KEY", "stale-vision-key")
     assert _provider_api_key("cliproxy_image") != "stale-vision-key"
-    assert _provider_api_key("cliproxy_image")
+    assert _provider_api_key("cliproxy_image") == "cliproxy-client-key"
 
 
 @pytest.mark.asyncio
@@ -114,7 +116,7 @@ async def test_image_chain_falls_back_to_cliproxy_after_capsolver(
     monkeypatch.setattr(CapSolverProvider, "solve", capsolver_rejected)
     monkeypatch.setattr(CliproxyImageProvider, "solve", cliproxy_ok)
     monkeypatch.setenv("CAPSOLVER_API_KEY", "cap-key")
-    monkeypatch.setenv("JOB_FTCH_OPENAI_API_KEY", "clip-key")
+    monkeypatch.setenv("JOB_FTCH_CLIPROXY_API_KEY", "clip-key")
 
     solver = CaptchaSolverBypass(
         enabled_providers=frozenset({"capsolver", "cliproxy_image"}),
@@ -155,7 +157,7 @@ async def test_image_chain_falls_back_when_capsolver_token_fails_verification(
     monkeypatch.setattr(CapSolverProvider, "solve", capsolver_token)
     monkeypatch.setattr(CliproxyImageProvider, "solve", cliproxy_ok)
     monkeypatch.setenv("CAPSOLVER_API_KEY", "cap-key")
-    monkeypatch.setenv("JOB_FTCH_OPENAI_API_KEY", "clip-key")
+    monkeypatch.setenv("JOB_FTCH_CLIPROXY_API_KEY", "clip-key")
 
     solver = CaptchaSolverBypass(
         enabled_providers=frozenset({"capsolver", "cliproxy_image"}),
@@ -190,7 +192,7 @@ async def test_image_chain_backs_off_only_after_cliproxy_also_fails(
     monkeypatch.setattr(CapSolverProvider, "solve", await token_result("capsolver"))
     monkeypatch.setattr(CliproxyImageProvider, "solve", await token_result("cliproxy_image"))
     monkeypatch.setenv("CAPSOLVER_API_KEY", "cap-key")
-    monkeypatch.setenv("JOB_FTCH_OPENAI_API_KEY", "clip-key")
+    monkeypatch.setenv("JOB_FTCH_CLIPROXY_API_KEY", "clip-key")
 
     solver = CaptchaSolverBypass(
         enabled_providers=frozenset({"capsolver", "cliproxy_image"}),

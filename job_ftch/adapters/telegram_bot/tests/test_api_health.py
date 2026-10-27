@@ -118,6 +118,37 @@ class _Runner:
         }
 
 
+def test_api_initializes_observability_for_its_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_ftch.adapters.telegram_bot.api import create_app
+    from job_ftch.config import Settings
+    from job_ftch.infrastructure import observability
+
+    calls: list[Settings] = []
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN", "123456:test-token")
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN", "secret-token")
+    monkeypatch.setattr(
+        observability, "configure_observability", lambda settings: calls.append(settings)
+    )
+    settings = Settings.model_validate({"tracing_enabled": True})
+    create_app(runner=_Runner(), base_settings=settings)  # type: ignore[arg-type]
+    assert calls == [settings]
+
+
+def test_api_starts_if_observability_configuration_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import Mock
+
+    from job_ftch.adapters.telegram_bot.api import create_app
+    from job_ftch.config import Settings
+    from job_ftch.infrastructure import observability
+
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN", "123456:test-token")
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN", "secret-token")
+    monkeypatch.setattr(
+        observability, "configure_observability", Mock(side_effect=RuntimeError("test"))
+    )
+    create_app(runner=_Runner(), base_settings=Settings.model_validate({"tracing_enabled": True}))  # type: ignore[arg-type]
+
+
 @pytest.mark.asyncio
 async def test_tenant_health_reports_store_source_scheduler_and_publish_state() -> None:
     payload = await _tenant_health(_Runner(), "ai_jobs")  # type: ignore[arg-type]
@@ -131,6 +162,25 @@ async def test_tenant_health_reports_store_source_scheduler_and_publish_state() 
     assert payload["scheduler"]["last_error"] is None
     assert payload["publish"]["last_error"] == "rate limit"
     assert payload["publish"]["last_sent"] == 2
+
+
+@pytest.mark.asyncio
+async def test_uncertain_publication_is_visible_in_health() -> None:
+    runner = _Runner()
+    runner.store.health = []
+    runner.store.state["bot_scheduler:last_publish_error"] = ""
+
+    async def uncertain(limit: int = 100) -> tuple[SimpleNamespace, ...]:
+        return (
+            SimpleNamespace(sink_name="telegram:channel", delivery_payload={"attempt_id": "one"}),
+            SimpleNamespace(sink_name="telegram:channel", delivery_payload={"attempt_id": "one"}),
+            SimpleNamespace(sink_name="other-sink", delivery_payload={"attempt_id": "two"}),
+        )
+
+    runner.store.list_uncertain_outbox = uncertain  # type: ignore[attr-defined]
+    payload = await _tenant_health(runner, "ai_jobs")  # type: ignore[arg-type]
+    assert payload["status"] == "degraded"
+    assert payload["publish"]["uncertain_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -240,3 +290,23 @@ def test_api_pipeline_sources_important_and_quality(monkeypatch: pytest.MonkeyPa
     assert res.status_code == 200
     body = res.json()
     assert not any(item["source_id"] == "career_site:example" for item in body["important"])
+
+
+def test_public_api_does_not_claim_bot_ingest_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    from starlette.testclient import TestClient
+
+    from job_ftch.adapters.telegram_bot.api import create_app
+
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN", "123456:test-token")
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN", "secret-token")
+
+    class Runner(_Runner):
+        started = 0
+
+        async def start(self) -> None:
+            self.started += 1
+
+    runner = Runner()
+    with TestClient(create_app(runner=runner)) as client:  # type: ignore[arg-type]
+        assert client.get("/health/live").status_code == 200
+        assert runner.started == 0

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from job_ftch.application.llm_usage import llm_node_context
 from job_ftch.application.run_budget import AsyncCallBudget, ScopedCircuitBreaker
 from job_ftch.domain import (
     AssessedJob,
@@ -216,7 +217,8 @@ _DOMAIN_NEUTRAL_TASK_RULES = (
     "offers, and recommendation pages are not hiring posts unless they explicitly recruit a "
     "person for a role. Use only the "
     "evidence IDs listed above. Positive IDs may prove a target role by title and/or duties; "
-    "negative IDs must prove a non-target role or contradictory responsibilities."
+    "negative IDs must prove a non-target role or contradictory responsibilities. "
+    "Return at most three distinct IDs in each evidence list; select the strongest evidence."
 )
 
 
@@ -588,6 +590,8 @@ class LLMRelevanceClassificationNode:
         self._tenant_id = tenant_id
         self._graph_hash = graph_hash
         self._graph_prompt_name: str | None = None
+        self.provider_binding: str | None = None
+        self.model_binding: str | None = None
         self._call_policy = "threshold"
         self._classification_mode = _LEGACY_CLASSIFICATION_MODE
         self._count = 0
@@ -609,6 +613,10 @@ class LLMRelevanceClassificationNode:
         }
 
     def configure_graph_params(self, params: dict[str, object]) -> None:
+        if "provider" in params:
+            self.provider_binding = str(params["provider"])
+        if "model" in params:
+            self.model_binding = str(params["model"])
         if "low_threshold" in params:
             self._low = float(str(params["low_threshold"]))
         if "high_threshold" in params:
@@ -645,12 +653,13 @@ class LLMRelevanceClassificationNode:
         self._ambiguity_resolution_count += 1
         self.stats["llm_ambiguity_resolution_calls"] += 1
         try:
-            result = await self._llm.classify(
-                _build_ambiguity_resolution_prompt(
-                    item, profile, system_prompt_override=system_prompt_override
-                ),
-                RelevanceEvidenceClassification,
-            )
+            with llm_node_context("relevance"):
+                result = await self._llm.classify(
+                    _build_ambiguity_resolution_prompt(
+                        item, profile, system_prompt_override=system_prompt_override
+                    ),
+                    RelevanceEvidenceClassification,
+                )
         except Exception as exc:
             self.stats["llm_ambiguity_resolution_failures"] += 1
             logger.warning("llm_ambiguity_resolution_failed", error=str(exc))
@@ -673,12 +682,13 @@ class LLMRelevanceClassificationNode:
         self._precision_confirmation_count += 1
         self.stats["llm_precision_confirmation_calls"] += 1
         try:
-            result = await self._llm.classify(
-                _build_precision_confirmation_prompt(
-                    item, profile, system_prompt_override=system_prompt_override
-                ),
-                RelevanceEvidenceClassification,
-            )
+            with llm_node_context("relevance"):
+                result = await self._llm.classify(
+                    _build_precision_confirmation_prompt(
+                        item, profile, system_prompt_override=system_prompt_override
+                    ),
+                    RelevanceEvidenceClassification,
+                )
         except Exception as exc:
             self.stats["llm_precision_confirmation_failures"] += 1
             logger.warning("llm_precision_confirmation_failed", error=str(exc))
@@ -822,7 +832,8 @@ class LLMRelevanceClassificationNode:
             if not await self._circuit_breaker.allow(**circuit_key):
                 return self._apply_provider_unavailable_fallback(item, error="circuit_open")
             self.stats["llm_relevance_calls"] += 1
-            result: Any = await self._llm.classify(prompt, response_schema)
+            with llm_node_context("relevance"):
+                result: Any = await self._llm.classify(prompt, response_schema)
         except Exception as exc:
             self.stats["llm_relevance_failures"] += 1
             logger.warning("llm_relevance_failed", error=str(exc))

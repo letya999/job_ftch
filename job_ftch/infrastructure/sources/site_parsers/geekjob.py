@@ -591,7 +591,8 @@ class GeekJobParser:
             {
                 "headless": True,
                 "stealth": False,
-                "wait": getattr(browser, "wait", None) or "domcontentloaded",
+                "wait": getattr(browser, "wait", None) or "commit",
+                "disable_http2": True,
             },
         )
         config["_bypass_strategy"] = bypass_strategy
@@ -722,6 +723,14 @@ class GeekJobParser:
                     break
                 visited.add(current_url)
                 await navigate(page, current_url, config)
+                wait_for_selector = getattr(page, "wait_for_selector", None)
+                if callable(wait_for_selector):
+                    try:
+                        await wait_for_selector(
+                            'a[href*="/vacancy/"], a[href*="/jobs/"]', timeout=10000
+                        )
+                    except Exception as exc:
+                        logger.debug("geekjob.listing_hydration_wait", error=type(exc).__name__)
                 page_url = urljoin(
                     current_url, str(getattr(page, "url", current_url) or current_url)
                 )
@@ -842,7 +851,7 @@ class GeekJobParser:
     async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
         """Expose phase-1 discovery for callers that invoke the parser directly."""
         limit = self._limit(spec.limit)
-        if self._search_query(spec.url):
+        if spec.monitor_config.get("use_search_api"):
             try:
                 return (await self._discover_search_api(spec, client))[:limit]
             except Exception as exc:
@@ -851,31 +860,50 @@ class GeekJobParser:
                 logger.info("geekjob.search_api_failed", url=spec.url, error=str(exc))
                 return []
 
-        detail_re = self._detail_re()
+        return (await self._discover_public_listing(spec, client))[0]
+
+    async def _discover_public_listing(
+        self,
+        spec: CareerSiteSpec,
+        client: Any,
+    ) -> tuple[list[str], dict[str, dict[str, str]]]:
+        """Use public HTML; /json/ is excluded by the board's robots policy."""
+        limit = self._limit(spec.limit)
+        keywords = keywords_from_spec(spec)
         collected: list[str] = []
+        cards: dict[str, dict[str, str]] = {}
         seen: set[str] = set()
-        max_pages = self._max_listing_pages(spec, limit)
-        for page in range(1, max_pages + 1):
-            page_url = _page_url(spec.url, page)
-            try:
-                response = await safe_fetch(client, page_url)
-            except Exception as exc:
-                if _status_from_exception(exc) == 429:
-                    raise
-                logger.debug("geekjob.listing_fetch_failed", url=page_url, error=str(exc))
-                break
-            response_url = str(getattr(response, "url", page_url) or page_url)
+        current_url = spec.url
+        for _ in range(self._max_listing_pages(spec, limit)):
+            response = await safe_fetch(client, current_url)
+            response_url = str(getattr(response, "url", current_url) or current_url)
             body = str(getattr(response, "text", "") or "")
-            for url in extract_urls_with_limit(body, detail_re, response_url, limit, seen=seen):
-                collected.append(_canonical_url(url))
+            if is_challenge_response(body):
+                raise _challenge_error(response_url, response)
+            cards.update(_listing_cards(body, response_url))
+            for url in extract_urls_with_limit(body, self._detail_re(), response_url, limit):
+                url = _canonical_url(url)
+                identity = _detail_identity(url)
+                card = cards.get(identity)
+                if identity in seen:
+                    continue
+                if (
+                    keywords
+                    and card
+                    and not listing_matches_keywords(
+                        card.get("title", ""), card.get("text", ""), keywords
+                    )
+                ):
+                    continue
+                seen.add(identity)
+                collected.append(url)
                 if len(collected) >= limit:
-                    return collected[:limit]
+                    return collected, cards
             next_url = _next_listing_url(body, response_url)
-            if next_url:
-                continue
-            if page >= max_pages:
+            if not next_url:
                 break
-        return collected[:limit]
+            current_url = next_url
+        return collected, cards
 
     async def parse(
         self,
@@ -891,49 +919,60 @@ class GeekJobParser:
         collected: list[str] = []
         seen: set[str] = set()
         listing_error: Exception | None = None
-        for page in range(1, self._max_listing_pages(spec, limit) + 1):
+        if not spec.monitor_config.get("use_search_api"):
             try:
-                rows, payload = await self._fetch_api_page(spec, client, page)
-            except Exception as exc:  # noqa: BLE001 - browser fallback may rescue the listing
+                collected, cards = await self._discover_public_listing(spec, client)
+                if not collected and bypass_strategy is not None:
+                    collected, cards = await self._discover_with_browser(
+                        spec, limit=limit, bypass_strategy=bypass_strategy
+                    )
+                seen.update(_detail_identity(url) for url in collected)
+            except Exception as exc:
                 listing_error = exc
-                logger.debug("geekjob.search_api_failed", url=spec.url, error=str(exc))
-                break
-            if not rows:
-                break
-            added = 0
-            for row in rows:
-                card = _api_card(row, spec.url)
-                if card is None:
-                    continue
-                identity = card["id"] or _detail_identity(card["url"])
-                if identity in seen:
-                    continue
-                # `qs` is fuzzy: "project manager" also returns Product/Construction
-                # Manager. Keep the server query for recall, then match the title.
-                if keywords and not listing_matches_keywords(
-                    card.get("title", ""), card.get("text", ""), keywords
-                ):
-                    continue
-                seen.add(identity)
-                cards[_detail_identity(card["url"])] = card
-                collected.append(card["url"])
-                added += 1
-                if len(collected) >= limit:
+        else:
+            for page in range(1, self._max_listing_pages(spec, limit) + 1):
+                try:
+                    rows, payload = await self._fetch_api_page(spec, client, page)
+                except Exception as exc:  # noqa: BLE001 - browser fallback may rescue the listing
+                    listing_error = exc
+                    logger.debug("geekjob.search_api_failed", url=spec.url, error=str(exc))
                     break
-            stats = spec.monitor_config.get("_pipeline_stats")
-            if stats is not None:
-                stats.parser_urls_discovered = len(collected)
-            logger.info(
-                "geekjob.listing_page",
-                page=page,
-                discovered=len(collected),
-                returned=len(rows),
-                requested=limit,
-            )
-            if len(collected) >= limit or not added:
-                break
-            if not self._api_has_more(payload, page, len(rows), page_size):
-                break
+                if not rows:
+                    break
+                added = 0
+                for row in rows:
+                    card = _api_card(row, spec.url)
+                    if card is None:
+                        continue
+                    identity = card["id"] or _detail_identity(card["url"])
+                    if identity in seen:
+                        continue
+                    # `qs` is fuzzy: "project manager" also returns Product/Construction
+                    # Manager. Keep the server query for recall, then match the title.
+                    if keywords and not listing_matches_keywords(
+                        card.get("title", ""), card.get("text", ""), keywords
+                    ):
+                        continue
+                    seen.add(identity)
+                    cards[_detail_identity(card["url"])] = card
+                    collected.append(card["url"])
+                    added += 1
+                    if len(collected) >= limit:
+                        break
+                stats = spec.monitor_config.get("_pipeline_stats")
+                if stats is not None:
+                    stats.parser_urls_discovered = len(collected)
+                logger.info(
+                    "geekjob.listing_page",
+                    page=page,
+                    discovered=len(collected),
+                    returned=len(rows),
+                    requested=limit,
+                )
+                if len(collected) >= limit or not added:
+                    break
+                if not self._api_has_more(payload, page, len(rows), page_size):
+                    break
 
         if listing_error is not None:
             status = _status_from_exception(listing_error)

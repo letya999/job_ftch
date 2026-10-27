@@ -7,7 +7,7 @@ updated: 2026-07-26
 
 # Node Reference
 
-Generated: 2026-09-06T18:53:05.970074+00:00
+Generated: 2026-09-18T08:05:16.216268+00:00
 Total registered nodes: 53
 
 | Node | Input | Output | Version | Capabilities |
@@ -194,6 +194,8 @@ Total registered nodes: 53
 - Version: 1
 - Mutates payload: True
 - Parameters:
+  - `provider` (str, default=None)
+  - `model` (str, default=None)
   - `extraction_mode` (str, default=llm_or_structured)
 
 ### extraction_validation
@@ -303,6 +305,8 @@ Total registered nodes: 53
 - Version: 1
 - Mutates payload: False
 - Parameters:
+  - `provider` (str, default=None)
+  - `model` (str, default=None)
   - `low_threshold` (float, default=None)
   - `high_threshold` (float, default=None)
   - `max_per_run` (int, default=None)
@@ -319,6 +323,8 @@ Total registered nodes: 53
 - Version: 1
 - Mutates payload: False
 - Parameters:
+  - `provider` (str, default=None)
+  - `model` (str, default=None)
   - `low_threshold` (float, default=None)
   - `high_threshold` (float, default=None)
   - `max_per_run` (int, default=None)

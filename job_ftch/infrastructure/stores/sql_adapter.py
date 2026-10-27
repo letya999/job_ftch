@@ -56,10 +56,6 @@ def _as_datetime(value: object) -> datetime:
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
-def _queue_time(value: datetime | None) -> str | None:
-    return value.astimezone(UTC).isoformat() if value is not None else None
-
-
 def _ingest_task_from_row(row: tuple[object, ...]) -> IngestTask:
     return IngestTask(
         task_id=str(row[0]),
@@ -128,6 +124,9 @@ class SQLStoreAdapter(abc.ABC):
     _SQL_OUTBOX_GET: str
     _SQL_OUTBOX_PENDING: str
     _SQL_OUTBOX_DELIVERED: str
+    _SQL_OUTBOX_RELEASE_UNCERTAIN: str
+    _SQL_OUTBOX_CONFIRM_UNCERTAIN: str
+    _SQL_OUTBOX_ATTEMPT: str
     _SQL_DEDUP_CLAIM_ACQUIRE: str
     _SQL_DEDUP_CLAIM_OWNER: str
     _SQL_DEDUP_CLAIM_RELEASE: str
@@ -160,6 +159,11 @@ class SQLStoreAdapter(abc.ABC):
 
     def __init__(self, *, processed_item_ttl_hours: int | None = 24) -> None:
         self._processed_item_ttl_hours = processed_item_ttl_hours
+
+    @staticmethod
+    def _queue_time(value: datetime | None) -> str | datetime | None:
+        """Encode queue timestamps for the backend column type."""
+        return value.astimezone(UTC).isoformat() if value is not None else None
 
     @abc.abstractmethod
     async def _execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
@@ -224,7 +228,9 @@ class SQLStoreAdapter(abc.ABC):
                 record.outbox_id,
                 record.tenant_id,
                 record.idempotency_key,
-                OutboxState.OUTBOXED.value,
+                (
+                    record.state if record.state is OutboxState.UNCERTAIN else OutboxState.OUTBOXED
+                ).value,
                 record.model_dump_json(),
             ),
         )
@@ -247,6 +253,30 @@ class SQLStoreAdapter(abc.ABC):
             for row in rows
         )
 
+    async def list_uncertain_outbox(
+        self, limit: int = 100, *, tenant_id: str | None = None
+    ) -> tuple[OutboxRecord, ...]:
+        rows = await self._fetchall(
+            self._SQL_OUTBOX_PENDING, (OutboxState.UNCERTAIN.value, tenant_id or "default", limit)
+        )
+        return tuple(
+            OutboxRecord.model_validate_json(str(row[0])).model_copy(
+                update={"state": OutboxState(str(row[1]))}
+            )
+            for row in rows
+        )
+
+    async def list_outbox_attempt(
+        self, attempt_id: str, sink_name: str, *, tenant_id: str
+    ) -> tuple[OutboxRecord, ...]:
+        rows = await self._fetchall(self._SQL_OUTBOX_ATTEMPT, (tenant_id, sink_name, attempt_id))
+        return tuple(
+            OutboxRecord.model_validate_json(str(row[0])).model_copy(
+                update={"state": OutboxState(str(row[1]))}
+            )
+            for row in rows
+        )
+
     async def mark_outbox_delivered(self, idempotency_key: str) -> OutboxRecord | None:
         await self._execute(
             self._SQL_OUTBOX_DELIVERED, (OutboxState.DELIVERED.value, idempotency_key)
@@ -256,6 +286,39 @@ class SQLStoreAdapter(abc.ABC):
             return None
         record = OutboxRecord.model_validate_json(str(row[0]))
         return record.model_copy(update={"state": OutboxState(str(row[1]))})
+
+    async def release_uncertain_outbox(self, record: OutboxRecord) -> None:
+        await self._execute(
+            self._SQL_OUTBOX_RELEASE_UNCERTAIN,
+            (record.idempotency_key, OutboxState.UNCERTAIN.value, record.model_dump_json()),
+        )
+
+    async def confirm_uncertain_outbox(
+        self, record: OutboxRecord, receipt: dict[str, object]
+    ) -> OutboxRecord | None:
+        confirmed = record.model_copy(
+            update={
+                "state": OutboxState.DELIVERED,
+                "delivery_payload": {**record.delivery_payload, "receipt": receipt},
+            }
+        )
+        await self._execute(
+            self._SQL_OUTBOX_CONFIRM_UNCERTAIN,
+            (
+                OutboxState.DELIVERED.value,
+                confirmed.model_dump_json(),
+                record.idempotency_key,
+                OutboxState.UNCERTAIN.value,
+                record.model_dump_json(),
+            ),
+        )
+        row = await self._fetchone(self._SQL_OUTBOX_GET, (record.idempotency_key,))
+        if row is None:
+            return None
+        current = OutboxRecord.model_validate_json(str(row[0])).model_copy(
+            update={"state": OutboxState(str(row[1]))}
+        )
+        return confirmed if current == confirmed else None
 
     async def acquire_dedup_claim(self, key: str, owner_id: str, *, ttl_seconds: int) -> bool:
         await self._execute(
@@ -581,13 +644,13 @@ class SQLStoreAdapter(abc.ABC):
                 normalized.parser_override,
                 normalized.personal_mode,
                 normalized.trigger,
-                _queue_time(normalized.available_at),
+                self._queue_time(normalized.available_at),
                 normalized.lease_owner,
-                _queue_time(normalized.lease_until),
+                self._queue_time(normalized.lease_until),
                 normalized.last_error,
-                _queue_time(normalized.created_at),
-                _queue_time(normalized.updated_at),
-                _queue_time(normalized.completed_at),
+                self._queue_time(normalized.created_at),
+                self._queue_time(normalized.updated_at),
+                self._queue_time(normalized.completed_at),
             ),
         )
         row = await self._fetchone(self._SQL_INGEST_TASK_GET, (normalized.task_id,))
@@ -631,8 +694,8 @@ class SQLStoreAdapter(abc.ABC):
             self._SQL_INGEST_TASK_COMPLETE,
             (
                 IngestTaskState.SUCCEEDED.value,
-                _queue_time(now),
-                _queue_time(now),
+                self._queue_time(now),
+                self._queue_time(now),
                 task_id,
                 worker_id,
             ),
@@ -647,15 +710,17 @@ class SQLStoreAdapter(abc.ABC):
         *,
         available_at: datetime,
         error: str | None = None,
+        refund_attempt: bool = False,
     ) -> IngestTask | None:
         now = datetime.now(UTC)
         await self._execute(
             self._SQL_INGEST_TASK_DEFER,
             (
+                refund_attempt,
                 IngestTaskState.WAITING_RATE_LIMIT.value,
-                _queue_time(available_at),
+                self._queue_time(available_at),
                 error,
-                _queue_time(now),
+                self._queue_time(now),
                 task.task_id,
                 worker_id,
             ),
@@ -675,7 +740,14 @@ class SQLStoreAdapter(abc.ABC):
         state = IngestTaskState.NEEDS_OPERATOR if needs_operator else IngestTaskState.FAILED
         await self._execute(
             self._SQL_INGEST_TASK_FAIL,
-            (state.value, error, _queue_time(now), _queue_time(now), task.task_id, worker_id),
+            (
+                state.value,
+                error,
+                self._queue_time(now),
+                self._queue_time(now),
+                task.task_id,
+                worker_id,
+            ),
         )
         row = await self._fetchone(self._SQL_INGEST_TASK_GET, (task.task_id,))
         return _ingest_task_from_row(row) if row is not None else None
@@ -683,7 +755,7 @@ class SQLStoreAdapter(abc.ABC):
     async def reap_ingest_leases(self, now: datetime) -> int:
         await self._execute(
             self._SQL_INGEST_TASK_REAP,
-            (IngestTaskState.READY.value, _queue_time(now), _queue_time(now)),
+            (IngestTaskState.READY.value, self._queue_time(now), self._queue_time(now)),
         )
         row = await self._fetchone("SELECT changes()")
         return int(cast("int | str", row[0] or 0)) if row else 0
@@ -707,10 +779,10 @@ class SQLStoreAdapter(abc.ABC):
             self._SQL_INGEST_RATE_LIMIT_UPSERT,
             (
                 scope_id,
-                _queue_time(cooldown_until),
+                self._queue_time(cooldown_until),
                 retry_after_seconds,
                 status_code,
-                _queue_time(datetime.now(UTC)),
+                self._queue_time(datetime.now(UTC)),
             ),
         )
 

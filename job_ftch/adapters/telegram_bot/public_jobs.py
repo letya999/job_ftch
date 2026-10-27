@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -104,22 +104,32 @@ async def build_public_jobs_response(
     if not is_public_tenant(tenant_slug.strip(), allowlist=resolved):
         raise LookupError("public jobs not available")
     bounded_limit = min(max(int(limit), 1), MAX_PUBLIC_JOBS)
-    key = f"{tenant_slug}:{bounded_limit}"
+    key = tenant_slug
     if cache is not None:
         cached = cache.get(key)
         if cached is not None:
-            return cached
-    candidates = await runner.latest_jobs(tenant_slug, limit=max(2000, bounded_limit))
-    jobs = candidates[:bounded_limit]
+            jobs = cached["jobs"][:bounded_limit]
+            return {**cached, "jobs": jobs, "job_count": len(jobs)}
+    fetch_limit = MAX_PUBLIC_JOBS if cache is not None else bounded_limit
+    get_runtime = getattr(runner, "get_runtime", None)
+    group_store = get_runtime(tenant_slug).job_group_store if callable(get_runtime) else None
+    list_public = getattr(group_store, "list_public_canonical_jobs", None)
+    if callable(list_public):
+        candidates = cast("Sequence[object]", await list_public(fetch_limit))
+    else:
+        candidates = await runner.latest_jobs(tenant_slug, limit=max(2000, fetch_limit))
+    jobs = candidates[:fetch_limit]
+    public_jobs = [_public_job(job) for job in jobs]
     payload = {
         "generated_at": time.time(),
         "tenant_slug": tenant_slug,
         "job_count": len(jobs),
-        "jobs": [_public_job(job) for job in jobs],
+        "jobs": public_jobs,
     }
     if cache is not None:
         cache.set(key, payload)
-    return payload
+    selected = public_jobs[:bounded_limit]
+    return {**payload, "jobs": selected, "job_count": len(selected)}
 
 
 def mount_public_job_routes(

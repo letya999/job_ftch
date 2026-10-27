@@ -121,6 +121,8 @@ def test_build_dispatcher_assembles_without_optional_providers() -> None:
 async def test_scheduler_loop_uses_publish_owner_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+
     calls = {"sleep": 0}
 
     async def fake_sleep(seconds: float) -> None:
@@ -143,9 +145,9 @@ async def test_scheduler_loop_uses_publish_owner_profile(
     async def _set_state(key: str, value: str) -> None:
         store_state[key] = value
 
-    store = MagicMock()
-    store.get_run_state = MagicMock(side_effect=_get_state)
-    store.set_run_state = MagicMock(side_effect=_set_state)
+    store = InMemoryStore()
+    monkeypatch.setattr(store, "get_run_state", MagicMock(side_effect=_get_state))
+    monkeypatch.setattr(store, "set_run_state", MagicMock(side_effect=_set_state))
 
     runner = MagicMock()
     runner.get_runtime.return_value = SimpleNamespace(
@@ -170,6 +172,7 @@ async def test_scheduler_loop_uses_publish_owner_profile(
     runner.latest_jobs.return_value.set_result(
         [
             SimpleNamespace(
+                group_id="group-1",
                 post_type=PostType.JOB_POSTING,
                 routing_decision=MatchDecision.ACCEPT,
                 quality_score=1.0,
@@ -180,7 +183,9 @@ async def test_scheduler_loop_uses_publish_owner_profile(
     )
     bot = MagicMock()
     bot.send_message = MagicMock(return_value=asyncio.Future())
-    bot.send_message.return_value.set_result(None)
+    bot.send_message.return_value.set_result(
+        SimpleNamespace(message_id=1, chat=SimpleNamespace(id=123))
+    )
 
     with pytest.raises(asyncio.CancelledError):
         await _run_scheduler_loop(runner, bot)
@@ -331,6 +336,7 @@ async def test_scheduler_loop_does_not_warn_when_jobs_are_grouped_for_publish(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from job_ftch.adapters.telegram_bot import main as bot_main
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
     calls = {"sleep": 0}
 
@@ -355,9 +361,9 @@ async def test_scheduler_loop_does_not_warn_when_jobs_are_grouped_for_publish(
     async def _set_state(key: str, value: str) -> None:
         store_state[key] = value
 
-    store = MagicMock()
-    store.get_run_state = AsyncMock(side_effect=_get_state)
-    store.set_run_state = AsyncMock(side_effect=_set_state)
+    store = InMemoryStore()
+    monkeypatch.setattr(store, "get_run_state", AsyncMock(side_effect=_get_state))
+    monkeypatch.setattr(store, "set_run_state", AsyncMock(side_effect=_set_state))
 
     runner = MagicMock()
     runner.get_runtime.return_value = SimpleNamespace(
@@ -383,7 +389,9 @@ async def test_scheduler_loop_does_not_warn_when_jobs_are_grouped_for_publish(
     )
 
     bot = MagicMock()
-    bot.send_message = AsyncMock()
+    bot.send_message = AsyncMock(
+        return_value=SimpleNamespace(message_id=1, chat=SimpleNamespace(id=123))
+    )
 
     with pytest.raises(asyncio.CancelledError):
         await _run_scheduler_loop(runner, bot)
@@ -440,7 +448,7 @@ async def test_scheduler_loop_skips_publish_channel_without_owner_profile(
 
 
 @pytest.mark.asyncio
-async def test_scheduler_loop_resets_stale_publish_state_on_empty_run(
+async def test_scheduler_loop_preserves_last_delivery_on_empty_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = {"sleep": 0}
@@ -498,14 +506,14 @@ async def test_scheduler_loop_resets_stale_publish_state_on_empty_run(
     assert bot.send_message.call_args.args[0] == "123"
     assert "Публикация пропущена: новых вакансий 0" in bot.send_message.call_args.args[1]
     assert store_state["bot_scheduler:last_run_emitted"] == "0"
-    assert store_state["bot_scheduler:last_publish_sent"] == "0"
+    assert store_state["bot_scheduler:last_publish_sent"] == "2"
     assert store_state["bot_scheduler:last_publish_error"] == ""
     assert store_state["bot_scheduler:last_publish_skipped_reason"] == "no_new_jobs"
     assert "bot_scheduler:last_publish_skipped_at" in store_state
 
 
 @pytest.mark.asyncio
-async def test_scheduler_loop_resets_stale_publish_state_on_failed_run(
+async def test_scheduler_loop_preserves_last_delivery_on_failed_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = {"sleep": 0}
@@ -562,7 +570,7 @@ async def test_scheduler_loop_resets_stale_publish_state_on_failed_run(
     assert bot.send_message.call_args.args[0] == "123"
     assert "Автозапуск упал" in bot.send_message.call_args.args[1]
     assert store_state["bot_scheduler:last_run_emitted"] == "0"
-    assert store_state["bot_scheduler:last_publish_sent"] == "0"
+    assert store_state["bot_scheduler:last_publish_sent"] == "2"
     assert store_state["bot_scheduler:last_publish_error"] == ""
     assert store_state["bot_scheduler:last_error"] == "run failed"
 
@@ -601,6 +609,8 @@ def test_bot_publish_gate_requires_accept_decision() -> None:
 async def test_scheduler_loop_drains_pending_publish_window_on_zero_emit_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+
     iteration = {"outer": 0}
 
     async def fake_sleep(seconds: float) -> None:
@@ -624,9 +634,9 @@ async def test_scheduler_loop_drains_pending_publish_window_on_zero_emit_run(
     async def _set_state(key: str, value: str) -> None:
         store_state[key] = value
 
-    store = MagicMock()
-    store.get_run_state = MagicMock(side_effect=_get_state)
-    store.set_run_state = MagicMock(side_effect=_set_state)
+    store = InMemoryStore()
+    monkeypatch.setattr(store, "get_run_state", MagicMock(side_effect=_get_state))
+    monkeypatch.setattr(store, "set_run_state", MagicMock(side_effect=_set_state))
 
     jobs = [
         SimpleNamespace(
@@ -666,7 +676,7 @@ async def test_scheduler_loop_drains_pending_publish_window_on_zero_emit_run(
 
     owner_reports: list[str] = []
 
-    async def send_message(channel: str, card: str, **_kwargs: object) -> None:
+    async def send_message(channel: str, card: str, **_kwargs: object) -> SimpleNamespace | None:
         if channel == "123":
             owner_reports.append(card)
             return None
@@ -677,6 +687,7 @@ async def test_scheduler_loop_drains_pending_publish_window_on_zero_emit_run(
                 message="flood",
                 retry_after=1,
             )
+        return SimpleNamespace(message_id=send_attempts["count"], chat=SimpleNamespace(id=123))
 
     bot = MagicMock()
     bot.send_message = AsyncMock(side_effect=send_message)

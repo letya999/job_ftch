@@ -46,7 +46,7 @@ _CAPTCHA_PROVIDER_ENV: dict[str, str] = {
     "2captcha": "TWOCAPTCHA_API_KEY",
     "anticaptcha": "ANTICAPTCHA_API_KEY",
     "nopecha": "NOPECHA_API_KEY",
-    "cliproxy_image": "JOB_FTCH_OPENAI_API_KEY",
+    "cliproxy_image": "JOB_FTCH_CLIPROXY_API_KEY",
 }
 _RUNTIME_ENGINES: tuple[tuple[str, str, str, str], ...] = (
     ("stealth_browser", "playwright_stealth", "stealth", "stealth_browser"),

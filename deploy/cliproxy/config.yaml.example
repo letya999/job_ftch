@@ -1,0 +1,14 @@
+# CLIProxyAPI configuration for the optional job_ftch Compose sidecar.
+# Copy this file to config.yaml on the VPS and replace the API key with a
+# random client key. OAuth credentials are stored in ./auth, not in Git.
+host: "0.0.0.0"
+port: 8317
+auth-dir: "/root/.cli-proxy-api"
+api-keys:
+  - "replace-with-a-random-client-key"
+remote-management:
+  allow-remote: false
+  secret-key: ""
+debug: false
+logging-to-file: false
+request-retry: 0

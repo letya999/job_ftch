@@ -38,6 +38,36 @@ class _FakeClient:
         return self._responses[url]
 
 
+@pytest.mark.asyncio
+async def test_hh_salary_and_remote_marker_reach_normalized_record() -> None:
+    from job_ftch.domain import JobRecord, SourceKind
+    from job_ftch.nodes.job_normalization import CompensationParsingNode
+
+    html = '<script type="application/ld+json">{"@type":"JobPosting","title":"AI Engineer","description":"Build AI systems","hiringOrganization":{"name":"Acme"},"jobLocationType":"TELECOMMUTE","baseSalary":{"currency":"RUB","value":{"minValue":200000,"maxValue":300000,"unitText":"MONTH"}}}</script>'
+    html += '<h1 data-qa="vacancy-title">AI Engineer</h1><div data-qa="vacancy-description">Build AI systems</div><div data-qa="vacancy-salary">200000–300000 RUB per month net</div>'
+    raw = _item_from_detail_html("https://hh.ru/vacancy/123", html, "hh", "https://hh.ru")
+    assert raw.metadata["job_location_type"] == "TELECOMMUTE"
+    assert raw.metadata["company_authoritative"] is True
+    record = JobRecord(
+        raw_item_id="hh-salary",
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="hh",
+        metadata=raw.metadata,
+    )
+    result = await CompensationParsingNode().process(record)
+    assert result.compensation.min_amount == 200000
+    assert result.compensation.max_amount == 300000
+    assert result.compensation.period.value == "month"
+    assert result.compensation.gross is False
+
+
+def test_hh_visible_salary_survives_without_jsonld_salary() -> None:
+    html = '<h1 data-qa="vacancy-title">Engineer</h1><div data-qa="vacancy-description">Python role</div><div data-qa="vacancy-salary">from 200000 RUB per month gross</div>'
+    raw = _item_from_detail_html("https://hh.ru/vacancy/123", html, "hh", "https://hh.ru")
+    assert raw.metadata["salary_text"] == "from 200000 RUB per month gross"
+    assert "200000 RUB" in raw.text
+
+
 def test_hh_clears_leftover_challenge_stamp_on_clear_page() -> None:
     strategy = SimpleNamespace(observed_challenge_type="smartcaptcha")
 

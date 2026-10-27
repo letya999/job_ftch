@@ -13,4 +13,5 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_mcp_server.py](test_mcp_server.py)
 - [test_mcp_shot_ontology_parity.py](test_mcp_shot_ontology_parity.py)
 - [test_mcp_unit.py](test_mcp_unit.py)
+- [test_public_job_projection.py](test_public_job_projection.py)
 - [test_sources_pagination.py](test_sources_pagination.py)
