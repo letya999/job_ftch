@@ -129,6 +129,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_reranker.py](test_reranker.py)
 - [test_rocketjobs_site_parser.py](test_rocketjobs_site_parser.py)
 - [test_run_bot_ingest_script.py](test_run_bot_ingest_script.py)
+- [test_sber_ecosystem_parser.py](test_sber_ecosystem_parser.py)
 - [test_schema_export.py](test_schema_export.py)
 - [test_scrapers.py](test_scrapers.py)
 - [test_security_basics.py](test_security_basics.py)

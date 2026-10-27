@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+
+from selectolax.lexbor import LexborHTMLParser
 
 from job_ftch.application.registry import known_board_assessment_hint, register_site_parser
 from job_ftch.domain import (
@@ -276,6 +278,93 @@ _TRANSLIT = str.maketrans(
 def _sber_slug(value: str) -> str:
     transliterated = value.lower().translate(_TRANSLIT)
     return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", transliterated)).strip("-")
+
+
+class SberEcosystemParser:
+    domain_pattern = r"^https?://sber\.rabota\.ru(?:[/?#]|$)"
+    has_custom_parse = True
+    supports_discover = True
+    parser_name = "sber_ecosystem"
+    supports_search = True
+    search_mode = "per_keyword"
+
+    def runtime_defaults(self, url: str) -> None:
+        del url
+        return None
+
+    def parser_kind(self, url: str) -> None:
+        del url
+        return None
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del limit
+        return [
+            with_query_params(base_url, {"query": term})
+            for term in normalize_search_keywords(keywords)
+        ]
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        landing = await safe_fetch(client, "https://sber.rabota.ru/", follow_redirects=False)
+        companies = None
+        for node in LexborHTMLParser(landing.text).css("a[href]"):
+            parsed = urlparse(urljoin("https://sber.rabota.ru/", node.attributes["href"]))
+            query = parse_qs(parsed.query)
+            ids = query.get("company_ids", [""])[0]
+            if (
+                parsed.scheme == "https"
+                and parsed.hostname == "www.rabota.ru"
+                and parsed.path.rstrip("/") == "/vacancy"
+                and query.get("ecosystemSearch") == ["1"]
+                and re.fullmatch(r"\d+(?:,\d+)*", ids)
+            ):
+                companies = ids
+                break
+        if companies is None:
+            return []
+
+        limit = spec.limit or 50
+        result: list[str] = []
+        seen: set[str] = set()
+        for page in range(1, 6):
+            params = {
+                "company_ids": companies,
+                "all_regions": "1",
+                "sort": "relevance",
+                "ecosystemSearch": "1",
+                "page": str(page),
+            }
+            keyword = parse_qs(urlparse(spec.url).query).get("query", [""])[0]
+            if keyword:
+                params["query"] = keyword
+            response = await safe_fetch(
+                client,
+                f"https://www.rabota.ru/vacancy/?{urlencode(params)}",
+                follow_redirects=False,
+            )
+            before = len(result)
+            for node in LexborHTMLParser(response.text).css("a[href]"):
+                parsed = urlparse(urljoin("https://www.rabota.ru/", node.attributes["href"]))
+                if parsed.scheme != "https" or parsed.hostname != "www.rabota.ru":
+                    continue
+                match = re.fullmatch(r"/vacancy/(\d+)/?", parsed.path)
+                if match is None:
+                    continue
+                url = f"https://www.rabota.ru/vacancy/{match.group(1)}/"
+                if url not in seen:
+                    seen.add(url)
+                    result.append(url)
+                    if len(result) >= limit:
+                        return result
+            if len(result) == before:
+                break
+        return result
+
+
+register_site_parser("sber_ecosystem", domain_pattern=SberEcosystemParser.domain_pattern)(
+    SberEcosystemParser
+)
 
 
 register_site_parser(
