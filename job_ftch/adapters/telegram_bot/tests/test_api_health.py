@@ -139,15 +139,15 @@ async def test_uncertain_publication_is_visible_in_health() -> None:
     runner.store.health = []
     runner.store.state["bot_scheduler:last_publish_error"] = ""
 
-    async def uncertain(limit: int = 100):
+    async def uncertain(limit: int = 100) -> tuple[SimpleNamespace, ...]:
         return (
             SimpleNamespace(sink_name="telegram:channel", delivery_payload={"attempt_id": "one"}),
             SimpleNamespace(sink_name="telegram:channel", delivery_payload={"attempt_id": "one"}),
             SimpleNamespace(sink_name="other-sink", delivery_payload={"attempt_id": "two"}),
         )
 
-    runner.store.list_uncertain_outbox = uncertain
-    payload = await _tenant_health(runner, "ai_jobs")
+    runner.store.list_uncertain_outbox = uncertain  # type: ignore[attr-defined]
+    payload = await _tenant_health(runner, "ai_jobs")  # type: ignore[arg-type]
     assert payload["status"] == "degraded"
     assert payload["publish"]["uncertain_count"] == 1
 
