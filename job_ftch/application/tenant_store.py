@@ -401,7 +401,12 @@ class TenantStore:
         *,
         available_at: datetime,
         error: str | None = None,
+        refund_attempt: bool = False,
     ) -> IngestTask | None:
+        if refund_attempt:
+            return await self._ingest_queue_store().defer_ingest_task(
+                task, worker_id, available_at=available_at, error=error, refund_attempt=True
+            )
         return await self._ingest_queue_store().defer_ingest_task(
             task, worker_id, available_at=available_at, error=error
         )

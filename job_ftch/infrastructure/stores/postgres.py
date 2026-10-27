@@ -155,9 +155,10 @@ class PostgreSQLStore(SQLStoreAdapter):
     """
     _SQL_INGEST_TASK_DEFER = """
         UPDATE jf_ingest_tasks
-        SET state=$1, available_at=$2, lease_owner=NULL, lease_until=NULL,
-            last_error=$3, updated_at=$4
-        WHERE task_id=$5 AND lease_owner=$6 AND state='leased'
+        SET attempt=CASE WHEN $1 THEN GREATEST(attempt-1, 0) ELSE attempt END,
+            state=$2, available_at=$3, lease_owner=NULL, lease_until=NULL,
+            last_error=$4, updated_at=$5
+        WHERE task_id=$6 AND lease_owner=$7 AND state='leased'
     """
     _SQL_INGEST_TASK_FAIL = """
         UPDATE jf_ingest_tasks

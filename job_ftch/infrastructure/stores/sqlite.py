@@ -140,7 +140,8 @@ class SQLiteStore(SQLStoreAdapter):
     """
     _SQL_INGEST_TASK_DEFER = """
         UPDATE jf_ingest_tasks
-        SET state=?, available_at=?, lease_owner=NULL, lease_until=NULL,
+        SET attempt=CASE WHEN ? THEN MAX(attempt-1, 0) ELSE attempt END,
+            state=?, available_at=?, lease_owner=NULL, lease_until=NULL,
             last_error=?, updated_at=?
         WHERE task_id=? AND lease_owner=? AND state='leased'
     """

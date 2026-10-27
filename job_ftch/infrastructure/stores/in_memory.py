@@ -640,6 +640,7 @@ class InMemoryStore:
         *,
         available_at: datetime,
         error: str | None = None,
+        refund_attempt: bool = False,
     ) -> IngestTask | None:
         current = self._ingest_tasks.get(task.task_id)
         if (
@@ -651,6 +652,7 @@ class InMemoryStore:
         deferred = current.model_copy(
             update={
                 "state": IngestTaskState.WAITING_RATE_LIMIT,
+                "attempt": max(0, current.attempt - 1) if refund_attempt else current.attempt,
                 "available_at": available_at,
                 "lease_owner": None,
                 "lease_until": None,

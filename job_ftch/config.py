@@ -477,6 +477,7 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     fingerprinter_timeout_seconds: float = Field(default=8.0, gt=0.0, le=300.0)
     store_path: Path = Path(".runtime/job_ftch.db")
+    tenant_lock_dir: Path | None = None
     store_dsn: SecretStr | None = None
     http_proxy_list: Annotated[list[str], NoDecode] = Field(default_factory=list)
     store_pool_min: int = Field(default=2, gt=0)
