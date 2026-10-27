@@ -327,3 +327,62 @@ async def test_tenant_run_lock_releases_filelock_after_context(tmp_path: Path):
     lock = FileLock(str(lock_path), timeout=0)
     lock.acquire()
     lock.release()
+
+
+@pytest.mark.asyncio
+async def test_tenant_lock_directory_can_be_shared_across_runtime_paths(tmp_path: Path):
+    from job_ftch.application.tenant_locks import tenant_run_is_active
+
+    shared = tmp_path / "shared-locks"
+    first = get_settings().model_copy(
+        update={"store_path": tmp_path / "bot" / "store.db", "tenant_lock_dir": shared}
+    )
+    second = get_settings().model_copy(
+        update={"store_path": tmp_path / "api" / "store.db", "tenant_lock_dir": shared}
+    )
+    async with tenant_run_lock(first, "shared_tenant"):
+        assert tenant_run_is_active(second, "shared_tenant")
+        with pytest.raises(TenantRunAlreadyActiveError):
+            async with tenant_run_lock(second, "shared_tenant", timeout=0):
+                pass
+    assert not tenant_run_is_active(second, "shared_tenant")
+
+
+def test_tenant_lock_directory_can_be_configured_from_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from job_ftch.config import Settings
+
+    monkeypatch.setenv("JOB_FTCH_TENANT_LOCK_DIR", str(tmp_path / "locks"))
+    settings = Settings(_env_file=None)
+    assert getattr(settings, "tenant_lock_dir", None) == tmp_path / "locks"
+
+
+@pytest.mark.asyncio
+async def test_run_tenant_does_not_wait_and_rerun_after_external_lock(tmp_path: Path):
+    import asyncio
+
+    from filelock import FileLock
+
+    settings = get_settings().model_copy(
+        update={"store_path": tmp_path / "store.db", "ingest_queue_enabled": False}
+    )
+    tenant = TenantConfig(tenant_id="external_lock", display_name="External lock")
+    runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    runtime = runner.get_runtime("external_lock")
+    lock_dir = runtime.settings.store_path.parent / "tenant_locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    external = FileLock(str(lock_dir / "external_lock.lock"), thread_local=False)
+    external.acquire()
+    task = asyncio.create_task(runner.run_tenant("external_lock"))
+    try:
+        try:
+            summary = await asyncio.wait_for(asyncio.shield(task), timeout=2)
+        except TimeoutError:
+            external.release()
+            await asyncio.wait_for(task, timeout=20)
+            pytest.fail("a concurrent run waited for another process and then ran")
+        assert summary.skipped_already_active
+    finally:
+        external.release()
+        await runner.close()

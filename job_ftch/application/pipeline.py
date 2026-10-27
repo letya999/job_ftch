@@ -1255,8 +1255,6 @@ class Pipeline[PipelineInput, PipelineOutput]:
 
     async def _recover_pending_outbox(self) -> None:
         """Replay only the still-pending leaf target for each durable record."""
-        if not self._delivery_targets:
-            return
 
         async def deliver(record: OutboxRecord) -> None:
             try:

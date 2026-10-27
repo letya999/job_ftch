@@ -200,6 +200,22 @@ def test_x5_builds_per_keyword_search_from_target_roles() -> None:
     assert [_query(url)["search"] for url in many] == [[role] for role in ROLES]
 
 
+def test_x5_moves_legacy_career_search_to_current_it_catalog() -> None:
+    url = X5TechCareerParser().build_search_urls("https://x5-tech.ru/career/", ["Python"])[0]
+    parsed = urlparse(url)
+    assert (parsed.scheme, parsed.netloc, parsed.path) == ("https", "rabota.x5.ru", "/vacancies")
+    assert _query(url)["vacancy_categories"] == ["it"]
+    assert _query(url)["search"] == ["Python"]
+
+
+def test_x5_preserves_catalog_filters_in_keyword_search() -> None:
+    url = X5TechCareerParser().build_search_urls(
+        "https://rabota.x5.ru/vacancies?vacancy_categories=it", ["Python"]
+    )[0]
+    assert _query(url)["vacancy_categories"] == ["it"]
+    assert _query(url)["search"] == ["Python"]
+
+
 def test_distinctive_search_tokens_drop_engineer() -> None:
     assert distinctive_search_tokens(ROLES) == ["AI", "LLM"]
 

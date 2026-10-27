@@ -7,7 +7,7 @@ import hashlib
 import json
 import random
 import uuid
-from contextlib import nullcontext, suppress
+from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
@@ -756,6 +756,25 @@ class TenantRunner:
                 run_id=task.run_id,
                 source_id=task.source_id,
                 error=str(exc),
+            )
+            return
+        if summary.skipped_already_active:
+            await store.defer_ingest_task(
+                task,
+                self._ingest_worker_id,
+                available_at=datetime.now(UTC)
+                + timedelta(seconds=settings.ingest_queue_error_retry_seconds),
+                error="tenant_run_already_active",
+                refund_attempt=True,
+            )
+            return
+        if summary.drop_reasons.get("lock_error"):
+            await store.defer_ingest_task(
+                task,
+                self._ingest_worker_id,
+                available_at=datetime.now(UTC)
+                + timedelta(seconds=settings.ingest_queue_error_retry_seconds),
+                error="tenant_run_lock_error",
             )
             return
         if summary.completion_state == "waiting_rate_limit":
@@ -1863,12 +1882,42 @@ class TenantRunner:
         tracer = trace.get_tracer("job_ftch.tenant_runner")
         attach_token = None
         borrowed = False
+        run_lock = AsyncExitStack()
         try:
             with tracer.start_as_current_span("ingest.run") as span:
                 span.set_attribute("job_ftch.source_run_id", run_id)
                 span.set_attribute("job_ftch.tenant_id", tenant_id)
                 runtime = self.get_runtime(tenant_id)
                 config_fingerprint = _tenant_config_fingerprint(runtime)
+                try:
+                    await run_lock.enter_async_context(
+                        _tenant_run_lock(runtime.settings, tenant_id, timeout=0)
+                    )
+                except TenantRunAlreadyActiveError:
+                    logger.info("tenant_run_skipped_already_active", tenant_id=tenant_id)
+                    span.set_attribute("job_ftch.skipped_already_active", True)
+                    return RunSummary(
+                        tenant_id=tenant_id,
+                        source_run_id=run_id,
+                        finished_at=datetime.now(UTC),
+                        trigger=trigger,
+                        config_fingerprint=config_fingerprint,
+                        skipped_already_active=True,
+                    )
+                except TenantRunLockError as exc:
+                    logger.error(
+                        "tenant_run_skipped_lock_error", tenant_id=tenant_id, error=str(exc)
+                    )
+                    span.set_attribute("job_ftch.failed", 1)
+                    return RunSummary(
+                        tenant_id=tenant_id,
+                        source_run_id=run_id,
+                        finished_at=datetime.now(UTC),
+                        trigger=trigger,
+                        config_fingerprint=config_fingerprint,
+                        failed=1,
+                        drop_reasons={"lock_error": 1},
+                    )
                 if not _from_ingest_queue and getattr(
                     runtime.settings, "ingest_queue_enabled", False
                 ):
@@ -1984,91 +2033,144 @@ class TenantRunner:
                     borrowed = True
                     attach_token = attach_operator_page(attached.page)
                 try:
-                    async with _tenant_run_lock(runtime.settings, tenant_id):
-                        llm_interval = (
-                            runtime.tenant.schedule.interval_seconds
-                            if runtime.tenant.schedule is not None
-                            else getattr(runtime.settings, "schedule_interval_seconds", None)
-                        ) or DEFAULT_SCHEDULE_INTERVAL_SECONDS
-                        binding_checks: dict[str, BindingPreflight] = {}
-                        binding_switches: list[dict[str, object]] = []
-                        extraction_preflight = None
-                        preflight = await check_llm_pause(runtime.store)
-                        if preflight is None and getattr(
-                            runtime.settings, "llm_preflight_enabled", True
+                    llm_interval = (
+                        runtime.tenant.schedule.interval_seconds
+                        if runtime.tenant.schedule is not None
+                        else getattr(runtime.settings, "schedule_interval_seconds", None)
+                    ) or DEFAULT_SCHEDULE_INTERVAL_SECONDS
+                    binding_checks: dict[str, BindingPreflight] = {}
+                    binding_switches: list[dict[str, object]] = []
+                    extraction_preflight = None
+                    preflight = await check_llm_pause(runtime.store)
+                    if preflight is None and getattr(
+                        runtime.settings, "llm_preflight_enabled", True
+                    ):
+                        _sync_legacy_llm_override(runtime)
+                        binding_checks, binding_switches = await preflight_bindings(
+                            runtime.settings,
+                            runtime.llm_bindings,
+                            names=required_binding_names(runtime.settings),
+                        )
+                        for binding_name, check in binding_checks.items():
+                            runtime.llm_bindings[binding_name] = check.provider
+                        if "extraction" in binding_checks:
+                            runtime.llm_provider = cast(
+                                "LLMProvider", binding_checks["extraction"].provider
+                            )
+                            extraction_preflight = binding_checks["extraction"].result
+                        previous_switches = await runtime.store.get_run_state(
+                            "llm:last_binding_switches"
+                        )
+                        previous_recovery = await runtime.store.get_run_state(
+                            "llm:last_binding_recovery"
+                        )
+                        if binding_switches and (
+                            json.dumps(binding_switches, ensure_ascii=False, sort_keys=True)
+                            != (previous_switches or "")
+                            or bool(previous_recovery)
                         ):
-                            _sync_legacy_llm_override(runtime)
-                            binding_checks, binding_switches = await preflight_bindings(
+                            await runtime.store.set_run_state(
+                                "llm:last_binding_switches",
+                                json.dumps(binding_switches, ensure_ascii=False, sort_keys=True),
+                            )
+                            await runtime.store.set_run_state("llm:last_binding_recovery", "")
+                            logger.warning(
+                                "llm_binding_fallback_selected",
+                                tenant_id=tenant_id,
+                                run_id=run_id,
+                                switches=binding_switches,
+                            )
+                        unavailable = [
+                            (name, check.result)
+                            for name, check in binding_checks.items()
+                            if not check.result.available
+                        ]
+                        if (
+                            not unavailable
+                            and not binding_switches
+                            and previous_switches
+                            and not previous_recovery
+                        ):
+                            await runtime.store.set_run_state(
+                                "llm:last_binding_recovery",
+                                json.dumps(
+                                    {
+                                        "recovered_at": datetime.now(UTC).isoformat(),
+                                        "previous_switches": previous_switches,
+                                    },
+                                    ensure_ascii=False,
+                                    sort_keys=True,
+                                ),
+                            )
+                        if unavailable:
+                            _, first_result = next(
+                                (
+                                    (name, result)
+                                    for name, result in unavailable
+                                    if result.quota_exhausted
+                                ),
+                                unavailable[0],
+                            )
+                            extraction_preflight = first_result
+                        preflight = await check_llm_before_run(
+                            runtime.store,
+                            runtime.llm_provider,
+                            normal_interval_seconds=int(llm_interval),
+                            retry_delay_seconds=getattr(
                                 runtime.settings,
-                                runtime.llm_bindings,
-                                names=required_binding_names(runtime.settings),
-                            )
-                            for binding_name, check in binding_checks.items():
-                                runtime.llm_bindings[binding_name] = check.provider
-                            if "extraction" in binding_checks:
-                                runtime.llm_provider = cast(
-                                    "LLMProvider", binding_checks["extraction"].provider
-                                )
-                                extraction_preflight = binding_checks["extraction"].result
-                            previous_switches = await runtime.store.get_run_state(
-                                "llm:last_binding_switches"
-                            )
-                            previous_recovery = await runtime.store.get_run_state(
-                                "llm:last_binding_recovery"
-                            )
-                            if binding_switches and (
-                                json.dumps(binding_switches, ensure_ascii=False, sort_keys=True)
-                                != (previous_switches or "")
-                                or bool(previous_recovery)
-                            ):
-                                await runtime.store.set_run_state(
-                                    "llm:last_binding_switches",
-                                    json.dumps(
-                                        binding_switches, ensure_ascii=False, sort_keys=True
-                                    ),
-                                )
-                                await runtime.store.set_run_state("llm:last_binding_recovery", "")
-                                logger.warning(
-                                    "llm_binding_fallback_selected",
-                                    tenant_id=tenant_id,
-                                    run_id=run_id,
-                                    switches=binding_switches,
-                                )
-                            unavailable = [
-                                (name, check.result)
-                                for name, check in binding_checks.items()
-                                if not check.result.available
-                            ]
-                            if (
-                                not unavailable
-                                and not binding_switches
-                                and previous_switches
-                                and not previous_recovery
-                            ):
-                                await runtime.store.set_run_state(
-                                    "llm:last_binding_recovery",
-                                    json.dumps(
-                                        {
-                                            "recovered_at": datetime.now(UTC).isoformat(),
-                                            "previous_switches": previous_switches,
-                                        },
-                                        ensure_ascii=False,
-                                        sort_keys=True,
-                                    ),
-                                )
-                            if unavailable:
-                                _, first_result = next(
-                                    (
-                                        (name, result)
-                                        for name, result in unavailable
-                                        if result.quota_exhausted
-                                    ),
-                                    unavailable[0],
-                                )
-                                extraction_preflight = first_result
-                            preflight = await check_llm_before_run(
+                                "llm_quota_retry_delay_seconds",
+                                DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
+                            ),
+                            max_retries=getattr(
+                                runtime.settings,
+                                "llm_quota_max_retries",
+                                DEFAULT_QUOTA_MAX_RETRIES,
+                            ),
+                            preflight_result=extraction_preflight,
+                        )
+                    if preflight is not None and not preflight.allowed:
+                        summary = RunSummary(
+                            tenant_id=tenant_id,
+                            source_run_id=run_id,
+                            trigger=trigger,
+                            config_fingerprint=config_fingerprint,
+                            completion_state="llm_preflight_blocked",
+                            next_retry_at=preflight.retry_at,
+                            llm_quota_exhausted=preflight.quota_exhausted,
+                            llm_health_error=preflight.message,
+                            source_outcomes=[
+                                {
+                                    "source_id": source_spec_identifier(spec),
+                                    "source_kind": str(getattr(spec, "type", "unknown")),
+                                    "source_name": source_spec_name(spec),
+                                    "status": "skipped",
+                                    "completion_state": "llm_preflight_blocked",
+                                    "error": preflight.message,
+                                }
+                                for spec in runtime.tenant.sources
+                            ],
+                        ).finish()
+                        await self._persist_terminal_summary(runtime, summary)
+                    else:
+                        summary = await self._run_tenant_bound(
+                            tenant_id,
+                            run_id=run_id,
+                            max_items=max_items,
+                            user_id=user_id,
+                            source_ids=source_ids,
+                            bypass_override=bypass_override,
+                            parser_override=parser_override,
+                            ignore_schedule_gates=ignore_schedule_gates,
+                            lock_already_held=True,
+                            personal_mode=personal_mode,
+                            trigger=trigger,
+                            config_fingerprint=config_fingerprint,
+                            ingest_task_id=_ingest_task_id,
+                            ingest_worker_id=self._ingest_worker_id if _from_ingest_queue else None,
+                        )
+                        if getattr(runtime.llm_provider, "quota_exhausted", False):
+                            decision = await note_llm_quota_failure(
                                 runtime.store,
-                                runtime.llm_provider,
                                 normal_interval_seconds=int(llm_interval),
                                 retry_delay_seconds=getattr(
                                     runtime.settings,
@@ -2080,70 +2182,12 @@ class TenantRunner:
                                     "llm_quota_max_retries",
                                     DEFAULT_QUOTA_MAX_RETRIES,
                                 ),
-                                preflight_result=extraction_preflight,
                             )
-                        if preflight is not None and not preflight.allowed:
-                            summary = RunSummary(
-                                tenant_id=tenant_id,
-                                source_run_id=run_id,
-                                trigger=trigger,
-                                config_fingerprint=config_fingerprint,
-                                completion_state="llm_preflight_blocked",
-                                next_retry_at=preflight.retry_at,
-                                llm_quota_exhausted=preflight.quota_exhausted,
-                                llm_health_error=preflight.message,
-                                source_outcomes=[
-                                    {
-                                        "source_id": source_spec_identifier(spec),
-                                        "source_kind": str(getattr(spec, "type", "unknown")),
-                                        "source_name": source_spec_name(spec),
-                                        "status": "skipped",
-                                        "completion_state": "llm_preflight_blocked",
-                                        "error": preflight.message,
-                                    }
-                                    for spec in runtime.tenant.sources
-                                ],
-                            ).finish()
+                            summary.completion_state = "llm_quota_exhausted"
+                            summary.next_retry_at = decision.retry_at
+                            summary.llm_quota_exhausted = True
+                            summary.llm_health_error = decision.message
                             await self._persist_terminal_summary(runtime, summary)
-                        else:
-                            summary = await self._run_tenant_bound(
-                                tenant_id,
-                                run_id=run_id,
-                                max_items=max_items,
-                                user_id=user_id,
-                                source_ids=source_ids,
-                                bypass_override=bypass_override,
-                                parser_override=parser_override,
-                                ignore_schedule_gates=ignore_schedule_gates,
-                                lock_already_held=True,
-                                personal_mode=personal_mode,
-                                trigger=trigger,
-                                config_fingerprint=config_fingerprint,
-                                ingest_task_id=_ingest_task_id,
-                                ingest_worker_id=self._ingest_worker_id
-                                if _from_ingest_queue
-                                else None,
-                            )
-                            if getattr(runtime.llm_provider, "quota_exhausted", False):
-                                decision = await note_llm_quota_failure(
-                                    runtime.store,
-                                    normal_interval_seconds=int(llm_interval),
-                                    retry_delay_seconds=getattr(
-                                        runtime.settings,
-                                        "llm_quota_retry_delay_seconds",
-                                        DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
-                                    ),
-                                    max_retries=getattr(
-                                        runtime.settings,
-                                        "llm_quota_max_retries",
-                                        DEFAULT_QUOTA_MAX_RETRIES,
-                                    ),
-                                )
-                                summary.completion_state = "llm_quota_exhausted"
-                                summary.next_retry_at = decision.retry_at
-                                summary.llm_quota_exhausted = True
-                                summary.llm_health_error = decision.message
-                                await self._persist_terminal_summary(runtime, summary)
                 except TenantRunAlreadyActiveError:
                     logger.info("tenant_run_skipped_already_active", tenant_id=tenant_id)
                     summary = RunSummary()
@@ -2170,6 +2214,7 @@ class TenantRunner:
                 span.set_attribute("job_ftch.failed", summary.failed)
                 return summary
         finally:
+            await run_lock.aclose()
             if attach_token is not None:
                 from job_ftch.infrastructure.sources.browser_utils import (
                     reset_operator_page,
@@ -2586,6 +2631,7 @@ class TenantRunner:
         now = datetime.now(UTC)
         queue_started_at = summary.started_at
         queue_run_id = str(summary.source_run_id)
+        retry_attempt = 0
         if ingest_task_id:
             list_active = getattr(runtime.store, "list_active_ingest_tasks", None)
             if callable(list_active):
@@ -2599,6 +2645,7 @@ class TenantRunner:
                 if current_task is not None:
                     queue_started_at = current_task.created_at
                     queue_run_id = current_task.run_id
+                    retry_attempt = current_task.attempt
         scheduled: list[datetime] = []
         needs_operator: list[str] = []
         queued_sources: set[str] = set()
@@ -2616,7 +2663,22 @@ class TenantRunner:
             else:
                 wait_seconds = 0.0
             if wait_seconds <= 0:
-                wait_seconds = settings.ingest_queue_default_retry_seconds
+                base_wait = settings.ingest_queue_default_retry_seconds
+                if base_wait > settings.ingest_queue_max_wait_seconds:
+                    wait_seconds = base_wait
+                else:
+                    wait_seconds = min(
+                        settings.ingest_queue_max_wait_seconds,
+                        base_wait * 2 ** min(retry_attempt, 20),
+                    )
+            elif retry_attempt:
+                wait_seconds = max(
+                    wait_seconds,
+                    min(
+                        settings.ingest_queue_max_wait_seconds,
+                        settings.ingest_queue_default_retry_seconds * 2 ** min(retry_attempt, 20),
+                    ),
+                )
             scope = str(outcome.get("rate_limit_scope") or source_id)
             reason = "rate_limit_delay_exceeds_policy"
             if wait_seconds > settings.ingest_queue_max_wait_seconds:
