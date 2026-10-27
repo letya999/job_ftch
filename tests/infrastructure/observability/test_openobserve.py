@@ -51,6 +51,7 @@ def test_openobserve_dashboard_copies_match_and_panels_have_descriptions() -> No
 def test_context_filter_promotes_only_safe_correlation_fields() -> None:
     tokens = bind_contextvars(
         source_run_id="run-123",
+        parent_run_id="parent-run",
         tenant_id="ai_jobs",
         graph_hash="graph-456",
         source_id="forproducts",
@@ -61,6 +62,7 @@ def test_context_filter_promotes_only_safe_correlation_fields() -> None:
 
         assert _ContextAttributesFilter().filter(record) is True
         assert record.source_run_id == "run-123"  # type: ignore[attr-defined]
+        assert getattr(record, "parent_run_id", None) == "parent-run"
         assert record.tenant_id == "ai_jobs"  # type: ignore[attr-defined]
         assert record.graph_hash == "graph-456"  # type: ignore[attr-defined]
         assert record.source_id == "forproducts"  # type: ignore[attr-defined]

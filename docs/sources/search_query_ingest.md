@@ -1,7 +1,7 @@
 ---
 title: "Search query ingest"
 description: "How career-site source URLs are expanded into keyword-search ingest targets."
-updated: 2026-09-03
+updated: 2026-10-27
 status: current
 audience: engineers configuring career-site ingest
 ---
@@ -65,7 +65,7 @@ see `job_ftch/infrastructure/sources/site_parsers/`):
 | getmatch.ru | combined | `query=A OR B` on `/vacancies` | No free-text search box; the live UI strips `?query=`. The parser still puts terms on the URL (and `_search_keywords`) so diagnostic ingest can title-filter `/api/offers` locally. Offset pagination follows `meta.total`; canonical detail pages are fetched concurrently, with API-card fallback for temporary detail loss and sitemap/browser-scroll fallback for listing loss. Shared retry propagates 429/503 to durable ingest. |
 | team.vk.company | combined | `search=A OR B` | Live search box uses `search=` (maps to API `title=`). `query=` is ignored. API `title` is a substring, not boolean OR; combined queries paginate the listing and filter titles locally. |
 | rabota.sber.ru | combined | `query=A OR B` | Parse maps listing `query` to API `searchString` and walks `skip`/`take`. |
-| yandex.ru/jobs | combined | `text=A OR B` | Public `/jobs/api/publications?text=` walks `page`; browser intercept is only a fallback. |
+| yandex.ru/jobs | per-keyword | `text=ROLE` | The public API does not implement `OR` as a union. Separate role searches use the existing three-query fan-out cap; `/jobs/api/publications?text=` walks `page`. |
 | superjob.ru | combined | `keywords=A OR B` | HTTP listing of `vakansii/{slug}-{id}.html`. A challenge body raises `BrowserChallengeError` instead of a generic hang. |
 | tbank.ru | combined | `/career/vacancies/it/` | No free-text box. Listing URL is kept; target roles stay on `_search_keywords` and are applied locally while listing pages are walked. |
 | rabota.x5.ru | per-keyword | `search=ROLE` | One URL per target role. Combined `OR` is not used. Listing pages are walked. |

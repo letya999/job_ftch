@@ -8,3 +8,4 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 
 - [Production recovery — audit context](production-recovery-audit-context.md) - Передаваемые факты сессии, ограничения доказательств и regression cases. (Updated: 2026-09-12)
 - [Recovery task dispatch](production-recovery-task-dispatch.md) - Созданные задачи, модель, startup status и координация. (Updated: 2026-09-12)
+- [S1: передача изменений подтверждённой доставки](recovery-s1-handoff.md) - Проверки и ограничения восстановления публикаций Telegram. (Updated: 2026-10-27)

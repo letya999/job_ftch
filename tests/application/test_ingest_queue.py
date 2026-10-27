@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -57,6 +59,108 @@ async def test_ingest_queue_cooldown_lease_and_recovery(store_factory) -> None:
         IngestTaskState.WAITING_RATE_LIMIT
     )
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_delayed_ingest_attempt_uses_fresh_run_identity() -> None:
+    store = InMemoryStore()
+    settings = Settings.model_validate({"ingest_queue_enabled": True})
+    runtime = SimpleNamespace(store=store, settings=settings)
+    runner = TenantRunner({})
+    task = IngestTask(
+        task_id="task-1",
+        tenant_id="tenant-1",
+        run_id="parent-run",
+        source_id="career_site:hirify",
+        rate_scope="hirify.me",
+    )
+    seen: list[str] = []
+
+    async def fake_run(_tenant_id, **kwargs):
+        seen.append(kwargs["run_id"])
+        return RunSummary(completion_state="waiting_rate_limit")
+
+    runner.run_tenant = fake_run  # type: ignore[method-assign]
+    await runner._process_ingest_task(runtime, task)
+    await runner._process_ingest_task(runtime, task)
+
+    assert len(set(seen)) == 2
+    assert "parent-run" not in seen
+
+
+@pytest.mark.asyncio
+async def test_delayed_ingest_attempt_logs_parent_and_attempt_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = InMemoryStore()
+    runtime = SimpleNamespace(store=store, settings=Settings.model_validate({}))
+    runner = TenantRunner({})
+    task = IngestTask(
+        task_id="task-1", tenant_id="t", run_id="parent", source_id="source", rate_scope="scope"
+    )
+    seen: list[str] = []
+
+    async def fake_run(_tenant_id, **kwargs):
+        seen.append(kwargs["run_id"])
+        return RunSummary(completion_state="waiting_rate_limit")
+
+    runner.run_tenant = fake_run  # type: ignore[method-assign]
+    log = MagicMock()
+    monkeypatch.setattr("job_ftch.application.tenant_runner.logger", log)
+    await runner._process_ingest_task(runtime, task)
+
+    log.info.assert_called_once_with(
+        "ingest_delayed_task_started",
+        tenant_id="t",
+        parent_run_id="parent",
+        source_run_id=seen[0],
+        source_id="source",
+    )
+
+
+@pytest.mark.asyncio
+async def test_delayed_attempt_reschedules_same_parent_task() -> None:
+    store = InMemoryStore()
+    settings = Settings.model_validate({"ingest_queue_enabled": True})
+    runtime = SimpleNamespace(store=store, settings=settings, tenant=SimpleNamespace(tenant_id="t"))
+    runner = TenantRunner({})
+    task_id = hashlib.sha256(b"t:parent:career_site:hirify").hexdigest()
+    task = IngestTask(
+        task_id=task_id,
+        tenant_id="t",
+        run_id="parent",
+        source_id="career_site:hirify",
+        rate_scope="hirify.me",
+    )
+    await store.enqueue_ingest_task(task)
+    claimed = await store.claim_due_ingest_tasks(
+        "t", "worker", limit=1, lease_seconds=30, now=datetime.now(UTC)
+    )
+    assert len(claimed) == 1
+    summary = RunSummary(
+        tenant_id="t",
+        source_run_id="new-attempt",
+        source_outcomes=[{"source_id": task.source_id, "status": "rate_limited"}],
+    )
+
+    await runner._schedule_ingest_continuations(
+        runtime,
+        summary,
+        max_items=None,
+        user_id=None,
+        bypass_override=None,
+        parser_override=None,
+        personal_mode=False,
+        trigger="manual",
+        ingest_task_id=task_id,
+        ingest_worker_id="worker",
+    )
+
+    active = await store.list_active_ingest_tasks("t")
+    assert len(active) == 1
+    assert active[0].task_id == task_id
+    assert active[0].run_id == "parent"
+    assert active[0].state == IngestTaskState.WAITING_RATE_LIMIT
 
 
 @pytest.mark.asyncio

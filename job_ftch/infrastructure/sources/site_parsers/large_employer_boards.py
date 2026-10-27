@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit
 
 from selectolax.lexbor import LexborHTMLParser
 
@@ -799,6 +799,23 @@ class X5TechCareerParser(_EmployerBoardParser):
     supports_search = True
     search_mode = "per_keyword"
 
+    @staticmethod
+    def _listing_spec(spec: CareerSiteSpec) -> CareerSiteSpec:
+        if _host_of(spec.url) == "x5-tech.ru":
+            url = with_query_params(
+                "https://rabota.x5.ru/vacancies?vacancy_categories=it",
+                dict(parse_qsl(urlsplit(spec.url).query, keep_blank_values=True)),
+            )
+            return spec.model_copy(update={"url": url})
+        return spec
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        return await super().discover(self._listing_spec(spec), client)
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        async for item in super().parse(self._listing_spec(spec), client):
+            yield item
+
     def build_search_urls(
         self,
         base_url: str,
@@ -810,7 +827,11 @@ class X5TechCareerParser(_EmployerBoardParser):
         terms = normalize_search_keywords(keywords)
         if not terms:
             return []
-        listing = base_url.split("?", 1)[0]
+        listing = (
+            "https://rabota.x5.ru/vacancies?vacancy_categories=it"
+            if _host_of(base_url) == "x5-tech.ru"
+            else base_url
+        )
         return [with_query_params(listing, {"search": term}) for term in terms]
 
 

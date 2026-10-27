@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -641,7 +642,9 @@ async def test_run_pipeline_reports_channel_publish_outer_failure(
     message.from_user.id = 123
     status_msg = MagicMock()
     status_msg.edit_text = AsyncMock()
-    message.answer = AsyncMock(side_effect=[status_msg, None, None])
+    message.answer = AsyncMock(
+        side_effect=[status_msg, SimpleNamespace(message_id=1, chat=SimpleNamespace(id=123)), None]
+    )
 
     bot = MagicMock()
 
@@ -655,6 +658,7 @@ async def test_run_pipeline_reports_partial_chat_delivery_and_publishes_only_del
 ) -> None:
     from job_ftch.adapters.telegram_bot.handlers.pipeline import run_pipeline_for_chat
     from job_ftch.domain.models import MatchDecision, PostType
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
     monkeypatch.setattr(
         "job_ftch.adapters.telegram_bot.handlers.pipeline._url_is_alive",
@@ -666,6 +670,7 @@ async def test_run_pipeline_reports_partial_chat_delivery_and_publishes_only_del
     )
     runner = MagicMock()
     runtime = MagicMock()
+    runtime.store = InMemoryStore()
     runtime.settings = MagicMock(
         bot_send_limit_per_run=5,
     )
@@ -731,7 +736,7 @@ async def test_run_pipeline_reports_partial_chat_delivery_and_publishes_only_del
             return status_msg
         if text.startswith("card:AI Engineer 1"):
             sent_cards.append(text)
-            return None
+            return SimpleNamespace(message_id=1, chat=SimpleNamespace(id=123))
         if text.startswith("card:AI Engineer 2"):
             raise RuntimeError("chat send failed")
         sent_cards.append(text)
@@ -740,7 +745,9 @@ async def test_run_pipeline_reports_partial_chat_delivery_and_publishes_only_del
     message.answer = AsyncMock(side_effect=_answer)
 
     bot = MagicMock()
-    bot.send_message = AsyncMock()
+    bot.send_message = AsyncMock(
+        return_value=SimpleNamespace(message_id=2, chat=SimpleNamespace(id=123))
+    )
 
     await run_pipeline_for_chat(message, runner, bot)
 
@@ -828,7 +835,7 @@ async def test_run_pipeline_backfills_past_dead_links_before_send_limit(
         del kwargs
         if text.startswith("🚀 Запускаю"):
             return status_msg
-        return None
+        return SimpleNamespace(message_id=1, chat=SimpleNamespace(id=123))
 
     message.answer = AsyncMock(side_effect=_answer)
     bot = MagicMock()
