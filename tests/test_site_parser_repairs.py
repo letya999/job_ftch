@@ -46,6 +46,64 @@ class _FakeClient:
 
 
 @pytest.mark.asyncio
+async def test_x5_discovery_redirects_legacy_listing_to_current_it_catalog() -> None:
+    from job_ftch.infrastructure.sources.site_parsers.large_employer_boards import (
+        X5TechCareerParser,
+    )
+
+    listing = "https://rabota.x5.ru/vacancies?vacancy_categories=it"
+    vacancy = "https://rabota.x5.ru/vacancies/35b84c32-6fd0-4784-8e42-8e4893947910"
+    client = _FakeClient(
+        {listing: _FakeResponse(f'<a href="{vacancy}">Python developer</a>', listing)}
+    )
+    spec = CareerSiteSpec(url="https://x5-tech.ru/career/", source_name="x5", limit=1)
+    assert await X5TechCareerParser().discover(spec, client) == [vacancy]
+
+
+@pytest.mark.asyncio
+async def test_x5_discovery_keeps_legacy_search_query() -> None:
+    from job_ftch.infrastructure.sources.site_parsers.large_employer_boards import (
+        X5TechCareerParser,
+    )
+
+    listing = "https://rabota.x5.ru/vacancies?vacancy_categories=it&search=Python"
+    vacancy = "https://rabota.x5.ru/vacancies/35b84c32-6fd0-4784-8e42-8e4893947910"
+    calls: list[str] = []
+
+    class RecordingClient(_FakeClient):
+        async def get(self, url: str, **kwargs: object) -> _FakeResponse:
+            calls.append(url)
+            return await super().get(url, **kwargs)
+
+    client = RecordingClient(
+        {listing: _FakeResponse(f'<a href="{vacancy}">Python developer</a>', listing)}
+    )
+    spec = CareerSiteSpec(url="https://x5-tech.ru/career/?search=Python", source_name="x5", limit=1)
+    assert await X5TechCareerParser().discover(spec, client) == [vacancy]
+    assert calls[0] == listing
+
+
+@pytest.mark.asyncio
+async def test_x5_parse_fallback_uses_current_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_ftch.infrastructure.sources.site_parsers import large_employer_boards
+
+    seen: list[str] = []
+
+    async def parse(spec: CareerSiteSpec, client: object, **kwargs: object):
+        del client, kwargs
+        seen.append(spec.url)
+        yield "job"
+
+    monkeypatch.setattr(large_employer_boards, "_parse_detail_board", parse)
+    spec = CareerSiteSpec(url="https://x5-tech.ru/career/?search=Python", source_name="x5")
+    items = [
+        item async for item in large_employer_boards.X5TechCareerParser().parse(spec, object())
+    ]
+    assert items == ["job"]
+    assert seen == ["https://rabota.x5.ru/vacancies?vacancy_categories=it&search=Python"]
+
+
+@pytest.mark.asyncio
 async def test_habr_parser_discovers_detail_urls() -> None:
     parser = HabrCareerParser()
     client = _FakeClient(
