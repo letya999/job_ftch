@@ -14,6 +14,7 @@ class CaptchaChallengeType(StrEnum):
     CLOUDFLARE_CHALLENGE = "cloudflare_challenge"
     DATADOME = "datadome"
     PERIMETERX = "perimeterx"
+    SMARTCAPTCHA = "smartcaptcha"
     IMAGE = "image"
     UNKNOWN = "unknown"
 

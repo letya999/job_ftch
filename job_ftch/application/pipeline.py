@@ -188,6 +188,12 @@ class RunSummary(StatsBase):
     # that found nothing, and adapters report "nothing found" for work that
     # never happened.
     skipped_already_active: bool = False
+    trigger: str = "manual"
+    config_fingerprint: str | None = None
+    completion_state: str = "completed"
+    next_retry_at: datetime | None = None
+    llm_quota_exhausted: bool = False
+    llm_health_error: str | None = None
 
     def finish(self) -> RunSummary:
         self.finished_at = datetime.now(UTC)
@@ -461,7 +467,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
             candidate_sink_attempted=summary.emitted,
             dropped=summary.dropped,
             failed=summary.failed,
-            source_outcomes=summary.source_outcomes,
+            source_outcome_count=len(summary.source_outcomes),
         )
         return summary
 
@@ -511,6 +517,11 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     "source_name": result.source_name,
                     "status": result.terminal_outcome
                     or ("failed" if result.failed else "partial" if result.partial else "ok"),
+                    "phase": "detail" if result.detail_started_at else "listing",
+                    "outcome": (
+                        "failed" if result.failed else "partial" if result.partial else "success"
+                    ),
+                    "reason": result.zero_reason or result.error,
                     "completion_state": result.completion_state,
                     "yielded": result.yielded,
                     "monitored": result.monitored,
@@ -528,6 +539,21 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     "generic_scraper_used": result.generic_scraper_used,
                     "parser_urls_discovered": result.parser_urls_discovered,
                     "detail_cards_extracted": result.detail_cards_extracted,
+                    "rate_limit_retry_after_seconds": result.rate_limit_retry_after_seconds,
+                    "rate_limit_scope": result.rate_limit_scope,
+                    "started_at": result.started_at,
+                    "finished_at": result.finished_at,
+                    "duration_ms": result.duration_ms,
+                    "discovery_started_at": result.discovery_started_at,
+                    "discovery_finished_at": result.discovery_finished_at,
+                    "discovery_duration_ms": result.discovery_duration_ms,
+                    "detail_started_at": result.detail_started_at,
+                    "detail_finished_at": result.detail_finished_at,
+                    "detail_duration_ms": result.detail_duration_ms,
+                    "detail_budget_seconds": result.detail_budget_seconds,
+                    "remaining_budget_ms": result.remaining_budget_ms,
+                    "monitor_attempt_records": result.monitor_attempt_records,
+                    "detail_attempt_records": result.detail_attempt_records,
                 }
             )
             if result.failed:
@@ -610,7 +636,11 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 # workers could all pass it at the limit and overshoot the cap.
                 if isinstance(item, RawItem):
                     await self._record_observation(item)
-                if processed_key is not None and await self._store.has_processed(processed_key):
+                if (
+                    processed_key is not None
+                    and not bool(getattr(settings, "pipeline_replay_mode", False))
+                    and await self._store.has_processed(processed_key)
+                ):
                     result["outcome"] = "already_processed"
                     item_span.set_attribute("job_ftch.result", "already_processed")
                     return result
@@ -1187,7 +1217,18 @@ class Pipeline[PipelineInput, PipelineOutput]:
         for record in targets:
             if record.state is OutboxState.DELIVERED:
                 continue
-            await self._deliver_outbox_record(record, fallback_item=delivery)
+            try:
+                await self._deliver_outbox_record(record, fallback_item=delivery)
+            except Exception as exc:
+                if record.sink_name.startswith("webhook:"):
+                    self._logger.warning(
+                        "webhook_delivery_deferred",
+                        sink_name=record.sink_name,
+                        idempotency_key=record.idempotency_key,
+                        error=str(exc),
+                    )
+                    continue
+                raise
             await self._store.mark_outbox_delivered(record.idempotency_key)
 
     async def _deliver_outbox_record(self, record: OutboxRecord, *, fallback_item: object) -> None:
@@ -1214,8 +1255,6 @@ class Pipeline[PipelineInput, PipelineOutput]:
 
     async def _recover_pending_outbox(self) -> None:
         """Replay only the still-pending leaf target for each durable record."""
-        if not self._delivery_targets:
-            return
 
         async def deliver(record: OutboxRecord) -> None:
             try:

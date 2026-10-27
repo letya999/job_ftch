@@ -127,6 +127,16 @@ def test_conservative_fallback_order_is_explicit() -> None:
     )
 
 
+def test_preflight_residential_route_is_applied() -> None:
+    manager = AdaptiveBypassManager()
+    context = _ProxyContext()
+    context.preflight = SimpleNamespace(tier="adaptive", network="residential_proxy")
+
+    manager.bind_context(context)
+
+    assert manager.route_state.network.value == "residential_proxy"
+
+
 @pytest.mark.asyncio
 async def test_captcha_failure_escalates() -> None:
     manager = AdaptiveBypassManager()
@@ -237,7 +247,7 @@ async def test_operation_attempt_budget_stops_additional_failure_actions() -> No
     finally:
         manager.end_operation(token)
 
-    assert len(manager.attempt_telemetry) == 1
+    assert len(manager.attempt_telemetry) == 2
     assert manager.current_name == tier_after_first
 
 
@@ -317,6 +327,8 @@ def test_observed_challenge_type_is_exposed_read_only() -> None:
     manager.set_observed_challenge_type("cloudflare_challenge")
 
     assert manager.observed_challenge_type == "cloudflare_challenge"
+    manager.set_observed_challenge_type(None)
+    assert manager.observed_challenge_type is None
 
 
 @pytest.mark.asyncio
@@ -424,6 +436,114 @@ async def test_exhausted_http_timeout_activates_proxy_on_first_controller_report
 
     assert kind is FailureKind.TIMEOUT
     assert manager.uses_proxy
+    assert manager.current_name == "noop"
+
+
+@pytest.mark.asyncio
+async def test_timeout_without_proxy_escalates_engine() -> None:
+    manager = AdaptiveBypassManager()
+
+    kind = await manager.handle_failure("source", error=TimeoutError())
+
+    assert kind is FailureKind.TIMEOUT
+    assert manager.current_name == "curl_stealth"
+    assert not manager.uses_proxy
+
+
+@pytest.mark.asyncio
+async def test_timeout_after_failed_proxy_escalates_engine_instead_of_bouncing() -> None:
+    manager = AdaptiveBypassManager()
+    manager.bind_context(_ProxyContext())
+
+    await manager.handle_failure("source", error=TimeoutError())
+    assert manager.uses_proxy
+    assert manager.current_name == "noop"
+
+    await manager.handle_failure("source", error=TimeoutError())
+    assert not manager.uses_proxy
+    assert manager.current_name == "noop"
+
+    await manager.handle_failure("source", error=TimeoutError())
+    assert manager.current_name == "curl_stealth"
+    assert not manager.uses_proxy
+
+
+@pytest.mark.asyncio
+async def test_timeout_does_not_escalate_when_source_deadline_spent() -> None:
+    manager = AdaptiveBypassManager()
+    async with source_deadline_scope(asyncio.get_running_loop().time() - 1):
+        kind = await manager.handle_failure("source", error=TimeoutError())
+
+    assert kind is FailureKind.TIMEOUT
+    assert manager.current_name == "noop"
+    assert manager.attempt_telemetry
+
+
+@pytest.mark.asyncio
+async def test_proxy_transport_connect_error_keeps_proxy_and_escalates_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from job_ftch.config import Settings
+
+    settings = Settings.model_validate({"bypass_keep_proxy_on_engine_connect_error": True})
+    monkeypatch.setattr("job_ftch.config.get_settings", lambda: settings)
+    manager = AdaptiveBypassManager()
+    manager.bind_context(_ProxyContext())
+    assert manager.activate_proxy()
+    assert manager.activate_proxy()
+    assert manager.uses_proxy
+    assert manager.current_name == "noop"
+
+    kind = await manager.handle_failure("source", error=ConnectionError("connection refused"))
+
+    assert kind is FailureKind.CONNECT_ERROR
+    assert manager.uses_proxy
+    assert manager.current_name != "noop"
+
+
+def test_js_hardening_skips_cloak_family(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_ftch.config import Settings
+
+    settings = Settings.model_validate(
+        {"bypass_js_hardening_browser_families": ["chromium", "chromium_patchright"]}
+    )
+    monkeypatch.setattr("job_ftch.config.get_settings", lambda: settings)
+    manager = AdaptiveBypassManager()
+    assert manager.escalate_to("stealth_browser")
+    assert manager._js_hardening_enabled() is True
+    assert manager.escalate_to("cloak")
+    assert manager._js_hardening_enabled() is False
+
+
+def test_prepare_browser_config_uses_proxy_country_geo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from job_ftch.config import Settings
+
+    settings = Settings.model_validate(
+        {
+            "proxy_country_default": "RU",
+            "proxy_timezone_by_country": {"RU": "Europe/Moscow"},
+            "proxy_locale_by_country": {"RU": "ru-RU"},
+        }
+    )
+    monkeypatch.setattr("job_ftch.config.get_settings", lambda: settings)
+    manager = AdaptiveBypassManager()
+    manager.bind_context(_ProxyContext())
+    assert manager.activate_proxy()
+    prepared = manager.prepare_browser_config({})
+    assert prepared["timezone_id"] == "Europe/Moscow"
+    assert prepared["locale"] == "ru-RU"
+
+
+def test_observed_challenge_type_can_be_cleared() -> None:
+    manager = AdaptiveBypassManager()
+    manager.set_observed_challenge_type("smartcaptcha")
+    assert manager.observed_challenge_type == "smartcaptcha"
+    manager.set_observed_challenge_type(None)
+    assert manager.observed_challenge_type is None
+    manager.set_observed_challenge_type("  ")
+    assert manager.observed_challenge_type is None
 
 
 @pytest.mark.asyncio
@@ -557,6 +677,7 @@ async def test_apply_page_calls_strategy_and_behavior_simulator() -> None:
 @pytest.mark.asyncio
 async def test_apply_page_installs_recaptcha_action_probe() -> None:
     manager = AdaptiveBypassManager()
+    assert manager.escalate_to("stealth_browser")
     page = type(
         "Page",
         (),
@@ -569,3 +690,13 @@ async def test_apply_page_installs_recaptcha_action_probe() -> None:
 
     scripts = [call.args[0] for call in page.add_init_script.await_args_list]
     assert any("__job_ftch_recaptcha_executes" in script for script in scripts)
+
+
+@pytest.mark.asyncio
+async def test_apply_page_skips_recaptcha_probe_on_cloak() -> None:
+    manager = AdaptiveBypassManager()
+    assert manager.escalate_to("cloak")
+    page = type("Page", (), {"add_init_script": AsyncMock()})()
+    await manager.apply_page(page)
+    scripts = [call.args[0] for call in page.add_init_script.await_args_list]
+    assert not any("__job_ftch_recaptcha_executes" in script for script in scripts)

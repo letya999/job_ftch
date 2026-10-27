@@ -15,13 +15,16 @@ source_fetch_concurrency: 2
 source_fetch_concurrency_adaptive: false
 pipeline_item_concurrency: 3
 pipeline_item_concurrency_adaptive: false
+career_site_browser_concurrency: 2
 source_soft_deadline_seconds: 60.0
 source_hard_deadline_seconds: 180.0
 
-# Production pipeline traces go to Langfuse when its credentials are present.
-tracing_enabled: true
+# Tracing has no production exporter. Operational logs and metrics go to
+# OpenObserve; do not configure a second trace destination in this image.
+tracing_enabled: false
 tracing_capture_payloads: false
 openobserve_enabled: true
+openobserve_metric_export_interval_ms: 60000
 
 # Evaluated MVP relevance recipe. Keep this in sync with the release eval config.
 # Embeddings/BGE are outside the terminal decision path for the current graph.
@@ -30,3 +33,13 @@ bgem3_enabled: false
 relevance_backend: keywords
 openai_model: gpt-5.4-nano
 relevance_llm_model: gpt-4.1-mini
+
+# Paid solvers do not support Yandex SmartCaptcha. Observe rather than
+# burning CapSolver/CapMonster slots. Image OCR stays observe in prod.
+captcha_provider_routes:
+  smartcaptcha:
+    - browser_wait
+    - observe
+  image:
+    - browser_wait
+    - observe

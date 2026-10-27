@@ -113,8 +113,13 @@ def _cookie_to_mapping(cookie: Any) -> dict[str, Any]:
         ("same_site", "sameSite"),
     ):
         value = getattr(cookie, source, None)
-        if value is not None:
-            result[target] = value
+        if value is None:
+            continue
+        # CDP enums (CookieSameSite, etc.) are not JSON serializable for
+        # Playwright's add_cookies; flatten enums to their string value.
+        if hasattr(value, "value") and not isinstance(value, (str, int, float, bool)):
+            value = str(value.value)
+        result[target] = value
     return result
 
 

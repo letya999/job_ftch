@@ -1,0 +1,26 @@
+[
+  {
+    "source_kind": "career_site",
+    "source_name": "demo_engineering_board",
+    "external_id": "eng-001",
+    "url": "https://jobs.example.test/eng-001",
+    "text": "Senior ML Engineer\nRemote Europe\nBuild production Python and FastAPI services for LLM and RAG evaluation. Own retrieval quality, observability and Docker delivery.",
+    "metadata": {"company": "Northstar AI", "location": "Remote Europe", "job_url": "https://jobs.example.test/eng-001"}
+  },
+  {
+    "source_kind": "career_site",
+    "source_name": "demo_engineering_board",
+    "external_id": "eng-002",
+    "url": "https://jobs.example.test/eng-002",
+    "text": "AI Platform Engineer\nRemote\nDesign an LLM gateway, structured extraction and safe model rollouts with Python, PostgreSQL, Docker and evaluation harnesses.",
+    "metadata": {"company": "Vector Harbor", "location": "Remote", "job_url": "https://jobs.example.test/eng-002"}
+  },
+  {
+    "source_kind": "telegram_channel",
+    "source_name": "demo_engineering_digest",
+    "external_id": "eng-003",
+    "url": "https://t.me/demo_engineering_digest/3",
+    "text": "Backend Engineer\nBuild Python APIs and data services for a machine learning platform. Some LLM integration and on-call ownership.",
+    "metadata": {"chat_username": "demo_engineering_digest", "company": "Signal Works"}
+  }
+]

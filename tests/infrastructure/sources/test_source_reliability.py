@@ -142,6 +142,38 @@ def test_career_site_source_preserves_documented_unlimited_detail_limit(
     assert source._effective_limit() == 12
 
 
+def test_effective_limit_uses_window_max_only_with_freshness_cutoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings.model_validate(
+        {
+            "llm_backend": "heuristic",
+            "career_site_default_limit": 50,
+            "career_site_default_detail_limit": 50,
+            "career_site_window_max_details": 500,
+        }
+    )
+    monkeypatch.setattr("job_ftch.config.get_settings", lambda: settings)
+    from job_ftch.infrastructure.sources.career_site_source import CareerSiteSource
+
+    unbounded = CareerSiteSource(
+        CareerSiteSpec(url="https://example.com/jobs", source_name="jobs"),
+        http_client=object(),
+        auth=object(),
+    )
+    windowed = CareerSiteSource(
+        CareerSiteSpec(
+            url="https://example.com/jobs",
+            source_name="jobs",
+            freshness_cutoff_utc="2026-07-01T00:00:00+00:00",
+        ),
+        http_client=object(),
+        auth=object(),
+    )
+    assert unbounded._effective_limit() == 50
+    assert windowed._effective_limit() == 500
+
+
 def test_telegram_channel_factory_uses_window_cap_when_cutoff_is_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

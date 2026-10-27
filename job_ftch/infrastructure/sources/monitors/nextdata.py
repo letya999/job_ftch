@@ -303,13 +303,11 @@ async def discover(
                 if "urlString" in item:
                     url = str(item["urlString"])
                     if url.startswith("/"):
-                        url = f"{board_url.rstrip('/')}{url}"
+                        from urllib.parse import urljoin
+
+                        url = urljoin(board_url, url)
                 elif "url" in item:
                     url = str(item["url"])
-                elif "id" in item:
-                    url = f"{board_url.rstrip('/')}/job/{item['id']}"
-                elif "slug" in item:
-                    url = f"{board_url.rstrip('/')}/job/{item['slug']}"
                 else:
                     continue
             heuristic_jobs.append(_heuristic_extract_job(item, url))

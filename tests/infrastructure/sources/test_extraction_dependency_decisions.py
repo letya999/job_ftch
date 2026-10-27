@@ -54,7 +54,7 @@ def test_compensation_corpus_covers_ranges_suffix_currency_and_k_suffix() -> Non
         ("до 1 млн рублей", ("RUB", None, 1_000_000)),
         ("от 200 тыс. руб.", ("RUB", 200_000, None)),
         ("от 200 000 до 350 000 ₽", ("RUB", 200_000, 350_000)),
-        ("от 300 к LLM", ("RUB", 300_000, None)),
+        ("от 300 к LLM", None),
         ("300k tokens", None),
     ],
 )

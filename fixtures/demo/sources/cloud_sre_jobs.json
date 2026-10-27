@@ -1,0 +1,4 @@
+[
+  {"source_kind":"career_site","source_name":"cloud_sre_board","external_id":"sre-001","url":"https://jobs.example.test/sre-001","text":"Platform SRE\nOperate Kubernetes on AWS, define SLOs and automate Terraform delivery.","metadata":{"company":"Cloud Harbor","location":"Remote Europe"}},
+  {"source_kind":"telegram_channel","source_name":"cloud_sre_digest","external_id":"sre-002","url":"https://t.me/cloud_sre_digest/2","text":"Cloud Reliability Engineer\nImprove Prometheus observability, incident response and Go services.","metadata":{"company":"Reliable Systems"}}
+]

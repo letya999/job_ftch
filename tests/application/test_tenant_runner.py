@@ -54,8 +54,76 @@ def _isolated_base_settings() -> Settings:
             "embedding_provider": "none",
             "relevance_backend": "keywords",
             "relevance_shot_backend": "memory",
+            "llm_preflight_enabled": False,
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_binding_failure_uses_durable_pause_before_next_binding_probe(monkeypatch) -> None:
+    from job_ftch.application.llm_quota import LLMPreflightResult
+
+    settings = _isolated_base_settings().model_copy(
+        update={
+            "store_backend": "memory",
+            "job_group_store_backend": "memory",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "llm_backend": "heuristic",
+            "llm_preflight_enabled": True,
+        }
+    )
+    tenant = TenantConfig(tenant_id="quota-pause", display_name="Quota pause")
+    runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    calls = []
+
+    async def unavailable(*args, **kwargs):
+        calls.append(1)
+        return {
+            "extraction": SimpleNamespace(
+                provider=runner.get_runtime("quota-pause").llm_provider,
+                result=LLMPreflightResult(False, quota_exhausted=True, error="insufficient_quota"),
+            )
+        }, []
+
+    monkeypatch.setattr(tenant_runner_module, "preflight_bindings", unavailable)
+    try:
+        first = await runner.run_tenant("quota-pause", ignore_schedule_gates=True)
+        second = await runner.run_tenant("quota-pause", ignore_schedule_gates=True)
+        assert first.completion_state == "llm_preflight_blocked"
+        assert first.next_retry_at is not None
+        assert second.next_retry_at == first.next_retry_at
+        assert calls == [1]
+    finally:
+        await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_disabled_tenant_persists_terminal_run_summary() -> None:
+    settings = _isolated_base_settings().model_copy(
+        update={
+            "store_backend": "memory",
+            "job_group_store_backend": "memory",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "llm_backend": "heuristic",
+        }
+    )
+    tenant = TenantConfig(
+        tenant_id="disabled-lane",
+        display_name="Disabled lane",
+        enabled=False,
+    )
+    runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    try:
+        summary = await runner.run_tenant("disabled-lane", trigger="schedule")
+        stored = await runner.get_run(summary.source_run_id or "", tenant_id="disabled-lane")
+        assert summary.trigger == "schedule"
+        assert stored is not None
+        assert stored.config_fingerprint == summary.config_fingerprint
+        assert stored.source_outcomes == []
+    finally:
+        await runner.close()
 
 
 @pytest.fixture(autouse=True)
@@ -385,6 +453,38 @@ async def test_tenant_store_source_health_rolls_back_on_index_failure(
 
 
 @pytest.mark.asyncio
+async def test_tenant_store_prunes_stale_source_health_alias_without_touching_active() -> None:
+    from job_ftch.application.tenant_runner import TenantStore
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+
+    backing = InMemoryStore()
+    store = TenantStore("tenant1", backing)
+    health = SourceHealth(
+        source_id="career_site:active",
+        source_kind="career_site",
+        source_name="active",
+        last_run_at="2026-09-07T00:00:00+00:00",
+        last_success_at="2026-09-07T00:00:00+00:00",
+        failure_streak=0,
+        success_count=1,
+        last_fetched=1,
+        last_emitted=1,
+        last_failed=0,
+        last_quarantined=0,
+        baseline_emitted=1.0,
+        drift_ratio=0.0,
+        degraded=False,
+        status="healthy",
+    )
+    stale = health.model_copy(update={"source_id": "telegram_channel:s", "source_kind": "telegram"})
+    await store.save_source_health(health.source_id, health)
+    await store.save_source_health(stale.source_id, stale)
+
+    assert await store.prune_source_health({health.source_id}) == ("telegram_channel:s",)
+    assert [item.source_id for item in await store.list_source_health()] == [health.source_id]
+
+
+@pytest.mark.asyncio
 async def test_tenant_store_clear_runtime_sources_rolls_back_on_partial_delete_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -490,6 +590,74 @@ async def test_tenant_runner_can_scope_a_clean_canary_to_explicit_source_ids(
     assert {str(outcome["source_id"]) for outcome in summary.source_outcomes} == {
         selected_source_id
     }
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_legacy_search_clone_request_resolves_parent(monkeypatch: pytest.MonkeyPatch) -> None:
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "clone-replay",
+            "display_name": "Clone replay",
+            "sources": [
+                {
+                    "type": "career_site",
+                    "url": "https://example.com/jobs",
+                    "source_name": "hireseeker",
+                }
+            ],
+            "store_backend": "memory",
+            "job_group_store_backend": "memory",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+        }
+    )
+    runner = TenantRunner.from_tenants([tenant], base_settings=_isolated_base_settings())
+
+    class Prepared(Exception):
+        pass
+
+    async def reached_preparation(*args, **kwargs):
+        raise Prepared
+
+    monkeypatch.setattr(runner, "_prepare_effective_source", reached_preparation)
+    with pytest.raises(Prepared):
+        await runner.run_tenant("clone-replay", source_ids=("career_site:hireseeker_kw1",))
+    await runner.close()
+
+
+@pytest.mark.asyncio
+async def test_real_source_name_ending_kw1_is_not_rewritten(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "literal-kw1",
+            "display_name": "Literal kw1",
+            "sources": [
+                {
+                    "type": "career_site",
+                    "url": "https://example.com/jobs",
+                    "source_name": "hireseeker_kw1",
+                }
+            ],
+            "store_backend": "memory",
+            "job_group_store_backend": "memory",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+        }
+    )
+    runner = TenantRunner.from_tenants([tenant], base_settings=_isolated_base_settings())
+
+    class Prepared(Exception):
+        pass
+
+    async def reached_preparation(*args, **kwargs):
+        raise Prepared
+
+    monkeypatch.setattr(runner, "_prepare_effective_source", reached_preparation)
+    with pytest.raises(Prepared):
+        await runner.run_tenant("literal-kw1", source_ids=("career_site:hireseeker_kw1",))
     await runner.close()
 
 
@@ -669,13 +837,18 @@ async def test_tenant_runner_prepares_sources_with_bounded_concurrency(
         user_id=None,
         relevance_prompts=None,
     ):
-        del self, runtime, effective_sources, catalog, run_id, user_id, relevance_prompts
+        del self, effective_sources, catalog, run_id, user_id, relevance_prompts
 
         class _FakeBuilder:
             async def run_async(self, *, max_items=None):
                 del max_items
+                from job_ftch.application.watermark import IncrementalCursor
+
+                await runtime.store.incremental_cursor().set("telegram", "42")
+                assert await IncrementalCursor(runtime.store).get("telegram") is None
                 summary = RunSummary()
                 summary.source_run_id = "run-1"
+                summary.failed = 1
                 return summary
 
         class _FakeSnapshot:
@@ -711,6 +884,9 @@ async def test_tenant_runner_prepares_sources_with_bounded_concurrency(
 
     release.set()
     await task
+    from job_ftch.application.watermark import IncrementalCursor
+
+    assert await IncrementalCursor(runner.get_runtime("ai_jobs").store).get("telegram") is None
     await runner.close()
 
 
@@ -1236,7 +1412,7 @@ async def test_tenant_runner_ignores_post_run_housekeeping_failures(
 
 
 @pytest.mark.asyncio
-async def test_tenant_runner_clears_stale_status_when_final_summary_persist_fails(
+async def test_tenant_runner_keeps_last_completed_status_when_final_summary_persist_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1310,7 +1486,7 @@ async def test_tenant_runner_clears_stale_status_when_final_summary_persist_fail
     monkeypatch.setattr(TenantRunner, "_build_runtime_builder", _fake_build_runtime_builder)
 
     runtime = runner.get_runtime("ai_jobs")
-    stale_summary = RunSummary(source_run_id="run-new", tenant_id="ai_jobs")
+    stale_summary = RunSummary(source_run_id="run-old", tenant_id="ai_jobs")
     stale_summary.finished_at = datetime.now(UTC)
     await runtime.store.set_run_state(
         "pipeline.run_summary",
@@ -1329,7 +1505,8 @@ async def test_tenant_runner_clears_stale_status_when_final_summary_persist_fail
         summary = await runner.run_tenant("ai_jobs")
         status = await runner.get_status("ai_jobs")
         assert summary.source_run_id == "run-new"
-        assert status is None
+        assert status is not None
+        assert status.source_run_id == "run-old"
     finally:
         await runner.close()
 
@@ -1727,6 +1904,120 @@ profiles:
 
     await runner_one.close()
     await runner_two.close()
+
+
+@pytest.mark.asyncio
+async def test_delayed_queue_precheck_cannot_start_overlapping_tenant_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    profile_path = tmp_path / "profiles.yaml"
+    profile_path.write_text(
+        "catalog_name: concurrency_test\nprofiles:\n  - profile_id: ml\n"
+        '    name: ML Engineer\n    target_roles: ["ML Engineer"]\n    preferred_skills: ["ML"]\n',
+        encoding="utf-8",
+    )
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "ai_jobs",
+            "display_name": "AI Jobs",
+            "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+            "store_backend": "sqlite",
+            "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            "job_group_store_backend": "sqlite",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "filter_profile_path": str(profile_path),
+            "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+        }
+    )
+    settings = _isolated_base_settings().model_copy(
+        update={"relevance_shot_threshold": -10.0, "ingest_queue_enabled": True}
+    )
+    first_runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    second_runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    monkeypatch.setattr(
+        tenant_runner_module, "build_llm", lambda settings: _AcceptingHeuristicLLMProvider()
+    )
+    for runner in (first_runner, second_runner):
+        runner.get_runtime("ai_jobs").llm_provider = _AcceptingHeuristicLLMProvider()
+
+    first_locked = asyncio.Event()
+    release_first = asyncio.Event()
+    release_precheck = asyncio.Event()
+    second_started = asyncio.Event()
+    first_bound = first_runner._run_tenant_bound
+    second_store = second_runner.get_runtime("ai_jobs").store
+    original_precheck = second_store.list_active_ingest_tasks
+
+    async def hold_first(*args, **kwargs):
+        first_locked.set()
+        await release_first.wait()
+        return await first_bound(*args, **kwargs)
+
+    async def delay_second_precheck(*args, **kwargs):
+        await release_precheck.wait()
+        return await original_precheck(*args, **kwargs)
+
+    async def run_second():
+        second_started.set()
+        return await second_runner.run_tenant("ai_jobs")
+
+    monkeypatch.setattr(first_runner, "_run_tenant_bound", hold_first)
+    monkeypatch.setattr(second_store, "list_active_ingest_tasks", delay_second_precheck)
+    try:
+        first_task = asyncio.create_task(first_runner.run_tenant("ai_jobs"))
+        await asyncio.wait_for(first_locked.wait(), timeout=30)
+        second_task = asyncio.create_task(run_second())
+        await second_started.wait()
+        await asyncio.sleep(0)
+        release_first.set()
+        first = await asyncio.wait_for(first_task, timeout=60)
+        release_precheck.set()
+        second = await asyncio.wait_for(second_task, timeout=60)
+        assert first.emitted == 1
+        payload = json.loads((tmp_path / "artifacts" / "ai_jobs.json").read_text(encoding="utf-8"))
+        assert len(payload["items"]) == 1
+        assert second.skipped_already_active
+    finally:
+        release_first.set()
+        release_precheck.set()
+        await first_runner.close()
+        await second_runner.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_queue_precheck_releases_tenant_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant = TenantConfig(tenant_id="cancel_precheck", display_name="Cancel precheck")
+    settings = _isolated_base_settings().model_copy(
+        update={"store_path": tmp_path / "store.db", "ingest_queue_enabled": True}
+    )
+    runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    runtime = runner.get_runtime("cancel_precheck")
+    entered = asyncio.Event()
+
+    async def stalled_precheck(*args, **kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(runtime.store, "list_active_ingest_tasks", stalled_precheck)
+    task = asyncio.create_task(runner.run_tenant("cancel_precheck"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=20)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not runner.tenant_run_is_active("cancel_precheck")
+        async with tenant_runner_module._tenant_run_lock(
+            runtime.settings, "cancel_precheck", timeout=0
+        ):
+            pass
+    finally:
+        task.cancel()
+        await runner.close()
 
 
 @pytest.mark.asyncio

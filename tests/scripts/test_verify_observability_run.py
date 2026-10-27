@@ -22,17 +22,11 @@ def test_verify_observability_run_fails_when_required_backends_are_missing(
         lambda run_id: {"configured": False},
     )
     monkeypatch.setattr(
-        verify_observability_run,
-        "_langfuse",
-        lambda run_id: {"configured": False},
-    )
-    monkeypatch.setattr(
         "sys.argv",
         [
             "verify_observability_run.py",
             "run-123",
             "--require-openobserve",
-            "--require-langfuse",
         ],
     )
 
@@ -56,30 +50,13 @@ def test_verify_observability_run_writes_gate_evidence(
         },
     )
     monkeypatch.setattr(
-        verify_observability_run,
-        "_langfuse",
-        lambda run_id: {
-            "configured": True,
-            "trace_status": 200,
-            "trace_found": True,
-            "eval_item_trace_status": 200,
-            "eval_item_traces": 2,
-            "decision_spans": 4,
-        },
-    )
-    monkeypatch.setattr(
         "sys.argv",
         [
             "verify_observability_run.py",
             "run-123",
             "--require-openobserve",
-            "--require-langfuse",
             "--min-openobserve-rows",
             "3",
-            "--expect-eval-item-traces",
-            "2",
-            "--expect-decision-spans",
-            "4",
             "--out-json",
             str(output),
         ],
@@ -103,16 +80,16 @@ def test_verify_observability_run_writes_fail_evidence_on_backend_error(
         lambda run_id: {"configured": False},
     )
 
-    def broken_langfuse(run_id: str) -> dict[str, object]:
+    def broken_openobserve(run_id: str) -> dict[str, object]:
         raise httpx.ConnectError("connection refused")
 
-    monkeypatch.setattr(verify_observability_run, "_langfuse", broken_langfuse)
+    monkeypatch.setattr(verify_observability_run, "_openobserve", broken_openobserve)
     monkeypatch.setattr(
         "sys.argv",
         [
             "verify_observability_run.py",
             "run-123",
-            "--require-langfuse",
+            "--require-openobserve",
             "--out-json",
             str(output),
         ],
@@ -121,4 +98,4 @@ def test_verify_observability_run_writes_fail_evidence_on_backend_error(
     assert verify_observability_run.main() == 1
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["status"] == "fail"
-    assert "Langfuse probe failed" in payload["failures"][0]
+    assert "OpenObserve probe failed" in payload["failures"][0]

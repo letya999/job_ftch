@@ -1,0 +1,18 @@
+[
+  {
+    "source_kind": "career_site",
+    "source_name": "demo_engineering_edge",
+    "external_id": "eng-004",
+    "url": "https://jobs.example.test/eng-004",
+    "text": "AI Sales Specialist\nSell an AI platform and carry a quarterly quota. Coordinate with engineering but do not build software.",
+    "metadata": {"company": "Quota Cloud", "location": "Remote"}
+  },
+  {
+    "source_kind": "career_site",
+    "source_name": "demo_engineering_edge",
+    "external_id": "eng-005",
+    "url": "https://jobs.example.test/eng-005",
+    "text": "ML Platform Engineer\nImprove model serving, retrieval evaluation and Python tooling for a remote platform team.",
+    "metadata": {"company": "Orbit Labs", "location": "Remote"}
+  }
+]

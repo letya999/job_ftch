@@ -7,7 +7,10 @@
   "github_read_guard": {
     "mode": "strict",
     "allowed_repositories": [
-      "letya999/job_ftch"
+      "letya999/job_ftch",
+      "capsolver/capsolver-python",
+      "CapMonsterCloud/capmonster-python-captcha-solver",
+      "fikstt2/hh-ai-agent"
     ],
     "allowed_resources": [
       "issues",

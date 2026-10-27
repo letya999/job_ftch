@@ -1,0 +1,4 @@
+[
+  {"source_kind":"career_site","source_name":"analytics_board","external_id":"an-001","url":"https://jobs.example.test/an-001","text":"Product Analyst\nUse SQL, statistics and experimentation to guide a subscription roadmap.","metadata":{"company":"North Metrics","location":"Remote"}},
+  {"source_kind":"telegram_channel","source_name":"analytics_digest","external_id":"an-002","url":"https://t.me/analytics_digest/2","text":"Analytics Engineer\nBuild dbt models and trusted product metrics with Python and Tableau.","metadata":{"company":"Signal Metrics"}}
+]

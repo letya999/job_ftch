@@ -32,5 +32,14 @@ class SourceHealth(BaseModel):
     last_error: str | None = None
     last_error_at: str | None = None
     last_error_kind: str | None = None
+    # Rolling window labels from the last N pipeline runs (source_quality.py).
+    quality_window_runs: int = 0
+    quality_ok_rate: float = 0.0
+    quality_yield_rate: float = 0.0
+    quality_relevant_rate: float = 0.0
+    quality_reliable: bool = False
+    quality_rich: bool = False
+    quality_high_relevance: bool = False
+    quality_important: bool = False
 
     model_config = ConfigDict(extra="forbid")

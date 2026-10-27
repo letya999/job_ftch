@@ -1,11 +1,11 @@
-"""Parser for Beeline Uzbekistan's public Nuxt vacancy API."""
+"""Parsers for Beeline career surfaces."""
 
 from __future__ import annotations
 
 from contextlib import suppress
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, urlunparse
 
 from selectolax.lexbor import LexborHTMLParser
 
@@ -13,6 +13,11 @@ from job_ftch.application.registry import register_site_parser
 from job_ftch.domain import SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
+from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    keywords_from_spec,
+    normalize_search_keywords,
+)
+from job_ftch.infrastructure.sources.site_parsers.hh import HhParser
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -119,3 +124,64 @@ class BeelineUzParser:
 
 
 register_site_parser("beeline_uz", domain_pattern=BeelineUzParser.domain_pattern)(BeelineUzParser)
+
+
+_BEELINE_RU_HH_EMPLOYER_ID = "4934"
+_BEELINE_RU_HH_URL = f"https://hh.ru/search/vacancy?employer_id={_BEELINE_RU_HH_EMPLOYER_ID}"
+
+
+class BeelineRuParser:
+    """Public Beeline RU hiring is geo-blocked; HH employer 4934 is the listing."""
+
+    domain_pattern = r"^https?://(?:www\.)?jobs?\.beeline\.ru(?:/|$)"
+    has_custom_parse = True
+    supports_search = True
+    search_mode = "combined"
+    confirmed_empty_on_empty = True
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del limit
+        if not normalize_search_keywords(keywords):
+            return []
+        # Keep the Beeline host so this parser stays selected. HH is queried
+        # inside ``parse``; rewriting to hh.ru would dispatch HhParser and
+        # lose ``confirmed_empty_on_empty``.
+        parsed = urlparse(base_url)
+        listing = urlunparse(parsed._replace(query="", fragment=""))
+        return [listing or "https://job.beeline.ru/vacancies"]
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(
+            render=False,
+            wait="domcontentloaded",
+            include_if_detail_page=False,
+            extra={
+                "proxy_rescue_allow_domains": [
+                    "hh.ru",
+                    "job.beeline.ru",
+                    "jobs.beeline.ru",
+                ],
+            },
+        )
+
+    def parser_kind(self, url: str) -> str | None:
+        del url
+        return "beeline_ru_hh"
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        keywords = keywords_from_spec(spec)
+        urls = self.build_search_urls(_BEELINE_RU_HH_URL, keywords, limit=spec.limit)
+        delegated = spec.model_copy(update={"url": urls[0] if urls else _BEELINE_RU_HH_URL})
+        async for item in HhParser().parse(delegated, client):
+            metadata = dict(item.metadata or {})
+            metadata["parser"] = "beeline_ru_hh"
+            metadata.setdefault("company", "Билайн")
+            metadata["company_authoritative"] = True
+            metadata["fallback"] = "hh_employer"
+            yield item.model_copy(update={"metadata": metadata})
+
+
+register_site_parser("beeline_ru", domain_pattern=BeelineRuParser.domain_pattern)(BeelineRuParser)

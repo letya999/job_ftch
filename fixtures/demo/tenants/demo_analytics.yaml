@@ -1,0 +1,35 @@
+tenant_id: demo_analytics
+display_name: Demo — Product Analytics
+enabled: true
+source_backend: local_fixture
+sources:
+  - type: local_fixture
+    path: fixtures/demo/sources/analytics_jobs.json
+    source_name: analytics_board
+    interval_seconds: 900
+  - type: local_fixture
+    path: fixtures/demo/sources/product_jobs.json
+    source_name: analytics_product_board
+    interval_seconds: 1800
+schedule:
+  interval_seconds: 900
+  ingest_mode: polling
+profile_path: fixtures/demo/profiles/analytics.yaml
+ontology_path: fixtures/demo/ontology_product_pm.json
+pipeline_recipe_path: config/pipelines/demo_product_pm.yaml
+llm_backend: heuristic
+allow_tenant_model_override: true
+embedding_enabled: false
+store_backend: sqlite
+job_group_store_backend: sqlite
+job_backend: sqlite
+search_backend: sqlite
+store_path: artifacts/demo/{tenant_id}/state.db
+job_store_path: artifacts/demo/{tenant_id}/jobs.db
+output: {backend: json_file, path: "artifacts/demo/{tenant_id}/jobs.json", jsonl: false, schema_version: job_ftch.job.v1}
+review_output: {path: "artifacts/demo/{tenant_id}/review.jsonl", jsonl: true}
+rejected_output: {path: "artifacts/demo/{tenant_id}/rejected.jsonl", jsonl: true}
+quarantine_output: {path: "artifacts/demo/{tenant_id}/quarantine.jsonl", jsonl: true}
+pipeline_max_items_per_run: 20
+source_fetch_concurrency: 1
+pipeline_item_concurrency: 2

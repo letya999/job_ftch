@@ -1,0 +1,18 @@
+extends: evidence_v2_compact_prefilter.yaml
+name: demo_applied_ai_engineering
+version: "1.0.0"
+metadata:
+  purpose: local_fixture_engineering_lane
+  production_default: false
+nodes:
+  - id: tfidf_logreg_prefilter
+    params:
+      threshold: 0.10
+      mode: gate
+      model_path: fixtures/prefilter/tfidf_logreg_v1.json
+  - id: relevance_judge
+    params:
+      call_policy: force_all
+      classification_mode: compact_evidence
+      max_ambiguity_resolutions: 12
+      max_precision_confirmations: 12

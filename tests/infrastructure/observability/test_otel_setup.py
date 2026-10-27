@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from types import SimpleNamespace
-
-from opentelemetry.sdk.trace import TracerProvider
-from pydantic import SecretStr
 
 from job_ftch.application.item_decision_trace import record_item_decision_trace
 from job_ftch.application.pipeline import RunSummary
@@ -30,10 +26,7 @@ class _Tracer:
         return nullcontext(self.span)
 
 
-def test_final_run_trace_uses_post_sink_summary(monkeypatch) -> None:
-    span = _Span()
-    tracer = _Tracer(span)
-    monkeypatch.setattr(otel_setup.trace, "get_tracer", lambda _: tracer)
+def test_final_run_trace_is_a_noop_without_external_exporter() -> None:
     summary = RunSummary(
         tenant_id="ai_jobs",
         source_run_id="run-123",
@@ -54,58 +47,6 @@ def test_final_run_trace_uses_post_sink_summary(monkeypatch) -> None:
     )
 
     otel_setup.record_final_run_trace(summary)
-
-    assert tracer.name == "pipeline.run.final"
-    assert span.attributes["job_ftch.source_run_id"] == "run-123"
-    assert span.attributes["job_ftch.routing_accepted"] == 7
-    assert span.attributes["job_ftch.routed_review"] == 4
-    assert span.attributes["job_ftch.routed_rejected"] == 9
-    assert span.attributes["job_ftch.routed_deferred"] == 2
-    assert span.attributes["job_ftch.groups_created"] == 6
-    assert span.attributes["job_ftch.groups_merged"] == 1
-    assert span.attributes["job_ftch.llm_tokens_in"] == 120
-    assert span.attributes["job_ftch.llm_cost_is_complete"] is True
-    assert span.attributes["job_ftch.llm_cost_usd"] == 0.012
-
-
-def test_configure_tracing_adds_processor_to_existing_sdk_provider(monkeypatch) -> None:
-    import opentelemetry.exporter.otlp.proto.http.trace_exporter as trace_exporter
-    import opentelemetry.sdk.trace.export as trace_export
-
-    class _Exporter:
-        def __init__(self, endpoint: str, headers: dict[str, str]) -> None:
-            self.endpoint = endpoint
-            self.headers = headers
-
-    class _Processor:
-        def __init__(self, exporter: _Exporter) -> None:
-            self.exporter = exporter
-
-    provider = TracerProvider()
-    processors: list[_Processor] = []
-    monkeypatch.setattr(otel_setup.trace, "get_tracer_provider", lambda: provider)
-    monkeypatch.setattr(
-        otel_setup.trace,
-        "set_tracer_provider",
-        lambda _: (_ for _ in ()).throw(AssertionError("must not replace provider")),
-    )
-    monkeypatch.setattr(trace_exporter, "OTLPSpanExporter", _Exporter)
-    monkeypatch.setattr(trace_export, "BatchSpanProcessor", _Processor)
-    monkeypatch.setattr(provider, "add_span_processor", processors.append)
-    otel_setup._CONFIGURED_PROVIDER_IDS.clear()
-    settings = SimpleNamespace(
-        tracing_enabled=True,
-        langfuse_public_key="pk",
-        langfuse_secret_key=SecretStr("sk"),
-        langfuse_host="http://langfuse.local",
-        otel_service_name="job_ftch",
-    )
-
-    otel_setup.configure_tracing(settings)  # type: ignore[arg-type]
-
-    assert len(processors) == 1
-    assert processors[0].exporter.endpoint == "http://langfuse.local/api/public/otel/v1/traces"
-    assert id(provider) in otel_setup._CONFIGURED_PROVIDER_IDS
 
 
 def test_item_decision_trace_records_accept_contract(monkeypatch) -> None:

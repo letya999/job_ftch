@@ -22,6 +22,8 @@ MCP_SHARED_TOOLS = frozenset(
         "doctor",
         "get_sources",
         "update_source",
+        "set_source_important",
+        "list_source_quality",
         "get_jobs",
         "update_shot",
     }
@@ -260,7 +262,7 @@ profiles:
 
     assert server.app.name == "job_ftch"
     assert set(server.app.tools) == MCP_OPERATOR_TOOLS
-    assert len(server.app.tools) == 18
+    assert len(server.app.tools) == 20
     assert MCP_FORBIDDEN_TOOL_NAMES.isdisjoint(server.app.tools)
     assert set(server.app.resources) == {"config://{tenant_id}"}
 
@@ -1656,6 +1658,35 @@ profiles:
     assert base["status"] == "unsupported"
     assert base["error"] == "config_source_not_deletable"
 
+    pinned_quality = await server.app.tools["set_source_important"](
+        tenant_id="ai_jobs",
+        source_id=config_source_id,
+        important=True,
+        note="core board",
+    )
+    assert any(item["source_id"] == config_source_id for item in pinned_quality["important"])
+
+    listed_quality = await server.app.tools["list_source_quality"](tenant_id="ai_jobs")
+    assert listed_quality["tenant_id"] == "ai_jobs"
+    assert any(item["source_id"] == config_source_id for item in listed_quality["important"])
+    assert "reliable" in listed_quality
+    assert "rich" in listed_quality
+    assert "high_relevance" in listed_quality
+
+    unpinned_quality = await server.app.tools["set_source_important"](
+        tenant_id="ai_jobs",
+        source_id=config_source_id,
+        important=False,
+    )
+    assert not any(item["source_id"] == config_source_id for item in unpinned_quality["important"])
+
+    empty_id_err = await server.app.tools["set_source_important"](
+        tenant_id="ai_jobs",
+        source_id="   ",
+        important=True,
+    )
+    assert empty_id_err.get("error") == "invalid_arguments"
+
     await server.shutdown()
 
 
@@ -1785,10 +1816,10 @@ async def test_mcp_browser_session_dispatcher_forwards_actions(
 
 def test_mcp_surface_tool_sets() -> None:
     assert "doctor" in MCP_SHARED_TOOLS
-    assert len(MCP_SHARED_TOOLS) == 8
-    assert len(MCP_MASS_TOOLS) == 14
-    assert len(MCP_PERSONAL_TOOLS) == 12
-    assert len(MCP_OPERATOR_TOOLS) == 18
+    assert len(MCP_SHARED_TOOLS) == 10
+    assert len(MCP_MASS_TOOLS) == 16
+    assert len(MCP_PERSONAL_TOOLS) == 14
+    assert len(MCP_OPERATOR_TOOLS) == 20
     assert MCP_MASS_ONLY_TOOLS.isdisjoint(MCP_PERSONAL_ONLY_TOOLS)
     assert MCP_SHARED_TOOLS <= MCP_MASS_TOOLS
     assert MCP_SHARED_TOOLS <= MCP_PERSONAL_TOOLS

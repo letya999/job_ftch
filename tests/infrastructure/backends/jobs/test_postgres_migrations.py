@@ -7,7 +7,7 @@ from job_ftch.infrastructure.backends.jobs.postgres import PostgreSQLJobBackend
 
 
 class FakeSettings:
-    store_dsn = "postgresql://postgres:postgres@localhost:5432/postgres"
+    store_dsn = "postgresql://postgres@localhost:5432/postgres"
     store_pool_min = 1
     store_pool_max = 2
     search_language = "simple"
@@ -50,11 +50,14 @@ async def test_postgres_migrations_order_and_failure(
     class FakeConn:
         def __init__(self):
             self.executed = []
+            self.locks = []
             self.tables = {"jf_migrations": []}
             self.creates = []
 
         async def execute(self, sql, *args):
-            if "CREATE TABLE IF NOT EXISTS jf_migrations" in sql:
+            if "pg_advisory_lock" in sql or "pg_advisory_unlock" in sql:
+                self.locks.append(sql)
+            elif "CREATE TABLE IF NOT EXISTS jf_migrations" in sql:
                 self.creates.append("jf_migrations")
             elif "INSERT INTO jf_migrations" in sql:
                 self.tables["jf_migrations"].append(args[0])
@@ -104,6 +107,7 @@ async def test_postgres_migrations_order_and_failure(
 
     # The pool was mocked, so we can check the connection
     assert backend._pool.conn.executed == ["CREATE TABLE t1 (id INT);", "CREATE TABLE t2 (id INT);"]
+    assert len(backend._pool.conn.locks) == 2
     assert backend._pool.conn.tables["jf_migrations"] == [
         "001_postgres_a.sql",
         "002_postgres_b.sql",

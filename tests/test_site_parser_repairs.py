@@ -3,7 +3,9 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from types import SimpleNamespace
+from urllib.parse import parse_qsl, urlparse
 
+import httpx
 import pytest
 
 from job_ftch.domain.source_spec import CareerSiteSpec
@@ -11,6 +13,7 @@ from job_ftch.infrastructure.sources.monitors.greenhouse import can_handle as gr
 from job_ftch.infrastructure.sources.monitors.lever import can_handle as lever_can_handle
 from job_ftch.infrastructure.sources.site_parsers.geekjob import GeekJobParser
 from job_ftch.infrastructure.sources.site_parsers.habr import HabrCareerParser
+from job_ftch.infrastructure.sources.site_parsers.kaspi import KaspiParser
 from job_ftch.infrastructure.sources.site_parsers.rabota import RabotaByParser
 from job_ftch.infrastructure.sources.site_parsers.sber import SberParser, _sber_slug
 from job_ftch.infrastructure.sources.site_parsers.tbank import (
@@ -40,6 +43,64 @@ class _FakeClient:
     ) -> _FakeResponse:
         del follow_redirects, kwargs
         return self._responses[url]
+
+
+@pytest.mark.asyncio
+async def test_x5_discovery_redirects_legacy_listing_to_current_it_catalog() -> None:
+    from job_ftch.infrastructure.sources.site_parsers.large_employer_boards import (
+        X5TechCareerParser,
+    )
+
+    listing = "https://rabota.x5.ru/vacancies?vacancy_categories=it"
+    vacancy = "https://rabota.x5.ru/vacancies/35b84c32-6fd0-4784-8e42-8e4893947910"
+    client = _FakeClient(
+        {listing: _FakeResponse(f'<a href="{vacancy}">Python developer</a>', listing)}
+    )
+    spec = CareerSiteSpec(url="https://x5-tech.ru/career/", source_name="x5", limit=1)
+    assert await X5TechCareerParser().discover(spec, client) == [vacancy]
+
+
+@pytest.mark.asyncio
+async def test_x5_discovery_keeps_legacy_search_query() -> None:
+    from job_ftch.infrastructure.sources.site_parsers.large_employer_boards import (
+        X5TechCareerParser,
+    )
+
+    listing = "https://rabota.x5.ru/vacancies?vacancy_categories=it&search=Python"
+    vacancy = "https://rabota.x5.ru/vacancies/35b84c32-6fd0-4784-8e42-8e4893947910"
+    calls: list[str] = []
+
+    class RecordingClient(_FakeClient):
+        async def get(self, url: str, **kwargs: object) -> _FakeResponse:
+            calls.append(url)
+            return await super().get(url, **kwargs)
+
+    client = RecordingClient(
+        {listing: _FakeResponse(f'<a href="{vacancy}">Python developer</a>', listing)}
+    )
+    spec = CareerSiteSpec(url="https://x5-tech.ru/career/?search=Python", source_name="x5", limit=1)
+    assert await X5TechCareerParser().discover(spec, client) == [vacancy]
+    assert calls[0] == listing
+
+
+@pytest.mark.asyncio
+async def test_x5_parse_fallback_uses_current_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_ftch.infrastructure.sources.site_parsers import large_employer_boards
+
+    seen: list[str] = []
+
+    async def parse(spec: CareerSiteSpec, client: object, **kwargs: object):
+        del client, kwargs
+        seen.append(spec.url)
+        yield "job"
+
+    monkeypatch.setattr(large_employer_boards, "_parse_detail_board", parse)
+    spec = CareerSiteSpec(url="https://x5-tech.ru/career/?search=Python", source_name="x5")
+    items = [
+        item async for item in large_employer_boards.X5TechCareerParser().parse(spec, object())
+    ]
+    assert items == ["job"]
+    assert seen == ["https://rabota.x5.ru/vacancies?vacancy_categories=it&search=Python"]
 
 
 @pytest.mark.asyncio
@@ -142,6 +203,7 @@ async def test_geekjob_parser_uses_search_api_for_role_query() -> None:
             url="https://geekjob.ru/vacancies?qs=machine+learning",
             source_name="geekjob_jobs",
             limit=2,
+            monitor_config={"use_search_api": True},
         ),
         client,
     )
@@ -159,48 +221,409 @@ async def test_geekjob_parser_uses_search_api_for_role_query() -> None:
 
 
 @pytest.mark.asyncio
-async def test_geekjob_parser_uses_browser_fallback_for_lazy_listing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_geekjob_parser_emits_json_rows_without_browser() -> None:
     parser = GeekJobParser()
+
+    class _ApiResponse(_FakeResponse):
+        def json(self) -> dict[str, object]:
+            return {
+                "data": [
+                    {
+                        "id": "abc123",
+                        "position": "Tech Lead NLP / LLM",
+                        "company": {"name": "Team4You"},
+                        "city": "Москва",
+                    }
+                ]
+            }
+
+    class _ApiClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def get(
+            self, url: str, *, follow_redirects: bool = True, **kwargs: object
+        ) -> _ApiResponse:
+            del follow_redirects
+            self.calls.append((url, kwargs))
+            return _ApiResponse("", url)
+
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(
+                url="https://geekjob.ru/vacancies?qs=LLM",
+                source_name="geekjob_jobs",
+                limit=2,
+                monitor_config={"use_search_api": True},
+            ),
+            _ApiClient(),
+        )
+    ]
+
+    assert len(items) == 1
+    assert items[0].external_id == "abc123"
+    assert "Tech Lead NLP / LLM" in items[0].text
+    assert str(items[0].url).endswith("/vacancy/abc123")
+
+
+@pytest.mark.asyncio
+async def test_geekjob_parser_paginates_api_and_extracts_detail() -> None:
+    parser = GeekJobParser()
+
+    class _ApiResponse(_FakeResponse):
+        def __init__(self, url: str, page: int) -> None:
+            super().__init__("", url)
+            self._page = page
+
+        def json(self) -> dict[str, object]:
+            return {
+                "page": self._page,
+                "pagecount": 2,
+                "nextpage": 2 if self._page == 1 else 0,
+                "data": [
+                    {
+                        "id": f"abc{self._page}",
+                        "position": f"Developer {self._page}",
+                        "company": {"name": "Acme"},
+                    }
+                ],
+            }
+
+    class _ApiClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def get(
+            self, url: str, *, follow_redirects: bool = True, **kwargs: object
+        ) -> _FakeResponse:
+            del follow_redirects
+            self.calls.append((url, kwargs))
+            if url.endswith("/json/find/vacancy"):
+                page = int(kwargs["params"]["page"])  # type: ignore[index]
+                return _ApiResponse(url, page)
+            return _FakeResponse(
+                '<script type="application/ld+json">'
+                '{"@type":"JobPosting","title":"Developer",'
+                '"description":"<p>Full detail.</p>",'
+                '"hiringOrganization":{"name":"Acme"}}'
+                "</script>",
+                url,
+            )
+
+    client = _ApiClient()
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(
+                url="https://geekjob.ru/vacancies?qs=developer",
+                source_name="geekjob_jobs",
+                limit=2,
+                monitor_config={"detail_concurrency": 2, "use_search_api": True},
+            ),
+            client,
+        )
+    ]
+
+    assert len(items) == 2
+    assert {item.external_id for item in items} == {"abc1", "abc2"}
+    assert all(item.metadata["detail_vacancy_confirmed"] is True for item in items)
+    assert all(item.metadata["source_platform"] == "geekjob.ru" for item in items)
+    assert sum(url.endswith("/json/find/vacancy") for url, _ in client.calls) == 2
+    assert sum("/vacancy/abc" in url for url, _ in client.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_geekjob_search_uses_public_html_and_preserves_query() -> None:
+    listing = "https://geekjob.ru/vacancies?qs=LLM"
+    detail = "https://geekjob.ru/vacancy/abc123"
     client = _FakeClient(
         {
-            "https://geekjob.ru/vacancies": _FakeResponse(
-                "<html><body><div id='root'></div></body></html>",
-                "https://geekjob.ru/vacancies",
+            listing: _FakeResponse('<a href="/vacancy/abc123">LLM Engineer</a>', listing),
+            detail: _FakeResponse(
+                '<script type="application/ld+json">{"@type":"JobPosting","title":"LLM Engineer","description":"Build LLM systems","hiringOrganization":{"name":"Acme"}}</script>',
+                detail,
+            ),
+        }
+    )
+    items = [
+        item
+        async for item in GeekJobParser().parse(
+            CareerSiteSpec(url=listing, source_name="geekjob_jobs", limit=2), client
+        )
+    ]
+    assert len(items) == 1
+    assert items[0].external_id == "abc123"
+    assert items[0].metadata["detail_vacancy_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_jetbrains_missing_description_is_not_emitted() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "resources.jetbrains.com":
+            return httpx.Response(200, json={"jobs": [{"id": 123}]})
+        return httpx.Response(200, text="<html><h1>ML Engineer</h1></html>")
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(ValueError):
+            _ = [
+                item
+                async for item in parser.parse(
+                    CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/", limit=1), client
+                )
+            ]
+
+
+@pytest.mark.asyncio
+async def test_habr_parser_fetches_full_detail() -> None:
+    parser = HabrCareerParser()
+    client = _FakeClient(
+        {
+            "https://career.habr.com/companies/rwb/vacancies": _FakeResponse(
+                '<a class="vacancy-card__title-link" href="/vacancies/1000160764">'
+                "Продуктовый аналитик</a>",
+                "https://career.habr.com/companies/rwb/vacancies",
+            ),
+            "https://career.habr.com/vacancies/1000160764": _FakeResponse(
+                '<script type="application/ld+json">'
+                '{"@type":"JobPosting","title":"Продуктовый аналитик",'
+                '"description":"<p>Полное описание обязанностей вакансии.</p>"}'
+                "</script>",
+                "https://career.habr.com/vacancies/1000160764",
+            ),
+        }
+    )
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(
+                url="https://career.habr.com/companies/rwb/vacancies",
+                source_name="rwb_habr",
+                limit=5,
+            ),
+            client,
+        )
+    ]
+    assert len(items) == 1
+    assert items[0].external_id == "1000160764"
+    assert "Полное описание обязанностей вакансии." in items[0].text
+    assert items[0].metadata["detail_vacancy_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_habr_parser_extracts_rich_jobposting_fields() -> None:
+    listing_url = "https://career.habr.com/vacancies?q=developer&type=all"
+    detail_url = "https://career.habr.com/vacancies/1000166519"
+    client = _FakeClient(
+        {
+            listing_url: _FakeResponse(
+                '<div class="vacancy-card">'
+                '<a class="vacancy-card__title-link" href="/vacancies/1000166519">'
+                "1C Developer</a> Москва Developer</div>",
+                listing_url,
+            ),
+            detail_url: _FakeResponse(
+                '<script type="application/ld+json">'
+                '{"@type":"JobPosting","title":"1C Developer",'
+                '"description":"<p>Полное описание вакансии.</p>",'
+                '"datePosted":"2026-08-19","employmentType":"FULL_TIME",'
+                '"jobLocationType":"TELECOMMUTE",'
+                '"jobLocation":[{"address":"Москва"}],'
+                '"hiringOrganization":{"name":"Aston"},'
+                '"baseSalary":{"currency":"RUR","value":'
+                '{"minValue":70000,"maxValue":104000,"unitText":"MONTH"}}}'
+                "</script>",
+                detail_url,
+            ),
+        }
+    )
+    items = [
+        item
+        async for item in HabrCareerParser().parse(
+            CareerSiteSpec(url=listing_url, source_name="habr_jobs", limit=1),
+            client,
+        )
+    ]
+
+    assert len(items) == 1
+    assert items[0].external_id == "1000166519"
+    assert items[0].metadata["locations"] == ["Москва"]
+    assert items[0].metadata["base_salary"] == {
+        "currency": "RUR",
+        "min": 70000,
+        "max": 104000,
+        "unit": "month",
+    }
+    assert items[0].metadata["employment_type"] == "FULL_TIME"
+    assert items[0].metadata["source_platform"] == "career.habr.com"
+
+
+@pytest.mark.asyncio
+async def test_habr_parser_walks_twenty_five_card_pages_to_two_hundred() -> None:
+    listing_base = "https://career.habr.com/vacancies?q=developer&type=all"
+    calls: list[str] = []
+
+    class Client:
+        async def get(self, url: str, **_: object) -> _FakeResponse:
+            calls.append(url)
+            query = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+            page = int(query.get("page", "1"))
+            start = (page - 1) * 25 + 1
+            ids = range(start, start + 25)
+            body = "".join(
+                f'<div class="vacancy-card"><a class="vacancy-card__title-link" '
+                f'href="/vacancies/{job_id}">Developer {job_id}</a></div>'
+                for job_id in ids
             )
+            return _FakeResponse(body, url)
+
+    items = [
+        item
+        async for item in HabrCareerParser().parse(
+            CareerSiteSpec(
+                url=listing_base,
+                source_name="habr_jobs",
+                limit=200,
+                detail_limit=0,
+                monitor_config={"max_listing_pages": 20, "listing_page_size": 25},
+            ),
+            Client(),
+        )
+    ]
+
+    assert len(items) == 200
+    assert len({item.external_id for item in items}) == 200
+    assert len(calls) == 8
+
+
+@pytest.mark.asyncio
+async def test_habr_parser_keeps_russian_project_manager_and_stops_empty_pages() -> None:
+    listing_base = "https://career.habr.com/vacancies?q=project+manager&type=all"
+    calls: list[str] = []
+
+    def _cards(*rows: tuple[int, str]) -> str:
+        return "".join(
+            f'<div class="vacancy-card"><a class="vacancy-card__title-link" '
+            f'href="/vacancies/{job_id}">{title}</a></div>'
+            for job_id, title in rows
+        )
+
+    class Client:
+        async def get(self, url: str, **_: object) -> _FakeResponse:
+            calls.append(url)
+            query = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+            page = int(query.get("page") or "1")
+            if page == 1:
+                body = _cards((1, "Project Manager"), (2, "Product Manager"))
+            elif page == 2:
+                body = _cards((3, "Руководитель проектов"), (4, "Java Developer"))
+            else:
+                body = _cards((2, "Product Manager"))
+            return _FakeResponse(body, url)
+
+    items = [
+        item
+        async for item in HabrCareerParser().parse(
+            CareerSiteSpec(
+                url=listing_base,
+                source_name="habr_jobs",
+                limit=20,
+                detail_limit=0,
+            ),
+            Client(),
+        )
+    ]
+    assert [item.external_id for item in items] == ["1", "3"]
+    assert "Project Manager" in items[0].text
+    assert "Руководитель проектов" in items[1].text
+    assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_geekjob_parser_filters_fuzzy_qs_hits_by_title() -> None:
+    parser = GeekJobParser()
+
+    class _ApiResponse(_FakeResponse):
+        def json(self) -> dict[str, object]:
+            return {
+                "data": [
+                    {"id": "pm1", "position": "Project Manager"},
+                    {"id": "prod1", "position": "Product Manager iGaming"},
+                    {"id": "ops1", "position": "People Operations Specialist"},
+                ],
+                "pagecount": 1,
+                "nextpage": 0,
+            }
+
+    class _ApiClient:
+        async def get(self, url: str, **_: object) -> _ApiResponse:
+            return _ApiResponse("", url)
+
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(
+                url="https://geekjob.ru/vacancies?qs=project+manager",
+                source_name="geekjob_jobs",
+                monitor_config={"use_search_api": True},
+                limit=20,
+                detail_limit=0,
+            ),
+            _ApiClient(),
+        )
+    ]
+    assert [item.external_id for item in items] == ["pm1"]
+    assert "Project Manager" in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_habr_parser_propagates_listing_429() -> None:
+    request = httpx.Request("GET", "https://career.habr.com/vacancies?q=developer")
+    response = httpx.Response(429, request=request, headers={"Retry-After": "0"})
+
+    class Client:
+        async def get(self, url: str, **_: object) -> httpx.Response:
+            del url
+            return response
+
+    with pytest.raises(httpx.HTTPStatusError):
+        _ = [
+            item
+            async for item in HabrCareerParser().parse(
+                CareerSiteSpec(url="https://career.habr.com/?q=developer", limit=1),
+                Client(),
+            )
+        ]
+
+
+@pytest.mark.asyncio
+async def test_kaspi_parser_enriches_listing_from_jobposting_detail() -> None:
+    listing_url = "https://job.kaspi.kz/search"
+    detail_url = "https://job.kaspi.kz/vacancy/ai-engineer"
+    client = _FakeClient(
+        {
+            listing_url: _FakeResponse(
+                '<a href="/vacancy/ai-engineer">AI Engineer</a>', listing_url
+            ),
+            detail_url: _FakeResponse(
+                '<script type="application/ld+json">'
+                '{"@type":"JobPosting","description":"<p>Полные требования вакансии.</p>"}'
+                "</script>",
+                detail_url,
+            ),
         }
     )
 
-    @asynccontextmanager
-    async def _fake_open_page(*args: object, **kwargs: object):
-        del args, kwargs
-        yield SimpleNamespace(url="https://geekjob.ru/vacancies")
+    items = [
+        item async for item in KaspiParser().parse(CareerSiteSpec(url=listing_url, limit=1), client)
+    ]
 
-    async def _fake_navigate(page: object, url: str, config: dict[str, object]) -> None:
-        del page, url, config
-
-    async def _fake_scroll(*args: object, **kwargs: object) -> list[str]:
-        del args, kwargs
-        return ["https://geekjob.ru/jobs/648644"]
-
-    monkeypatch.setattr(
-        "job_ftch.infrastructure.sources.site_parsers.geekjob.open_page", _fake_open_page
-    )
-    monkeypatch.setattr(
-        "job_ftch.infrastructure.sources.site_parsers.geekjob.navigate", _fake_navigate
-    )
-    monkeypatch.setattr(
-        "job_ftch.infrastructure.sources.site_parsers.geekjob.browser_scroll_collect_urls",
-        _fake_scroll,
-    )
-
-    urls = await parser.discover(
-        CareerSiteSpec(url="https://geekjob.ru/vacancies", source_name="geekjob_jobs", limit=1),
-        client,
-    )
-
-    assert urls == ["https://geekjob.ru/jobs/648644"]
+    assert "Полные требования вакансии." in items[0].text
+    assert items[0].metadata["detail_vacancy_confirmed"] is True
 
 
 @pytest.mark.asyncio
@@ -443,6 +866,32 @@ async def test_vk_parser_uses_public_api_and_preserves_search_query() -> None:
 
 
 @pytest.mark.asyncio
+async def test_vk_parser_reads_full_detail_article() -> None:
+    api_url = "https://team.vk.company/career/api/v2/vacancies/?limit=50&offset=0"
+    detail_url = "https://team.vk.company/vacancy/52146/"
+    client = _FakeClient(
+        {
+            api_url: _FakeResponse('{"results": [{"id": 52146}]}', api_url),
+            detail_url: _FakeResponse(
+                '<div class="article"><h1>AI Engineer</h1><p>Полное описание задач и требований.</p></div>',
+                detail_url,
+            ),
+        }
+    )
+
+    items = [
+        item
+        async for item in VkTeamParser().parse(
+            CareerSiteSpec(url="https://team.vk.company/vacancy/", limit=1), client
+        )
+    ]
+
+    assert len(items) == 1
+    assert "Полное описание задач и требований." in items[0].text
+    assert items[0].metadata["detail_vacancy_confirmed"] is True
+
+
+@pytest.mark.asyncio
 async def test_rabota_by_parser_delegates_to_hh_family_shape() -> None:
     client = _FakeClient(
         {
@@ -540,3 +989,239 @@ async def test_lever_monitor_does_not_guess_token_from_arbitrary_slug() -> None:
     result = await lever_can_handle("https://az.linkedin.com/jobs", client)
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_jetbrains_official_feed_discovers_greenhouse_vacancies() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert (
+            str(request.url)
+            == "https://resources.jetbrains.com/storage/greenhouse/greenhouse-data.json"
+        )
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    None,
+                    "bad",
+                    {"id": 123},
+                    {"id": 123},
+                    {"id": True},
+                    {"id": -5},
+                    {"id": 456},
+                ]
+            },
+        )
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        urls = await parser.discover(
+            CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/", limit=2), client
+        )
+    assert urls == [
+        "https://job-boards.eu.greenhouse.io/jetbrains/jobs/123",
+        "https://job-boards.eu.greenhouse.io/jetbrains/jobs/456",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload", [None, {"jobs": "invalid"}, {}])
+async def test_jetbrains_malformed_feed_is_not_reported_as_empty(payload: object) -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    ) as client:
+        with pytest.raises(ValueError):
+            await parser.discover(
+                CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/"), client
+            )
+
+
+def test_jetbrains_official_feed_does_not_require_browser() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    assert parser.runtime_defaults("https://www.jetbrains.com/careers/jobs/").render is False
+
+
+@pytest.mark.asyncio
+async def test_jetbrains_feed_with_only_invalid_jobs_is_a_failure() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"jobs": [None, {"id": "invalid"}]})
+        )
+    ) as client:
+        with pytest.raises(ValueError):
+            await parser.discover(
+                CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/"), client
+            )
+
+
+@pytest.mark.asyncio
+async def test_jetbrains_empty_valid_feed_returns_no_urls() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"jobs": []}))
+    ) as client:
+        assert (
+            await parser.discover(
+                CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/"), client
+            )
+            == []
+        )
+    assert getattr(parser, "confirmed_empty_on_empty", False) is True
+    assert getattr(parser, "terminal_on_error", False) is True
+
+
+def test_jetbrains_uses_custom_detail_extraction() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    assert getattr(parser, "supports_discover", True) is False
+
+
+@pytest.mark.asyncio
+async def test_jetbrains_emits_full_description_for_the_same_job() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    description = "Build reliable machine learning tools. " * 12
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "resources.jetbrains.com":
+            return httpx.Response(200, json={"jobs": [{"id": 123}]})
+        if request.url.host == "job-boards.eu.greenhouse.io":
+            return httpx.Response(
+                200,
+                text=f'<html><h1>ML Engineer</h1><div class="job__description">{description}</div></html>',
+            )
+        return httpx.Response(200, text="<html></html>")
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        items = [
+            item
+            async for item in parser.parse(
+                CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/", limit=1), client
+            )
+        ]
+    assert len(items) == 1
+    assert items[0].external_id == "123"
+    assert str(items[0].url) == "https://job-boards.eu.greenhouse.io/jetbrains/jobs/123"
+    assert description.strip() in items[0].text
+    assert items[0].metadata["detail_vacancy_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_dataart_catalog_paginates_and_reads_full_job_posting() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("filter-content-page"):
+            page = int(request.url.params.get("page", "1"))
+            return httpx.Response(
+                200,
+                json={
+                    "page": page,
+                    "pagesTotal": 2,
+                    "items": [
+                        {
+                            "slug": f"PYT{page:05d}",
+                            "title": "Engineer",
+                            "text": "Summary",
+                            "countriesTags": [{"title": "Georgia"}],
+                            "locationTags": [{"title": "Tbilisi"}],
+                        }
+                    ],
+                },
+            )
+        slug = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(
+            200,
+            text=f"""<script type="application/ld+json">{{"@type":"JobPosting","title":"Engineer {slug}","description":"<p>Full detailed description {slug}</p>"}}</script>""",
+        )
+
+    parser = resolve_site_parser("https://www.dataart.team/vacancies")
+    assert parser is not None
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        items = [
+            item
+            async for item in parser.parse(
+                CareerSiteSpec(url="https://www.dataart.team/vacancies", limit=2), client
+            )
+        ]
+    assert [item.external_id for item in items] == ["PYT00001", "PYT00002"]
+    assert all("Full detailed description" in item.text for item in items)
+    assert all("Georgia" in item.text and "Tbilisi" in item.text for item in items)
+    assert all(item.metadata["detail_vacancy_confirmed"] for item in items)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"items": [], "pagesTotal": -1},
+        {"items": [{"slug": "../bad"}], "pagesTotal": 1},
+        {"items": [], "pagesTotal": 2},
+    ],
+)
+async def test_dataart_invalid_catalog_is_failure(payload: object) -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.dataart.team/vacancies")
+    assert parser is not None
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    ) as client:
+        with pytest.raises(ValueError):
+            _ = [
+                item
+                async for item in parser.parse(
+                    CareerSiteSpec(url="https://www.dataart.team/vacancies"), client
+                )
+            ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "detail",
+    [
+        '<script type="application/ld+json">{"@type":"Organization"}</script>',
+        '<script type="application/ld+json">{"@type":"JobPosting","title":"Engineer"}</script>',
+        '<script type="application/ld+json">{"@type":"JobPosting","title":"Engineer","description":""}</script>',
+    ],
+)
+async def test_dataart_missing_detail_is_failure(detail: str) -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("filter-content-page"):
+            return httpx.Response(200, json={"items": [{"slug": "PYT001"}], "pagesTotal": 1})
+        return httpx.Response(200, text=detail)
+
+    parser = resolve_site_parser("https://www.dataart.team/vacancies")
+    assert parser is not None
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(ValueError):
+            _ = [
+                item
+                async for item in parser.parse(
+                    CareerSiteSpec(url="https://www.dataart.team/vacancies"), client
+                )
+            ]

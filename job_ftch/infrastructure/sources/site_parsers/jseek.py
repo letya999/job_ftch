@@ -135,6 +135,7 @@ class JSeekParser:
     supports_discover = True
     supports_search = True
     search_mode = "combined"
+    confirmed_empty_on_empty = True
 
     def __init__(self) -> None:
         self._detail_action_id: str | None = None
@@ -237,29 +238,44 @@ class JSeekParser:
         base_url = f"{protocol}://{host}"
         if (protocol, port) not in {("https", 443), ("http", 80)}:
             base_url = f"{base_url}:{port}"
-        response = await client.get(
-            f"{base_url}/collections/job_posting/documents/search",
-            headers={
-                "x-typesense-api-key": api_key,
-                "referer": referer_url,
-            },
-            params={
-                "q": search_query,
-                "query_by": "title",
-                "filter_by": "is_active:true && has_content:!=false && locales:[en,_none]",
-                "sort_by": "_text_match:desc,first_seen_at:desc",
-                "group_by": "company_id",
-                "group_limit": str(max(limit, 10)),
-                "per_page": str(min(max(limit, 10), 50)),
-                "page": "1",
-                "typo_tokens_threshold": "1",
-                "drop_tokens_threshold": "1",
-            },
-        )
-        if hasattr(response, "raise_for_status"):
-            response.raise_for_status()
-        payload = response.json()
-        return _source_urls_from_typesense_payload(payload, limit=limit)
+        urls: list[str] = []
+        seen: set[str] = set()
+        per_page = min(max(limit, 10), 50)
+        for page in range(1, 6):
+            response = await client.get(
+                f"{base_url}/collections/job_posting/documents/search",
+                headers={
+                    "x-typesense-api-key": api_key,
+                    "referer": referer_url,
+                },
+                params={
+                    "q": search_query,
+                    "query_by": "title",
+                    "filter_by": "is_active:true && has_content:!=false && locales:[en,_none]",
+                    "sort_by": "_text_match:desc,first_seen_at:desc",
+                    "group_by": "company_id",
+                    "group_limit": str(max(limit, 10)),
+                    "per_page": str(per_page),
+                    "page": str(page),
+                    "typo_tokens_threshold": "1",
+                    "drop_tokens_threshold": "1",
+                },
+            )
+            if hasattr(response, "raise_for_status"):
+                response.raise_for_status()
+            page_urls = _source_urls_from_typesense_payload(response.json(), limit=limit)
+            new_on_page = 0
+            for source_url in page_urls:
+                if source_url in seen:
+                    continue
+                seen.add(source_url)
+                urls.append(source_url)
+                new_on_page += 1
+                if len(urls) >= limit:
+                    return urls
+            if new_on_page == 0:
+                break
+        return urls
 
     async def _resolve_detail_action_id(
         self,
@@ -333,34 +349,43 @@ def _search_query_from_url(url: str) -> str | None:
     return " ".join(tokens) if tokens else None
 
 
+def _iter_typesense_documents(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    documents: list[dict[str, Any]] = []
+    groups = payload.get("grouped_hits")
+    if isinstance(groups, list):
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            hits = group.get("hits")
+            if not isinstance(hits, list):
+                continue
+            for hit in hits:
+                if isinstance(hit, dict) and isinstance(hit.get("document"), dict):
+                    documents.append(hit["document"])
+    hits = payload.get("hits")
+    if isinstance(hits, list):
+        for hit in hits:
+            if isinstance(hit, dict) and isinstance(hit.get("document"), dict):
+                documents.append(hit["document"])
+    return documents
+
+
 def _source_urls_from_typesense_payload(payload: dict[str, Any], *, limit: int) -> list[str]:
     urls: list[str] = []
     seen: set[str] = set()
-    groups = payload.get("grouped_hits")
-    if not isinstance(groups, list):
+    if not isinstance(payload, dict):
         return urls
-    for group in groups:
-        if not isinstance(group, dict):
+    for document in _iter_typesense_documents(payload):
+        source_url = document.get("source_url")
+        if not isinstance(source_url, str):
             continue
-        hits = group.get("hits")
-        if not isinstance(hits, list):
+        canonical_url = _canonical_source_url(source_url)
+        if canonical_url is None or canonical_url in seen:
             continue
-        for hit in hits:
-            if not isinstance(hit, dict):
-                continue
-            document = hit.get("document")
-            if not isinstance(document, dict):
-                continue
-            source_url = document.get("source_url")
-            if not isinstance(source_url, str):
-                continue
-            canonical_url = _canonical_source_url(source_url)
-            if canonical_url is None or canonical_url in seen:
-                continue
-            seen.add(canonical_url)
-            urls.append(canonical_url)
-            if len(urls) >= limit:
-                return urls
+        seen.add(canonical_url)
+        urls.append(canonical_url)
+        if len(urls) >= limit:
+            return urls
     return urls
 
 

@@ -1,0 +1,26 @@
+[
+  {
+    "source_kind": "career_site",
+    "source_name": "demo_product_board",
+    "external_id": "pm-001",
+    "url": "https://jobs.example.test/pm-001",
+    "text": "AI Product Manager\nOwn discovery, roadmap and measurable adoption for an LLM assistant. Partner with engineering, design and go-to-market teams.",
+    "metadata": {"company": "Northstar AI", "location": "Remote Europe", "job_url": "https://jobs.example.test/pm-001"}
+  },
+  {
+    "source_kind": "career_site",
+    "source_name": "demo_product_board",
+    "external_id": "pm-002",
+    "url": "https://jobs.example.test/pm-002",
+    "text": "Technical Program Manager, AI\nLead delivery across data, API platform and applied ML teams. Manage dependencies, risks, experiments and executive communication.",
+    "metadata": {"company": "Vector Harbor", "location": "Remote", "job_url": "https://jobs.example.test/pm-002"}
+  },
+  {
+    "source_kind": "telegram_group",
+    "source_name": "demo_product_digest",
+    "external_id": "pm-003",
+    "url": "https://t.me/demo_product_digest/3",
+    "text": "AI Project Manager / Product Builder\nTurn customer problems into experiments and ship AI workflow improvements with engineers. Strong technical communication required.",
+    "metadata": {"chat_username": "demo_product_digest", "company": "Signal Works"}
+  }
+]

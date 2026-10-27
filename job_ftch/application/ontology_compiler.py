@@ -537,6 +537,7 @@ def _normalize_classify_result(raw: Any, schema: type[Any]) -> Any | None:
     return raw
 
 
+_CANDIDATE_PASS_MAX_TOKENS = 12000
 _COMPILE_PASS_MAX_TOKENS = 12000
 
 
@@ -559,6 +560,7 @@ async def _extract_candidate_chunk(
         LLMOntologyCandidateChunk,
         prompt_parts,
         timeout_seconds=compile_timeout,
+        max_tokens=_CANDIDATE_PASS_MAX_TOKENS,
     )
     if candidate is None:
         return None, tuple(prompt_parts)
@@ -588,6 +590,7 @@ async def _extract_candidate_chunk(
                 LLMOntologyCandidateChunk,
                 prompt_parts,
                 timeout_seconds=compile_timeout,
+                max_tokens=_CANDIDATE_PASS_MAX_TOKENS,
             )
             if rescued is not None:
                 rescued = _reattach_chunk_evidence(rescued, (shot,))
@@ -1372,6 +1375,7 @@ async def compile_ontology_from_shots(
                 LLMOntologyCandidateChunk,
                 prompt_parts,
                 timeout_seconds=compile_timeout,
+                max_tokens=_CANDIDATE_PASS_MAX_TOKENS,
             )
             if coverage is None:
                 consecutive_failures += 1

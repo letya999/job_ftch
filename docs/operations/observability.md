@@ -1,7 +1,7 @@
 ---
 title: "Observability"
 description: "Логи, метрики, traces, quality checks and runtime diagnostics for job_ftch."
-updated: 2026-08-02
+updated: 2026-10-18
 ---
 # Observability
 
@@ -14,9 +14,22 @@ signals are related, but owned by different runtime paths.
 | ------ | --------------- |
 | Structured logs | `structlog` wiring and runtime env |
 | OpenTelemetry | `opentelemetry-*` dependencies and tracing settings |
-| Langfuse | `docs/adr/043-langfuse-observability.md` |
+| OpenObserve logs and metrics | `job_ftch/infrastructure/observability/openobserve.py` |
+| CAPTCHA encounters | log events `captcha_encounter` and `captcha_solve_outcome`; dashboard `job_ftch captcha` |
 | Compose env | `deploy/observability/.env*.example` |
 | Runtime verification | `scripts/verify_observability_run.py` |
+
+Production exports metrics every 60 seconds with bounded labels such as tenant,
+source, stage, and outcome. The unique `source_run_id` remains on detailed run
+and source log records and in PostgreSQL run statistics; it is not a metric
+label, since cumulative export would resend a new time series for every run.
+The OpenObserve production stack retains metric and log data for at least 15
+days. Before changing retention, verify the most recent 14 complete days in
+each stream and preserve the PostgreSQL publication ledger separately.
+
+## CAPTCHA telemetry
+
+Every classified challenge emits `captcha_encounter` (host, type, surface, outcome=`observed`). Solver attempts emit `captcha_solve_outcome` with `captcha_solved` and `captcha_outcome` (`solved` / `failed` / `unsupported`). Fields are first-class OpenObserve columns (`captcha_host`, `captcha_type`, …). Dashboard `job_ftch captcha` graphs frequency by type, stacked encounters by host, and unsolved outcomes. Upserted on OpenObserve startup from `job_ftch/infrastructure/observability/dashboards/job_ftch_captcha.json`.
 
 ## Quality And Regression
 

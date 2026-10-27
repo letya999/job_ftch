@@ -139,17 +139,17 @@ class PostTypeClassificationNode:
             tracer = trace.get_tracer("job_ftch.nodes")
 
             with tracer.start_as_current_span("post_type.classify") as span:
-                span.set_attribute("langfuse.observation.type", "generation")
+                span.set_attribute("job_ftch.llm.observation.type", "generation")
 
                 if settings.tracing_capture_payloads:
-                    span.set_attribute("langfuse.observation.input", item.text)
+                    span.set_attribute("job_ftch.llm.observation.input", item.text)
 
                 result = await self._classifier.classify(item.text)
 
                 if result.model_id:
                     span.set_attribute("gen_ai.request.model", result.model_id)
                 if settings.tracing_capture_payloads:
-                    span.set_attribute("langfuse.observation.output", result.label)
+                    span.set_attribute("job_ftch.llm.observation.output", result.label)
 
                 if result.confidence >= self._confidence_threshold:
                     return result

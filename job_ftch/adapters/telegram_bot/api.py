@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any, cast
 
 import structlog
+from pydantic import SecretStr
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from job_ftch.adapters.fastapi.adapter import create_app as create_private_api_app
 from job_ftch.adapters.telegram_bot.config import load_bot_config
 from job_ftch.adapters.telegram_bot.main import build_bot, build_dispatcher
 from job_ftch.adapters.telegram_bot.public_jobs import mount_public_job_routes
@@ -131,8 +133,20 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
                 "bot_scheduler:last_publish_error",
                 "bot_scheduler:last_publish_sent",
                 "bot_scheduler:pending_publish_since",
+                "bot_scheduler:last_owner_report_attempt_at",
+                "bot_scheduler:last_owner_report_success_at",
+                "bot_scheduler:last_owner_report_error",
             )
         }
+        list_uncertain = getattr(store, "list_uncertain_outbox", None)
+        uncertain = await list_uncertain() if callable(list_uncertain) else ()
+        uncertain_count = len(
+            {
+                (item.sink_name, item.delivery_payload["attempt_id"])
+                for item in uncertain
+                if str(item.sink_name).startswith("telegram:")
+            }
+        )
     except Exception as exc:
         logger.warning("health_dependency_check_failed", tenant_id=tenant_id, error=str(exc))
         return {
@@ -146,9 +160,17 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
         for item in source_health
         if item.paused or item.degraded or item.status in {"failing", "paused", "degraded"}
     ]
+    watch_sources = [item for item in source_health if item.quality_important]
     scheduler_error = str(scheduler_state.get("bot_scheduler:last_error") or "").strip()
     publish_error = str(scheduler_state.get("bot_scheduler:last_publish_error") or "").strip()
-    status = "degraded" if bad_sources or scheduler_error or publish_error else "ok"
+    owner_report_error = str(
+        scheduler_state.get("bot_scheduler:last_owner_report_error") or ""
+    ).strip()
+    status = (
+        "degraded"
+        if bad_sources or scheduler_error or publish_error or owner_report_error or uncertain_count
+        else "ok"
+    )
     last_finished = summary.finished_at.isoformat() if summary and summary.finished_at else None
     return {
         "tenant_id": tenant_id,
@@ -166,6 +188,11 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
             "total": len(source_health),
             "degraded": len(bad_sources),
             "bad_source_ids": [item.source_id for item in bad_sources],
+            "reliable": sum(1 for item in source_health if item.quality_reliable),
+            "rich": sum(1 for item in source_health if item.quality_rich),
+            "high_relevance": sum(1 for item in source_health if item.quality_high_relevance),
+            "important": sum(1 for item in source_health if item.quality_important),
+            "watch_source_ids": [item.source_id for item in watch_sources],
         },
         "scheduler": {
             "last_attempt_age_seconds": _age_seconds(
@@ -177,6 +204,7 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
             "last_error": scheduler_error or None,
         },
         "publish": {
+            "uncertain_count": uncertain_count,
             "last_success_age_seconds": _age_seconds(
                 scheduler_state.get("bot_scheduler:last_publish_success_at")
             ),
@@ -187,6 +215,77 @@ async def _tenant_health(runner: TenantRunner, tenant_id: str) -> dict[str, Any]
                 scheduler_state.get("bot_scheduler:pending_publish_since")
             ),
         },
+        "owner_report": {
+            "last_attempt_at": scheduler_state.get("bot_scheduler:last_owner_report_attempt_at")
+            or None,
+            "last_success_at": scheduler_state.get("bot_scheduler:last_owner_report_success_at")
+            or None,
+            "last_error": owner_report_error or None,
+        },
+    }
+
+
+async def _telegram_readiness(bot: Any, runner: TenantRunner) -> dict[str, Any]:
+    """Check Bot API access without sending a test message."""
+    try:
+        me = await bot.get_me()
+    except Exception as exc:  # noqa: BLE001 - readiness must never take down liveness
+        return {"status": "unhealthy", "bot_api": {"ok": False, "error": str(exc)}}
+    targets: list[dict[str, Any]] = []
+    statuses = ["ok"]
+    for tenant_id in runner.tenant_ids():
+        target: Any = None
+        try:
+            target = await runner.get_publish_channel(tenant_id)
+            if not target:
+                targets.append(
+                    {
+                        "tenant_id": tenant_id,
+                        "status": "degraded",
+                        "error": "publish_target_missing",
+                    }
+                )
+                statuses.append("degraded")
+                continue
+            chat = await bot.get_chat(target)
+            member = None
+            get_member = getattr(bot, "get_chat_member", None)
+            if callable(get_member):
+                member = await get_member(chat.id, me.id)
+            member_status = str(getattr(member, "status", "unknown")) if member else "unchecked"
+            if member_status in {"left", "kicked"}:
+                statuses.append("unhealthy")
+                targets.append(
+                    {
+                        "tenant_id": tenant_id,
+                        "target": str(target),
+                        "status": "unhealthy",
+                        "error": member_status,
+                    }
+                )
+            else:
+                targets.append(
+                    {
+                        "tenant_id": tenant_id,
+                        "target": str(target),
+                        "status": "ok",
+                        "member_status": member_status,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001 - one target must not hide other targets
+            statuses.append("unhealthy")
+            targets.append(
+                {
+                    "tenant_id": tenant_id,
+                    "target": str(target or ""),
+                    "status": "unhealthy",
+                    "error": str(exc),
+                }
+            )
+    return {
+        "status": _worst_status(statuses),
+        "bot_api": {"ok": True, "username": getattr(me, "username", None)},
+        "targets": targets,
     }
 
 
@@ -221,9 +320,24 @@ def create_app(
             "TELEGRAM_SECRET_TOKEN must be set; refusing to start without authentication"
         )
 
+    if settings.tracing_enabled:
+        from job_ftch.infrastructure.observability import configure_observability
+
+        try:
+            configure_observability(settings)
+        except Exception:
+            logger.warning("api_observability_unavailable")
+
     # Initialize rate limiter
     limiter = Limiter(key_func=get_remote_address)
     app = FastAPI(title="job_ftch telegram bridge")
+
+    @app.on_event("shutdown")
+    async def _stop_ingest_queue() -> None:
+        close = getattr(runner, "close", None)
+        if callable(close):
+            await close()
+
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, cast("Any", _rate_limit_exceeded_handler))
 
@@ -253,6 +367,20 @@ def create_app(
     async def health_live() -> dict[str, Any]:
         return {"status": "ok"}
 
+    @app.get("/health/ready")
+    async def health_ready() -> dict[str, Any]:
+        telegram = await _telegram_readiness(bot, runner)
+        tenants = [await _tenant_health(runner, tenant_id) for tenant_id in runner.tenant_ids()]
+        status = _worst_status(
+            [str(telegram["status"]), *(str(item["status"]) for item in tenants)]
+        )
+        return {
+            "status": status,
+            "telegram": telegram,
+            "tenant_count": len(tenants),
+            "tenants": tenants,
+        }
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         tenants: list[dict[str, Any]] = []
@@ -268,10 +396,27 @@ def create_app(
     mount_public_source_routes(app, runner, limiter=limiter)
     mount_public_job_routes(app, runner, limiter=limiter)
 
+    # Keep the pull API on the bot process so CareerGo/Hermes can use one
+    # authenticated endpoint.  Bearer auth uses the bridge key when no
+    # dedicated JOB_FTCH_API_TOKEN is configured; no private route is public.
+    private_settings = settings.model_copy(
+        update={
+            "api_token": settings.api_token
+            or (SecretStr(bot_config.bridge_api_key) if bot_config.bridge_api_key else None),
+            "api_tenant_allowlist": settings.api_tenant_allowlist or list(runner.tenant_ids()),
+        }
+    )
+    private_app = create_private_api_app(runner=runner, settings=private_settings)
+    app.router.routes.extend(
+        route
+        for route in private_app.router.routes
+        if getattr(route, "path", "").startswith("/v1/")
+    )
+
     @app.post("/pipeline/run")
     @limiter.limit("5/minute")
     async def pipeline_run(
-        request: Any,
+        request: Request,
         payload: dict[str, Any] | None = None,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
@@ -292,7 +437,7 @@ def create_app(
     @app.get("/pipeline/status/{tenant_id}")
     @limiter.limit("10/minute")
     async def pipeline_status(
-        request: Any,
+        request: Request,
         tenant_id: str,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any] | None:
@@ -305,7 +450,7 @@ def create_app(
     @app.get("/pipeline/browser-capabilities")
     @limiter.limit("10/minute")
     async def pipeline_browser_capabilities(
-        request: Any,
+        request: Request,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
         """Read-only browser/bypass capability inventory (no execution)."""
@@ -322,7 +467,7 @@ def create_app(
     @app.get("/pipeline/browser-routes")
     @limiter.limit("10/minute")
     async def pipeline_browser_routes(
-        request: Any,
+        request: Request,
         tenant_id: str | None = None,
         source_id: str | None = None,
         bypass: str | None = None,
@@ -347,7 +492,7 @@ def create_app(
     @app.post("/pipeline/search-sessions")
     @limiter.limit("5/minute")
     async def create_search_session(
-        request: Any,
+        request: Request,
         payload: dict[str, Any],
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
@@ -380,7 +525,7 @@ def create_app(
     @app.post("/pipeline/search-sessions/{session_id}/plan")
     @limiter.limit("5/minute")
     async def plan_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
@@ -396,7 +541,7 @@ def create_app(
     @app.post("/pipeline/search-sessions/{session_id}/approve")
     @limiter.limit("5/minute")
     async def approve_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         payload: dict[str, Any],
         x_api_key: str | None = Header(default=None),
@@ -427,7 +572,7 @@ def create_app(
     @app.post("/pipeline/search-sessions/{session_id}/run")
     @limiter.limit("3/minute")
     async def run_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         payload: dict[str, Any] | None = None,
         x_api_key: str | None = Header(default=None),
@@ -448,7 +593,7 @@ def create_app(
     @app.get("/pipeline/search-sessions/{session_id}")
     @limiter.limit("10/minute")
     async def get_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
@@ -464,7 +609,7 @@ def create_app(
     @app.get("/pipeline/search-sessions/{session_id}/results")
     @limiter.limit("10/minute")
     async def list_search_session_results(
-        request: Any,
+        request: Request,
         session_id: str,
         limit: int = 20,
         x_api_key: str | None = Header(default=None),
@@ -479,7 +624,7 @@ def create_app(
     @app.get("/pipeline/search-sessions/{session_id}/explain")
     @limiter.limit("10/minute")
     async def explain_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         source_id: str | None = None,
         job_id: str | None = None,
@@ -501,7 +646,7 @@ def create_app(
     @app.post("/pipeline/search-sessions/{session_id}/cancel")
     @limiter.limit("5/minute")
     async def cancel_search_session(
-        request: Any,
+        request: Request,
         session_id: str,
         x_api_key: str | None = Header(default=None),
     ) -> dict[str, Any]:
@@ -517,7 +662,7 @@ def create_app(
     @app.get("/pipeline/sources/{tenant_id}")
     @limiter.limit("10/minute")
     async def pipeline_sources(
-        request: Any,
+        request: Request,
         tenant_id: str,
         x_api_key: str | None = Header(default=None),
     ) -> list[dict[str, Any]]:
@@ -529,7 +674,7 @@ def create_app(
     @app.post("/pipeline/sources/{tenant_id}")
     @limiter.limit("5/minute")
     async def add_pipeline_source(
-        request: Any,
+        request: Request,
         tenant_id: str,
         payload: dict[str, Any],
         x_api_key: str | None = Header(default=None),
@@ -554,10 +699,55 @@ def create_app(
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.post("/pipeline/sources/{tenant_id}/important")
+    @limiter.limit("10/minute")
+    async def set_pipeline_source_important(
+        request: Request,
+        tenant_id: str,
+        payload: dict[str, Any],
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        source_id = payload.get("source_id")
+        if not isinstance(source_id, str) or not source_id.strip():
+            raise HTTPException(status_code=400, detail="source_id is required.")
+        important = payload.get("important", True)
+        if not isinstance(important, bool):
+            raise HTTPException(status_code=400, detail="important must be a boolean.")
+        note = payload.get("note")
+        if note is not None and not isinstance(note, str):
+            raise HTTPException(status_code=400, detail="note must be a string.")
+        try:
+            return await runner.set_source_important(
+                tenant_id,
+                source_id.strip(),
+                important=important,
+                set_by="api",
+                note=note,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/pipeline/sources/{tenant_id}/quality")
+    @limiter.limit("10/minute")
+    async def pipeline_source_quality(
+        request: Request,
+        tenant_id: str,
+        x_api_key: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        expected_key = bot_config.bridge_api_key
+        if not expected_key or not hmac.compare_digest(x_api_key or "", expected_key):
+            raise HTTPException(status_code=403, detail="Invalid bridge API key.")
+        return await runner.list_source_quality(tenant_id)
+
     @app.post("/pipeline/sources/{tenant_id}/disable")
     @limiter.limit("5/minute")
     async def disable_pipeline_source(
-        request: Any,
+        request: Request,
         tenant_id: str,
         payload: dict[str, Any],
         x_api_key: str | None = Header(default=None),
@@ -576,7 +766,7 @@ def create_app(
     @app.get("/profiles/{tenant_id}/{user_id}")
     @limiter.limit("20/minute")
     async def list_profiles(
-        request: Any,
+        request: Request,
         tenant_id: str,
         user_id: str,
         x_api_key: str | None = Header(default=None),
@@ -589,7 +779,7 @@ def create_app(
     @app.post("/profiles/{tenant_id}/{user_id}")
     @limiter.limit("10/minute")
     async def save_profile(
-        request: Any,
+        request: Request,
         tenant_id: str,
         user_id: str,
         payload: dict[str, Any],
@@ -622,7 +812,7 @@ def create_app(
     @app.post("/profiles/{tenant_id}/{user_id}/activate")
     @limiter.limit("10/minute")
     async def activate_profile(
-        request: Any,
+        request: Request,
         tenant_id: str,
         user_id: str,
         payload: dict[str, Any],
@@ -642,7 +832,7 @@ def create_app(
     @app.get("/jobs/search")
     @limiter.limit("30/minute")
     async def search_jobs(
-        request: Any,
+        request: Request,
         q: str,
         tenant_id: str | None = None,
         user_id: str | None = None,

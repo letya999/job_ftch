@@ -56,7 +56,10 @@ class LinkedinParser:
     domain_pattern = _DOMAIN_PATTERN
     has_custom_parse = True
     terminal_on_empty = True
-    supports_discover = True
+    # LinkedIn's public guest HTML already contains the job links.  Browser
+    # discovery is less reliable for bot sessions and can turn a valid page
+    # into a false policy_not_scraped result.
+    supports_discover = False
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url

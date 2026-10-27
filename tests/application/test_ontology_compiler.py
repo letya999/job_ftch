@@ -105,6 +105,7 @@ class _ScriptedLLM:
         self.calls = 0
         self.prompts: list[str] = []
         self.timeouts: list[float | None] = []
+        self.token_limits: list[int | None] = []
 
     async def classify(
         self,
@@ -114,10 +115,11 @@ class _ScriptedLLM:
         timeout_seconds: float | None = None,
         max_tokens: int | None = None,
     ) -> Any:
-        del schema, max_tokens
+        del schema
         self.calls += 1
         self.prompts.append(prompt)
         self.timeouts.append(timeout_seconds)
+        self.token_limits.append(max_tokens)
         if not self._responses:
             raise RuntimeError("InstructorRetryException")
         item = self._responses.pop(0)
@@ -175,6 +177,8 @@ async def test_compile_skips_failed_chunk_and_keeps_later_terms() -> None:
     result = await compile_ontology_from_shots(shots=shots, llm=llm, prompt_path=_PROMPT)
     assert "python" in result.materialized.positive_skills
     assert result.materialized.negative_roles or result.materialized.anti_patterns
+    assert llm.token_limits[:2] == [12000, 12000]
+    assert llm.token_limits[2:] == [12000, 12000]
 
 
 @pytest.mark.asyncio

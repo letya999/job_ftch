@@ -18,6 +18,13 @@ from job_ftch.application.registry import register_site_parser
 from job_ftch.domain import SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
+from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    keywords_from_spec,
+    normalize_search_keywords,
+    paginate_listing,
+    text_matches_keywords,
+    with_query_params,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -62,11 +69,30 @@ class _JsonLdExtractor(HTMLParser):
                     pass
 
 
+_DETAIL_RE = re.compile(r"/vacancies/[a-z0-9-]+/(\d+)/?$", re.IGNORECASE)
+
+
 class AvitoCareerParser:
     """Parser for avito.ru career page."""
 
     domain_pattern = r"^https?://(?:(?:[a-z0-9-]+\.)?(?:avito\.ru|career\.avito\.com))(?:/|$)"
     has_custom_parse = True
+    supports_search = True
+    search_mode = "combined"
+
+    def build_search_urls(
+        self,
+        base_url: str,
+        keywords: Any,
+        *,
+        limit: int | None = None,
+    ) -> list[str]:
+        del limit
+        terms = normalize_search_keywords(keywords)
+        if not terms:
+            return []
+        listing = base_url.split("?", 1)[0] or "https://career.avito.com/vacancies/"
+        return [with_query_params(listing, {"q": " OR ".join(terms)})]
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
@@ -83,23 +109,30 @@ class AvitoCareerParser:
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
         limit = spec.limit or 50
         source_name = spec.source_name or "avito"
-
-        # Fetch through the source client so retry, SSRF guard, proxy and
-        # connection-pool policies remain identical to generic ingestion.
+        keywords = keywords_from_spec(spec)
         from job_ftch.infrastructure.sources.source_deadline import await_with_source_deadline
 
-        response = await await_with_source_deadline(client.get(spec.url, follow_redirects=True))
-        html = response.text
+        async def fetch(url: str) -> str:
+            response = await await_with_source_deadline(client.get(url, follow_redirects=True))
+            return str(response.text)
 
-        # Try JSON-LD first
-        items = self._parse_from_jsonld(html, spec.url, source_name, limit)
-        if items:
-            for item in items:
-                yield item
-            return
+        def extract(html: str, url: str) -> list[RawItem]:
+            page_items = self._parse_from_jsonld(html, url, source_name, max(limit, 50))
+            if not page_items:
+                page_items = self._parse_from_html(html, url, source_name, max(limit, 50))
+            return [
+                item
+                for item in page_items
+                if text_matches_keywords(f"{item.url}\n{item.text}", keywords)
+            ]
 
-        # Fall back to HTML parsing
-        items = self._parse_from_html(html, spec.url, source_name, limit)
+        items = await paginate_listing(
+            fetch,
+            extract,
+            spec.url,
+            limit=limit,
+            identity=lambda item: item.url,
+        )
         for item in items:
             yield item
 
@@ -163,59 +196,40 @@ class AvitoCareerParser:
         return items
 
     def _parse_from_html(self, html: str, url: str, source_name: str, limit: int) -> list[RawItem]:
-        """Extract jobs from HTML elements."""
+        """Extract jobs from HTML vacancy anchors ``/vacancies/{direction}/{id}/``."""
         parser = LexborHTMLParser(html)
         items: list[RawItem] = []
+        seen: set[str] = set()
 
-        # Avito career job cards
-        job_cards = parser.css(
-            '.main-team--job, .job-card, [class*="job"], [class*="vacancy"], .career-item'
-        )
-
-        for card in job_cards[:limit]:
-            link_node = card.css_first("a[href]")
-            if not link_node:
+        for anchor in parser.css("a[href]"):
+            href = str(anchor.attributes.get("href") or "").strip()
+            job_url = urljoin(url, href.split("?", 1)[0])
+            match = _DETAIL_RE.search(job_url)
+            if match is None or job_url in seen:
                 continue
-
-            href = link_node.attributes.get("href")
-            if not href:
-                continue
-
-            job_url = urljoin(url, href)
-
-            title_node = card.css_first('h2, h3, h4, .title, [class*="title"]')
-            title = _clean_text(title_node.text(separator=" ", strip=True)) if title_node else None
-            if not title:
-                title = _clean_text(link_node.text(separator=" ", strip=True))
+            title = _clean_text(anchor.text(separator=" ", strip=True))
+            if not title or len(title) < 3:
+                parent = anchor.parent
+                title = _clean_text(parent.text(separator=" ", strip=True)) if parent else ""
             if not title or len(title) < 3:
                 continue
-
-            location_node = card.css_first('.location, [class*="location"]')
-            location = (
-                _clean_text(location_node.text(separator=" ", strip=True))
-                if location_node
-                else None
-            )
-
-            text_parts = [title]
-            if location:
-                text_parts.append(location)
-
+            seen.add(job_url)
             items.append(
                 build_raw_item(
                     source_kind=SourceKind.CAREER_SITE,
                     source_name=source_name,
-                    external_id=job_url,
+                    external_id=match.group(1),
                     url=job_url,
-                    text="\n".join(part for part in text_parts if part),
+                    text=title,
                     metadata={
                         "board_url": url,
                         "job_url": job_url,
-                        "location": location,
                         "parser": "avito_html",
                     },
                 )
             )
+            if len(items) >= limit:
+                break
 
         return items
 

@@ -51,6 +51,7 @@ class TenantConfig(BaseModel):
 
     tenant_id: str = Field(min_length=1, max_length=63)
     display_name: str = Field(min_length=1)
+    enabled: bool = True
     sources: list[SourceSpec] = Field(default_factory=list)
     output: OutputSpec = Field(
         default_factory=lambda: OutputSpec(path=Path("artifacts/{tenant_id}/jobs.json"))
@@ -58,6 +59,12 @@ class TenantConfig(BaseModel):
     schedule: ScheduleSpec | None = None
     auth_provider: str | None = None
     filter_profile_path: Path | None = None
+    profile_path: Path | None = None
+    ontology_path: Path | None = None
+    pipeline_recipe_path: Path | None = None
+    retention_runs: int | None = Field(default=20, ge=1)
+    webhook_url: str | None = None
+    webhook_secret_env: str | None = None
     quarantine_output: OutputSpec = Field(
         default_factory=lambda: OutputSpec(
             path=Path("artifacts/{tenant_id}/quarantine.jsonl"),
@@ -152,6 +159,8 @@ class TenantConfig(BaseModel):
         "embedding_model",
         "openai_model",
         "relevance_llm_model",
+        "webhook_url",
+        "webhook_secret_env",
         "search_language",
         mode="before",
     )

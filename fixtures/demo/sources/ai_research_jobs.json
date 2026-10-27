@@ -1,0 +1,4 @@
+[
+  {"source_kind":"career_site","source_name":"ai_research_board","external_id":"ar-001","url":"https://jobs.example.test/ar-001","text":"Research Engineer\nRun reproducible Python and PyTorch experiments for transformers and evaluation.","metadata":{"company":"Frontier Methods","location":"Remote Europe"}},
+  {"source_kind":"telegram_channel","source_name":"ai_research_digest","external_id":"ar-002","url":"https://t.me/ai_research_digest/2","text":"Applied Scientist\nTurn model papers into measured NLP systems with experiment design and MLOps.","metadata":{"company":"Lab North"}}
+]

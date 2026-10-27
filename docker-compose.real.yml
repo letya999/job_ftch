@@ -1,0 +1,87 @@
+name: job-ftch-real
+
+services:
+  bot:
+    image: job-ftch-telegram-bot:real
+    build:
+      context: .
+      dockerfile: job_ftch/adapters/telegram_bot/Dockerfile.real
+      args:
+        BASE_IMAGE: job-ftch-runtime:dev
+    init: true
+    restart: unless-stopped
+    command: ["xvfb-run", "-a", "job_ftch", "--configs-dir", "/app/real_demo/tenants", "pipeline", "--daemon"]
+    environment:
+      JOB_FTCH_ENV: prod
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml
+      JOB_FTCH_STORE_DSN: ${JOB_FTCH_STORE_DSN:?set JOB_FTCH_STORE_DSN}
+      JOB_FTCH_CONFIGS_DIR: /app/real_demo/tenants
+      JOB_FTCH_LOG_LEVEL: INFO
+      JOB_FTCH_OPENAI_ENABLED: "false"
+      JOB_FTCH_EMBEDDING_ENABLED: "false"
+      JOB_FTCH_OPENOBSERVE_URL: ${JOB_FTCH_OPENOBSERVE_URL:-http://host.docker.internal:5080}
+      JOB_FTCH_OPENOBSERVE_USERNAME: ${JOB_FTCH_OPENOBSERVE_USERNAME:?set JOB_FTCH_OPENOBSERVE_USERNAME}
+      JOB_FTCH_OPENOBSERVE_PASSWORD: ${JOB_FTCH_OPENOBSERVE_PASSWORD:?set JOB_FTCH_OPENOBSERVE_PASSWORD}
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      HF_HUB_VERBOSITY: error
+      TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    volumes:
+      - ./artifacts/real_demo:/app/artifacts/real_demo
+      - real_runtime:/app/.runtime
+      - ./job_ftch/adapters/telegram_bot/runtime.prod.yaml:/app/job_ftch/adapters/telegram_bot/runtime.prod.yaml:ro
+    shm_size: "1gb"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os; from pathlib import Path; p=Path('/app/.runtime/.pid'); pid=int(p.read_text()) if p.exists() else 0; raise SystemExit(0 if pid and Path(f'/proc/{pid}').exists() else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  public-api:
+    image: job-ftch-telegram-bot:real
+    command: ["uvicorn", "job_ftch.adapters.telegram_bot.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]
+    restart: unless-stopped
+    environment:
+      JOB_FTCH_ENV: prod
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml
+      JOB_FTCH_STORE_DSN: ${JOB_FTCH_STORE_DSN:?set JOB_FTCH_STORE_DSN}
+      JOB_FTCH_CONFIGS_DIR: /app/real_demo/tenants
+      JOB_FTCH_OPENAI_ENABLED: "false"
+      JOB_FTCH_EMBEDDING_ENABLED: "false"
+      JOB_FTCH_API_TOKEN: ${JOB_FTCH_API_TOKEN:?set JOB_FTCH_API_TOKEN}
+      JOB_FTCH_API_TENANT_ALLOWLIST: ${JOB_FTCH_API_TENANT_ALLOWLIST:-real_ai_engineering,real_ai_product_program,real_platform_security}
+      JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN: ${JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN:?set JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN}
+      JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN: ${JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN:?set JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN}
+      JOB_FTCH_AUTH_TELEGRAM_BOT_BRIDGE_API_KEY: ${JOB_FTCH_AUTH_TELEGRAM_BOT_BRIDGE_API_KEY:?set JOB_FTCH_AUTH_TELEGRAM_BOT_BRIDGE_API_KEY}
+    volumes:
+      - ./job_ftch:/app/job_ftch:ro
+      - real_runtime:/app/.runtime
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: job_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: job_ftch
+    volumes:
+      - real_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U job_user -d job_ftch"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  real_pgdata:
+  real_runtime:

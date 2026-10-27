@@ -16,6 +16,7 @@ from pydantic import (
 )
 
 from job_ftch.application.drops import RawItemDropped
+from job_ftch.application.llm_usage import llm_node_context
 from job_ftch.domain import (
     CompensationRange,
     EmploymentType,
@@ -517,6 +518,8 @@ class ExtractionNode:
         self._min_hiring_intent = 0.0
 
     def configure_graph_params(self, params: dict[str, object]) -> None:
+        self.provider_binding = str(params["provider"]) if "provider" in params else None
+        self.model_binding = str(params["model"]) if "model" in params else None
         if "extraction_mode" not in params:
             return
         mode = str(params["extraction_mode"])
@@ -577,6 +580,8 @@ class ExtractionNode:
             extracted_title = None
         title = extracted_title or _fallback_title(item)
         company = extracted.company or _fallback_company(item)
+        if item.metadata.get("company_authoritative") is True:
+            company = _fallback_company(item) or company
         description = _strip_prompt_scaffnewing(extracted.description or item.text).strip()
         canonical_url = _coerce_url(extracted.canonical_url) or _fallback_url(item)
         location = extracted.location or _fallback_location(item)
@@ -873,21 +878,22 @@ class ExtractionNode:
         tracer = trace.get_tracer("job_ftch.nodes")
 
         with tracer.start_as_current_span("extraction.generation") as span:
-            span.set_attribute("langfuse.observation.type", "generation")
+            span.set_attribute("job_ftch.llm.observation.type", "generation")
             if hasattr(self._llm, "_model"):
                 span.set_attribute("gen_ai.request.model", self._llm._model)
             elif hasattr(self._llm, "model_id"):
                 span.set_attribute("gen_ai.request.model", self._llm.model_id)
 
             if self._capture_payloads:
-                span.set_attribute("langfuse.observation.input", text)
+                span.set_attribute("job_ftch.llm.observation.input", text)
 
             try:
                 schema = CoreExtractedJobFields if self._scope == "core" else ExtractedJobFields
-                result = await self._llm.extract(text, schema)
+                with llm_node_context("extraction"):
+                    result = await self._llm.extract(text, schema)
                 if self._capture_payloads:
                     span.set_attribute(
-                        "langfuse.observation.output",
+                        "job_ftch.llm.observation.output",
                         result.model_dump_json()
                         if hasattr(result, "model_dump_json")
                         else str(result),

@@ -7,26 +7,162 @@ import base64
 import json
 import logging
 import os
+import re
+import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
+from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import quote, urlsplit
 
 from opentelemetry import metrics
 from opentelemetry.metrics import Observation
+from opentelemetry.sdk.trace import SpanProcessor
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from job_ftch.application.pipeline import RunSummary
     from job_ftch.config import Settings
     from job_ftch.domain import SourceHealth
+    from job_ftch.domain.run_stats import PipelineRunStats, SourceRunStatsRow
 
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_trace_span(span: Any) -> Any:
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import ReadableSpan
+    from opentelemetry.trace import SpanContext
+    from opentelemetry.trace.status import Status
+
+    def clean_context(context: Any) -> Any:
+        if context is None:
+            return None
+        return SpanContext(
+            trace_id=context.trace_id,
+            span_id=context.span_id,
+            is_remote=context.is_remote,
+            trace_flags=context.trace_flags,
+        )
+
+    attributes: dict[str, object] = {}
+    original = span.attributes or {}
+    run_id = original.get("job_ftch.source_run_id")
+    if isinstance(run_id, str) and re.fullmatch(r"[0-9a-f]{32}", run_id):
+        attributes["job_ftch.source_run_id"] = run_id
+    for key in ("job_ftch.fetched", "job_ftch.extracted", "job_ftch.emitted"):
+        value = original.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            attributes[key] = value
+    known_names = {
+        "ingest.run",
+        "bot.run",
+        "pipeline.run",
+        "pipeline.item",
+        "pipeline.node",
+        "pipeline.item.decision",
+        "extraction.generation",
+        "post_type.classify",
+        "match_scoring.score",
+        "hard_filter.check",
+        "garbage_filter.check",
+        "semantic_prefilter.check",
+        "tfidf_logreg_prefilter.check",
+    }
+    name = span.name if span.name in known_names else "job_ftch.span"
+    if span.name.startswith("graph.node."):
+        name = "graph.node"
+    return ReadableSpan(
+        name=name,
+        context=clean_context(span.context),
+        parent=clean_context(span.parent),
+        resource=Resource({"service.name": "job_ftch"}),
+        attributes=cast("Any", attributes),
+        status=Status(span.status.status_code),
+        start_time=span.start_time,
+        end_time=span.end_time,
+    )
+
+
+class _SafeTraceProcessor(SpanProcessor):
+    def __init__(self, exporter: Any) -> None:
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        self._delegate: Any = BatchSpanProcessor(
+            exporter, max_queue_size=2048, max_export_batch_size=128
+        )
+
+    def on_start(self, span: Any, parent_context: Any = None) -> None:
+        return None
+
+    def _on_ending(self, span: Any) -> None:
+        return None
+
+    def on_end(self, span: Any) -> None:
+        try:
+            self._delegate.on_end(_safe_trace_span(span))
+        except Exception:
+            logger.warning("Safe trace could not be queued")
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return bool(self._delegate.force_flush(timeout_millis))
+
+    def shutdown(self) -> None:
+        self._delegate.shutdown()
+
+
+_trace_setup_lock = threading.Lock()
+
+
+def _configure_safe_trace_export(settings: Settings) -> bool:
+    with _trace_setup_lock:
+        return _configure_safe_trace_export_locked(settings)
+
+
+def _configure_safe_trace_export_locked(settings: Settings) -> bool:
+    if not (
+        settings.tracing_enabled
+        and settings.openobserve_enabled
+        and settings.openobserve_url
+        and settings.openobserve_username
+        and settings.openobserve_password
+    ):
+        return False
+    from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+
+    provider = trace.get_tracer_provider()
+    if isinstance(provider, trace.ProxyTracerProvider):
+        provider = TracerProvider(resource=Resource({"service.name": "job_ftch"}))
+        trace.set_tracer_provider(provider)
+    if not isinstance(provider, TracerProvider):
+        return False
+    if getattr(provider, "_job_ftch_safe_trace_processor", None) is not None:
+        return True
+    base = _resolve_openobserve_url(settings.openobserve_url)
+    org = quote(settings.openobserve_org.strip() or "default", safe="")
+    secret = settings.openobserve_password.get_secret_value()
+    auth = base64.b64encode(f"{settings.openobserve_username}:{secret}".encode()).decode()
+    exporter = OTLPSpanExporter(
+        endpoint=f"{base}/api/{org}/v1/traces",
+        headers={"Authorization": f"Basic {auth}", "stream-name": "job_ftch_traces"},
+        timeout=settings.openobserve_timeout_seconds,
+    )
+    processor = _SafeTraceProcessor(exporter)
+    provider.add_span_processor(processor)
+    setattr(provider, "_job_ftch_safe_trace_processor", processor)  # noqa: B010
+    return True
+
+
 _configured = False
 _shutdown = False
 _meter_provider: Any | None = None
 _logger_provider: Any | None = None
+_aux_logger_providers: list[Any] = []
 _item_counters: dict[str, Any] = {}
 _duration_histogram: Any | None = None
 _cost_histogram: Any | None = None
@@ -36,12 +172,70 @@ _runtime_state_snapshots: dict[str, list[tuple[float, dict[str, str]]]] = {}
 _CORRELATION_FIELDS = frozenset(
     {
         "source_run_id",
+        "parent_run_id",
         "tenant_id",
         "graph_hash",
         "source_id",
         "source_kind",
         "source_name",
         "node_id",
+        "operation",
+        "attempt",
+        "timeout_ms",
+        "queue_wait_ms",
+        "request_latency_ms",
+        "total_latency_ms",
+        "request_id",
+        "retry_reason",
+        "requested_provider",
+        "resolved_provider",
+        "requested_model",
+        "resolved_model",
+        "phase",
+        "discovery_duration_ms",
+        "detail_duration_ms",
+        "detail_budget_seconds",
+        "remaining_budget_ms",
+        "source_key",
+        "status",
+        "outcome_category",
+        "source_outcome_count",
+        "duration_ms",
+        "llm_cost_usd",
+        "llm_latency_ms",
+        "conversion_extract",
+        "conversion_accept",
+        "fetched",
+        "extracted",
+        "emitted",
+        "review",
+        "rejected",
+        "dropped",
+        "failed",
+        "source_count",
+        "ok_sources",
+        "fail_sources",
+        "yielded",
+        "quality_reliable",
+        "quality_rich",
+        "quality_high_relevance",
+        "quality_important",
+        "provider",
+        "model",
+        "tokens_in",
+        "cached_tokens_in",
+        "tokens_out",
+        "captcha_host",
+        "captcha_type",
+        "captcha_kind",
+        "captcha_surface",
+        "captcha_outcome",
+        "captcha_solved",
+        "captcha_result_kind",
+        "captcha_failure_reason",
+        "captcha_engine",
+        "captcha_provider",
+        "evidence_hash",
     }
 )
 
@@ -72,7 +266,7 @@ class _ContextAttributesFilter(logging.Filter):
 
     The rendered JSON event remains the log body, while these fields become
     first-class OpenObserve columns.  This keeps queries cheap and avoids
-    parsing every JSON body merely to join logs with Langfuse traces.
+    parsing every JSON body merely to join logs with an external trace system.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -92,12 +286,16 @@ class _ContextAttributesFilter(logging.Filter):
                 event = payload.get("event")
                 if isinstance(event, str) and event:
                     record.event = event
+                for key in _CORRELATION_FIELDS:
+                    value = payload.get(key)
+                    if isinstance(value, (str, int, float, bool)):
+                        setattr(record, key, value)
         return True
 
 
 def configure_openobserve(settings: Settings) -> bool:
-    """Enable only logs and metrics; Langfuse remains the trace destination."""
-    global _configured, _logger_provider, _meter_provider
+    """Enable logs and metrics in OpenObserve."""
+    global _configured, _logger_provider, _meter_provider, _aux_logger_providers
     if _configured:
         return True
     if not settings.openobserve_enabled:
@@ -147,12 +345,34 @@ def configure_openobserve(settings: Settings) -> bool:
     log_handler = LoggingHandler(logger_provider=logger_provider)
     log_handler.setLevel(logging.INFO)
     log_handler.addFilter(_ContextAttributesFilter())
-    # The Telegram adapter is a sibling package, not a child of `job_ftch`,
-    # so attach the same handler to both application namespaces.
-    for namespace in ("job_ftch", "job_ftch.adapters.telegram_bot"):
-        namespace_logger = logging.getLogger(namespace)
-        namespace_logger.setLevel(logging.INFO)
-        namespace_logger.addHandler(log_handler)
+    # `job_ftch.adapters.telegram_bot` is a child of `job_ftch`; attaching a
+    # second handler there duplicates every bot event in OpenObserve.
+    namespace_logger = logging.getLogger("job_ftch")
+    namespace_logger.setLevel(logging.INFO)
+    namespace_logger.addHandler(log_handler)
+
+    if (
+        settings.openobserve_llm_stream
+        and settings.openobserve_llm_stream != settings.openobserve_logs_stream
+    ):
+        llm_provider = LoggerProvider(resource=resource)
+        llm_provider.add_log_record_processor(
+            BatchLogRecordProcessor(
+                OTLPLogExporter(
+                    endpoint=f"{base}/api/{org}/v1/logs",
+                    headers={**headers, "stream-name": settings.openobserve_llm_stream},
+                    timeout=settings.openobserve_timeout_seconds,
+                )
+            )
+        )
+        llm_handler = LoggingHandler(logger_provider=llm_provider)
+        llm_handler.setLevel(logging.INFO)
+        llm_handler.addFilter(_ContextAttributesFilter())
+        llm_logger = logging.getLogger("job_ftch.llm")
+        llm_logger.setLevel(logging.INFO)
+        llm_logger.propagate = False
+        llm_logger.addHandler(llm_handler)
+        _aux_logger_providers.append(llm_provider)
 
     metric_reader = PeriodicExportingMetricReader(
         OTLPMetricExporter(
@@ -170,12 +390,167 @@ def configure_openobserve(settings: Settings) -> bool:
     _register_runtime_state_gauges(metrics.get_meter("job_ftch.runtime"))
     atexit.register(shutdown_openobserve)
     logger.info("OpenObserve operational telemetry configured at %s", base)
+    try:
+        upsert_openobserve_dashboards(settings)
+    except Exception:
+        logger.warning("OpenObserve dashboard upsert failed", exc_info=True)
     return True
+
+
+def upsert_openobserve_dashboards(settings: Settings) -> None:
+    """Best-effort import of shipped ingest dashboards. Never raises to callers."""
+    import urllib.error
+    import urllib.request
+
+    if not (
+        settings.openobserve_url and settings.openobserve_username and settings.openobserve_password
+    ):
+        return
+    here = Path(__file__).resolve().parent / "dashboards"
+    repo = Path(__file__).resolve().parents[3] / "deploy" / "observability" / "dashboards"
+    path = here if here.is_dir() else repo
+    if not path.is_dir():
+        return
+    base = _resolve_openobserve_url(settings.openobserve_url)
+    org = quote(settings.openobserve_org.strip() or "default", safe="")
+    secret = settings.openobserve_password.get_secret_value()
+    auth = base64.b64encode(f"{settings.openobserve_username}:{secret}".encode()).decode()
+    stream = settings.openobserve_logs_stream or "job_ftch_ingest"
+    timeout = max(float(settings.openobserve_timeout_seconds), 5.0)
+    dashboard_url = f"{base}/api/{org}/dashboards"
+    for dashboard_file in sorted(path.glob("*.json")):
+        body = dashboard_file.read_text(encoding="utf-8").replace("__LOGS_STREAM__", stream)
+        method = "POST"
+        url = dashboard_url
+        try:
+            title = str(json.loads(body).get("title") or "")
+            list_url = f"{dashboard_url}?folder=default&title={quote(title, safe='')}"
+            list_request = urllib.request.Request(
+                list_url,
+                method="GET",
+                headers={"Authorization": f"Basic {auth}"},
+            )
+            with urllib.request.urlopen(list_request, timeout=timeout) as response:  # nosec B310
+                dashboards = json.loads(response.read().decode("utf-8")).get("dashboards", [])
+            existing = next(
+                (
+                    item
+                    for item in dashboards
+                    if isinstance(item, dict) and item.get("title") == title
+                ),
+                None,
+            )
+            dashboard_id = (existing or {}).get("dashboard_id") or (existing or {}).get(
+                "dashboardId"
+            )
+            dashboard_hash = (existing or {}).get("hash")
+            if dashboard_id and dashboard_hash:
+                method = "PUT"
+                url = (
+                    f"{dashboard_url}/{quote(str(dashboard_id), safe='')}"
+                    f"?folder=default&hash={quote(str(dashboard_hash), safe='')}"
+                )
+        except (urllib.error.HTTPError, urllib.error.URLError, json.JSONDecodeError, OSError):
+            # Listing is best-effort; a cold/unavailable API can still accept a create.
+            pass
+        request = urllib.request.Request(
+            url,
+            data=body.encode("utf-8"),
+            method=method,
+            headers={
+                "Authorization": f"Basic {auth}",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 -- _resolve_openobserve_url restricts schemes
+                logger.info(
+                    "OpenObserve dashboard upserted",
+                    extra={"dashboard": dashboard_file.name, "status": response.status},
+                )
+        except urllib.error.HTTPError as exc:
+            if exc.code == 409:
+                try:
+                    title = str(json.loads(body).get("title") or "")
+                    list_url = f"{dashboard_url}?folder=default&title={quote(title, safe='')}"
+                    list_request = urllib.request.Request(
+                        list_url,
+                        method="GET",
+                        headers={"Authorization": f"Basic {auth}"},
+                    )
+                    with urllib.request.urlopen(list_request, timeout=timeout) as listed:  # nosec B310
+                        dashboards = json.loads(listed.read().decode("utf-8")).get("dashboards", [])
+                    existing = next(
+                        (
+                            item
+                            for item in dashboards
+                            if isinstance(item, dict) and item.get("title") == title
+                        ),
+                        None,
+                    )
+                    dashboard_id = (existing or {}).get("dashboard_id") or (existing or {}).get(
+                        "dashboardId"
+                    )
+                    dashboard_hash = (existing or {}).get("hash")
+                    if dashboard_id:
+                        put_url = (
+                            f"{dashboard_url}/{quote(str(dashboard_id), safe='')}?folder=default"
+                        )
+                        if dashboard_hash:
+                            put_url += f"&hash={quote(str(dashboard_hash), safe='')}"
+                        put_request = urllib.request.Request(
+                            put_url,
+                            data=body.encode("utf-8"),
+                            method="PUT",
+                            headers={
+                                "Authorization": f"Basic {auth}",
+                                "Content-Type": "application/json",
+                            },
+                        )
+                        with urllib.request.urlopen(put_request, timeout=timeout) as response:  # nosec B310
+                            logger.info(
+                                "OpenObserve dashboard upserted",
+                                extra={
+                                    "dashboard": dashboard_file.name,
+                                    "status": response.status,
+                                },
+                            )
+                        continue
+                except (
+                    urllib.error.HTTPError,
+                    urllib.error.URLError,
+                    json.JSONDecodeError,
+                    OSError,
+                ):
+                    logger.info(
+                        "OpenObserve dashboard 409 retry failed",
+                        extra={"dashboard": dashboard_file.name},
+                    )
+                continue
+            if exc.code == 400:
+                logger.info(
+                    "OpenObserve dashboard already present or rejected",
+                    extra={"dashboard": dashboard_file.name, "status": exc.code},
+                )
+                continue
+            logger.warning(
+                "OpenObserve dashboard upsert HTTP error",
+                extra={"dashboard": dashboard_file.name, "status": exc.code},
+            )
+        except urllib.error.URLError:
+            logger.warning(
+                "OpenObserve dashboard upsert unreachable",
+                extra={"dashboard": dashboard_file.name},
+            )
 
 
 def _resolve_openobserve_url(url: str) -> str:
     """Use the Docker gateway only in Docker; host scripts use localhost."""
     base = url.strip().rstrip("/")
+    parsed = urlsplit(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        msg = "OpenObserve URL must use http or https."
+        raise ValueError(msg)
     running_in_container = Path("/.dockerenv").exists() or os.environ.get(
         "CONTAINER", ""
     ).lower() in {"docker", "podman"}
@@ -226,6 +601,19 @@ def record_run_metrics(summary: RunSummary) -> None:
         1 if summary.llm_cost_is_complete else 0,
         {**attrs, "pricing_version": summary.llm_cost_pricing_version or "unknown"},
     )
+    fetched = max(int(summary.fetched or 0), 0)
+    _runtime_state_snapshots["job_ftch.ingest.conversion.extract"] = [
+        ((summary.extracted / fetched) if fetched else 0.0, attrs)
+    ]
+    _runtime_state_snapshots["job_ftch.ingest.conversion.accept"] = [
+        ((summary.emitted / fetched) if fetched else 0.0, attrs)
+    ]
+    _runtime_state_snapshots["job_ftch.ingest.run.last_duration"] = [
+        (_duration_seconds(summary), attrs)
+    ]
+    _runtime_state_snapshots["job_ftch.ingest.run.cost"] = [
+        (float(summary.llm_cost_usd or 0.0), attrs)
+    ]
 
     for node_id, node_stats in summary.graph_node_metrics.items():
         node_attrs = {**attrs, "graph_hash": summary.graph_hash or "unknown", "node_id": node_id}
@@ -269,11 +657,14 @@ def record_run_metrics(summary: RunSummary) -> None:
             "quarantined",
             "deferred",
         ):
-            _counter(meter, f"job_ftch.ingest.items.{field}").add(
+            _counter(meter, f"job_ftch.ingest.source.items.{field}").add(
                 getattr(stats, field), source_attrs
             )
+    from job_ftch.application.source_quality import source_status_category
+
     for source_outcome in summary.source_outcomes:
         status = str(source_outcome.get("status") or "unknown")
+        outcome_category = source_status_category(status, str(source_outcome.get("error") or ""))
         source_id = str(source_outcome.get("source_id") or "unknown")
         source_kind, _, source_name = source_id.partition(":")
         _counter(meter, "job_ftch.ingest.source.outcomes").add(
@@ -284,6 +675,17 @@ def record_run_metrics(summary: RunSummary) -> None:
                 "source_id": source_id,
                 "source_name": source_name or source_id,
                 "status": status,
+                "outcome_category": outcome_category,
+            },
+        )
+        _counter(meter, "job_ftch.ingest.source.outcome_categories").add(
+            1,
+            {
+                **attrs,
+                "source_kind": source_kind or "unknown",
+                "source_id": source_id,
+                "source_name": source_name or source_id,
+                "outcome_category": outcome_category,
             },
         )
         for stage in (
@@ -304,6 +706,52 @@ def record_run_metrics(summary: RunSummary) -> None:
                 },
             )
     force_flush_openobserve()
+
+
+def record_run_stats_logs(
+    summary: RunSummary,
+    pipeline_row: PipelineRunStats,
+    source_rows: Sequence[SourceRunStatsRow],
+) -> None:
+    """Emit one pipeline row and one row per source as searchable log events."""
+    import structlog
+
+    from job_ftch.application.source_quality import source_status_category
+
+    log = structlog.get_logger("job_ftch.run_stats")
+    pipeline_payload = pipeline_row.model_dump(exclude={"extra_json"})
+    log.info(
+        "pipeline_run_stats",
+        tenant_id=summary.tenant_id or "unknown",
+        graph_hash=summary.graph_hash or "unknown",
+        source_outcome_count=len(summary.source_outcomes),
+        **pipeline_payload,
+    )
+    for row in source_rows:
+        row_payload = row.model_dump()
+        row_payload["outcome_category"] = source_status_category(row.status, row.error)
+        log.info(
+            "source_run_stats",
+            tenant_id=summary.tenant_id or "unknown",
+            graph_hash=summary.graph_hash or "unknown",
+            **row_payload,
+        )
+    for outcome in summary.source_outcomes:
+        if not isinstance(outcome, dict):
+            continue
+        outcome_payload = dict(outcome)
+        outcome_payload["outcome_category"] = source_status_category(
+            str(outcome.get("status") or "unknown"),
+            str(outcome.get("error") or ""),
+        )
+        log.info(
+            "source_outcome",
+            tenant_id=summary.tenant_id or "unknown",
+            graph_hash=summary.graph_hash or "unknown",
+            **outcome_payload,
+        )
+    if _configured:
+        force_flush_openobserve()
 
 
 def record_bot_delivery_metrics(
@@ -355,6 +803,14 @@ def record_runtime_state_metrics(
         "job_ftch.source.health.failure_streak": [],
         "job_ftch.source.health.last_success_age": [],
         "job_ftch.source.health.last_emitted": [],
+        "job_ftch.source.quality.reliable": [],
+        "job_ftch.source.quality.rich": [],
+        "job_ftch.source.quality.high_relevance": [],
+        "job_ftch.source.quality.important": [],
+        "job_ftch.source.quality.ok_rate": [],
+        "job_ftch.source.quality.yield_rate": [],
+        "job_ftch.source.quality.relevant_rate": [],
+        "job_ftch.source.quality.window_runs": [],
     }
     for health in source_health:
         source_attrs = {
@@ -381,6 +837,30 @@ def record_runtime_state_metrics(
         )
         source_rows["job_ftch.source.health.last_emitted"].append(
             (float(health.last_emitted), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.reliable"].append(
+            (1.0 if health.quality_reliable else 0.0, source_attrs)
+        )
+        source_rows["job_ftch.source.quality.rich"].append(
+            (1.0 if health.quality_rich else 0.0, source_attrs)
+        )
+        source_rows["job_ftch.source.quality.high_relevance"].append(
+            (1.0 if health.quality_high_relevance else 0.0, source_attrs)
+        )
+        source_rows["job_ftch.source.quality.important"].append(
+            (1.0 if health.quality_important else 0.0, source_attrs)
+        )
+        source_rows["job_ftch.source.quality.ok_rate"].append(
+            (float(health.quality_ok_rate), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.yield_rate"].append(
+            (float(health.quality_yield_rate), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.relevant_rate"].append(
+            (float(health.quality_relevant_rate), source_attrs)
+        )
+        source_rows["job_ftch.source.quality.window_runs"].append(
+            (float(health.quality_window_runs), source_attrs)
         )
 
     scheduler_attrs = attrs
@@ -428,7 +908,7 @@ def record_runtime_state_metrics(
 
 
 def force_flush_openobserve() -> None:
-    for provider in (_logger_provider, _meter_provider):
+    for provider in (*_aux_logger_providers, _logger_provider, _meter_provider):
         flush = getattr(provider, "force_flush", None)
         if callable(flush):
             flush(timeout_millis=5_000)
@@ -439,7 +919,7 @@ def shutdown_openobserve() -> None:
     if _shutdown:
         return
     _shutdown = True
-    for provider in (_logger_provider, _meter_provider):
+    for provider in (*_aux_logger_providers, _logger_provider, _meter_provider):
         shutdown = getattr(provider, "shutdown", None)
         if callable(shutdown):
             shutdown()
@@ -478,6 +958,18 @@ def _register_runtime_state_gauges(meter: Any) -> None:
         ("job_ftch.source.health.failure_streak", "failures"),
         ("job_ftch.source.health.last_success_age", "s"),
         ("job_ftch.source.health.last_emitted", "items"),
+        ("job_ftch.source.quality.reliable", "1"),
+        ("job_ftch.source.quality.rich", "1"),
+        ("job_ftch.source.quality.high_relevance", "1"),
+        ("job_ftch.source.quality.important", "1"),
+        ("job_ftch.source.quality.ok_rate", "1"),
+        ("job_ftch.source.quality.yield_rate", "1"),
+        ("job_ftch.source.quality.relevant_rate", "1"),
+        ("job_ftch.source.quality.window_runs", "runs"),
+        ("job_ftch.ingest.conversion.extract", "1"),
+        ("job_ftch.ingest.conversion.accept", "1"),
+        ("job_ftch.ingest.run.last_duration", "s"),
+        ("job_ftch.ingest.run.cost", "USD"),
         ("job_ftch.runtime.last_run_finished_age", "s"),
         ("job_ftch.runtime.last_run_failed", "1"),
         ("job_ftch.bot.scheduler.last_attempt_age", "s"),
@@ -530,9 +1022,8 @@ def _duration_seconds(summary: RunSummary) -> float:
 
 
 def _run_attrs(summary: RunSummary) -> dict[str, str]:
-    """Stable attributes shared with the terminal Langfuse trace."""
+    """Bounded metric dimensions; run IDs remain in per-run log records."""
     return {
         "tenant_id": summary.tenant_id or "unknown",
-        "source_run_id": summary.source_run_id or "unknown",
         "graph_hash": summary.graph_hash or "unknown",
     }

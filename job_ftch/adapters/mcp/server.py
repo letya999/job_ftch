@@ -46,6 +46,7 @@ _CAPTCHA_PROVIDER_ENV: dict[str, str] = {
     "2captcha": "TWOCAPTCHA_API_KEY",
     "anticaptcha": "ANTICAPTCHA_API_KEY",
     "nopecha": "NOPECHA_API_KEY",
+    "cliproxy_image": "JOB_FTCH_CLIPROXY_API_KEY",
 }
 _RUNTIME_ENGINES: tuple[tuple[str, str, str, str], ...] = (
     ("stealth_browser", "playwright_stealth", "stealth", "stealth_browser"),
@@ -859,6 +860,7 @@ class TenantMCPServer:
             return
         tenants = load_tenants(self.configs_dir)
         self.runner = TenantRunner.from_tenants(tenants, base_settings=self.base_settings)
+        await self.runner.start()
 
     async def shutdown(self) -> None:
         if self.runner is None:
@@ -1735,6 +1737,30 @@ class TenantMCPServer:
                 source_id=source_id,
                 enabled=enabled,
             )
+
+        @self.app.tool
+        async def set_source_important(
+            tenant_id: str,
+            source_id: str,
+            important: bool = True,
+            note: str | None = None,
+        ) -> dict[str, Any]:
+            """Pin or unpin a source as operator-important. Survives quality windows."""
+            try:
+                return await self._require_runner().set_source_important(
+                    tenant_id,
+                    source_id,
+                    important=important,
+                    set_by="mcp",
+                    note=note,
+                )
+            except (KeyError, ValueError) as exc:
+                return {"error": "invalid_arguments", "message": str(exc)}
+
+        @self.app.tool
+        async def list_source_quality(tenant_id: str) -> dict[str, Any]:
+            """Current important / reliable / rich / high_relevance source lists."""
+            return await self._require_runner().list_source_quality(tenant_id)
 
         @self.app.tool
         async def get_jobs(

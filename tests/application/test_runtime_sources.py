@@ -43,6 +43,14 @@ async def test_build_source_spec_accepts_t_me_without_scheme() -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_source_spec_normalizes_telegram_preview_links() -> None:
+    spec = await build_source_spec_from_input("https://t.me/s/dev_connectablejobs")
+
+    assert spec.type == "telegram_channel"
+    assert spec.entity == "dev_connectablejobs"
+
+
+@pytest.mark.asyncio
 async def test_build_source_spec_accepts_inline_rss_type_hint() -> None:
     spec = await build_source_spec_from_input("rss:https://example.com/feed.xml")
 

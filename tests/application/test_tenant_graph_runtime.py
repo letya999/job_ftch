@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 import job_ftch.application.tenant_runner as tenant_runner_module
-from job_ftch.application.builder import load_profile_catalog
+from job_ftch.application.builder import load_profile_catalog, tenant_to_settings
 from job_ftch.application.graph import compile_graph, load_graph
 from job_ftch.application.graph.pipeline_stage import GraphPipelineStage
 from job_ftch.application.tenant_runner import TenantRunner
@@ -13,8 +13,26 @@ from job_ftch.config import Settings
 from job_ftch.domain import TenantConfig
 from job_ftch.domain.profile import ProfileCatalog, SearchProfile
 
-if TYPE_CHECKING:
-    from pathlib import Path
+
+def test_tenant_recipe_does_not_inherit_default_graph_hash() -> None:
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "recipe-owner",
+            "display_name": "Recipe owner",
+            "pipeline_recipe_path": "config/pipelines/evidence_v2.yaml",
+        }
+    )
+    settings = Settings.model_validate(
+        {
+            "pipeline_graph_path": "config/pipelines/evidence_v2_compact_postaccept.yaml",
+            "pipeline_graph_expected_hash": "0" * 64,
+        }
+    )
+
+    resolved = tenant_to_settings(tenant, settings)
+
+    assert resolved.pipeline_graph_path == Path("config/pipelines/evidence_v2.yaml")
+    assert resolved.pipeline_graph_expected_hash is None
 
 
 @pytest.mark.asyncio

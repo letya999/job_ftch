@@ -1,12 +1,9 @@
 """Site-specific parser for yandex.ru/jobs.
 
-Yandex Jobs is a Next.js SPA that loads vacancy data via a paginated REST API
-(/jobs/api/publications). The DOM shows only ~60 cards via infinite scroll, but
-the API returns 200+ results across 12+ cursor pages.
-
-Strategy: fetch full SSR detail pages first, then open the page in a browser to
-intercept subsequent /api/publications pages. API records are resolved back to
-their detail pages before emission, preserving the complete vacancy text.
+Yandex Jobs exposes a public REST API at ``/jobs/api/publications``. The
+``text=`` query actually narrows results (``q=`` / ``search=`` are ignored).
+HTTP API is the primary path; SSR listing and browser intercept remain
+fallbacks when the API is empty or unreachable.
 """
 
 from __future__ import annotations
@@ -16,7 +13,7 @@ import html
 import inspect
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urljoin, urlparse, urlunparse
 
 import structlog
 from selectolax.parser import HTMLParser
@@ -25,6 +22,12 @@ from job_ftch.application.registry import known_board_assessment_hint, register_
 from job_ftch.domain import SourceKind
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
+from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    keywords_from_spec,
+    normalize_search_keywords,
+    text_matches_keywords,
+    with_query_params,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -50,6 +53,60 @@ def _clean_text(value: str | None) -> str:
     return " ".join(value.split())
 
 
+def _raise_if_yandex_captcha(response: Any, url: str) -> None:
+    from urllib.parse import urlsplit
+
+    from job_ftch.infrastructure.bypass.challenge_classifier import (
+        classify_challenge,
+        emit_challenge_detection,
+    )
+    from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
+
+    html = str(getattr(response, "text", "") or "")
+    final_url = str(getattr(response, "url", url) or url)
+    status_code = getattr(response, "status_code", None)
+    raw_headers = getattr(response, "headers", None)
+    headers = dict(raw_headers) if raw_headers else None
+    body = getattr(response, "content", None)
+    if body is None:
+        body = html.encode("utf-8", errors="ignore")
+    detection = classify_challenge(
+        surface="yandex_jobs",
+        status_code=status_code if isinstance(status_code, int) else 200,
+        headers=headers,
+        body=body,
+        page_url=final_url,
+    )
+    if not detection.detected:
+        return
+    emit_challenge_detection(urlsplit(final_url).hostname or "", detection)
+    raise BrowserChallengeError(
+        url=final_url,
+        status_code=status_code if isinstance(status_code, int) else None,
+        headers=headers,
+        body=bytes(body) if isinstance(body, (bytes, bytearray)) else None,
+        challenge_type=detection.challenge_type,
+        confidence=detection.confidence,
+        evidence_hash=detection.evidence_hash,
+    )
+
+
+def _publication_url(base_url: str, slug: str, vacancy_id: Any) -> str:
+    origin = urlunparse(urlparse(base_url)._replace(path="", query="", fragment=""))
+    text = slug.strip()
+    if text.startswith("http://") or text.startswith("https://"):
+        return text
+    if "/jobs/vacancies/" in text:
+        path = text if text.startswith("/") else f"/{text}"
+        return urljoin(f"{origin}/", path.lstrip("/"))
+    slug_part = text.strip("/").rsplit("/", 1)[-1] if text else ""
+    if not slug_part and vacancy_id:
+        slug_part = str(vacancy_id)
+    if not slug_part:
+        return base_url
+    return urljoin(f"{origin}/", f"jobs/vacancies/{slug_part}")
+
+
 def _item_from_api(payload: dict[str, Any], base_url: str, source_name: str) -> RawItem | None:
     """Convert a single /api/publications result dict into a RawItem."""
     title = _clean_text(payload.get("title"))
@@ -58,7 +115,7 @@ def _item_from_api(payload: dict[str, Any], base_url: str, source_name: str) -> 
 
     slug = payload.get("publication_slug_url") or ""
     vacancy_id = payload.get("id")
-    job_url = urljoin(base_url, slug) if slug else base_url
+    job_url = _publication_url(base_url, str(slug), vacancy_id)
 
     # Extract structured metadata from nested API objects
     vacancy = payload.get("vacancy") or {}
@@ -141,7 +198,28 @@ def _item_from_detail_html(detail_url: str, html_text: str, source_name: str) ->
 )
 class YandexJobsParser:
     domain_pattern = r"yandex\.ru/jobs"
-    has_custom_parse = True  # Yandex is a SPA: requires a custom Playwright-based parse
+    has_custom_parse = True
+    supports_search = True
+    search_mode = "per_keyword"
+    confirmed_empty_on_empty = True
+
+    def build_search_urls(
+        self,
+        base_url: str,
+        keywords: Any,
+        *,
+        limit: int | None = None,
+    ) -> list[str]:
+        del limit
+        terms = normalize_search_keywords(keywords)
+        if not terms:
+            return []
+        parsed = urlparse(base_url)
+        path = (parsed.path or "").rstrip("/")
+        if path in {"", "/jobs"} or not path.endswith("/vacancies"):
+            parsed = parsed._replace(path="/jobs/vacancies")
+        listing = urlunparse(parsed._replace(query="", fragment=""))
+        return [with_query_params(listing, {"text": term}) for term in terms]
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
@@ -163,7 +241,7 @@ class YandexJobsParser:
     def _browser_scroll_config(self) -> tuple[int, float, int, int]:
         manifest_entry = getattr(self, "_manifest_entry", None)
         browser = getattr(manifest_entry, "browser", None)
-        loops = getattr(browser, "scroll_loops", None) or 120
+        loops = getattr(browser, "scroll_loops", None) or 8
         pause_ms = getattr(browser, "scroll_pause_ms", None) or 1200
         scroll_px = getattr(browser, "scroll_px", None) or 3000
         stale_rounds = getattr(browser, "stale_rounds", None) or 4
@@ -177,6 +255,69 @@ class YandexJobsParser:
             or default_timeout_ms
         )
 
+    @staticmethod
+    def _search_text(url: str) -> str:
+        query = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+        return str(query.get("text") or "").strip()
+
+    async def _publications_from_api(
+        self,
+        client: Any,
+        listing_url: str,
+        limit: int,
+        search_text: str = "",
+    ) -> list[dict[str, Any]]:
+        from job_ftch.infrastructure.sources.monitors.shared import BrowserChallengeError
+
+        origin = urlparse(listing_url)
+        api_url = urlunparse(origin._replace(path=self._api_path(), query="", fragment=""))
+        page_size = min(max(limit, 1), 50)
+        text = search_text or self._search_text(listing_url)
+        collected: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for page in range(1, 6):
+            params = {"page_size": str(page_size)}
+            if page > 1:
+                params["page"] = str(page)
+            if text:
+                params["text"] = text
+            try:
+                response = await client.get(
+                    with_query_params(api_url, params),
+                    follow_redirects=True,
+                )
+                _raise_if_yandex_captcha(response, api_url)
+                response.raise_for_status()
+                payload = response.json()
+            except BrowserChallengeError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - SSR/browser remain fallbacks
+                logger.debug("yandex.api_listing_failed", url=api_url, error=str(exc))
+                break
+            if not isinstance(payload, dict):
+                break
+            rows = (
+                payload.get("results") or payload.get("items") or payload.get("publications") or []
+            )
+            if not isinstance(rows, list) or not rows:
+                break
+            new_on_page = 0
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                row_id = str(row.get("id") or row.get("publication_id") or row.get("url") or "")
+                if row_id and row_id in seen:
+                    continue
+                if row_id:
+                    seen.add(row_id)
+                collected.append(row)
+                new_on_page += 1
+                if len(collected) >= limit:
+                    return collected[:limit]
+            if len(rows) < page_size or new_on_page == 0:
+                break
+        return collected[:limit]
+
     async def parse(
         self,
         spec: CareerSiteSpec,
@@ -188,6 +329,10 @@ class YandexJobsParser:
             navigate,
             open_page,
             safe_content,
+        )
+        from job_ftch.infrastructure.sources.monitors.shared import (
+            BrowserChallengeError,
+            raise_if_browser_challenge,
         )
 
         settings = get_settings()
@@ -205,12 +350,41 @@ class YandexJobsParser:
         # with no vacancy links.  Normalise it before the initial SSR request.
         if listing_url.rstrip("/") in {"https://yandex.ru/jobs", "https://www.yandex.ru/jobs"}:
             listing_url = "https://yandex.ru/jobs/vacancies"
+
+        emitted = 0
+        emitted_urls: set[str] = set()
+        search_text = self._search_text(listing_url) or " OR ".join(
+            normalize_search_keywords(keywords_from_spec(spec))
+        )
+        # ``text=`` already narrowed the API/listing. Re-filtering titles
+        # against that query drops valid cards (``Data Analyst`` vs ``ai``).
+        keywords = [] if search_text else keywords_from_spec(spec)
+        for payload in await self._publications_from_api(
+            client, listing_url, limit, search_text=search_text
+        ):
+            api_item = _item_from_api(payload, listing_url, source_name)
+            if api_item is None or str(api_item.url) in emitted_urls:
+                continue
+            if keywords and not text_matches_keywords(api_item.text, keywords):
+                continue
+            yield api_item
+            emitted += 1
+            emitted_urls.add(str(api_item.url))
+            if emitted >= limit:
+                break
+        if emitted:
+            logger.info("yandex_parser_api_emitted", url=listing_url, emitted=emitted)
+            return
+
         try:
             listing_response = await client.get(listing_url, follow_redirects=True)
+            _raise_if_yandex_captcha(listing_response, listing_url)
             listing_response.raise_for_status()
             ssr_urls = _extract_ssr_vacancy_urls(
                 str(listing_response.text), str(listing_response.url), limit=limit
             )
+        except BrowserChallengeError:
+            raise
         except Exception as exc:
             logger.debug(
                 "yandex.ssr_listing_failed_trying_fallback", url=listing_url, error=str(exc)
@@ -219,18 +393,19 @@ class YandexJobsParser:
                 listing_url = "https://yandex.ru/jobs/"
             try:
                 listing_response = await client.get(listing_url, follow_redirects=True)
+                _raise_if_yandex_captcha(listing_response, listing_url)
                 listing_response.raise_for_status()
                 ssr_urls = _extract_ssr_vacancy_urls(
                     str(listing_response.text), str(listing_response.url), limit=limit
                 )
+            except BrowserChallengeError:
+                raise
             except Exception as exc2:
                 logger.warning(
                     "yandex.ssr_listing_fallback_also_failed", url=listing_url, error=str(exc2)
                 )
                 ssr_urls = []
 
-        emitted = 0
-        emitted_urls: set[str] = set()
         for detail_url in ssr_urls:
             try:
                 detail_response = await client.get(detail_url, follow_redirects=True)
@@ -243,13 +418,18 @@ class YandexJobsParser:
             )
             if item is None:
                 continue
+            if keywords and not text_matches_keywords(item.text, keywords):
+                continue
             yield item
             emitted += 1
             emitted_urls.add(str(item.url))
             if emitted >= limit:
                 break
-        if emitted >= limit:
+        if emitted:
             logger.info("yandex_parser_ssr_emitted", url=listing_url, emitted=emitted)
+            return
+        if search_text:
+            logger.info("yandex_parser_empty_search", url=listing_url, emitted=emitted)
             return
 
         browser_config = {k: v for k, v in spec.monitor_config.items() if k in BROWSER_KEYS}
@@ -294,6 +474,8 @@ class YandexJobsParser:
                     page.on("response", _on_response)
 
                     await navigate(page, listing_url, browser_config)
+                    page_url = str(getattr(page, "url", listing_url) or listing_url)
+                    raise_if_browser_challenge(await safe_content(page), url=page_url)
                     last_height = 0
                     stale_rounds = 0
                     for _ in range(scroll_loops):
@@ -316,6 +498,8 @@ class YandexJobsParser:
                             limit=limit,
                         )
                     break
+            except BrowserChallengeError:
+                raise
             except Exception as exc:
                 if bypass_strategy is None or not hasattr(bypass_strategy, "handle_failure"):
                     logger.info("yandex_parser_navigation_failed", url=spec.url, error=str(exc))

@@ -20,7 +20,7 @@ runtime:
   embedding_enabled: false
   bgem3_enabled: false
   relevance_backend: keywords
-  tracing_enabled: true
+  tracing_enabled: false
   openobserve_enabled: true
 
 profile_shots:

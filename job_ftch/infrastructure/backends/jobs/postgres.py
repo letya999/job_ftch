@@ -89,27 +89,34 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
             )
             if not self._schema_initialized:
                 async with self._pool.acquire() as conn:
-                    await conn.execute("""
-                        CREATE TABLE IF NOT EXISTS jf_migrations (
-                            filename TEXT PRIMARY KEY,
-                            applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                        )
-                    """)
-                    migrations_dir = Path(__file__).parent / "migrations"
-                    for path in sorted(migrations_dir.glob("*.sql")):
-                        if "sqlite" in path.name:
-                            continue
-                        filename = path.name
-                        row = await conn.fetchrow(
-                            "SELECT filename FROM jf_migrations WHERE filename = $1", filename
-                        )
-                        if not row:
-                            with open(path, encoding="utf-8") as f:
-                                sql = f.read()
-                            await conn.execute(sql)
-                            await conn.execute(
-                                "INSERT INTO jf_migrations (filename) VALUES ($1)", filename
+                    lock_key = "job_ftch:job_schema"
+                    await conn.execute("SELECT pg_advisory_lock(hashtextextended($1, 0))", lock_key)
+                    try:
+                        await conn.execute("""
+                            CREATE TABLE IF NOT EXISTS jf_migrations (
+                                filename TEXT PRIMARY KEY,
+                                applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                             )
+                        """)
+                        migrations_dir = Path(__file__).parent / "migrations"
+                        for path in sorted(migrations_dir.glob("*.sql")):
+                            if "sqlite" in path.name:
+                                continue
+                            filename = path.name
+                            row = await conn.fetchrow(
+                                "SELECT filename FROM jf_migrations WHERE filename = $1", filename
+                            )
+                            if not row:
+                                with open(path, encoding="utf-8") as f:
+                                    sql = f.read()
+                                await conn.execute(sql)
+                                await conn.execute(
+                                    "INSERT INTO jf_migrations (filename) VALUES ($1)", filename
+                                )
+                    finally:
+                        await conn.execute(
+                            "SELECT pg_advisory_unlock(hashtextextended($1, 0))", lock_key
+                        )
 
                 self._schema_initialized = True
         return self._pool
@@ -444,6 +451,45 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                     limit,
                 )
             return [load_group(row["raw_json"]) for row in rows]
+
+    async def list_public_canonical_jobs(self, limit: int) -> list[JobRecord]:
+        """Read only fields needed by the anonymous public catalog."""
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                WITH recent AS MATERIALIZED (
+                    SELECT group_id, raw_json->'canonical_job' AS job
+                    FROM (
+                        SELECT group_id, raw_json
+                        FROM jf_job_groups ORDER BY updated_at DESC LIMIT $1
+                    ) AS selected
+                )
+                SELECT jsonb_build_object(
+                    'group_id', group_id,
+                    'raw_item_id', job->'raw_item_id',
+                    'source_kind', job->'source_kind',
+                    'source_name', job->'source_name',
+                    'title', job->'title',
+                    'company', job->'company',
+                    'description', left(job->>'description', 360),
+                    'location', job->'location',
+                    'city', job->'city',
+                    'region', job->'region',
+                    'country', job->'country',
+                    'work_mode', job->'work_mode',
+                    'seniority', job->'seniority',
+                    'tools_stack', job->'tools_stack',
+                    'skills_explicit', job->'skills_explicit',
+                    'posted_at', job->'posted_at',
+                    'compensation', job->'compensation',
+                    'canonical_url', job->'canonical_url'
+                ) AS public_job
+                FROM recent
+                """,
+                limit,
+            )
+        return [JobRecord.model_validate_json(row["public_job"]) for row in rows]
 
     async def count(self, since: datetime | None = None) -> int:
         pool = await self._get_pool()

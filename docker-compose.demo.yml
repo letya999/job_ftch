@@ -1,0 +1,15 @@
+services:
+  demo-runner:
+    image: job-ftch-runtime:dev
+    working_dir: /app
+    environment:
+      JOB_FTCH_ENV: dev
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.dev.yaml
+      JOB_FTCH_CONFIGS_DIR: /app/fixtures/demo/tenants
+      JOB_FTCH_LOG_LEVEL: INFO
+    restart: unless-stopped
+    volumes:
+      - ./fixtures/demo:/app/fixtures/demo
+      - ./config/pipelines:/app/config/pipelines
+      - ./artifacts/demo:/app/artifacts/demo
+    command: ["/app/.venv/bin/job_ftch", "--configs-dir", "/app/fixtures/demo/tenants", "pipeline", "--daemon"]

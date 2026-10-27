@@ -28,8 +28,7 @@ _DOMAIN_PATTERN = (
     r"theprotocol\.it|"
     r"(?:www\.)?pracuj\.pl|"
     r"(?:www\.)?cypruswork\.com|"
-    r"jobs\.ashbyhq\.com|"
-    r"job\.beeline\.ru"
+    r"jobs\.ashbyhq\.com"
     r")(?:/|$)"
 )
 
@@ -57,11 +56,9 @@ class ProtectedBrowserDefaultsParser:
                 "settle_seconds": 5,
                 "captcha_authorized_domains": [
                     "jobs.ashbyhq.com",
-                    "job.beeline.ru",
                 ],
                 "proxy_rescue_allow_domains": [
                     "jobs.ashbyhq.com",
-                    "job.beeline.ru",
                 ],
             },
         )

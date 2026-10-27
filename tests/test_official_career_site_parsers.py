@@ -96,3 +96,69 @@ async def test_kaspi_jumys_parser_emits_unique_ssr_cards() -> None:
     assert items[0].external_id == "123"
     assert str(items[0].url) == "https://jumys.kaspi.kz/a/data-engineer-123"
     assert "Алматы" in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_cloud_ru_parser_emits_listing_cards() -> None:
+    from job_ftch.infrastructure.sources.site_parsers.cloud_ru import CloudRuCareerParser
+
+    client = _Client(
+        _Response(
+            """
+            <a href="/career/vacancies/4188602">DevOps (Кибербезопасность)</a>
+            <a href="/career/vacancies/4188602">duplicate</a>
+            <a href="/career">listing</a>
+            """
+        )
+    )
+    items = [
+        item
+        async for item in CloudRuCareerParser().parse(
+            CareerSiteSpec(url="https://cloud.ru/career/vacancies", limit=5),
+            client,
+        )
+    ]
+    assert len(items) == 1
+    assert items[0].external_id == "4188602"
+    assert "DevOps" in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_just_ai_parser_reads_wordpress_rest() -> None:
+    from job_ftch.infrastructure.sources.site_parsers.just_ai import JustAICareerParser
+
+    class _ListResponse(_Response):
+        def json(self) -> list[dict[str, Any]]:  # type: ignore[override]
+            return [
+                {
+                    "id": 403,
+                    "slug": "junior-devops-engineer",
+                    "link": "https://careers.just-ai.com/vacancy/junior-devops-engineer",
+                    "title": {"rendered": "Junior DevOps engineer"},
+                    "content": {"rendered": "<p>Kubernetes and CI.</p>"},
+                }
+            ]
+
+    items = [
+        item
+        async for item in JustAICareerParser().parse(
+            CareerSiteSpec(url="https://careers.just-ai.com/", limit=5),
+            _Client(_ListResponse()),
+        )
+    ]
+    assert len(items) == 1
+    assert items[0].external_id == "junior-devops-engineer"
+    assert "DevOps" in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_kaspi_parser_discovers_http_vacancy_links() -> None:
+    from job_ftch.infrastructure.sources.site_parsers.kaspi import KaspiParser
+
+    client = _Client(_Response('<a href="/vacancy/middle-data-engineer">Data engineer</a>'))
+    client.response.url = "https://job.kaspi.kz/search"
+    urls = await KaspiParser().discover(
+        CareerSiteSpec(url="https://job.kaspi.kz/search", limit=5),
+        client,
+    )
+    assert urls == ["https://job.kaspi.kz/vacancy/middle-data-engineer"]

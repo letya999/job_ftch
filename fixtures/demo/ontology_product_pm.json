@@ -1,0 +1,18 @@
+{
+  "profile_description": "Technical AI product and program leader who ships LLM/data products.",
+  "positive_keywords": [
+    {"term": "AI product", "weight": 5},
+    {"term": "roadmap", "weight": 4},
+    {"term": "delivery", "weight": 4},
+    {"term": "LLM", "weight": 3},
+    {"term": "discovery", "weight": 3}
+  ],
+  "negative_keywords": [
+    {"term": "sales quota", "weight": 5},
+    {"term": "pure backend", "weight": 4}
+  ],
+  "anti_patterns": ["quota-carrying sales", "coordinator only"],
+  "skills": ["product discovery", "roadmap", "delivery", "LLM", "API platforms"],
+  "positive_examples": ["AI product roadmap", "cross-functional platform delivery"],
+  "negative_examples": ["backend implementation without product ownership"]
+}

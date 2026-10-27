@@ -284,7 +284,6 @@ async def rebuild_ontology(*, apply: bool, staging_artifact: Path | None = None)
             for chunk in manifest.get("candidate_chunks", ())
         )
         if candidate_chunks:
-            ontology = ontology.model_copy(update={"terms": ()})
             ontology = sanitize_compiled_ontology(
                 _restore_projection_from_candidates(
                     ontology,

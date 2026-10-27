@@ -5,6 +5,9 @@
 
 sink_backend: none
 posting_backend: none
+# Keep compact non-accepted decisions queryable by the private pull API.
+review_output_backend: store
+rejected_output_backend: store
 
 embedding_provider: sentence_transformers
 embedding_model: BAAI/bge-m3

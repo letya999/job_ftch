@@ -30,6 +30,7 @@ from job_ftch.domain.evidence import (
 )
 from job_ftch.domain.experiment import RelevanceCard
 from job_ftch.domain.filter_profile import FilterProfile
+from job_ftch.domain.ingest_queue import IngestTask, IngestTaskState
 from job_ftch.domain.job_group import (
     JobGroup,
     SourceAttribution,
@@ -107,6 +108,7 @@ from job_ftch.domain.quarantine import QuarantinedRawItem, RawItemRejectionReaso
 from job_ftch.domain.rejected import RejectedItem, RejectedOutcome
 from job_ftch.domain.relevance import RelevanceClassification, RelevanceEvidenceClassification
 from job_ftch.domain.resolution import ResolutionTask
+from job_ftch.domain.run_stats import PipelineRunStats, SourceOperatorFlag, SourceRunStatsRow
 from job_ftch.domain.runtime_profile import ManagedCandidateProfile
 from job_ftch.domain.runtime_source import (
     RuntimeSourceRecord,
@@ -166,6 +168,8 @@ __all__ = [
     "EvidenceAtom",
     "EvidenceBundle",
     "EnrichmentTask",
+    "IngestTask",
+    "IngestTaskState",
     "EvidencePolarity",
     "ExtractedOntologyClaim",
     "ExtractedRoleSkillEdge",
@@ -229,6 +233,9 @@ __all__ = [
     "SourceEvidence",
     "SourceAttribution",
     "SourceHealth",
+    "SourceOperatorFlag",
+    "PipelineRunStats",
+    "SourceRunStatsRow",
     "SourceFamily",
     "SourceIdentity",
     "source_identity_for_raw_item",

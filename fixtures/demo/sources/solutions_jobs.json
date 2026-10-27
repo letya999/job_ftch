@@ -1,0 +1,4 @@
+[
+  {"source_kind":"career_site","source_name":"solutions_board","external_id":"sa-001","url":"https://jobs.example.test/sa-001","text":"Solutions Architect\nDesign cloud and API integrations, run technical discovery and present trade-offs.","metadata":{"company":"Connective Cloud","location":"Remote"}},
+  {"source_kind":"telegram_channel","source_name":"solutions_digest","external_id":"sa-002","url":"https://t.me/solutions_digest/2","text":"Integration Architect\nHelp teams adopt Python and SQL APIs across a practical customer platform.","metadata":{"company":"Bridge Systems"}}
+]

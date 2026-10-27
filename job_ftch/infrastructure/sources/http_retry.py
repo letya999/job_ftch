@@ -115,6 +115,17 @@ def bounded_retry_delay(seconds: float) -> float:
     return delay
 
 
+def _http_attempt_timeout() -> float | None:
+    """Bound one HTTP wait so a hung transport cannot eat the source deadline."""
+    remaining = remaining_source_seconds()
+    if remaining is None:
+        return None
+    from job_ftch.config import get_settings
+
+    cap = max(0.1, float(get_settings().career_site_timeout_seconds))
+    return min(remaining, cap)
+
+
 async def fetch_with_retry(
     http: httpx.AsyncClient,
     url: str,
@@ -150,7 +161,8 @@ async def fetch_with_retry(
                 method=normalized_method,
                 follow_redirects=follow_redirects,
                 **kwargs,
-            )
+            ),
+            timeout=_http_attempt_timeout(),
         )
 
     import httpx as _httpx
@@ -173,7 +185,8 @@ async def fetch_with_retry(
                             method=normalized_method,
                             follow_redirects=follow_redirects,
                             **kwargs,
-                        )
+                        ),
+                        timeout=_http_attempt_timeout(),
                     )
                 except (_httpx.TransportError, _httpx.TimeoutException) as exc:
                     logger.warning(

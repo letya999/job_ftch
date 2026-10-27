@@ -1,0 +1,13 @@
+ARG BASE_IMAGE=job-ftch-runtime:dev
+FROM ${BASE_IMAGE}
+
+WORKDIR /app
+
+# The runtime base already contains the locked dependencies and browser
+# runtimes. Bake the application and this run's tenant package into the image;
+# only mutable artifacts and the scheduler pid volume stay mounted.
+COPY job_ftch /app/job_ftch
+COPY config /app/config
+COPY real_demo /app/real_demo
+
+ENV PYTHONPATH=/app

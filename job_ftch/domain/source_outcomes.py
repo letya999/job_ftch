@@ -14,6 +14,7 @@ SourceOutcome = Literal[
     "listing_discovery_failed",
     "unconfirmed_empty",
     "no_open_vacancies",
+    "no_new_vacancies",
     "board_gone",
     "source_error",
     "transport_error",
