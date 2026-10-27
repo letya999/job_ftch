@@ -24,6 +24,7 @@ from job_ftch.infrastructure.sources.site_parsers.helpers import (
     normalize_search_keywords,
     paginate_listing,
     resolve_browser_config,
+    safe_fetch,
     text_matches_keywords,
     with_query_params,
 )
@@ -589,6 +590,72 @@ class _EmployerBoardParser:
             yield item
 
 
+class JetBrainsCareerParser(_EmployerBoardParser):
+    domain_pattern = r"^https?://(?:www\.)?jetbrains\.com/careers/jobs(?:[/?#]|$)"
+    parser_name = "jetbrains_career"
+    company = "JetBrains"
+    supports_discover = False
+    confirmed_empty_on_empty = True
+    terminal_on_error = True
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        for url in await self.discover(spec, client):
+            response = await safe_fetch(client, url, follow_redirects=False)
+            page = LexborHTMLParser(response.text)
+            title_node = page.css_first("h1")
+            description_node = page.css_first(".job__description")
+            title = title_node.text(separator=" ", strip=True) if title_node else ""
+            description = (
+                description_node.text(separator="\n", strip=True) if description_node else ""
+            )
+            if not title or not description:
+                raise ValueError("invalid JetBrains vacancy detail")
+            yield build_raw_item(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=spec.source_name or self.parser_name,
+                external_id=url.rsplit("/", 1)[-1],
+                url=url,
+                text=f"{title}\n\n{description}",
+                metadata={
+                    "board_url": spec.url,
+                    "parser": self.parser_name,
+                    "observation_kind": "vacancy_detail",
+                    "detail_vacancy_confirmed": True,
+                    "company": self.company,
+                    "company_authoritative": True,
+                },
+            )
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        response = await safe_fetch(
+            client,
+            "https://resources.jetbrains.com/storage/greenhouse/greenhouse-data.json",
+            follow_redirects=False,
+        )
+        payload = response.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+            raise ValueError("invalid JetBrains vacancy feed")
+        result: list[str] = []
+        seen: set[int] = set()
+        for job in payload["jobs"]:
+            job_id = job.get("id") if isinstance(job, dict) else None
+            if not isinstance(job_id, int) or isinstance(job_id, bool) or job_id <= 0:
+                continue
+            if job_id in seen:
+                continue
+            seen.add(job_id)
+            result.append(f"https://job-boards.eu.greenhouse.io/jetbrains/jobs/{job_id}")
+            if len(result) >= _board_item_limit(spec):
+                break
+        if payload["jobs"] and not result:
+            raise ValueError("invalid JetBrains vacancy identifiers")
+        return result
+
+
 class CianCareerParser(_EmployerBoardParser):
     domain_pattern = r"^https?://(?:(?:www\.)?cian\.ru/vacancies|career\.cian\.ru)(?:/.*)?$"
     parser_name = "cian_career"
@@ -1033,6 +1100,7 @@ register_site_parser("t1_innotech", domain_pattern=T1InnotechParser.domain_patte
     T1InnotechParser
 )
 for _parser_class in (
+    JetBrainsCareerParser,
     CianCareerParser,
     InnotechCareerParser,
     RostelecomCareerParser,

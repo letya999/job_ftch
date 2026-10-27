@@ -358,6 +358,27 @@ async def test_geekjob_search_uses_public_html_and_preserves_query() -> None:
 
 
 @pytest.mark.asyncio
+async def test_jetbrains_missing_description_is_not_emitted() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "resources.jetbrains.com":
+            return httpx.Response(200, json={"jobs": [{"id": 123}]})
+        return httpx.Response(200, text="<html><h1>ML Engineer</h1></html>")
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        with pytest.raises(ValueError):
+            _ = [
+                item
+                async for item in parser.parse(
+                    CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/", limit=1), client
+                )
+            ]
+
+
+@pytest.mark.asyncio
 async def test_habr_parser_fetches_full_detail() -> None:
     parser = HabrCareerParser()
     client = _FakeClient(
@@ -968,3 +989,139 @@ async def test_lever_monitor_does_not_guess_token_from_arbitrary_slug() -> None:
     result = await lever_can_handle("https://az.linkedin.com/jobs", client)
 
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_jetbrains_official_feed_discovers_greenhouse_vacancies() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert (
+            str(request.url)
+            == "https://resources.jetbrains.com/storage/greenhouse/greenhouse-data.json"
+        )
+        return httpx.Response(
+            200,
+            json={
+                "jobs": [
+                    None,
+                    "bad",
+                    {"id": 123},
+                    {"id": 123},
+                    {"id": True},
+                    {"id": -5},
+                    {"id": 456},
+                ]
+            },
+        )
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        urls = await parser.discover(
+            CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/", limit=2), client
+        )
+    assert urls == [
+        "https://job-boards.eu.greenhouse.io/jetbrains/jobs/123",
+        "https://job-boards.eu.greenhouse.io/jetbrains/jobs/456",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload", [None, {"jobs": "invalid"}, {}])
+async def test_jetbrains_malformed_feed_is_not_reported_as_empty(payload: object) -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    ) as client:
+        with pytest.raises(ValueError):
+            await parser.discover(
+                CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/"), client
+            )
+
+
+def test_jetbrains_official_feed_does_not_require_browser() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    assert parser.runtime_defaults("https://www.jetbrains.com/careers/jobs/").render is False
+
+
+@pytest.mark.asyncio
+async def test_jetbrains_feed_with_only_invalid_jobs_is_a_failure() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"jobs": [None, {"id": "invalid"}]})
+        )
+    ) as client:
+        with pytest.raises(ValueError):
+            await parser.discover(
+                CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/"), client
+            )
+
+
+@pytest.mark.asyncio
+async def test_jetbrains_empty_valid_feed_returns_no_urls() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"jobs": []}))
+    ) as client:
+        assert (
+            await parser.discover(
+                CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/"), client
+            )
+            == []
+        )
+    assert getattr(parser, "confirmed_empty_on_empty", False) is True
+    assert getattr(parser, "terminal_on_error", False) is True
+
+
+def test_jetbrains_uses_custom_detail_extraction() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    assert getattr(parser, "supports_discover", True) is False
+
+
+@pytest.mark.asyncio
+async def test_jetbrains_emits_full_description_for_the_same_job() -> None:
+    from job_ftch.application.registry import resolve_site_parser
+
+    description = "Build reliable machine learning tools. " * 12
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "resources.jetbrains.com":
+            return httpx.Response(200, json={"jobs": [{"id": 123}]})
+        if request.url.host == "job-boards.eu.greenhouse.io":
+            return httpx.Response(
+                200,
+                text=f'<html><h1>ML Engineer</h1><div class="job__description">{description}</div></html>',
+            )
+        return httpx.Response(200, text="<html></html>")
+
+    parser = resolve_site_parser("https://www.jetbrains.com/careers/jobs/")
+    assert parser is not None
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        items = [
+            item
+            async for item in parser.parse(
+                CareerSiteSpec(url="https://www.jetbrains.com/careers/jobs/", limit=1), client
+            )
+        ]
+    assert len(items) == 1
+    assert items[0].external_id == "123"
+    assert str(items[0].url) == "https://job-boards.eu.greenhouse.io/jetbrains/jobs/123"
+    assert description.strip() in items[0].text
+    assert items[0].metadata["detail_vacancy_confirmed"] is True
