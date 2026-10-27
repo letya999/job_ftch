@@ -710,11 +710,13 @@ class SQLStoreAdapter(abc.ABC):
         *,
         available_at: datetime,
         error: str | None = None,
+        refund_attempt: bool = False,
     ) -> IngestTask | None:
         now = datetime.now(UTC)
         await self._execute(
             self._SQL_INGEST_TASK_DEFER,
             (
+                refund_attempt,
                 IngestTaskState.WAITING_RATE_LIMIT.value,
                 self._queue_time(available_at),
                 error,
