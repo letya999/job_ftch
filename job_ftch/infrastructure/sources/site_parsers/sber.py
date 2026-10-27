@@ -288,6 +288,14 @@ class SberEcosystemParser:
     supports_search = True
     search_mode = "per_keyword"
 
+    def runtime_defaults(self, url: str) -> None:
+        del url
+        return None
+
+    def parser_kind(self, url: str) -> None:
+        del url
+        return None
+
     def build_search_urls(
         self, base_url: str, keywords: Any, *, limit: int | None = None
     ) -> list[str]:
