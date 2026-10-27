@@ -126,6 +126,11 @@ docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod \
 
 ## Recovery checks
 
+With OpenObserve configured, `JOB_FTCH_TRACING_ENABLED=true` enables the
+sanitized `job_ftch_traces` stream described in [ADR-103](adr/103-safe-openobserve-tracing.md).
+The bounded exporter is best-effort and can lose spans during overload or a
+crash. Keep OpenObserve retention at seven days; cleanup is asynchronous.
+
 Quota preflight runs before acquisition. After one failed initial quota check,
 allow at most five retries spaced by 30 minutes, then wait until the next
 scheduled window. State survives restarts; successful preflight or a new window

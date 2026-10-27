@@ -320,6 +320,14 @@ def create_app(
             "TELEGRAM_SECRET_TOKEN must be set; refusing to start without authentication"
         )
 
+    if settings.tracing_enabled:
+        from job_ftch.infrastructure.observability import configure_observability
+
+        try:
+            configure_observability(settings)
+        except Exception:
+            logger.warning("api_observability_unavailable")
+
     # Initialize rate limiter
     limiter = Limiter(key_func=get_remote_address)
     app = FastAPI(title="job_ftch telegram bridge")
