@@ -118,6 +118,37 @@ class _Runner:
         }
 
 
+def test_api_initializes_observability_for_its_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    from job_ftch.adapters.telegram_bot.api import create_app
+    from job_ftch.config import Settings
+    from job_ftch.infrastructure import observability
+
+    calls: list[Settings] = []
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN", "123456:test-token")
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN", "secret-token")
+    monkeypatch.setattr(
+        observability, "configure_observability", lambda settings: calls.append(settings)
+    )
+    settings = Settings.model_validate({"tracing_enabled": True})
+    create_app(runner=_Runner(), base_settings=settings)  # type: ignore[arg-type]
+    assert calls == [settings]
+
+
+def test_api_starts_if_observability_configuration_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import Mock
+
+    from job_ftch.adapters.telegram_bot.api import create_app
+    from job_ftch.config import Settings
+    from job_ftch.infrastructure import observability
+
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN", "123456:test-token")
+    monkeypatch.setenv("JOB_FTCH_AUTH_TELEGRAM_BOT_SECRET_TOKEN", "secret-token")
+    monkeypatch.setattr(
+        observability, "configure_observability", Mock(side_effect=RuntimeError("test"))
+    )
+    create_app(runner=_Runner(), base_settings=Settings.model_validate({"tracing_enabled": True}))  # type: ignore[arg-type]
+
+
 @pytest.mark.asyncio
 async def test_tenant_health_reports_store_source_scheduler_and_publish_state() -> None:
     payload = await _tenant_health(_Runner(), "ai_jobs")  # type: ignore[arg-type]
