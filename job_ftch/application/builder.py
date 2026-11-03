@@ -692,7 +692,11 @@ def tenant_model_overrides(tenant: TenantConfig) -> dict[str, Any]:
 
 
 def tenant_to_settings(tenant: TenantConfig, base_settings: Settings | None = None) -> Settings:
-    base = (base_settings or get_settings()).model_dump(mode="python")
+    template = base_settings or get_settings()
+    base = template.model_dump(mode="python")
+    for name in ("llm_provider_profiles", "llm_bindings"):
+        if name not in template.model_fields_set:
+            base.pop(name, None)
     tenant_id = tenant.tenant_id
     base.update(
         {

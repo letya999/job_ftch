@@ -5,11 +5,13 @@ from pathlib import Path
 import pytest
 import yaml
 
+from job_ftch.application.builder import tenant_to_settings
 from job_ftch.application.provider_routing import (
     UnavailableLLMProvider,
     build_llm_bindings,
 )
 from job_ftch.config import Settings
+from job_ftch.domain import TenantConfig
 
 
 def test_default_bindings_keep_captcha_on_the_named_clipproxy_model() -> None:
@@ -18,6 +20,13 @@ def test_default_bindings_keep_captcha_on_the_named_clipproxy_model() -> None:
     assert settings.llm_bindings["captcha_image"].provider == "cliproxy_captcha"
     assert settings.llm_bindings["captcha_image"].model == "gemini-3.8-flash-high"
     assert settings.llm_bindings["extraction"].provider == "openai_main"
+
+
+def test_tenant_settings_keep_implicit_heuristic_provider() -> None:
+    tenant = TenantConfig(tenant_id="test", display_name="Test")
+    settings = tenant_to_settings(tenant, Settings.model_validate({"llm_backend": "heuristic"}))
+
+    assert settings.llm_provider_profiles["openai_main"].backend == "heuristic"
 
 
 def test_production_bot_routes_etl_through_cliproxy() -> None:
@@ -37,6 +46,10 @@ def test_production_bot_routes_etl_through_cliproxy() -> None:
     assert profile.structured_mode == "json"
     assert settings.llm_bindings["captcha_image"].provider == "cliproxy_captcha"
     assert settings.llm_provider_profiles["cliproxy_captcha"].base_url == "http://cliproxy:8317/v1"
+    tenant = TenantConfig(tenant_id="test", display_name="Test")
+    assert (
+        tenant_to_settings(tenant, settings).llm_bindings["extraction"].provider == "cliproxy_main"
+    )
 
 
 def test_cliproxy_json_mode_reaches_provider(monkeypatch: pytest.MonkeyPatch) -> None:
