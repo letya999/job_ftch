@@ -5,6 +5,7 @@ Both InMemoryStore and SQLiteStore must exhibit identical observable behaviour.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from typing import TYPE_CHECKING
 
@@ -59,6 +60,113 @@ STORE_FACTORIES: list[pytest.param] = [  # type: ignore[type-arg]
         marks=pytest.mark.skipif(not _SQLITE_AVAILABLE, reason="aiosqlite not installed"),
     ),
 ]
+
+
+def _sqlite_unique_error() -> sqlite3.IntegrityError:
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute("CREATE TABLE unique_test (id INTEGER PRIMARY KEY)")
+        connection.execute("INSERT INTO unique_test VALUES (1)")
+        with pytest.raises(sqlite3.IntegrityError) as caught:
+            connection.execute("INSERT INTO unique_test VALUES (1)")
+        return caught.value
+    finally:
+        connection.close()
+
+
+@pytest.mark.skipif(not _SQLITE_AVAILABLE, reason="aiosqlite not installed")
+async def test_observation_concurrent_writers_share_one_content_version(tmp_path: Any) -> None:
+    path = str(tmp_path / "observations.sqlite3")
+    stores = [_SQLiteStore(path), _SQLiteStore(path)]
+    raw = RawItem(
+        source_kind=SourceKind.DEBUG,
+        source_name="ledger",
+        external_id="same-item",
+        text="same content",
+    )
+    entry = ObservationLedgerEntry(
+        observation_id="obs-same-item",
+        tenant_id="default",
+        stable_id=raw.stable_id,
+        content_hash=content_hash_for_raw_item(raw),
+        decision_version="policy-v1",
+        raw_item=raw,
+    )
+    try:
+        recorded = await asyncio.gather(*(store.record_observation(entry) for store in stores))
+        assert recorded[0] == recorded[1]
+        assert recorded[0].content_version == 1
+        assert len(await stores[0].list_observations()) == 1
+    finally:
+        await asyncio.gather(*(store.close() for store in stores))
+
+
+@pytest.mark.skipif(not _SQLITE_AVAILABLE, reason="aiosqlite not installed")
+async def test_observation_concurrent_different_content_gets_next_version(tmp_path: Any) -> None:
+    path = str(tmp_path / "observations.sqlite3")
+    stores = [_SQLiteStore(path), _SQLiteStore(path)]
+    entries = []
+    for text in ("first content", "second content"):
+        raw = RawItem(
+            source_kind=SourceKind.DEBUG,
+            source_name="ledger",
+            external_id="same-item",
+            text=text,
+        )
+        entries.append(
+            ObservationLedgerEntry(
+                observation_id=f"obs-{text}",
+                tenant_id="default",
+                stable_id=raw.stable_id,
+                content_hash=content_hash_for_raw_item(raw),
+                decision_version="policy-v1",
+                raw_item=raw,
+            )
+        )
+    try:
+        recorded = await asyncio.gather(
+            *(store.record_observation(entry) for store, entry in zip(stores, entries, strict=True))
+        )
+        assert sorted(row.content_version for row in recorded) == [1, 2]
+        assert len(await stores[0].list_observations()) == 2
+    finally:
+        await asyncio.gather(*(store.close() for store in stores))
+
+
+@pytest.mark.skipif(not _SQLITE_AVAILABLE, reason="aiosqlite not installed")
+async def test_observation_nonunique_write_error_is_not_retried(monkeypatch: Any) -> None:
+    store = _SQLiteStore(":memory:")
+    raw = RawItem(
+        source_kind=SourceKind.DEBUG,
+        source_name="ledger",
+        external_id="write-error",
+        text="data",
+    )
+    entry = ObservationLedgerEntry(
+        observation_id="obs-write-error",
+        tenant_id="default",
+        stable_id=raw.stable_id,
+        content_hash=content_hash_for_raw_item(raw),
+        decision_version="policy-v1",
+        raw_item=raw,
+    )
+    original_execute = store._execute
+    attempts = 0
+
+    async def fail_insert(sql: str, params: tuple[object, ...] = ()) -> None:
+        nonlocal attempts
+        if "INSERT INTO jf_observations" in sql:
+            attempts += 1
+            raise OSError("disk failure")
+        await original_execute(sql, params)
+
+    monkeypatch.setattr(store, "_execute", fail_insert)
+    try:
+        with pytest.raises(OSError, match="disk failure"):
+            await store.record_observation(entry)
+        assert attempts == 1
+    finally:
+        await store.close()
 
 
 @pytest.mark.parametrize("factory", STORE_FACTORIES)
@@ -135,9 +243,7 @@ async def test_run_state_namespacing(factory: Callable[[], object]) -> None:
     await store.set_run_state("cursor", "B", source_kind="tg", source_name="ch2")  # type: ignore[union-attr]
     assert await store.get_run_state("cursor", source_kind="tg", source_name="ch1") == "A"  # type: ignore[union-attr]
     assert await store.get_run_state("cursor", source_kind="tg", source_name="ch2") == "B"  # type: ignore[union-attr]
-    assert (
-        await store.get_run_state("cursor") is None
-    )  # bare key → None  # type: ignore[union-attr]
+    assert await store.get_run_state("cursor") is None  # bare key → None  # type: ignore[union-attr]
     close = getattr(store, "close", None)
     if callable(close):
         await close()
@@ -346,7 +452,7 @@ async def test_observation_version_concurrent_updates_retry_or_succeed(
         async def mock_execute(self: Any, sql: str, params: tuple[Any, ...]) -> None:
             if "INSERT INTO jf_observations" in sql and call_count[0] == 0:
                 call_count[0] += 1
-                raise OSError("simulated unique constraint failure")
+                raise _sqlite_unique_error()
             return await original_execute(sql, params)
 
         monkeypatch.setattr(store, "_execute", mock_execute.__get__(store))
@@ -401,7 +507,7 @@ async def test_sql_observation_same_content_unique_conflict_returns_existing(
             if "INSERT INTO jf_observations" in sql and call_count[0] == 0:
                 call_count[0] += 1
                 await original_execute(sql, params)
-                raise OSError("simulated unique constraint failure")
+                raise _sqlite_unique_error()
             return await original_execute(sql, params)
 
         monkeypatch.setattr(store, "_execute", mock_execute.__get__(store))

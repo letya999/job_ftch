@@ -22,7 +22,7 @@ updated: 2026-10-27
 |---|---|
 | `pydantic`, `pydantic-settings` | Domain/config models |
 | `httpx` | HTTP ingest/API client |
-| `selectolax`, `trafilatura` | HTML/main-text extraction |
+| `selectolax>=0.3,<1`, `trafilatura` | HTML/main-text extraction; v1 removes the `parser.HTMLParser` API used by existing adapters |
 | `rapidfuzz` | Dedup/string similarity |
 | `structlog` | Structured logging |
 | `opentelemetry-api`, `opentelemetry-sdk` | Telemetry boundary |
@@ -64,7 +64,7 @@ OpenTelemetry, Pillow, pypdf, setuptools and virtualenv in the lockfile.
 | `[extraction]` | `trafilatura`, `extruct`, `lxml` | Structured extraction |
 | `[realtime]` | `aiohttp`, `websockets` | Realtime/push variants |
 | `[browser]` | `patchright`, `cloakbrowser` | Browser-backed scraping tiers |
-| `[stealth]` | `playwright-stealth`, `curl-cffi==0.16.2` | TLS/browser impersonation |
+| `[stealth]` | `playwright-stealth`, `curl-cffi==0.17.0` | TLS/browser impersonation |
 | `[tls_client]` | `tls-client` | Alternative TLS/HTTP impersonation transport |
 | `[camoufox]` | `camoufox` | Firefox anti-detect tier |
 | `[nodriver]` | `nodriver` | CDP-native browser tier |

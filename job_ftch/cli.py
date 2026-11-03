@@ -305,17 +305,17 @@ def _cmd_graph(args: argparse.Namespace) -> int:
 
 
 def _cmd_eval(args: argparse.Namespace) -> int:
-    """Forward to the per-harness Python scripts."""
+    """Run packaged evaluation harnesses from any working directory."""
     if args.fixture is None or args.fixture == "classification":
         r = subprocess.run(
-            [sys.executable, "scripts/evaluate_classification.py", "--gate"],
+            [sys.executable, "-m", "job_ftch.eval.classification", "--gate"],
             check=False,
         )
         if r.returncode != 0:
             return r.returncode
     if args.fixture is None or args.fixture == "extraction":
         r = subprocess.run(
-            [sys.executable, "scripts/evaluate_extraction.py", "--gate"],
+            [sys.executable, "-m", "job_ftch.eval.extraction", "--gate"],
             check=False,
         )
         if r.returncode != 0:

@@ -170,6 +170,10 @@ class SQLStoreAdapter(abc.ABC):
         """Execute a write query."""
 
     @abc.abstractmethod
+    def _is_unique_violation(self, error: Exception) -> bool:
+        """Recognize this backend's unique-constraint error."""
+
+    @abc.abstractmethod
     async def _execute_batch(self, sql: str, params_list: tuple[tuple[object, ...], ...]) -> None:
         """Execute a write query for multiple rows atomically."""
 
@@ -373,12 +377,8 @@ class SQLStoreAdapter(abc.ABC):
                     ),
                 )
                 return recorded
-            except Exception as e:
-                err_str = str(e).lower()
-                is_unique_violation = (
-                    "unique" in err_str or "integrity" in err_str or "duplicate" in err_str
-                )
-                if attempt == max_retries - 1 or not is_unique_violation:
+            except Exception as exc:
+                if not self._is_unique_violation(exc):
                     raise
                 existing = await self.get_observation(
                     entry.stable_id,
@@ -387,6 +387,8 @@ class SQLStoreAdapter(abc.ABC):
                 )
                 if existing is not None:
                     return existing
+                if attempt == max_retries - 1:
+                    raise
                 await asyncio.sleep(0.01 * (attempt + 1))
         return recorded
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -21,6 +22,11 @@ if TYPE_CHECKING:
 
 class SQLiteStore(SQLStoreAdapter):
     """SQLite-backed persistent store using aiosqlite."""
+
+    def _is_unique_violation(self, error: Exception) -> bool:
+        return isinstance(error, sqlite3.IntegrityError) and getattr(
+            error, "sqlite_errorcode", None
+        ) in {sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY, sqlite3.SQLITE_CONSTRAINT_UNIQUE}
 
     _SQL_KV_GET = "SELECT value FROM jf_kv WHERE key = ?"
     _SQL_KV_UPSERT = """

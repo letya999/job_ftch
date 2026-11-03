@@ -59,7 +59,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [050 — Browser Session Bypass Protocol](050-browser-session-bypass-protocol.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
 - [051 — Production-equivalent evaluation and graph contract](051-production-equivalent-evaluation-and-graph-contract.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
 - [052 — Immutable observation ledger and content-versioned replay](052-immutable-observation-ledger-and-content-versioned-replay.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
-- [053 — Durable outbox and delivery idempotency](053-durable-outbox-and-delivery-idempotency.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
+- [053 — Durable outbox and delivery idempotency](053-durable-outbox-and-delivery-idempotency.md) - **Status**: ACCEPTED (Updated: 2026-11-03)
 - [054 — Terminal, deferred and retryable pipeline states](054-terminal-deferred-and-retryable-pipeline-states.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
 - [055 — One-to-many candidate segmentation contract](055-one-to-many-candidate-segmentation-contract.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
 - [056 — Structured evidence, jobness, and extraction](056-structured-evidence-jobness-and-extraction.md) - **Status**: ACCEPTED (Updated: 2026-07-24)

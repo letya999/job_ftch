@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import httpx
 import structlog
+from selectolax.parser import HTMLParser
 
 logger = structlog.get_logger(__name__)
 
@@ -51,6 +52,22 @@ _KNOWN_BOARD_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+def _board_navigation_targets(body: str) -> tuple[str, ...]:
+    from job_ftch.config import get_settings
+
+    limit = get_settings().fingerprint_body_scan_max_chars
+    if len(body) > limit:
+        half = max(1, limit // 2)
+        body = body[:half] + body[-half:]
+    document = HTMLParser(body)
+    return tuple(
+        value
+        for node in document.css("[href], [src]")
+        for name in ("href", "src")
+        if (value := node.attributes.get(name))
+    )
+
+
 def _specific_monitor_from_text(url: str, body: str | None) -> str | None:
     haystacks = [url]
     parsed = urlparse(url)
@@ -58,17 +75,7 @@ def _specific_monitor_from_text(url: str, body: str | None) -> str | None:
     if host:
         haystacks.append(host)
     if body:
-        from job_ftch.config import get_settings
-
-        # ATS embeds are frequently appended after a large CMS document. Keep
-        # the bounded scan, but inspect both ends so a footer script is not
-        # invisible to routing.
-        limit = get_settings().fingerprint_body_scan_max_chars
-        if len(body) > limit:
-            half = max(1, limit // 2)
-            haystacks.append(body[:half] + body[-half:])
-        else:
-            haystacks.append(body)
+        haystacks.extend(_board_navigation_targets(body))
     for pattern, monitor_name in _KNOWN_BOARD_PATTERNS:
         if any(pattern.search(text) for text in haystacks):
             return monitor_name

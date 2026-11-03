@@ -124,6 +124,36 @@ async def test_pending_outbox_replays_only_its_named_target() -> None:
 
 
 @pytest.mark.asyncio
+async def test_removed_target_stays_pending_and_reports_error() -> None:
+    store = InMemoryStore()
+    job = _job()
+    record = OutboxRecord(
+        outbox_id="removed-target",
+        observation_id="raw-1",
+        content_hash="a" * 64,
+        decision_version="pipeline-v1",
+        sink_name="delivery:removed",
+        idempotency_key="b" * 64,
+        delivery_payload=job.model_dump(mode="json"),
+    )
+    await store.enqueue_outbox(record)
+    pipeline = Pipeline(
+        source=_EmptySource(),
+        sanitize_node=SanitizeNode(),
+        nodes=[],
+        sink=_RecordingSink(),
+        store=store,
+    )
+    with pytest.raises(RuntimeError, match="no longer configured"):
+        await pipeline._deliver_outbox_record(record, fallback_item=job)
+    await pipeline.run()
+    pending = await store.list_pending_outbox()
+    assert len(pending) == 1
+    assert pending[0].idempotency_key == record.idempotency_key
+    assert pending[0].state is OutboxState.OUTBOXED
+
+
+@pytest.mark.asyncio
 async def test_pending_primary_outbox_replays_without_extra_targets() -> None:
     store = InMemoryStore()
     job = _job()
@@ -190,6 +220,7 @@ async def test_partial_delivery_retry_does_not_repeat_primary_sink() -> None:
     store = InMemoryStore()
     job = _job()
     primary_sink = _RecordingSink()
+    successful_target = _RecordingSink()
     failing_target = _FailingSink()
     pipeline = Pipeline(
         source=_EmptySource(),
@@ -197,7 +228,10 @@ async def test_partial_delivery_retry_does_not_repeat_primary_sink() -> None:
         nodes=[],
         sink=primary_sink,
         store=store,
-        delivery_targets=[SinkDeliveryTarget("delivery:test", failing_target)],
+        delivery_targets=[
+            SinkDeliveryTarget("delivery:ok", successful_target),
+            SinkDeliveryTarget("delivery:test", failing_target),
+        ],
     )
     raw = RawItem(
         source_kind=SourceKind.DEBUG,
@@ -211,11 +245,13 @@ async def test_partial_delivery_retry_does_not_repeat_primary_sink() -> None:
         await pipeline._emit_outbox_targets(job, first_records)
 
     assert primary_sink.items == [job]
+    assert successful_target.items == [job]
     assert [envelope.sink_name for envelope in primary_sink.envelopes] == ["primary:sink"]
 
     retry_records = await pipeline._enqueue_outbox(raw, job)
     assert {record.sink_name: record.state for record in retry_records} == {
         "primary:sink": OutboxState.DELIVERED,
+        "delivery:ok": OutboxState.DELIVERED,
         "delivery:test": OutboxState.OUTBOXED,
     }
 
@@ -223,6 +259,7 @@ async def test_partial_delivery_retry_does_not_repeat_primary_sink() -> None:
         await pipeline._emit_outbox_targets(job, retry_records)
 
     assert primary_sink.items == [job]
+    assert successful_target.items == [job]
 
 
 @pytest.mark.asyncio
