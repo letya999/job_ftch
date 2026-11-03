@@ -44,7 +44,7 @@ async def test_legacy_auto_paused_source_is_resumed_immediately(tmp_path: Path) 
         }
     )
 
-    settings = Settings.model_validate({"llm_backend": "heuristic"})
+    settings = Settings.model_validate({"llm_backend": "heuristic", "llm_preflight_enabled": False})
     settings.source_health_failure_streak_pause = 2
     settings.source_health_probe_every_n_runs = 3
 
@@ -111,7 +111,10 @@ async def test_source_rate_limiting(tmp_path: Path) -> None:
     )
 
     runner = TenantRunner.from_tenants(
-        [tenant], base_settings=Settings.model_validate({"llm_backend": "heuristic"})
+        [tenant],
+        base_settings=Settings.model_validate(
+            {"llm_backend": "heuristic", "llm_preflight_enabled": False}
+        ),
     )
     runtime = runner.get_runtime(tenant_id)
     sid = source_spec_identifier(runtime.base_sources[0])
