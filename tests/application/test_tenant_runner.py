@@ -1634,7 +1634,7 @@ async def test_tenant_runner_persists_candidate_profiles_and_reranks_latest_jobs
         await runner.close()
 
 
-def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
+def test_update_source_health_payload_keeps_drift_as_metric_when_fetch_succeeds() -> None:
     stats = SourceRunStats(emitted=0, failed=0, fetched=2)
     payload = _update_source_health_payload(
         SourceHealth(
@@ -1661,9 +1661,19 @@ def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
         finished_at=datetime(2026, 6, 13, tzinfo=UTC),
     )
 
-    assert payload.degraded is True
-    assert payload.status == "degraded"
+    assert payload.degraded is False
+    assert payload.status == "healthy"
     assert payload.drift_ratio == 0.0
+
+    empty_payload = _update_source_health_payload(
+        payload,
+        source_id="career_site:bcc_ml",
+        source_kind="career_site",
+        source_name="bcc_ml",
+        stats=SourceRunStats(fetched=0, emitted=0, failed=0),
+        finished_at=datetime(2026, 6, 13, 0, 30, tzinfo=UTC),
+    )
+    assert empty_payload.status == "degraded"
 
     failed = SourceRunStats(emitted=0, failed=1)
     failed_payload = _update_source_health_payload(
