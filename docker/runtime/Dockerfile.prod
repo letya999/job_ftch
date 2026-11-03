@@ -38,7 +38,7 @@ RUN /usr/local/bin/python -m pip install --no-cache-dir "uv==0.9.26"
 # The production graph disables local embeddings; "all" would pull CUDA into the image.
 RUN UV_NO_CACHE=1 UV_LINK_MODE=copy uv sync --locked --no-dev --all-extras \
     --no-extra all --no-extra bgem3 --no-extra embeddings --no-extra dagster \
-    --no-extra faststream --no-extra mcp
+    --no-extra faststream --no-extra mcp --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
 RUN patchright install --with-deps chromium
 # Camoufox is Firefox-based and needs GTK, which the Chromium dep set does not provide.
@@ -53,6 +53,7 @@ RUN python -c "from camoufox.__main__ import CamoufoxUpdate; from camoufox.pkgma
 RUN python -m cloakbrowser install
 
 COPY --chown=appuser:appuser . /app
+RUN uv pip install --python /app/.venv/bin/python --no-deps .
 RUN mkdir -p /app/.runtime /app/artifacts \
     && chown appuser:appuser /app/.runtime /app/artifacts
 
