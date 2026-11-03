@@ -20,7 +20,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 BLOCK_RE = re.compile(r"^```mermaid\n(.*?)^```", re.S | re.M)
 SKIP_DIRS = {".git", "site", "node_modules", ".venv"}
 

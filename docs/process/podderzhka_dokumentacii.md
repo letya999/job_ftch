@@ -130,7 +130,7 @@ just docs-verify
 - `.github/workflows/docs.yml` выполняет тот же полный набор, что и
   `just docs-verify`. Deploy в Pages из этого workflow не выполняется.
 - `.github/workflows/docs-pages.yml` на push в `main` собирает сайт
-  (`mkdocs build --strict -f docs_scripts/mkdocs.yml`) и публикует
+  (`mkdocs build --strict -f scripts/docs/mkdocs.yml`) и публикует
   GitHub Pages; на PR не срабатывает.
 - `uv run python scripts/run_ci_checks.py lint` также включает
   `scripts/lint_docs.py`, но не заменяет docs gate: в нём нет

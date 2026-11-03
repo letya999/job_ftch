@@ -18,6 +18,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [plans index](plans/index.md)
 - [plugin_template index](plugin_template/index.md)
 - [process index](process/index.md)
+- [product index](product/index.md)
 - [recipes index](recipes/index.md)
 - [reports index](reports/index.md)
 - [sources index](sources/index.md)

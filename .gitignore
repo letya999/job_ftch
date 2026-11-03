@@ -44,7 +44,6 @@ coverage.xml
 dist/
 build/
 .site/
-docs_scripts/.site/
 *.egg-info/
 
 # Telethon sessions

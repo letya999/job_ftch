@@ -34,11 +34,11 @@ jobs:
       - name: Install docs dependencies
         run: |
           uv pip install --reinstall-package markupsafe markupsafe
-          uv pip install -r docs_scripts/requirements.txt
+          uv pip install -r scripts/docs/requirements.txt
 
       - name: Run docs gates
         run: |
           uv run python scripts/build_index_docs.py --check
           uv run python scripts/lint_docs.py
           uv run python scripts/check_docs_generated.py
-          uv run mkdocs build --strict -f docs_scripts/mkdocs.yml
+          uv run mkdocs build --strict -f scripts/docs/mkdocs.yml

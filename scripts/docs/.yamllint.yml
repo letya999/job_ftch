@@ -1,4 +1,4 @@
-# Стиль YAML. Смысл frontmatter проверяет docs_scripts/work_lint.py,
+# Стиль YAML. Смысл frontmatter проверяет scripts/docs/work_lint.py,
 # здесь только форма. Проверяется весь репозиторий, включая скрытые файлы:
 # конфиг раннера и рабочие файлы ошибаются так же, как остальные.
 extends: default

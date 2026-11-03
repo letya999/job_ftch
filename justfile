@@ -2,7 +2,7 @@
 # humans and agents running checks from the workstation.
 
 scripts := "scripts"
-docs_scripts := "docs_scripts"
+docs_scripts := "scripts/docs"
 
 export PYTHONUTF8 := "1"
 

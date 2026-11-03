@@ -5,8 +5,8 @@ site_description: Async pipeline for Telegram and career-site vacancy ingestion.
 repo_url: https://github.com/letya999/job_ftch
 edit_uri: edit/main/docs/
 
-docs_dir: ../docs
-site_dir: ../.site
+docs_dir: ../../docs
+site_dir: ../../.site
 exclude_docs: |
   adr/README.md
   entities/README.md

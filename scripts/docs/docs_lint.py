@@ -23,12 +23,12 @@ from pathlib import Path
 
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 # Директории с документацией, которую проверяем.
 DOC_ROOTS = ["docs", "specs", ".work"]
 
-# Структуру .work проверяет docs_scripts/work_lint.py: там зоны, папки изменений и
+# Структуру .work проверяет scripts/docs/work_lint.py: там зоны, папки изменений и
 # артефакты субагентов, к которым правила индексов и frontmatter неприменимы.
 # Здесь у .work проверяется только целостность ссылок и разметка.
 STRUCTURE_EXEMPT = [".work"]
@@ -39,12 +39,10 @@ STRUCTURE_EXEMPT = [".work"]
 ROOT_DOCS = [
     "README.md",
     "AGENTS.md",
-    "CLAUDE.md",
     "SECURITY.md",
     "QUICKSTART.md",
     "README.template.md",
     "AGENTS.template.md",
-    "CLAUDE.template.md",
     "QUICKSTART.template.md",
 ]
 

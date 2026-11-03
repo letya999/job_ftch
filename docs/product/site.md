@@ -1,3 +1,8 @@
+---
+title: "Product brief for the public site"
+description: "Audience, content, and design constraints for the job_ftch public site."
+updated: 2026-11-04
+---
 # Product
 
 <!-- impeccable:product-schema 1 -->
