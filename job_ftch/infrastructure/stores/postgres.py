@@ -25,6 +25,9 @@ if TYPE_CHECKING:
 class PostgreSQLStore(SQLStoreAdapter):
     """PostgreSQL-backed persistent store using asyncpg."""
 
+    def _is_unique_violation(self, error: Exception) -> bool:
+        return asyncpg is not None and isinstance(error, asyncpg.UniqueViolationError)
+
     @staticmethod
     def _queue_time(value: datetime | None) -> datetime | None:
         return value.astimezone(UTC) if value is not None else None

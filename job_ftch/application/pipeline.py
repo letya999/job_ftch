@@ -302,7 +302,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self._item_concurrency = max(1, pipeline_item_concurrency)
         self._source_run_id = source_run_id
         self._active_source_run_id: str | None = source_run_id
-        self._settings = settings
+        self._settings = settings or get_settings()
         self._delivery_targets = {target.target_id: target for target in delivery_targets}
         if len(self._delivery_targets) != len(delivery_targets):
             raise ValueError("Delivery target IDs must be unique")
@@ -315,7 +315,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self._tracer = trace.get_tracer("job_ftch.pipeline")
 
     async def run(self, max_items: int | None = None) -> RunSummary:
-        settings = self._settings or get_settings()
+        settings = self._settings
         self._decision_version = str(getattr(settings, "pipeline_decision_version", "pipeline-v1"))
         summary = RunSummary()
         summary.source_run_id = self._source_run_id or uuid4().hex

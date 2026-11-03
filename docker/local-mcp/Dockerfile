@@ -28,13 +28,14 @@ RUN mkdir -p job_ftch scripts && touch job_ftch/__init__.py
 RUN /usr/local/bin/python -m pip install --no-cache-dir "uv==0.9.26" \
     && uv sync --locked --no-dev --extra mcp --extra local-mcp --extra sqlite \
         --extra openai --extra feeds --extra site-scrapers --extra browser \
-        --extra stealth --extra extraction --extra language
+        --extra stealth --extra extraction --extra language --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Chromium for career-site adaptive path (no camoufox/nodriver/torch in this image).
 RUN patchright install --with-deps chromium
 
 COPY . /app
+RUN uv pip install --python /app/.venv/bin/python --no-deps .
 RUN mkdir -p /data
 
 # Default tenant configs for local MCP (override with volume mount).

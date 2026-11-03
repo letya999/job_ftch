@@ -169,6 +169,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_translation_node.py](test_translation_node.py)
 - [test_triage.py](test_triage.py)
 - [test_url_scoring.py](test_url_scoring.py)
+- [test_wantapply_site_parser.py](test_wantapply_site_parser.py)
 - [test_watermark.py](test_watermark.py)
 - [test_workxam_site_parser.py](test_workxam_site_parser.py)
 - [test_yandex_site_parser.py](test_yandex_site_parser.py)
