@@ -189,6 +189,52 @@ class TestBuildCard:
         assert card.key_requirements is not None
         assert "3+ years ML" in card.key_requirements
 
+    def test_requirements_and_stack_reuse_source_sections(self) -> None:
+        record = _minimal_record(
+            description=(
+                "Задачи: Разрабатывать AI-агентов для поддержки клиентов.\n"
+                "Требования: Опыт Python от трёх лет, умение работать с LLM.\n"
+                "Стек: Python, FastAPI, PostgreSQL и Docker.\n"
+                "Условия: гибридный формат."
+            ),
+        )
+        card = build_card(record)
+        assert card.key_requirements == "Опыт Python от трёх лет, умение работать с LLM."
+        assert card.stack == "Python, FastAPI, PostgreSQL и Docker."
+
+    def test_summary_uses_existing_responsibilities_without_llm(self) -> None:
+        record = _minimal_record(
+            description="Long source text that starts with an introduction.",
+            responsibilities=("Build AI agents", "Deploy them to production"),
+        )
+        assert build_card(record).summary == "Build AI agents; Deploy them to production"
+
+    def test_summary_falls_back_to_description_when_template_has_heading(self) -> None:
+        from job_ftch.domain.presentable import PresentableJob
+
+        record = _minimal_record(
+            description="ML Engineer\nBuild recommendation systems for retail customers.",
+            presentable=PresentableJob(
+                title="ML Engineer",
+                body="# ML Engineer\n**Company:** Acme\n\nBuild recommendation systems.",
+                ats_score=0.5,
+                language="en",
+            ),
+        )
+        assert build_card(record).summary == "Build recommendation systems for retail customers."
+
+    def test_summary_prefers_tasks_over_source_header(self) -> None:
+        record = _minimal_record(
+            description=(
+                "ML Engineer\nКомпания: Acme\nЗарплата: по договорённости\n"
+                "Задачи: Разрабатывать рекомендательные модели. • Внедрять их в продукт.\n"
+                "Требования: Python и PyTorch."
+            ),
+        )
+        assert build_card(record).summary == (
+            "Разрабатывать рекомендательные модели. Внедрять их в продукт."
+        )
+
     def test_url_from_canonical(self) -> None:
         job = _minimal_job(canonical_url="https://example.com/job/123")
         card = build_card(job)

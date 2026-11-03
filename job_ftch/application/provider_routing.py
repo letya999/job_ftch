@@ -104,6 +104,7 @@ def _profile_settings(
             "openai_model": model,
             "openai_timeout_seconds": profile.timeout_seconds,
             "openai_max_retries": profile.max_retries,
+            "llm_structured_mode": profile.structured_mode,
         }
     )
 

@@ -6,7 +6,7 @@ import functools
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -58,6 +58,7 @@ class LLMProviderProfile(BaseModel):
     credential_ref: str = "JOB_FTCH_OPENAI_API_KEY"
     timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     max_retries: int = Field(default=2, ge=0, le=10)
+    structured_mode: Literal["tools", "json"] = "tools"
     capabilities: tuple[str, ...] = ("text", "structured")
     models: tuple[str, ...] = ()
     session_dir: Path | None = None
@@ -273,6 +274,7 @@ class Settings(BaseSettings):
     posting_min_quality_score: float = Field(default=0.8, ge=0.0, le=1.0)
     routing_accept_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
     bot_send_limit_per_run: int = Field(default=100, ge=1, le=100)
+    bot_channel_throttle_seconds: float = Field(default=3.5, ge=0.0, le=120.0)
     extraction_min_search_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
     # TD-017 heuristic extraction fast-path. Default OFF: skipping the LLM
     # extraction for trusted ATS payloads also skips the fields (skills,
@@ -341,6 +343,7 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     openai_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     openai_max_retries: int = Field(default=2, ge=0, le=10)
+    llm_structured_mode: Literal["tools", "json"] = "tools"
     llm_preflight_enabled: bool = True
     llm_preflight_timeout_seconds: float = Field(default=15.0, gt=0.0, le=120.0)
     llm_quota_retry_delay_seconds: int = Field(default=1800, ge=60, le=86400)

@@ -687,6 +687,8 @@ class DataArtCareerParser(_EmployerBoardParser):
             ):
                 raise ValueError("invalid DataArt vacancy feed")
             for vacancy in payload["items"]:
+                if isinstance(vacancy, dict) and vacancy.get("contentType") == 1:
+                    continue  # The feed inserts a promotional card among vacancies.
                 slug = vacancy.get("slug") if isinstance(vacancy, dict) else None
                 if not isinstance(slug, str) or not re.fullmatch(r"[A-Za-z0-9]+", slug):
                     raise ValueError("invalid DataArt vacancy identifier")

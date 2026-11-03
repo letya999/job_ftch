@@ -221,10 +221,67 @@ def detect_content_language(job: Job | JobRecord) -> str:
 
 def summarise_requirements(job: Job | JobRecord) -> str | None:
     reqs = getattr(job, "requirements_must", None) or ()
-    if not reqs:
+    if reqs:
+        joined = ", ".join(r.strip() for r in reqs[:5] if r.strip())
+        return joined[:300] or None
+    return _description_section(
+        job,
+        r"(?:требования|кого мы ищем|что мы ждем|requirements|qualifications)",
+        r"(?:условия|мы предлагаем|benefits|задачи|обязанности|responsibilities|стек|технологии|tech stack|technologies)",
+        300,
+    )
+
+
+def _description_section(
+    job: Job | JobRecord, heading: str, next_heading: str, limit: int
+) -> str | None:
+    description = getattr(job, "description", None) or ""
+    match = re.search(rf"(?i)\b{heading}\s*:", description)
+    if not match:
         return None
-    joined = ", ".join(r.strip() for r in reqs[:5] if r.strip())
-    return joined[:300] or None
+    segment = re.split(rf"(?i)\b{next_heading}\s*:", description[match.end() :], maxsplit=1)[0]
+    text = " ".join(segment.replace("•", " ").split()).strip("; -—–")
+    return text[:limit] if len(text) >= 20 else None
+
+
+_TASK_SECTION = re.compile(
+    r"(?i)\b(?:задачи|обязанности|чем предстоит заниматься|что предстоит делать|"
+    r"responsibilities|what you'll do|what you will do)\s*:"
+)
+_NEXT_SECTION = re.compile(
+    r"(?i)\b(?:требования|условия|мы предлагаем|requirements|qualifications|benefits)\s*:"
+)
+_DETAIL_PREFIX = re.compile(
+    r"(?i)^(?:вакансия|компания|работодатель|локация|зарплата|зп|формат|"
+    r"company|location|salary|work mode)\s*:"
+)
+
+
+def summarise_description(job: Job | JobRecord) -> str | None:
+    """Prefer the tasks already present in source text; never invent missing work."""
+    description = (getattr(job, "description", None) or "").strip()
+    if not description:
+        return None
+    tasks = _TASK_SECTION.search(description)
+    if tasks:
+        segment = _NEXT_SECTION.split(description[tasks.end() :], maxsplit=1)[0]
+        summary = " ".join(segment.replace("•", " ").split()).strip("; -—–")
+        if len(summary) >= 25:
+            return summary[:300]
+
+    title = (getattr(job, "title", None) or "").strip().casefold()
+    company = (getattr(job, "company", None) or "").strip().casefold()
+    lines: list[str] = []
+    for raw in description.splitlines():
+        line = raw.strip().lstrip("#*• -—–").strip()
+        if not line or line.casefold() in {title, company} or _DETAIL_PREFIX.match(line):
+            continue
+        if line.count("#") >= 2:
+            continue
+        lines.append(line)
+        if sum(map(len, lines)) >= 300:
+            break
+    return " ".join(lines)[:300] or None
 
 
 def summarise_stack(job: Job | JobRecord) -> str | None:
@@ -233,6 +290,11 @@ def summarise_stack(job: Job | JobRecord) -> str | None:
         skills = getattr(job, "skills_explicit", None) or ()
         names = [getattr(s, "canonical_name", str(s)).strip() for s in skills[:8] if s]
         if not names:
-            return None
+            return _description_section(
+                job,
+                r"(?:стек|технологии|tech stack|technologies)",
+                r"(?:условия|мы предлагаем|benefits|задачи|обязанности|требования|requirements)",
+                200,
+            )
         return " · ".join(names)[:200] or None
     return " · ".join(t.strip() for t in tools[:8] if t.strip())[:200] or None

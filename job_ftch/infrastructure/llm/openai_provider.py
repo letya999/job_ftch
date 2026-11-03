@@ -3,17 +3,15 @@ and free-form text generation.
 
 LLM touchpoints (per ADR-019):
 
-1. ``extract(text, schema)`` — generic Pydantic extraction (instructor + tools).
+1. ``extract(text, schema)`` — generic Pydantic extraction (instructor).
 2. ``classify(prompt, schema)`` — low-confidence relevance classification.
 3. ``present(job, schema)`` — presentable text formatting for Telegram.
 4. ``generate_text(system, user)`` — free-form text (used by the dynamic
    relevance-prompt builder, which has no schema to constrain to).
 
-The structured methods go through the ``instructor.from_provider`` client
-(TOOLS mode) which patches ``chat.completions.create`` and requires a
-``response_model`` for every call. TOOLS (not TOOLS_STRICT) is required for
-OpenAI-compatible gateways such as CLIProxyAPI that reject strict function
-schemas when optional Pydantic fields are omitted from ``required``.
+The structured methods go through the ``instructor.from_provider`` client,
+which requires a ``response_model`` for every call. The default is TOOLS;
+profiles whose gateway returns structured JSON as message content use JSON.
 ``generate_text`` cannot use the same client because it has no schema — it
 would fail with ``AsyncInstructor.create() missing 'response_model'``. We
 therefore hold a second, raw ``AsyncOpenAI`` client alongside the instructor
@@ -157,6 +155,7 @@ class OpenAIInstructorLLMProvider:
         timeout_seconds: float,
         max_retries: int,
         preflight_timeout_seconds: float | None = None,
+        structured_mode: str = "tools",
     ) -> None:
         if not _INSTRUCTOR_AVAILABLE:
             raise ImportError(
@@ -180,14 +179,11 @@ class OpenAIInstructorLLMProvider:
         # an AsyncInstructor that wraps the underlying AsyncOpenAI but
         # rewrites ``.create()`` to require ``response_model``. We use
         # this for extract / classify / present.
-        # TOOLS (not TOOLS_STRICT): CLIProxy/Codex gateways reject strict
-        # function schemas when optional Pydantic fields are omitted from
-        # ``required`` (HTTP 400 invalid_function_parameters). Non-strict
-        # tools still return structured args and work across OpenAI-compatible
-        # proxies used for local subscription routing.
+        # Some gateways return JSON content instead of tool calls for real
+        # prompts; the named profile selects the parsing mode.
         self._client = instructor.from_provider(
             f"openai/{model}",
-            mode=instructor.Mode.TOOLS,
+            mode=instructor.Mode.JSON if structured_mode == "json" else instructor.Mode.TOOLS,
             async_client=True,
             api_key=api_key,
             base_url=base_url,
@@ -437,4 +433,5 @@ def _build_openai_llm(settings: Settings) -> OpenAIInstructorLLMProvider:
         timeout_seconds=settings.openai_timeout_seconds,
         max_retries=settings.openai_max_retries,
         preflight_timeout_seconds=settings.llm_preflight_timeout_seconds,
+        structured_mode=settings.llm_structured_mode,
     )

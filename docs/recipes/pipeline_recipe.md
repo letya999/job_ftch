@@ -1,7 +1,7 @@
 ---
 title: "Рецепт production-пайплайна"
 description: "Зафиксированный рецепт ai_jobs: тестовый пользователь, тенант, источники, датасет, граф, настройки, метрики и регрессионные проверки."
-updated: 2026-08-01
+updated: 2026-11-03
 ---
 # Рецепт production-пайплайна
 
@@ -26,6 +26,12 @@ updated: 2026-08-01
 | Модели | extraction `gpt-5.4-nano`, relevance `gpt-4.1-mini`, ontology `gpt-4.1-mini` |
 | Profile shots | 40: 10 positive resume, 10 negative resume, 10 positive jobs, 10 negative jobs |
 | Prefilter | `fixtures/prefilter/tfidf_logreg_v1.json`, production threshold `0.20`, trained for `ai_jobs` / AI-engineering profile |
+
+Это замороженный OpenAI champion для сравнительного eval. Live Telegram bot
+дополнительно загружает `job_ftch/adapters/telegram_bot/runtime.prod.yaml`:
+по [ADR 104](../adr/104-cliproxy-main-etl-production-route.md) его основные LLM
+bindings направлены в CLIProxy с `gemini-3.8-flash-high`. Сравнение с champion
+должно явно указывать этот model/provider override.
 
 Для open source воспроизводимости используйте fixture-пару
 `fixtures/bootstrap/test_user.json` + `fixtures/bootstrap/tenant_ai_jobs.yaml`.
