@@ -1,0 +1,18 @@
+# Telegram discussion groups from the 2026-11-04 source expansion.
+# Import with scripts/import_sources.py --source-type telegram_group --limit 20.
+urls:
+  # Kazakhstan
+  - https://t.me/itmankz
+  # Uzbekistan
+  - https://t.me/itjobstashkent
+  # Kyrgyzstan
+  - https://t.me/rabotakgz
+  # Georgia
+  - https://t.me/georgiaitjobs
+  # Poland
+  - https://t.me/digital_poland
+  # Cyprus
+  - https://t.me/it_jobs_cyprus
+  - https://t.me/cyprushr
+  - https://t.me/rabota_na_kipre
+  - https://t.me/LimassolJobs
