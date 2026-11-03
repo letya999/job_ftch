@@ -1,5 +1,5 @@
 {
-  // Разметка markdown. Смысловые правила проверяет docs_scripts/docs_lint.py,
+  // Разметка markdown. Смысловые правила проверяет scripts/docs/docs_lint.py,
   // здесь только форматирование. Запуск через just lint-md.
   "config": {
     "default": true,

@@ -42,4 +42,4 @@ uv run job_ftch eval --fixture classification
 
 Фокус JobFetch — на настраиваемом пути **источник → данные и подтверждения → оценка → публикация**, в том числе для Telegram-сообщества. Основное production-развёртывание — Telegram-бот; надёжность отдельных сайтов проверяется отдельно и не следует автоматически из зелёного CI.
 
-Правила участия — в [CONTRIBUTING.md](CONTRIBUTING.md), политика безопасности — в [SECURITY.md](SECURITY.md). Лицензия: [AGPL-3.0-only](LICENSE).
+Правила участия — в [CONTRIBUTING.md](.github/CONTRIBUTING.md), политика безопасности — в [SECURITY.md](SECURITY.md). Лицензия: [AGPL-3.0-only](LICENSE).

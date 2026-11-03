@@ -40,10 +40,10 @@ jobs:
         run: |
           uv venv
           uv pip install --reinstall-package markupsafe markupsafe
-          uv pip install -r docs_scripts/requirements.txt
+          uv pip install -r scripts/docs/requirements.txt
 
       - name: Build documentation site
-        run: uv run --no-sync mkdocs build -f docs_scripts/mkdocs.yml --strict
+        run: uv run --no-sync mkdocs build -f scripts/docs/mkdocs.yml --strict
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0

@@ -26,7 +26,7 @@ except ImportError:  # pragma: no cover
     print("Нужен PyYAML: just setup", file=sys.stderr)
     raise SystemExit(2) from None
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 WORK = ROOT / ".work"
 ZONES = ("todo", "in-progress", "done")
 DEBT = WORK / "tech-debt"

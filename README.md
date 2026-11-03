@@ -72,4 +72,4 @@ JobFetch focuses on the configurable **source → evidence → relevance → pub
 
 ## Develop and contribute
 
-Start with the [vision](docs/vision.md), [architecture](docs/architecture.md), [contributing guide](CONTRIBUTING.md) and [security policy](SECURITY.md). Issues are welcome for reproducible source failures and pipeline defects. Licensed under [AGPL-3.0-only](LICENSE).
+Start with the [vision](docs/vision.md), [architecture](docs/architecture.md), [contributing guide](.github/CONTRIBUTING.md) and [security policy](SECURITY.md). Issues are welcome for reproducible source failures and pipeline defects. Licensed under [AGPL-3.0-only](LICENSE).

@@ -16,13 +16,12 @@ import shutil
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 
 # Заготовка -> рабочее имя. Файл справа перед этим удаляется: он описывал шаблон,
 # а не проект, и в развёрнутом репозитории только путал бы.
 RENAMES = {
     "AGENTS.template.md": "AGENTS.md",
-    "CLAUDE.template.md": "CLAUDE.md",
     "README.template.md": "README.md",
     "QUICKSTART.template.md": "QUICKSTART.md",
 }

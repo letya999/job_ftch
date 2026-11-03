@@ -70,7 +70,7 @@ coverage и не охватывает весь suite. Для browser runtime и 
 
 [Docs workflow](../../.github/workflows/docs.yml) повторяет `docs-verify`
 на PR и push и **не** публикует сайт. [Docs Pages workflow](../../.github/workflows/docs-pages.yml)
-собирает MkDocs (`docs_scripts/mkdocs.yml`) и деплоит в GitHub Pages только
+собирает MkDocs (`scripts/docs/mkdocs.yml`) и деплоит в GitHub Pages только
 на push в `main` (и `workflow_dispatch` с `main`): PR checks и deploy
 разделены, permissions минимальны (`contents: read`, `pages: write`,
 `id-token: write`), concurrency group `pages` не отменяет уже идущий deploy.
