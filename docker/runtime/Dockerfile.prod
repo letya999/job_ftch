@@ -53,7 +53,7 @@ RUN python -c "from camoufox.__main__ import CamoufoxUpdate; from camoufox.pkgma
 RUN python -m cloakbrowser install
 
 COPY --chown=appuser:appuser . /app
-RUN uv pip install --python /app/.venv/bin/python --no-deps .
+RUN UV_NO_CACHE=1 UV_LINK_MODE=copy uv pip install --python /app/.venv/bin/python --no-deps .
 RUN mkdir -p /app/.runtime /app/artifacts \
     && chown appuser:appuser /app/.runtime /app/artifacts
 
