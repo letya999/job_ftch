@@ -21,6 +21,7 @@ from job_ftch.adapters.telegram_bot.public_jobs import mount_public_job_routes
 from job_ftch.adapters.telegram_bot.public_sources import mount_public_source_routes
 from job_ftch.application.profile_inputs import build_candidate_profile_from_payload
 from job_ftch.application.source_inputs import build_source_spec_from_input
+from job_ftch.application.source_quality import canonical_source_key
 from job_ftch.application.tenant_loader import load_tenants
 from job_ftch.application.tenant_runner import TenantRunner
 from job_ftch.config import Settings, get_settings
@@ -102,12 +103,23 @@ def _live_source_health(
 ) -> list[SourceHealth]:
     if not catalog_ids and finished_at is None:
         return source_health
+    fresh_keys = {
+        (item.source_kind, canonical_source_key(item.source_id))
+        for item in source_health
+        if _health_from_latest_run(item, finished_at)
+    }
     live: list[SourceHealth] = []
     for item in source_health:
+        recent = _health_from_latest_run(item, finished_at)
         if catalog_ids and item.source_id in catalog_ids:
+            if (
+                not recent
+                and (item.source_kind, canonical_source_key(item.source_id)) in fresh_keys
+            ):
+                continue
             live.append(item)
             continue
-        if _health_from_latest_run(item, finished_at):
+        if recent:
             live.append(item)
     return live
 

@@ -8,6 +8,7 @@ from job_ftch.application.registry import resolve_site_parser, resolve_site_pars
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.site_parsers.aggregator_boards import (
     AgileFluentParser,
+    AIEngineerParser,
     AIJobsAiParser,
     AIJobsComParser,
     AIJobsParser,
@@ -86,6 +87,57 @@ def test_search_builders_keep_target_role_on_supported_aggregators() -> None:
     assert (
         QuickOfferParser().build_search_urls("https://quick-offer.ru/jobs", ["AI Engineer"]) == []
     )
+
+
+@pytest.mark.asyncio
+async def test_ai_engineer_reads_relevant_full_cards_without_detail_requests() -> None:
+    url = "https://ai.engineer/jobs"
+    html = """<section id="acme"><span class="font-extrabold">Acme</span>
+      <div class="bg-white shadow-sm rounded-xl">
+        <span class="font-semibold text-lg">AI Engineer</span>
+        <div class="text-sm text-gray-600">Build and deploy language models with Python.
+          Work with product teams to evaluate quality and improve production systems.</div>
+        <div class="justify-end"><a href="https://jobs.example.com/ai-engineer">More Information</a></div>
+      </div>
+      <div class="bg-white shadow-sm rounded-xl">
+        <span class="font-semibold text-lg">Accountant</span>
+        <div class="text-sm text-gray-600">Support AI teams through payroll and accounting.
+          This job description is long enough to pass the body length check.</div>
+        <div class="justify-end"><a href="https://jobs.example.com/accountant">More Information</a></div>
+      </div>
+      <div class="bg-white shadow-sm rounded-xl">
+        <span class="font-semibold text-lg">AI Engineer</span>
+        <div class="text-sm text-gray-600">Join a growing AI team and build reliable
+          machine learning services for production with our engineers.</div>
+        <div class="justify-end"><a href="https://www.linkedin.com/posts/acme">More Information</a></div>
+      </div>
+    </section>"""
+    client = _Client({url: _Response(html, url)})
+    spec = CareerSiteSpec(
+        url=url,
+        source_name="ai_engineer",
+        limit=2,
+        monitor_config={"_search_keywords": ["AI Engineer"]},
+    )
+
+    items = [item async for item in AIEngineerParser().parse(spec, client)]
+
+    assert len(items) == 1
+    assert str(items[0].url) == "https://jobs.example.com/ai-engineer"
+    assert "Acme" in items[0].text
+    assert items[0].metadata["company"] == "Acme"
+    assert "improve production systems" in items[0].text
+    assert AIEngineerParser.confirmed_empty_on_empty is True
+
+
+@pytest.mark.asyncio
+async def test_ai_engineer_layout_change_is_not_reported_as_empty_board() -> None:
+    url = "https://ai.engineer/jobs"
+    client = _Client({url: _Response("<main>Unknown layout</main>", url)})
+    spec = CareerSiteSpec(url=url, source_name="ai_engineer")
+
+    with pytest.raises(ValueError, match="listing cards not found"):
+        [item async for item in AIEngineerParser().parse(spec, client)]
 
 
 @pytest.mark.asyncio

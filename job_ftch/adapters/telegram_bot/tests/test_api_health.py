@@ -213,6 +213,30 @@ async def test_tenant_health_ignores_stale_search_overlay_rows() -> None:
     assert payload["sources"]["bad_source_ids"] == ["career_site:example"]
 
 
+@pytest.mark.asyncio
+async def test_tenant_health_uses_fresh_overlay_instead_of_stale_base() -> None:
+    runner = _Runner()
+    now = datetime.now(UTC)
+    base = runner.store.health[0]
+    runner.store.health = [
+        base.model_copy(update={"last_run_at": (now - timedelta(days=12)).isoformat()}),
+        base.model_copy(
+            update={
+                "source_id": "career_site:example_kw1",
+                "source_name": "example_kw1",
+                "last_run_at": now.isoformat(),
+                "status": "healthy",
+                "degraded": False,
+            }
+        ),
+    ]
+
+    payload = await _tenant_health(runner, "ai_jobs")  # type: ignore[arg-type]
+
+    assert payload["sources"]["total"] == 1
+    assert payload["sources"]["bad_source_ids"] == []
+
+
 def test_api_pipeline_sources_important_and_quality(monkeypatch: pytest.MonkeyPatch) -> None:
     from starlette.testclient import TestClient
 

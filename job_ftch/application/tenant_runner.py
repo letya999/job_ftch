@@ -258,7 +258,8 @@ def _update_source_health_payload(
     drift_ratio: float | None = None
     if prev_baseline_emitted >= min_baseline_threshold:
         drift_ratio = current_emitted / prev_baseline_emitted if prev_baseline_emitted > 0 else 0.0
-        degraded = current_emitted == 0 or drift_ratio < drift_ratio_threshold
+        # Incremental dedup can reduce new publications while fetching still works.
+        degraded = stats.fetched == 0 and drift_ratio < drift_ratio_threshold and not had_failure
 
     if had_failure:
         failure_streak = (previous.failure_streak if previous else 0) + 1

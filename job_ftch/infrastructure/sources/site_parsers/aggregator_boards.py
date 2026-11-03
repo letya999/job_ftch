@@ -718,7 +718,66 @@ class AIEngineerParser(HtmlAggregatorParser):
     domain_pattern = r"^https?://ai\.engineer(?:/|$)"
     parser_name = "ai_engineer"
     detail_pattern = re.compile(r"$^", re.IGNORECASE)
-    terminal_on_empty = True
+    confirmed_empty_on_empty = True
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        try:
+            response = await safe_fetch(client, spec.url)
+        except Exception as exc:  # noqa: BLE001 - source fallback handles blocked boards
+            logger.info("aggregator_listing_fetch_failed", parser=self.parser_name, error=str(exc))
+            return
+        tree = LexborHTMLParser(str(response.text))
+        keywords = keywords_from_spec(spec)
+        emitted = 0
+        recognized = 0
+        if not tree.css("div.bg-white.shadow-sm.rounded-xl"):
+            msg = "AI Engineer listing cards not found"
+            raise ValueError(msg)
+        for section in tree.css("section[id]"):
+            employer_node = section.css_first("span.font-extrabold")
+            employer = _clean_text(employer_node.text()) if employer_node else ""
+            for card in section.css("div.bg-white.shadow-sm.rounded-xl"):
+                title_node = card.css_first("span.font-semibold.text-lg")
+                body_node = card.css_first("div.text-sm.text-gray-600")
+                link = card.css_first("div.justify-end a[href]")
+                if title_node is None or body_node is None or link is None:
+                    continue
+                recognized += 1
+                title = _clean_text(title_node.text())
+                body = _clean_text(body_node.text(separator=" "))
+                url = _canonical_http_url(link.attributes.get("href"), str(response.url))
+                if (
+                    not url
+                    or len(body) < 60
+                    or "talent community" in title.casefold()
+                    or not text_matches_keywords(title, keywords)
+                    or (urlparse(url).hostname or "").removeprefix("www.")
+                    in _IGNORED_EXTERNAL_HOSTS
+                ):
+                    continue
+                yield build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=spec.source_name or self.parser_name,
+                    external_id=url,
+                    url=url,
+                    text="\n".join(part for part in (title, employer, body) if part),
+                    metadata={
+                        "adapter": self.parser_name,
+                        "parser": self.parser_name,
+                        "board_url": spec.url,
+                        "origin_url": url,
+                        "origin_fetched": False,
+                        "company": employer,
+                        "company_authoritative": bool(employer),
+                        "detail_vacancy_confirmed": True,
+                    },
+                )
+                emitted += 1
+                if emitted >= (spec.limit or 50):
+                    return
+        if not recognized:
+            msg = "AI Engineer listing cards not found"
+            raise ValueError(msg)
 
 
 class RemoteRocketshipParser(HtmlAggregatorParser):
