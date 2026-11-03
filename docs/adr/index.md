@@ -112,6 +112,8 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [101 — Commit Telegram cursors after a successful run](101-commit-source-cursors-after-run.md) - Defer tenant Telegram cursors until pipeline processing finishes so interrupted runs replay unread messages. (Updated: 2026-10-18)
 - [102 — Неопределённая доставка Telegram](102-uncertain-telegram-delivery.md) - Durable publication attempts, receipts and operator reconciliation. (Updated: 2026-10-27)
 - [103 — Безопасные трассы в OpenObserve](103-safe-openobserve-tracing.md) - Экспорт ограниченных технических span без содержимого вакансий и секретов. (Updated: 2026-10-27)
+- [104 — CLIProxy as the production ETL provider](104-cliproxy-main-etl-production-route.md) - Explicit node bindings allow a controlled CLIProxy route for the production bot when direct OpenAI quota blocks ingestion. (Updated: 2026-11-03)
+- [105 — Paced Telegram channel delivery](105-paced-channel-delivery.md) - Space channel posts without changing ingest frequency or LLM usage. (Updated: 2026-11-03)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

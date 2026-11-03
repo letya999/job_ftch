@@ -5,9 +5,35 @@
 
 sink_backend: none
 posting_backend: none
+bot_channel_throttle_seconds: 45.0
 # Keep compact non-accepted decisions queryable by the private pull API.
 review_output_backend: store
 rejected_output_backend: store
+
+# ADR 102: the bot uses CLIProxy for ETL while the direct OpenAI quota is blocked.
+llm_preflight_timeout_seconds: 30.0
+llm_provider_profiles:
+  openai_main:
+    backend: openai
+    capabilities: [text, structured]
+  cliproxy_main:
+    backend: openai
+    base_url: http://cliproxy:8317/v1
+    credential_ref: JOB_FTCH_CLIPROXY_API_KEY
+    structured_mode: json
+    capabilities: [text, structured]
+  cliproxy_captcha:
+    backend: openai
+    base_url: http://cliproxy:8317/v1
+    credential_ref: JOB_FTCH_CLIPROXY_API_KEY
+    capabilities: [vision]
+
+llm_bindings:
+  extraction: {provider: cliproxy_main, model: gemini-3.8-flash-high}
+  relevance: {provider: cliproxy_main, model: gemini-3.8-flash-high}
+  ontology: {provider: cliproxy_main, model: gemini-3.8-flash-high}
+  presentation: {provider: cliproxy_main, model: gemini-3.8-flash-high}
+  captcha_image: {provider: cliproxy_captcha, model: gemini-3.8-flash-high, capability: vision}
 
 embedding_provider: sentence_transformers
 embedding_model: BAAI/bge-m3

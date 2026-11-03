@@ -264,7 +264,9 @@ def test_trace_export_stays_disabled_without_opt_in_and_credentials(monkeypatch)
     monkeypatch.setattr(
         "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter", unexpected
     )
-    assert not _configure_safe_trace_export(Settings.model_validate({"openobserve_enabled": True}))
+    assert not _configure_safe_trace_export(
+        Settings.model_validate({"openobserve_enabled": True, "tracing_enabled": False})
+    )
     assert not _configure_safe_trace_export(
         Settings.model_validate(
             {

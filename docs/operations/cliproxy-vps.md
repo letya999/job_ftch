@@ -1,7 +1,7 @@
 ---
 title: "CLIProxyAPI на VPS"
 description: "Безопасная настройка optional CLIProxyAPI sidecar для dev/prod Compose и Google OAuth."
-updated: 2026-09-17
+updated: 2026-11-03
 ---
 # CLIProxyAPI на VPS
 
@@ -78,7 +78,7 @@ Google OAuth/доступ к Gemini может требовать разреше
 
 ## Подключение CAPTCHA image-only
 
-Основной ETL всегда оставляйте на отдельно настроенном OpenAI-профиле:
+Обычный основной ETL использует отдельно настроенный OpenAI-профиль:
 
 ```dotenv
 JOB_FTCH_LLM_BACKEND=openai
@@ -98,6 +98,25 @@ JOB_FTCH_CAPTCHA_VISION_MODEL=gemini-3.8-flash-high
 gateway и не должен использоваться в production CAPTCHA-only режиме. Route
 `cliproxy_image` должен быть явно включён в runtime; один только
 `JOB_FTCH_CAPTCHA_AUTHORIZED_DOMAINS=*` не переключает OCR на CLIProxy.
+
+## Основной ETL через CLIProxy
+
+[ADR 104](../adr/104-cliproxy-main-etl-production-route.md) разрешает явный
+production-маршрут для extraction, relevance, ontology и presentation, когда
+прямой OpenAI заблокирован квотой. Его настройки находятся в
+`job_ftch/adapters/telegram_bot/runtime.prod.yaml`: именованный профиль
+`cliproxy_main` использует `http://cliproxy:8317/v1`, структурированный JSON
+и уже переданный через окружение `JOB_FTCH_CLIPROXY_API_KEY`. CAPTCHA сохраняет
+отдельный профиль.
+
+Перед включением проверьте реальный chat-запрос, структурированные extraction
+и relevance вызовы, а также локальные regression gates. `/v1/models` подтверждает
+только каталог моделей. Полный сравнительный eval проводите отдельно на
+изолированном state перед продвижением модели в champion. После пересборки
+bot image и пересоздания bot/public-api
+проверьте LLM preflight, ingest и подтверждённые Telegram receipts. Для отката
+верните прежний bot runtime overlay и образ; production state не сбрасывайте.
+Legacy `JOB_FTCH_LLM_GATEWAY=cliproxy` не меняет именованные ETL bindings.
 
 ## Остановка и rollback
 

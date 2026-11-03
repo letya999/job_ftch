@@ -11,6 +11,7 @@ def _card(**overrides: object) -> PublicationCard:
     defaults: dict[str, object] = {
         "role": "ML Engineer",
         "company": "Acme Corp",
+        "summary": "Build and maintain production ML pipelines.",
         "url": "https://example.com/job/1",
         "source_name": "TestSource",
     }
@@ -105,3 +106,9 @@ class TestVacancySubstanceGate:
     def test_salary_alone_is_substance(self) -> None:
         layout = load_layout()
         assert validate_card(_card(company=None, salary="200 000 ₽/мес"), layout).ok is True
+
+    def test_metadata_only_card_rejected(self) -> None:
+        layout = load_layout()
+        outcome = validate_card(_card(summary=None, geo="Москва"), layout)
+        assert outcome.ok is False
+        assert outcome.reject_reason == "missing_job_details"

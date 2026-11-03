@@ -70,6 +70,42 @@ async def test_trudvsem_parser_maps_official_api_vacancy() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dataart_parser_skips_promotional_feed_card() -> None:
+    from job_ftch.infrastructure.sources.site_parsers.large_employer_boards import (
+        DataArtCareerParser,
+    )
+
+    class _DataArtClient:
+        async def get(self, url: str, **_: object) -> _Response:
+            if "filter-content-page" in url:
+                return _Response(
+                    payload={
+                        "pagesTotal": 1,
+                        "items": [
+                            {"contentType": 0, "slug": "PYT00203"},
+                            {"contentType": 1, "title": "What if I can't find it?"},
+                            {"contentType": 0, "slug": "QAP00007"},
+                        ],
+                    }
+                )
+            return _Response(
+                text='<script type="application/ld+json">'
+                '{"@type":"JobPosting","title":"Python Developer",'
+                '"description":"<p>Build production Python services.</p>"}'
+                "</script>"
+            )
+
+    items = [
+        item
+        async for item in DataArtCareerParser().parse(
+            CareerSiteSpec(url="https://www.dataart.team/vacancies", limit=2),
+            _DataArtClient(),
+        )
+    ]
+    assert [item.external_id for item in items] == ["PYT00203", "QAP00007"]
+
+
+@pytest.mark.asyncio
 async def test_kaspi_jumys_parser_emits_unique_ssr_cards() -> None:
     client = _Client(
         _Response(

@@ -32,6 +32,7 @@ from job_ftch.adapters.telegram_bot.middlewares.di import DIMiddleware
 from job_ftch.adapters.telegram_bot.middlewares.throttling import ThrottlingMiddleware
 from job_ftch.adapters.telegram_bot.sender import TelegramCardSender
 from job_ftch.application.channel_publisher import (
+    channel_throttle_seconds,
     publish_jobs,
     remaining_publish_candidates,
 )
@@ -236,6 +237,7 @@ async def _recover_pending_scheduler_publish(
         ),
         store=store,
         send_limit=send_limit,
+        throttle_seconds=channel_throttle_seconds(runtime.settings),
         sleep=asyncio.sleep,
     )
     remaining = remaining_publish_candidates(len(eligible), outcome)
@@ -1004,6 +1006,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         ),
                         store=store,
                         send_limit=send_limit,
+                        throttle_seconds=channel_throttle_seconds(settings),
                         # Passed explicitly (rather than relying on the default) so
                         # this module's asyncio.sleep stays the single patch point
                         # for driving the loop in tests.

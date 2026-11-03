@@ -17,6 +17,7 @@ Publication tracking uses the tenant ledger and, when available, durable outbox:
 from __future__ import annotations
 
 import asyncio
+import inspect
 from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import TYPE_CHECKING, Protocol, cast
@@ -35,6 +36,7 @@ from job_ftch.application.publish_ledger import (
     persist_publish_url_ledger,
 )
 from job_ftch.domain import OutboxRecord, OutboxState
+from job_ftch.publication.dedup import same_vacancy
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Sequence
@@ -49,6 +51,13 @@ logger = structlog.get_logger(__name__)
 # Telegram tolerates roughly one channel post per 3 seconds; the extra margin
 # keeps a long batch from tripping flood control halfway through.
 _DEFAULT_THROTTLE_SECONDS = 3.5
+
+
+def channel_throttle_seconds(settings: object) -> float:
+    value = getattr(settings, "bot_channel_throttle_seconds", None)
+    return float(value) if isinstance(value, (int, float)) else _DEFAULT_THROTTLE_SECONDS
+
+
 _DEFAULT_TRANSIENT_ATTEMPTS = 2
 
 # Substrings that mean the target itself is unusable. Retrying or continuing
@@ -110,6 +119,7 @@ class RejectedDelivery:
 class PublishOutcome:
     sent: int = 0
     skipped_already_published: int = 0
+    skipped_duplicate: int = 0
     error: str | None = None
     # True for rate-limit exhaustion or transport outages, so callers can keep
     # a retry window open. The publish ledger makes retries idempotent.
@@ -143,6 +153,7 @@ def remaining_publish_candidates(total_candidates: int, outcome: PublishOutcome)
         total_candidates
         - outcome.sent
         - outcome.skipped_already_published
+        - int(getattr(outcome, "skipped_duplicate", 0) or 0)
         - int(getattr(outcome, "terminal_skips", 0) or 0),
     )
 
@@ -190,7 +201,7 @@ async def publish_jobs(
         id_ledger = await load_publish_ledger(store)
         url_ledger = await load_publish_url_ledger(store)
         enqueue = getattr(store, "enqueue_outbox", None)
-        if callable(enqueue):
+        if inspect.iscoroutinefunction(enqueue):
             target_key = sha256(target.encode()).hexdigest()
             anchor_key = sha256(b"publication:legacy-ledger-owner").hexdigest()
             anchor = await enqueue(
@@ -219,6 +230,7 @@ async def publish_jobs(
             published_ids = set(id_ledger)
             published_urls = set(url_ledger)
 
+    delivered_jobs: list[Job] = []
     for job in jobs:
         if outcome.sent >= send_limit:
             break
@@ -228,11 +240,15 @@ async def publish_jobs(
         already_by_url = publish_url is not None and publish_url in published_urls
         if already_by_id or already_by_url:
             outcome.skipped_already_published += 1
+            delivered_jobs.append(job)
+            continue
+        if any(same_vacancy(job, delivered) for delivered in delivered_jobs):
+            outcome.skipped_duplicate += 1
             continue
 
         intents: list[OutboxRecord] = []
         enqueue = getattr(store, "enqueue_outbox", None)
-        if callable(enqueue):
+        if inspect.iscoroutinefunction(enqueue):
             identities = [
                 (kind, value) for kind, value in (("id", job_id), ("url", publish_url)) if value
             ]
@@ -296,8 +312,10 @@ async def publish_jobs(
                         reason=delivery.reason,
                     )
                     break
-                if isinstance(delivery, DeliveryReceipt) and (
-                    not str(delivery.message_id).isdigit() or int(delivery.message_id) <= 0
+                if (
+                    intents
+                    and isinstance(delivery, DeliveryReceipt)
+                    and (not str(delivery.message_id).isdigit() or int(delivery.message_id) <= 0)
                 ):
                     outcome.error = "delivery_requires_reconciliation"
                     outcome.had_transient_failure = True
@@ -377,6 +395,7 @@ async def publish_jobs(
 
         outcome.sent += 1
         outcome.delivered.append(job)
+        delivered_jobs.append(job)
         if isinstance(delivery, DeliveryReceipt):
             outcome.receipts.append(delivery)
         if store is not None:

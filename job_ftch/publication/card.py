@@ -20,6 +20,7 @@ from job_ftch.publication.normalize import (
     format_work_mode,
     pick_source_label,
     resolve_card_url,
+    summarise_description,
     summarise_requirements,
     summarise_stack,
 )
@@ -63,12 +64,18 @@ def build_card(job: Job | JobRecord) -> PublicationCard:
     salary = format_compensation(job)
     url = resolve_card_url(job)
 
-    presentable = getattr(job, "presentable", None)
-    summary = None
-    if presentable is not None:
+    responsibilities = getattr(job, "responsibilities", ()) or ()
+    summary = "; ".join(part.strip() for part in responsibilities[:2] if part.strip()) or None
+    if not summary:
+        presentable = getattr(job, "presentable", None)
         body = getattr(presentable, "body", None)
-        if body and not body.startswith("#"):
-            summary = body.strip()[:300] or None
+        if body and not body.lstrip().startswith("#"):
+            summary = body.strip()
+    if not summary:
+        # The production template starts with a Markdown title; use the already
+        # extracted description instead of dropping the vacancy's only details.
+        summary = summarise_description(job)
+    summary = summary[:300] if summary else None
 
     key_requirements = summarise_requirements(job)
     stack = summarise_stack(job)

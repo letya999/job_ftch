@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -11,7 +12,9 @@ from job_ftch.application.channel_publisher import (
     FatalTargetError,
     RejectedDelivery,
     TransientSendError,
+    channel_throttle_seconds,
     publish_jobs,
+    remaining_publish_candidates,
 )
 
 pytestmark = pytest.mark.anyio
@@ -53,6 +56,11 @@ class _Store:
 
 async def _no_sleep(_seconds: float) -> None:
     return None
+
+
+def test_channel_throttle_uses_runtime_setting() -> None:
+    assert channel_throttle_seconds(SimpleNamespace(bot_channel_throttle_seconds=45.0)) == 45.0
+    assert channel_throttle_seconds(SimpleNamespace()) == 3.5
 
 
 async def test_publishes_up_to_send_limit() -> None:
@@ -703,6 +711,85 @@ async def test_delivered_intent_survives_missing_legacy_ledger() -> None:
     assert second.skipped_already_published == 1
     assert second.error is None
     assert sender.calls == [("@chan", "job")]
+
+
+async def test_near_duplicate_is_skipped_only_after_successful_delivery() -> None:
+    body = "Build and maintain production AI agents for customer support. " * 4
+    first = _Job("a", "https://example.com/one")
+    first.title = "AI Agent Engineer"
+    first.description = body
+    second = _Job("b", "https://example.com/two")
+    second.title = "AI Agent Engineer"
+    second.description = body
+    sender = _Sender()
+    outcome = await publish_jobs(
+        [first, second], target="@chan", sender=sender, send_limit=5, sleep=_no_sleep
+    )
+    assert [job_id for _, job_id in sender.calls] == ["a"]
+    assert outcome.skipped_duplicate == 1
+    assert remaining_publish_candidates(2, outcome) == 0
+
+    failing_sender = _Sender(failures={1: ValueError("invalid first card")})
+    retried = await publish_jobs(
+        [first, second], target="@chan", sender=failing_sender, send_limit=5, sleep=_no_sleep
+    )
+    assert [job_id for _, job_id in failing_sender.calls] == ["b"]
+    assert retried.skipped_duplicate == 0
+
+
+async def test_near_duplicate_of_ledger_entry_is_skipped() -> None:
+    body = "Build and maintain production AI agents for customer support. " * 4
+    first = _Job("a", "https://example.com/one")
+    first.title = "AI Agent Engineer"
+    first.description = body
+    second = _Job("b", "https://example.com/two")
+    second.title = first.title
+    second.description = body
+    store = _Store()
+    await publish_jobs(
+        [first], target="@chan", sender=_Sender(), store=store, send_limit=5, sleep=_no_sleep
+    )
+    sender = _Sender()
+    outcome = await publish_jobs(
+        [first, second], target="@chan", sender=sender, store=store, send_limit=5, sleep=_no_sleep
+    )
+    assert sender.calls == []
+    assert outcome.skipped_already_published == 1
+    assert outcome.skipped_duplicate == 1
+
+
+async def test_outbox_and_content_dedup_work_together() -> None:
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
+
+    body = "Build and maintain production AI agents for customer support. " * 4
+    first = _Job("outbox-a", "https://example.com/one")
+    first.title = "AI Agent Engineer"
+    first.description = body
+    second = _Job("outbox-b", "https://example.com/two")
+    second.title = first.title
+    second.description = body
+
+    class _ReceiptSender:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def send(self, _target: str, _job: Any) -> DeliveryReceipt:
+            self.calls += 1
+            return DeliveryReceipt("-100", self.calls, datetime.now(UTC))
+
+    store = InMemoryStore()
+    sender = _ReceiptSender()
+    first_outcome = await publish_jobs(
+        [first], target="@chan", sender=sender, store=store, send_limit=5, sleep=_no_sleep
+    )
+    retry_outcome = await publish_jobs(
+        [first, second], target="@chan", sender=sender, store=store, send_limit=5, sleep=_no_sleep
+    )
+    assert first_outcome.sent == 1
+    assert retry_outcome.sent == 0
+    assert retry_outcome.skipped_already_published == 1
+    assert retry_outcome.skipped_duplicate == 1
+    assert sender.calls == 1
 
 
 async def test_ledger_skips_already_published() -> None:

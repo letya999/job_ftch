@@ -41,6 +41,7 @@ def _install_instructor_and_openai(monkeypatch: pytest.MonkeyPatch) -> None:
     instructor_mod.Mode = types.SimpleNamespace(  # type: ignore[attr-defined]
         TOOLS="tools",
         TOOLS_STRICT="tools_strict",
+        JSON="json",
     )
     monkeypatch.setitem(sys.modules, "instructor", instructor_mod)
 
@@ -215,6 +216,27 @@ def test_provider_uses_tools_mode_not_tools_strict(
     assert call_kwargs["mode"] == openai_provider.instructor.Mode.TOOLS  # type: ignore[attr-defined]
     assert call_kwargs["mode"] != getattr(
         openai_provider.instructor.Mode, "TOOLS_STRICT", "tools_strict"
+    )
+
+
+def test_provider_uses_json_mode_when_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_instructor_and_openai(monkeypatch)
+    from job_ftch.infrastructure.llm import openai_provider
+
+    openai_provider.instructor.from_provider = MagicMock(return_value=MagicMock())  # type: ignore[attr-defined]
+    openai_provider.AsyncOpenAI = MagicMock(return_value=MagicMock())  # type: ignore[assignment]
+    openai_provider.OpenAIInstructorLLMProvider(
+        api_key="sk-test",  # pragma: allowlist secret
+        model="gemini-3.8-flash-high",
+        base_url="http://127.0.0.1:8317/v1",
+        timeout_seconds=30.0,
+        max_retries=1,
+        structured_mode="json",
+    )
+
+    assert (  # type: ignore[attr-defined]
+        openai_provider.instructor.from_provider.call_args.kwargs["mode"]
+        == openai_provider.instructor.Mode.JSON
     )
 
 

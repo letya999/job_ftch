@@ -43,6 +43,11 @@ def validate_card(card: PublicationCard, layout: CardLayout) -> ValidationOutcom
         outcome.reject_reason = "no_vacancy_substance"
         return outcome
 
+    if not (card.summary or "").strip():
+        outcome.ok = False
+        outcome.reject_reason = "missing_job_details"
+        return outcome
+
     for phrase in layout.banlist:
         lp = phrase.lower()
         if card.summary and lp in card.summary.lower():

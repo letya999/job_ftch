@@ -130,6 +130,10 @@ services:
     profiles: ["cliproxy"]
     image: ${JOB_FTCH_CLIPROXY_IMAGE:-eceasy/cli-proxy-api:latest}
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+    logging:
+      options: { max-size: "10m", max-file: "3" }
     ports:
       - "127.0.0.1:${JOB_FTCH_CLIPROXY_API_PORT:-8317}:8317"
       - "127.0.0.1:${JOB_FTCH_CLIPROXY_OAUTH_PORT:-8085}:8085"
@@ -142,6 +146,8 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    logging:
+      options: { max-size: "10m", max-file: "3" }
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-job_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
