@@ -32,6 +32,7 @@ class FailureKind(StrEnum):
     DNS_ERROR = "dns_error"
     CONNECT_ERROR = "connect_error"
     TLS_ERROR = "tls_error"
+    CERTIFICATE_ERROR = "certificate_error"
     PARSER_ERROR = "parser_error"
     PARSE_EMPTY = "parse_empty"
     SERVER_ERROR = "server_error"
@@ -368,14 +369,24 @@ def classify_error(error: BaseException) -> FailureKind:
     err_text = str(error).lower()
     if "timeout" in err_name or "timed out" in err_text or err_text == "timeout":
         return FailureKind.TIMEOUT
+    if any(
+        marker in err_text
+        for marker in (
+            "certificate verify",
+            "certificate_verify_failed",
+            "unable to get local issuer certificate",
+            "unknown ca",
+            "sec_error_unknown_issuer",
+            "err_cert_authority_invalid",
+            "certificate has expired",
+        )
+    ):
+        return FailureKind.CERTIFICATE_ERROR
     tls_markers = (
-        "certificate verify",
-        "certificate_verify_failed",
         "sslerror",
         "ssl error",
         "tls error",
         "wrong version number",
-        "unknown ca",
     )
     if "ssl" in err_name or any(marker in err_text for marker in tls_markers):
         return FailureKind.TLS_ERROR

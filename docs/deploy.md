@@ -19,7 +19,7 @@ MCP, FastAPI, FastStream и Dagster adapters не входят в этот deplo
 
 - Ubuntu 24.04 или совместимый Linux host.
 - Docker и Docker Compose plugin.
-- Минимум для текущих compose limits: 2 vCPU / 6 GB RAM.
+- Минимум для текущих compose limits: 2 vCPU / 16 GB RAM.
 - Заполненные `.env.prod` и `job_ftch/adapters/telegram_bot/.env.prod`.
 
 ## Подготовка
@@ -143,7 +143,8 @@ optional jitter by `JOB_FTCH_INGEST_QUEUE_MAX_WAIT_SECONDS`. An upstream `Retry-
 minimum; values exceeding the policy limit require operator attention. Tasks
 already in `needs_operator` are not replayed automatically.
 
-The production bot permits two concurrent browser sessions. Browser acquisition
+The production bot permits two concurrent browser sessions with a 6 GiB bot
+container limit. Browser acquisition
 also waits for 512 MiB of container memory headroom, within the source deadline.
 Cancellation and failures after browser launch must close the owned session.
 During release verification compare container memory and browser/driver process

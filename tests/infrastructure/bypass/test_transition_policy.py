@@ -18,6 +18,7 @@ from job_ftch.infrastructure.bypass.transition_policy import (
         (FailureKind.BLOCKED_IP, TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK),
         (FailureKind.QRATOR_CHALLENGE, TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK),
         (FailureKind.TLS_ERROR, TransitionAction.TLS_IMPERSONATION),
+        (FailureKind.CERTIFICATE_ERROR, TransitionAction.TERMINAL),
         (
             FailureKind.BLOCKED_FINGERPRINT,
             TransitionAction.FINGERPRINT_RESISTANT_ENGINE,

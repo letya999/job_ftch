@@ -102,7 +102,7 @@ services:
       - default
       - public_site
     shm_size: "1gb"
-    mem_limit: 3g
+    mem_limit: 6g
     cpus: 1.5
 
   # Restarts containers labelled autoheal=true when their healthcheck reports

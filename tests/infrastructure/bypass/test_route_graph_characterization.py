@@ -127,7 +127,7 @@ def test_status_body_classification_precedes_status_fallback(
     ("error", "expected"),
     [
         (httpx.ConnectTimeout("slow"), FailureKind.TIMEOUT),
-        (httpx.ConnectError("certificate verify failed"), FailureKind.TLS_ERROR),
+        (httpx.ConnectError("certificate verify failed"), FailureKind.CERTIFICATE_ERROR),
         (httpx.ConnectError("name or service not known"), FailureKind.DNS_ERROR),
         (httpx.ConnectError("connection refused"), FailureKind.CONNECT_ERROR),
         (ValueError("invalid selector"), FailureKind.PARSER_ERROR),
