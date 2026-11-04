@@ -384,6 +384,7 @@ def _classified_failure(
         FailureKind.DNS_ERROR,
         FailureKind.CONNECT_ERROR,
         FailureKind.TLS_ERROR,
+        FailureKind.CERTIFICATE_ERROR,
     }:
         return ZeroYieldReason.TRANSPORT_ERROR, None
     if classified_kind == FailureKind.PARSER_ERROR:

@@ -6,6 +6,9 @@ import tempfile
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
+import psutil
+import structlog
+
 from job_ftch.application.registry import BypassCapability, register_bypass
 from job_ftch.config import get_settings
 from job_ftch.infrastructure.bypass.proxy_pool import ProxyEndpoint
@@ -18,6 +21,40 @@ try:
 except ImportError:
     AsyncCamoufox = None
     _CAMOUFOX_AVAILABLE = False
+
+logger = structlog.get_logger(__name__)
+
+
+def _session_children(manager: Any) -> set[tuple[int, float]]:
+    """Snapshot only the browser processes owned by this Playwright driver."""
+    try:
+        driver = manager._connection._transport._proc
+        return {
+            (child.pid, child.create_time())
+            for child in psutil.Process(driver.pid).children(recursive=True)
+        }
+    except (AttributeError, TypeError, psutil.Error):
+        return set()
+
+
+def _reap_session_children(children: set[tuple[int, float]]) -> None:
+    survivors = []
+    for pid, started_at in children:
+        try:
+            child = psutil.Process(pid)
+            if child.create_time() != started_at or child.status() == psutil.STATUS_ZOMBIE:
+                continue
+            child.terminate()
+            survivors.append(child)
+        except psutil.Error:
+            continue
+    if not survivors:
+        return
+    _, alive = psutil.wait_procs(survivors, timeout=2)
+    for child in alive:
+        with suppress(psutil.Error):
+            child.kill()
+    logger.warning("camoufox.session_children_reaped", count=len(survivors))
 
 
 class CamoufoxBypass:
@@ -94,44 +131,52 @@ class CamoufoxBypass:
             if proxy_url:
                 browser_kwargs["proxy"] = ProxyEndpoint(url=str(proxy_url)).playwright_proxy()
 
+        manager: Any = None
+        owned_children: set[tuple[int, float]] = set()
         try:
+            manager = AsyncCamoufox(**browser_kwargs)
             created_context: Any = None
-            async with AsyncCamoufox(**browser_kwargs) as browser:
-                context = browser
-                if not config.get("persistent_context") and hasattr(browser, "new_context"):
-                    context_kwargs: dict[str, Any] = {}
-                    # Deliberately NOT setting user_agent: forcing our Chromium
-                    # persona's UA onto a Firefox engine is an instant cross-check
-                    # failure (A9). Camoufox's generated UA is authoritative.
-                    if isinstance(viewport, dict):
-                        context_kwargs["viewport"] = viewport
-                    # Skip locale override when geoip owns it (proxy active).
-                    if config.get("locale") and not proxy_active:
-                        context_kwargs["locale"] = config["locale"]
-                    if config.get("skip_ssl"):
-                        context_kwargs["ignore_https_errors"] = True
-                    created_context = await browser.new_context(**context_kwargs)
-                    context = created_context
-
-                if hasattr(context, "set_default_timeout"):
-                    context.set_default_timeout(
-                        config.get("timeout", get_settings().browser_default_timeout_ms)
-                    )
-                if config.get("cookies") and hasattr(context, "add_cookies"):
-                    await context.add_cookies(config["cookies"])
-
-                page = await context.new_page()
+            async with manager as browser:
+                owned_children.update(_session_children(manager))
                 try:
-                    if config.get("warmup_url"):
-                        await page.goto(config["warmup_url"])
-                    yield page
+                    context = browser
+                    if not config.get("persistent_context") and hasattr(browser, "new_context"):
+                        context_kwargs: dict[str, Any] = {}
+                        # Camoufox's generated Firefox identity is authoritative.
+                        if isinstance(viewport, dict):
+                            context_kwargs["viewport"] = viewport
+                        if config.get("locale") and not proxy_active:
+                            context_kwargs["locale"] = config["locale"]
+                        if config.get("skip_ssl"):
+                            context_kwargs["ignore_https_errors"] = True
+                        created_context = await browser.new_context(**context_kwargs)
+                        context = created_context
+
+                    if hasattr(context, "set_default_timeout"):
+                        context.set_default_timeout(
+                            config.get("timeout", get_settings().browser_default_timeout_ms)
+                        )
+                    if config.get("cookies") and hasattr(context, "add_cookies"):
+                        await context.add_cookies(config["cookies"])
+
+                    page = await context.new_page()
+                    try:
+                        if config.get("warmup_url"):
+                            await page.goto(config["warmup_url"])
+                        yield page
+                    finally:
+                        with suppress(Exception):
+                            await page.close()
                 finally:
-                    with suppress(Exception):
-                        await page.close()
+                    owned_children.update(_session_children(manager))
                     if created_context is not None and hasattr(created_context, "close"):
                         with suppress(Exception):
                             await created_context.close()
         finally:
+            if manager is not None:
+                if not owned_children:
+                    owned_children.update(_session_children(manager))
+                _reap_session_children(owned_children)
             if user_data_dir is not None and owns_profile_dir:
                 shutil.rmtree(user_data_dir, ignore_errors=True)
 

@@ -111,6 +111,17 @@ def test_payment_required_is_terminal() -> None:
     assert outcome.retryable is False
 
 
+def test_certificate_failure_does_not_escalate_to_browser() -> None:
+    outcome = HeuristicFailureSignal().classify_detailed(
+        status_code=None,
+        body=None,
+        error=OSError("[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed"),
+    )
+    assert outcome.kind is FailureKind.CERTIFICATE_ERROR
+    assert outcome.should_escalate is False
+    assert outcome.retryable is False
+
+
 def test_turnstile_marker_is_normalized_for_solver_routes() -> None:
     assert _detect_captcha_type('<div class="cf-turnstile"></div>') == "turnstile"
 

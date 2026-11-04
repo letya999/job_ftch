@@ -76,6 +76,64 @@ async def test_nodriver_raises_without_optional_dependency(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_nodriver_closes_browser_when_page_setup_fails(monkeypatch):
+    import job_ftch.infrastructure.bypass.nodriver_bypass as nodriver_bypass
+
+    closed = False
+
+    class _FakeBrowser:
+        async def get(self, url):
+            raise RuntimeError(f"page setup failed: {url}")
+
+        def stop(self):
+            nonlocal closed
+            closed = True
+
+    class _FakeNodriver:
+        async def start(self, **kwargs):
+            return _FakeBrowser()
+
+    monkeypatch.setattr(nodriver_bypass, "nodriver", _FakeNodriver())
+    with pytest.raises(RuntimeError, match="page setup failed"):
+        async with nodriver_bypass.NodriverBypass().open_page({}):
+            pass
+    assert closed
+
+
+def test_camoufox_reaps_only_session_children_with_matching_start_time(monkeypatch):
+    import job_ftch.infrastructure.bypass.camoufox_bypass as camoufox_bypass
+
+    terminated: list[int] = []
+    killed: list[int] = []
+
+    class _FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def create_time(self):
+            return 10.0 if self.pid == 1 else 20.0
+
+        def status(self):
+            return "running"
+
+        def terminate(self):
+            terminated.append(self.pid)
+
+        def kill(self):
+            killed.append(self.pid)
+
+    monkeypatch.setattr(camoufox_bypass.psutil, "Process", _FakeProcess)
+    monkeypatch.setattr(
+        camoufox_bypass.psutil,
+        "wait_procs",
+        lambda processes, timeout: ([], processes),
+    )
+    camoufox_bypass._reap_session_children({(1, 10.0), (2, 10.0)})
+    assert terminated == [1]
+    assert killed == [1]
+
+
+@pytest.mark.asyncio
 async def test_nodriver_serializes_same_persistent_profile(monkeypatch, tmp_path):
     import job_ftch.infrastructure.bypass.nodriver_bypass as nodriver_bypass
 
