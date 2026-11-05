@@ -41,7 +41,7 @@ parity_lab = [
     "cryptography==50.0.2",
     "httpx[http2]>=0.28.1,<0.29",
     "hypercorn[h3]==0.18.0",
-    "maxminddb==3.1.1",
+    "maxminddb==3.2.0",
     "starlette==1.10.0",
 ]
 # curl-cffi impersonation profiles are pinned per release so floating minors
