@@ -101,6 +101,8 @@ run IDs. `report RUN_ID` показывает сохранённую стати�
 
 Метрики `job_ftch.cliproxy.*` экспортируются через существующий OpenTelemetry
 runtime: attempts, outcomes, waits, circuit transitions, latency и oldest age.
+Worker подключается к `public_site` для внутреннего OpenObserve endpoint;
+CLIProxy остаётся только в закрытой `llm_private` сети.
 Operator-required/circuit transitions пишутся без payload и credentials. Bot
 получает reason через существующие deferred/scheduler reports.
 

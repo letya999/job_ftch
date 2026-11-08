@@ -16,6 +16,7 @@ services:
       JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml:config/runtime.llm_queue.yaml:config/runtime.home_egress.yaml
     networks:
       - default
+      - public_site
       - llm_private
   llm-home-egress:
     profiles: [home-egress]
