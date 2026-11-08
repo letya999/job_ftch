@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import random
@@ -137,7 +138,9 @@ class CliproxyRun:
                     await conn.execute(
                         "UPDATE jf_llm_runs SET state=%s,updated_at=now() WHERE run_id=%s AND state='active'",
                         (
-                            "waiting" if isinstance(exc, LLMRequestDeferredError) else "operator",
+                            "waiting"
+                            if isinstance(exc, (LLMRequestDeferredError, asyncio.CancelledError))
+                            else "operator",
                             self.run_id,
                         ),
                     )
