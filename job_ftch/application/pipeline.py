@@ -334,6 +334,8 @@ class Pipeline[PipelineInput, PipelineOutput]:
             ).finish()
 
     async def _run(self, max_items: int | None = None) -> RunSummary:
+        # A continuation can acquire fresh claims for items settled in the previous attempt.
+        self._settlement = DedupSettlementCoordinator(collect_settlement_participants(self._nodes))
         settings = self._settings
         self._decision_version = str(getattr(settings, "pipeline_decision_version", "pipeline-v1"))
         summary = RunSummary()
@@ -1071,6 +1073,8 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 # the run in completed_with_failures, preserving successful items.
         elif outcome == "llm_wait":
             pending = res["exc"]
+            for claim_item_id in pending.settlement_item_ids:
+                await self._settlement.settle(claim_item_id, SettlementOutcome.RELEASE)
             final_status = "DEFERRED"
             trace_drop_reason = pending.reason
             summary.record_deferred(pending.reason)

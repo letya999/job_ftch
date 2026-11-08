@@ -83,6 +83,7 @@ class LLMRequestDeferredError(RuntimeError):
         self.retry_at = retry_at
         self.reason = reason
         self.requires_operator = requires_operator
+        self.settlement_item_ids: tuple[str, ...] = ()
 
 
 def deferred_from_error(error: BaseException) -> LLMRequestDeferredError | None:

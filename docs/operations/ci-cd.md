@@ -1,7 +1,7 @@
 ---
 title: "CI/CD"
 description: "Операционная карта quality gates: локальные just-команды, их соответствие GitHub Actions и порядок перед release."
-updated: 2026-08-11
+updated: 2026-11-08
 ---
 # CI/CD
 
@@ -62,6 +62,10 @@ push в `main`, `dev`, `mvp-release-final`. Он состоит из незав�
 - `release-contract` проверяет graph/runtime, classification, extraction и
   source-outcome contracts;
 - `browser-smoke` устанавливает Chromium и проверяет запуск browser runtime.
+- `llm-dispatch` поднимает отдельный PostgreSQL 16 и проверяет durable queue,
+  общие интервалы между worker, session affinity, cooldown и продолжение pipeline.
+  Используются только тестовые credentials и локальные HTTP mocks; обращения
+  к Google и production БД не нужны.
 
 `tests-smoke` полезен локально, но не заменяет CI `test`: он не измеряет
 coverage и не охватывает весь suite. Для browser runtime и core-only install

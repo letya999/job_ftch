@@ -1,7 +1,7 @@
 ---
 title: "Быстрый старт"
 description: "Быстрый локальный запуск job_ftch на fixture tenant без внешних сервисов."
-updated: 2026-07-28
+updated: 2026-11-08
 ---
 # Быстрый старт
 
@@ -17,6 +17,12 @@ uv sync
 ```
 
 Требования: Python 3.12+ и `uv`.
+
+Для реального LLM можно подключить прямой compatible API с токеном. Очередь,
+CLIProxyAPI и домашний выход через Android опциональны: см.
+[настройки провайдеров](adapters/runtime_and_env.md) и
+[runbook](operations/llm-queue-and-home-egress.md). Fixture-сценарий ниже
+не требует этих компонентов.
 
 ## 2. Tenant config для smoke-запуска
 

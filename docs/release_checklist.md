@@ -1,7 +1,7 @@
 ---
 title: "Релизный чеклист"
 description: "Исполняемый релизный чеклист: локальные gates, docs/config parity, production recipe и deploy contract."
-updated: 2026-08-01
+updated: 2026-11-08
 ---
 # Релизный чеклист
 
@@ -218,3 +218,13 @@ ai-repo-safety prepush --target .
 - source coverage и known partial/failing sources;
 - eval artifact paths и metric floors;
 - изменения docs/config/env/runtime precedence.
+
+Для релиза с optional LLM dispatch дополнительно:
+
+- зелёный CI job `PostgreSQL LLM Dispatch` на текущем PR;
+- полный набор активных Compose overlays и постоянные mounts сохранены;
+- в Git, release assets и build context нет OAuth/Telegram/Tailscale state;
+- tag, `origin/main`, локальный checkout и сервер указывают на один commit;
+- runtime version совпадает с `pyproject.toml` релиза;
+- после обновления проверены LLM-ответ и подтверждённая доставка в Telegram;
+- неизвестные исходы разобраны отдельно от обычного cooldown.

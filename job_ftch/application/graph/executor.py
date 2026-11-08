@@ -112,7 +112,12 @@ class GraphExecutor:
         return reports[0]
 
     async def run_many(self, item: Any) -> list[ExecutionReport]:
-        return await self._run_from(item, 0)
+        settlement_ids: set[str] = set()
+        try:
+            return await self._run_from(item, 0, settlement_ids)
+        except LLMRequestDeferredError as exc:
+            exc.settlement_item_ids = tuple(sorted(settlement_ids | set(exc.settlement_item_ids)))
+            raise
 
     def settlement_participants(self) -> tuple[Any, ...]:
         from job_ftch.application.dedup_settlement import DedupSettlement
@@ -125,7 +130,11 @@ class GraphExecutor:
                 result.append(node)
         return tuple(result)
 
-    async def _run_from(self, item: Any, start_index: int) -> list[ExecutionReport]:
+    async def _run_from(
+        self, item: Any, start_index: int, settlement_ids: set[str]
+    ) -> list[ExecutionReport]:
+        if item_id := getattr(item, "stable_id", None):
+            settlement_ids.add(str(item_id))
         report = ExecutionReport(item=item)
         nodes = {node.id: node for node in self.graph.spec.nodes}
         background: dict[str, asyncio.Task[Any]] = {}
@@ -238,7 +247,9 @@ class GraphExecutor:
                 return [
                     child
                     for candidate in result
-                    for child in await self._run_from(_materialize(candidate), index + 1)
+                    for child in await self._run_from(
+                        _materialize(candidate), index + 1, settlement_ids
+                    )
                 ]
             if result is None and spec.effect == EffectMode.GATE and not spec.shadow:
                 self._update_event(report, spec.id, outcome="drop", reason="gate_returned_none")

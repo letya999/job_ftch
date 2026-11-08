@@ -1,7 +1,7 @@
 ---
 title: "Деплой Telegram bot production stack"
 description: "Production-shape деплой job_ftch: shared runtime image, Telegram bot compose, Postgres и Qdrant."
-updated: 2026-09-30
+updated: 2026-11-08
 ---
 # Деплой Telegram bot production stack
 
@@ -79,6 +79,24 @@ healthcheck stale, бот может отвечать на команды, но 
 неисправным.
 
 ## Эксплуатация
+
+### Опциональная очередь и домашний выход
+
+Прямой compatible API работает без LLM worker и телефона. Для CLIProxy через
+PostgreSQL сохраните при обновлении полный набор включённых Compose overlays
+и профилей из [runbook](operations/llm-queue-and-home-egress.md).
+Все новые механизмы CLIProxy требуют `gateway: cliproxy` и `execution: queued`.
+
+Храните OAuth credentials и состояние Tailscale вне каталога исходников,
+в защищённом каталоге или постоянном volume. Разворачивайте новый release
+в отдельный каталог; не распаковывайте архив поверх работающего checkout.
+Перед пересозданием CLIProxy проверьте, что bind mount sources существуют
+на хосте, и сохраните резервную копию приватного состояния без вывода содержимого.
+
+После deploy сверьте Git SHA, release tag и runtime version. Проверьте
+readiness, реальный LLM-ответ и подтверждённый receipt публикации. Известный
+`uncertain` сначала разбирает оператор: снятие account pause не должно
+автоматически повторять запрос с потерянным ответом.
 
 ### Сверка неопределённой публикации
 
