@@ -138,6 +138,10 @@ all = [
     "trafilatura>=1.8",
     "extruct>=0.16",
 ]
+llm-queue = [
+    "procrastinate==3.10.0",
+    "psycopg[binary,pool]>=3.2,<4",
+]
 
 [project.scripts]
 job_ftch = "job_ftch.cli:main"

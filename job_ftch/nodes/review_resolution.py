@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, Field
 
 from job_ftch.application.graph.params import float_param, int_param
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 from job_ftch.domain import JobRecord, MatchDecision  # noqa: TC001
 
 if TYPE_CHECKING:
@@ -58,6 +59,8 @@ class ReviewResolutionNode:
         try:
             async with asyncio.timeout(self._timeout_seconds):
                 result = await self._llm.extract(prompt, ReviewResolution)
+        except LLMRequestDeferredError:
+            raise
         except Exception as exc:
             trace = {"called": True, "outcome": "failed", "error": type(exc).__name__}
             return item.model_copy(update={"metadata": {**metadata, "review_resolution": trace}})

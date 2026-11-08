@@ -34,6 +34,7 @@ class LLMPreflightResult:
     quota_exhausted: bool = False
     error: str = ""
     model: str = ""
+    retry_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,7 +178,7 @@ async def check_llm_pause(store: Store, *, now: datetime | None = None) -> LLMQu
     count = _parse_count(await store.get_run_state(_RETRY_COUNT_KEY))
     return LLMQuotaDecision(
         allowed=False,
-        status="retry_wait",
+        status="waiting_llm" if status == "waiting_llm" else "retry_wait",
         message=await store.get_run_state(_LAST_ERROR_KEY) or "LLM на паузе до следующей проверки.",
         retry_at=blocked_until,
         quota_exhausted=count > 0 or status == "disabled_until_schedule",
@@ -286,6 +287,20 @@ async def check_llm_before_run(
     blocked_until = _parse_timestamp(await store.get_run_state(_BLOCKED_UNTIL_KEY))
     retry_count = _parse_count(await store.get_run_state(_RETRY_COUNT_KEY))
     result = preflight_result or await run_llm_preflight(provider)
+    if result.retry_at is not None:
+        await _save_state(
+            store,
+            retry_count=0,
+            blocked_until=result.retry_at,
+            status="waiting_llm",
+            error="llm_request_pending",
+        )
+        return LLMQuotaDecision(
+            allowed=False,
+            status="waiting_llm",
+            retry_at=result.retry_at,
+            message="LLM запрос сохранён и ожидает выполнения.",
+        )
     if result.available:
         if retry_count or blocked_until is not None:
             await _clear_state(store)

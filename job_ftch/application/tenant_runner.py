@@ -34,6 +34,7 @@ from job_ftch.application.builder import (
 from job_ftch.application.builder import (
     build_llm as _legacy_build_llm,
 )
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 from job_ftch.application.llm_quota import (
     DEFAULT_QUOTA_MAX_RETRIES,
     DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
@@ -788,7 +789,11 @@ class TenantRunner:
                 error="ingest_queue_policy_blocked",
             )
             return
-        if summary.completion_state in {"llm_preflight_blocked", "llm_quota_exhausted"}:
+        if summary.completion_state in {
+            "llm_preflight_blocked",
+            "llm_quota_exhausted",
+            "waiting_llm",
+        }:
             await store.defer_ingest_task(
                 task,
                 self._ingest_worker_id,
@@ -2135,7 +2140,11 @@ class TenantRunner:
                             source_run_id=run_id,
                             trigger=trigger,
                             config_fingerprint=config_fingerprint,
-                            completion_state="llm_preflight_blocked",
+                            completion_state=(
+                                "waiting_llm"
+                                if preflight.status == "waiting_llm"
+                                else "llm_preflight_blocked"
+                            ),
                             next_retry_at=preflight.retry_at,
                             llm_quota_exhausted=preflight.quota_exhausted,
                             llm_health_error=preflight.message,
@@ -2169,6 +2178,11 @@ class TenantRunner:
                             ingest_task_id=_ingest_task_id,
                             ingest_worker_id=self._ingest_worker_id if _from_ingest_queue else None,
                         )
+                        if summary.completion_state == "waiting_llm" and summary.next_retry_at:
+                            await runtime.store.set_run_state(
+                                "bot_scheduler:next_due_at", summary.next_retry_at.isoformat()
+                            )
+                            await self._persist_terminal_summary(runtime, summary)
                         if getattr(runtime.llm_provider, "quota_exhausted", False):
                             decision = await note_llm_quota_failure(
                                 runtime.store,
@@ -2214,6 +2228,20 @@ class TenantRunner:
                 span.set_attribute("job_ftch.routing_accepted", summary.emitted)
                 span.set_attribute("job_ftch.failed", summary.failed)
                 return summary
+        except LLMRequestDeferredError as exc:
+            summary = RunSummary(
+                tenant_id=tenant_id,
+                source_run_id=run_id,
+                trigger=trigger,
+                config_fingerprint=config_fingerprint,
+                completion_state="waiting_llm",
+                next_retry_at=exc.retry_at,
+                llm_health_error="LLM запрос ожидает выполнения.",
+                failed=1,
+            ).finish()
+            await runtime.store.set_run_state("bot_scheduler:next_due_at", exc.retry_at.isoformat())
+            await self._persist_terminal_summary(runtime, summary)
+            return summary
         finally:
             await run_lock.aclose()
             if attach_token is not None:

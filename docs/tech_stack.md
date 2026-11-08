@@ -71,6 +71,7 @@ OpenTelemetry, Pillow, pypdf, setuptools and virtualenv in the lockfile.
 | `[parity_lab]` | `cryptography`, `httpx[http2]`, `hypercorn[h3]`, `maxminddb`, `starlette` | Local-only browser/network parity lab |
 | `[tracing]` | OTLP HTTP exporter | OpenObserve export |
 | `[resilience]` | `tenacity` | Explicit retry helpers |
+| `[llm_queue]` | `procrastinate`, `psycopg` | Optional PostgreSQL LLM dispatch; isolated from inline clients and the asyncpg store |
 | `[ollama]` | `httpx` | Ollama-compatible LLM path |
 
 `[all]` объединяет shipped runtime optional stack. Local-only lab/tooling extras

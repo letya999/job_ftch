@@ -1,5 +1,9 @@
 .env
 .env.*
+**/.env
+**/.env.*
+deploy/cliproxy
+deploy/cliproxy-template
 .git
 .github
 .codex-backups

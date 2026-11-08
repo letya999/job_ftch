@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 from job_ftch.application.pipeline import Pipeline
 from job_ftch.domain import RawItem, SourceKind, processed_key_for_raw_item
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
@@ -36,6 +38,33 @@ class DroppingNode:
     async def process(self, item: RawItem) -> RawItem | None:
         del item
         return None
+
+
+@pytest.mark.asyncio
+async def test_pending_llm_preserves_observation_and_does_not_emit(tmp_path: Path) -> None:
+    due = datetime.now(UTC) + timedelta(minutes=2)
+
+    class PendingNode:
+        async def process(self, item):
+            raise LLMRequestDeferredError("request-7", due)
+
+    item = RawItem(
+        source_kind=SourceKind.DEBUG, source_name="debug", external_id="pending", text="one"
+    )
+    store = InMemoryStore()
+    pipeline = Pipeline(
+        source=StubSource([item]),
+        sanitize_node=SanitizeNode(),
+        nodes=[PendingNode()],
+        sink=JsonFileSink(tmp_path / "out.json"),
+        store=store,
+    )
+    summary = await pipeline.run()
+    assert summary.completion_state == "waiting_llm"
+    assert summary.next_retry_at == due
+    assert summary.emitted == 0 and summary.rejected == 0
+    assert summary.failed > 0
+    assert not await store.has_processed(processed_key_for_raw_item(item))
 
 
 class ExplodingSink:

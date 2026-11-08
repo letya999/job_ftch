@@ -1411,6 +1411,15 @@ class CliproxyImageProvider(_BaseProvider):
         model: str | None = None,
     ) -> None:
         super().__init__(api_key, proxy_url=proxy_url)
+        from job_ftch.config import get_settings
+
+        queue_settings = get_settings()
+        queue_profile = queue_settings.llm_provider_profiles.get("cliproxy_captcha")
+        self._queue_settings = (
+            queue_settings if queue_profile and queue_profile.execution == "queued" else None
+        )
+        self._session_affinity = bool(queue_profile and queue_profile.session_affinity)
+        self._queue_tenant = queue_settings.tenant_id
         if base_url is None or model is None:
             from job_ftch.config import get_settings
 
@@ -1457,10 +1466,28 @@ class CliproxyImageProvider(_BaseProvider):
             body = await self._extract_image_with_wait(page)
             if not isinstance(body, str) or not body:
                 return _rejected("cliproxy_image", "captcha image could not be extracted")
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            transport = None
+            if self._queue_settings is not None:
+                from job_ftch.infrastructure.llm.dispatch_transport import QueuedLLMTransport
+
+                transport = QueuedLLMTransport(
+                    self._queue_settings, "cliproxy_captcha", ttl_seconds=25
+                )
+            client_options: dict[str, Any] = (
+                {"transport": transport} if transport is not None else {}
+            )
+            headers = {"Authorization": f"Bearer {self.api_key}"}
+            if self._session_affinity:
+                from structlog.contextvars import get_contextvars
+
+                from job_ftch.application.llm_dispatch import session_identifier
+
+                tenant = str(get_contextvars().get("tenant_id") or self._queue_tenant)
+                headers["X-Session-ID"] = session_identifier(tenant, body.encode())
+            async with httpx.AsyncClient(timeout=30.0, **client_options) as client:
                 response = await client.post(
                     _chat_completions_url(self._base_url),
-                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    headers=headers,
                     json={
                         "model": self._model,
                         "temperature": 0,

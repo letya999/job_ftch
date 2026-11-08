@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import ConfigDict, Field
 
 from job_ftch.application.graph.params import int_param
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 from job_ftch.domain import JobDraft, RawItem  # noqa: TC001
 from job_ftch.domain.relevance import RelevanceClassification
 from job_ftch.nodes.extraction import CoreExtractedJobFields, ExtractedJobFields, ExtractionNode
@@ -164,6 +165,8 @@ class DecisionExtractionNode(ExtractionNode):
                 combined = schema.model_validate_json(cached)
                 self._set_decision(combined, prompt_variant)
                 return self._extraction_fields(combined), False
+            except LLMRequestDeferredError:
+                raise
             except Exception:
                 pass
 
@@ -182,6 +185,8 @@ class DecisionExtractionNode(ExtractionNode):
             await self._store.set_run_state(cache_key, combined.model_dump_json())
             self._set_decision(combined, prompt_variant)
             return self._extraction_fields(combined), False
+        except LLMRequestDeferredError:
+            raise
         except Exception as exc:
             # Keep the existing degraded extraction behavior on provider failure.
             import structlog

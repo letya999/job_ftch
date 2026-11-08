@@ -42,6 +42,7 @@ except ImportError:
     AsyncOpenAI = None  # type: ignore[assignment,misc]
     _OPENAI_AVAILABLE = False
 
+from job_ftch.application.llm_dispatch import deferred_from_error
 from job_ftch.application.llm_quota import (
     LLMPreflightResult,
     LLMQuotaExhaustedError,
@@ -156,6 +157,7 @@ class OpenAIInstructorLLMProvider:
         max_retries: int,
         preflight_timeout_seconds: float | None = None,
         structured_mode: str = "tools",
+        http_client: Any = None,
     ) -> None:
         if not _INSTRUCTOR_AVAILABLE:
             raise ImportError(
@@ -171,6 +173,7 @@ class OpenAIInstructorLLMProvider:
         self._preflight_timeout_seconds = preflight_timeout_seconds or min(timeout_seconds, 15.0)
         self._quota_exhausted = False
         self._last_llm_error = ""
+        self.pending_retry_at: Any = None
         # The SDK timeout is per HTTP attempt. Instructor may retry parsing
         # internally, so retain an outer deadline for the whole operation.
         # Without it a stalled response can hold an eval run forever.
@@ -181,6 +184,7 @@ class OpenAIInstructorLLMProvider:
         # this for extract / classify / present.
         # Some gateways return JSON content instead of tool calls for real
         # prompts; the named profile selects the parsing mode.
+        client_kwargs = {"http_client": http_client} if http_client is not None else {}
         self._client = instructor.from_provider(
             f"openai/{model}",
             mode=instructor.Mode.JSON if structured_mode == "json" else instructor.Mode.TOOLS,
@@ -189,6 +193,7 @@ class OpenAIInstructorLLMProvider:
             base_url=base_url,
             timeout=timeout_seconds,
             max_retries=0,
+            **client_kwargs,
         )
         # Free-form-text client. A bare AsyncOpenAI is needed because
         # the instructor wrapper above cannot do schema-less
@@ -198,6 +203,7 @@ class OpenAIInstructorLLMProvider:
             base_url=base_url,
             timeout=timeout_seconds,
             max_retries=0,
+            **client_kwargs,
         )
 
     @property
@@ -216,9 +222,18 @@ class OpenAIInstructorLLMProvider:
                 response = await self._raw_client.chat.completions.create(
                     model=self._model,
                     messages=[{"role": "user", "content": "Reply with OK."}],
+                    extra_headers={"x-job-ftch-operation": "preflight"},
                     **_completion_token_limit_kwargs(self._model, 8),
                 )
         except Exception as exc:
+            if pending := deferred_from_error(exc):
+                self.pending_retry_at = pending.retry_at
+                return LLMPreflightResult(
+                    available=False,
+                    error="llm_request_pending",
+                    model=self._model,
+                    retry_at=pending.retry_at,
+                )
             self._last_llm_error = safe_llm_error(exc)
             if is_quota_exhausted_error(exc):
                 self._quota_exhausted = True
@@ -325,6 +340,9 @@ class OpenAIInstructorLLMProvider:
                     )
                     break
                 except Exception as exc:
+                    if pending := deferred_from_error(exc):
+                        self.pending_retry_at = pending.retry_at
+                        raise pending from exc
                     if is_quota_exhausted_error(exc):
                         self._quota_exhausted = True
                         self._last_llm_error = safe_llm_error(exc)
@@ -386,6 +404,9 @@ class OpenAIInstructorLLMProvider:
                     **_completion_token_limit_kwargs(self._model, _GENERATE_MAX_TOKENS),
                 )
         except Exception as exc:
+            if pending := deferred_from_error(exc):
+                self.pending_retry_at = pending.retry_at
+                raise pending from exc
             if is_quota_exhausted_error(exc):
                 self._quota_exhausted = True
                 self._last_llm_error = safe_llm_error(exc)
@@ -426,6 +447,27 @@ def _build_openai_llm(settings: Settings) -> OpenAIInstructorLLMProvider:
     if settings.openai_api_key is None:
         msg = "openai_api_key is required when llm_backend=openai."
         raise ValueError(msg)
+    http_client = None
+    if settings.llm_queue_profile:
+        import httpx
+        from structlog.contextvars import get_contextvars
+
+        from job_ftch.application.llm_dispatch import session_identifier
+
+        profile = settings.llm_provider_profiles[settings.llm_queue_profile]
+        if profile.execution == "queued":
+            from job_ftch.infrastructure.llm.dispatch_transport import QueuedLLMTransport
+
+            http_client = httpx.AsyncClient(
+                transport=QueuedLLMTransport(settings, settings.llm_queue_profile)
+            )
+        elif profile.session_affinity:
+
+            async def pin_session(request: httpx.Request) -> None:
+                tenant = str(get_contextvars().get("tenant_id") or settings.tenant_id)
+                request.headers["X-Session-ID"] = session_identifier(tenant, await request.aread())
+
+            http_client = httpx.AsyncClient(event_hooks={"request": [pin_session]})
     return OpenAIInstructorLLMProvider(
         api_key=settings.openai_api_key.get_secret_value(),
         model=settings.openai_model,
@@ -433,5 +475,6 @@ def _build_openai_llm(settings: Settings) -> OpenAIInstructorLLMProvider:
         timeout_seconds=settings.openai_timeout_seconds,
         max_retries=settings.openai_max_retries,
         preflight_timeout_seconds=settings.llm_preflight_timeout_seconds,
+        http_client=http_client,
         structured_mode=settings.llm_structured_mode,
     )

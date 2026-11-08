@@ -1,0 +1,48 @@
+# Optional third compose file, requires Compose 2.24.4+ for !override.
+services:
+  bot:
+    environment:
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml:config/runtime.llm_queue.yaml:config/runtime.home_egress.yaml
+  public-api:
+    environment:
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml:config/runtime.llm_queue.yaml:config/runtime.home_egress.yaml
+  cliproxy:
+    image: eceasy/cli-proxy-api@sha256:3f74ca56cba8bea2a2a096a215bb774482d87d257da04c5047e6046493bfd644
+    ports: !reset []
+    networks: !override
+      - llm_private
+  llm-worker:
+    environment:
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml:config/runtime.llm_queue.yaml:config/runtime.home_egress.yaml
+    networks:
+      - default
+      - llm_private
+  llm-home-egress:
+    profiles: [home-egress]
+    image: job-ftch-home-egress:prod
+    build:
+      context: ../../..
+      dockerfile: docker/home_egress/Dockerfile
+    init: true
+    restart: unless-stopped
+    environment:
+      JOB_FTCH_HOME_EXIT_NODE: android-home
+      JOB_FTCH_HOME_BIND_HOST: 0.0.0.0
+    volumes:
+      - llm_home_state:/var/lib/tailscale
+    networks:
+      - default
+      - llm_private
+    mem_limit: 192m
+    cpus: 0.3
+    healthcheck:
+      test: [CMD, python, -c, "import os,time; p='/tmp/home-egress-ready'; raise SystemExit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<20 else 1)"]
+      interval: 15s
+      timeout: 3s
+    logging:
+      options: {max-size: 10m, max-file: '3'}
+networks:
+  llm_private:
+    internal: true
+volumes:
+  llm_home_state:

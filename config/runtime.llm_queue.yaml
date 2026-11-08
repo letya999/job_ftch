@@ -1,0 +1,35 @@
+# Optional overlay, loaded after the Telegram production runtime.
+# YAML maps replace previous maps, so keep complete provider definitions here.
+# Direct compatible profiles can opt in with their own quota_scope and policy.
+llm_dispatch_policies:
+  google_primary:
+    min_interval_seconds: 10.0
+    max_calls_per_hour: 120
+    max_tokens_per_hour: 500000
+    max_pending_per_tenant: 100
+    max_attempts: 3
+    request_ttl_seconds: 86400
+    wait_seconds: 10.0
+    retry_delay_seconds: 60
+    retention_seconds: 86400
+llm_provider_profiles:
+  openai_main:
+    backend: openai
+    capabilities: [text, structured]
+  cliproxy_main:
+    backend: openai
+    base_url: http://cliproxy:8317/v1
+    credential_ref: JOB_FTCH_CLIPROXY_API_KEY
+    structured_mode: json
+    capabilities: [text, structured]
+    execution: queued
+    quota_scope: google_primary
+    session_affinity: true
+  cliproxy_captcha:
+    backend: openai
+    base_url: http://cliproxy:8317/v1
+    credential_ref: JOB_FTCH_CLIPROXY_API_KEY
+    capabilities: [vision]
+    execution: queued
+    quota_scope: google_primary
+    session_affinity: true

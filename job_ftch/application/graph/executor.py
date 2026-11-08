@@ -12,6 +12,8 @@ from typing import Any
 
 from opentelemetry import trace
 
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
+
 from .conditions import ConditionResult, evaluate_condition
 from .contracts import (
     CompiledGraph,
@@ -280,6 +282,8 @@ class GraphExecutor:
                 values[node_id] = result
                 if result is not None and type(result) is type(report.item):
                     report.item = self._merge_payload(report.item, result)
+            except LLMRequestDeferredError:
+                raise
             except Exception as exc:  # optional evidence becomes unknown
                 report.diagnostics.append({"node": node_id, "reason": "unknown", "error": str(exc)})
             tasks.pop(node_id, None)
@@ -341,6 +345,8 @@ class GraphExecutor:
             reason = "timeout"
             report.diagnostics.append({"node": spec.id, "reason": "timeout"})
             return None
+        except LLMRequestDeferredError:
+            raise
         except Exception as exc:
             if exc.__class__.__name__ in {"RawItemDropped", "RawItemRejected"}:
                 outcome = "drop"
@@ -417,6 +423,8 @@ class GraphExecutor:
             try:
                 current.metadata = merged
                 return current
+            except LLMRequestDeferredError:
+                raise
             except Exception:
                 return incoming
         return incoming

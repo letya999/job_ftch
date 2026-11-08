@@ -846,7 +846,7 @@ def configure(path: str | Path) -> PipelineBuilder:
     auth = EnvAuthProvider()
     store = cast(Store, create_store(settings))
     job_group_store = cast(JobGroupStore, create_job_group_store(settings))
-    llm = cast("LLMProvider", create_llm(settings))
+    llm = build_llm(settings)
     catalog = load_profile_catalog(settings)
     run_id = uuid4().hex
     sanitize_node, _snapshot_filter, nodes = build_nodes(
@@ -2052,6 +2052,15 @@ async def build_store(settings: Settings) -> Store:
 
 
 def build_llm(settings: Settings) -> LLMProvider:
+    binding = settings.llm_bindings.get("extraction")
+    if binding is not None:
+        profile = settings.llm_provider_profiles.get(binding.provider)
+        if profile is not None and (profile.execution == "queued" or profile.session_affinity):
+            from job_ftch.application.provider_routing import build_llm_bindings
+
+            return cast(
+                "LLMProvider", build_llm_bindings(settings, names=("extraction",))["extraction"]
+            )
     return cast(LLMProvider, create_llm(settings))
 
 

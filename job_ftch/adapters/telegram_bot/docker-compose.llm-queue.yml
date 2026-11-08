@@ -1,0 +1,40 @@
+# Opt in by adding this file after docker-compose.prod.yml and --profile llm-queue.
+services:
+  bot:
+    build:
+      args: {INSTALL_LLM_QUEUE: '1'}
+    environment:
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml:config/runtime.llm_queue.yaml
+  public-api:
+    build:
+      args: {INSTALL_LLM_QUEUE: '1'}
+    environment:
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml:config/runtime.llm_queue.yaml
+  llm-worker:
+    profiles: [llm-queue]
+    image: job-ftch-llm-worker:prod
+    build:
+      context: ../../..
+      dockerfile: docker/llm_queue/Dockerfile
+    init: true
+    restart: unless-stopped
+    labels: {autoheal: 'true'}
+    mem_limit: 256m
+    cpus: 0.5
+    env_file:
+      - ../../../.env.prod
+      - ./.env.prod
+    environment:
+      JOB_FTCH_ENV: prod
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.prod.yaml:job_ftch/adapters/telegram_bot/runtime.prod.yaml:config/runtime.llm_queue.yaml
+      JOB_FTCH_STORE_DSN: postgresql://${POSTGRES_USER:-job_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-job_ftch}
+    command: [sh, -c, "python -m job_ftch.infrastructure.llm.dispatch_worker init && exec python -m job_ftch.infrastructure.llm.dispatch_worker worker"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import os,time; p='/tmp/job_ftch_llm_worker_ready'; raise SystemExit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<90 else 1)"]
+      interval: 30s
+      timeout: 3s
+      start_period: 30s
+    logging:
+      options: {max-size: 10m, max-file: '3'}

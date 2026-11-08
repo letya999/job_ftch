@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 from job_ftch.application.llm_usage import llm_node_context
 from job_ftch.application.run_budget import AsyncCallBudget, ScopedCircuitBreaker
 from job_ftch.domain import (
@@ -660,6 +661,8 @@ class LLMRelevanceClassificationNode:
                     ),
                     RelevanceEvidenceClassification,
                 )
+        except LLMRequestDeferredError:
+            raise
         except Exception as exc:
             self.stats["llm_ambiguity_resolution_failures"] += 1
             logger.warning("llm_ambiguity_resolution_failed", error=str(exc))
@@ -689,6 +692,8 @@ class LLMRelevanceClassificationNode:
                     ),
                     RelevanceEvidenceClassification,
                 )
+        except LLMRequestDeferredError:
+            raise
         except Exception as exc:
             self.stats["llm_precision_confirmation_failures"] += 1
             logger.warning("llm_precision_confirmation_failed", error=str(exc))
@@ -834,6 +839,8 @@ class LLMRelevanceClassificationNode:
             self.stats["llm_relevance_calls"] += 1
             with llm_node_context("relevance"):
                 result: Any = await self._llm.classify(prompt, response_schema)
+        except LLMRequestDeferredError:
+            raise
         except Exception as exc:
             self.stats["llm_relevance_failures"] += 1
             logger.warning("llm_relevance_failed", error=str(exc))
