@@ -35,6 +35,7 @@ class ExecutionReport:
     node_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
     node_events: dict[str, dict[str, Any]] = field(default_factory=dict)
     evidence: EvidenceBundle = field(default_factory=EvidenceBundle)
+    source_item: Any = field(default=None, repr=False)
 
 
 class GraphExecutor:
@@ -135,7 +136,7 @@ class GraphExecutor:
     ) -> list[ExecutionReport]:
         if item_id := getattr(item, "stable_id", None):
             settlement_ids.add(str(item_id))
-        report = ExecutionReport(item=item)
+        report = ExecutionReport(item=item, source_item=item)
         nodes = {node.id: node for node in self.graph.spec.nodes}
         background: dict[str, asyncio.Task[Any]] = {}
         values: dict[str, Any] = {}

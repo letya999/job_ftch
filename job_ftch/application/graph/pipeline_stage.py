@@ -68,7 +68,7 @@ class GraphPipelineStage:
             )
             results.append(
                 GraphPipelineResult(
-                    source_item=item,
+                    source_item=getattr(report, "source_item", None) or item,
                     item=report.item,
                     status=report.status,
                     first_loss_node=first_loss,

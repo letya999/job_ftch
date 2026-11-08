@@ -759,6 +759,20 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     "llm_preflight_blocked",
                     "waiting_llm",
                 }:
+                    emitted = getattr(run_result, "emitted", 0)
+                    queued_publish = bool(emitted > 0 and publish_channel and publish_user_id)
+                    if queued_publish:
+                        pending_since = _parse_scheduler_timestamp(
+                            await _maybe_await(
+                                store.get_run_state("bot_scheduler:pending_publish_since")
+                            )
+                        )
+                        await _maybe_await(
+                            store.set_run_state(
+                                "bot_scheduler:pending_publish_since",
+                                min(t_start, pending_since or t_start).isoformat(),
+                            )
+                        )
                     preflight_message = str(
                         getattr(run_result, "llm_health_error", "llm_unavailable")
                         or "llm_unavailable"
@@ -770,13 +784,15 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         run_id=str(getattr(run_result, "source_run_id", "") or ""),
                         run_finished_at=datetime.now(UTC).isoformat(),
                         run_error=preflight_message,
-                        publish_state="skipped",
-                        publish_reason="llm_preflight_blocked",
+                        publish_state="pending" if queued_publish else "skipped",
+                        publish_reason="" if queued_publish else "llm_preflight_blocked",
                     )
                     await _maybe_await(
                         store.set_run_state("bot_scheduler:last_error", preflight_message)
                     )
-                    await _maybe_await(store.set_run_state("bot_scheduler:last_run_emitted", "0"))
+                    await _maybe_await(
+                        store.set_run_state("bot_scheduler:last_run_emitted", str(emitted))
+                    )
                     notice = str(getattr(run_result, "completion_state", ""))
                     if (
                         await _maybe_await(store.get_run_state("bot_scheduler:llm_notice"))
