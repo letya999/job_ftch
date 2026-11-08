@@ -552,17 +552,21 @@ class CareerSiteAssessmentEngine:
             "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
         }
         try:
+            from job_ftch.infrastructure.sources.career_site import _make_ssl_context
             from job_ftch.infrastructure.sources.ssrf_guard import SSRFGuardedTransport
+
+            tls_config = normalized_spec.monitor_config or {}
+            tls_verify = (
+                _make_ssl_context(str(tls_config["tls_ca_bundle"]))
+                if tls_config.get("tls_ca_bundle")
+                else not bool(tls_config.get("skip_ssl"))
+            )
 
             async with httpx.AsyncClient(
                 headers=headers,
                 timeout=_PROBE_TIMEOUT,
                 follow_redirects=True,
-                transport=SSRFGuardedTransport(
-                    httpx.AsyncHTTPTransport(
-                        verify=not bool((normalized_spec.monitor_config or {}).get("skip_ssl"))
-                    )
-                ),
+                transport=SSRFGuardedTransport(httpx.AsyncHTTPTransport(verify=tls_verify)),
             ) as client:
                 try:
                     profile = await fingerprint(normalized_spec.url, client)

@@ -71,7 +71,7 @@ def test_attempt_log_hashes_url_and_omits_query_credentials() -> None:
     budget = _budget()
     with capture_logs() as logs:
         budget.log_attempt(
-            source_id="https://user:password@example.test/jobs?token=secret",
+            source_id="https://user:password@example.test/jobs?token=secret",  # pragma: allowlist secret (example credential)
             transport="httpx",
             browser=None,
             network="direct",

@@ -122,7 +122,7 @@ async def test_deferred_catalog_or_pipeline_request_persists_waiting_summary(mon
     try:
         summary = await runner.run_tenant("pending-lane", ignore_schedule_gates=True)
         assert (summary.completion_state, summary.next_retry_at) == ("waiting_llm", due)
-        assert summary.failed == 1
+        assert summary.failed == 0
         assert (
             await runner.get_runtime("pending-lane").store.get_run_state(
                 "bot_scheduler:next_due_at"
@@ -945,6 +945,9 @@ def test_merge_run_summaries_accumulates_counts_and_source_stats() -> None:
         fetched=3,
         emitted=2,
         failed=1,
+        new_publish_candidates=2,
+        replayed_observations=5,
+        deferred=3,
         quarantine_reasons={"policy": 2},
     )
     second.source_stats("career_site").fetched = 3
@@ -957,6 +960,9 @@ def test_merge_run_summaries_accumulates_counts_and_source_stats() -> None:
 
     assert merged.fetched == 5
     assert merged.emitted == 3
+    assert merged.new_publish_candidates == 2
+    assert merged.replayed_observations == 5
+    assert merged.deferred == 3
     assert merged.failed == 1
     assert merged.drop_reasons == {"already_processed": 1}
     assert merged.quarantine_reasons == {"policy": 2}

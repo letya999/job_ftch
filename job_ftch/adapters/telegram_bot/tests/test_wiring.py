@@ -255,10 +255,13 @@ async def test_scheduler_retries_run_left_incomplete_by_restart(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("initial_pending", [True, False])
+@pytest.mark.parametrize(
+    "initial_pending,lost_window", [(True, False), (True, True), (False, False)]
+)
 async def test_scheduler_recovers_pending_publish_before_next_run(
     monkeypatch: pytest.MonkeyPatch,
     initial_pending: bool,
+    lost_window: bool,
 ) -> None:
     sleeps = 0
 
@@ -339,6 +342,10 @@ async def test_scheduler_recovers_pending_publish_before_next_run(
             )
         ]
     )
+    if lost_window:
+        store_state.pop("bot_scheduler:pending_publish_since")
+        runner.pending_publish_jobs = AsyncMock(return_value=runner.latest_jobs.return_value)
+        runner.latest_jobs.return_value = []
     bot = MagicMock()
     bot.send_message = AsyncMock()
 

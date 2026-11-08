@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import ssl
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -44,7 +45,7 @@ _EXTRA_RETRYABLE_STATUSES = frozenset({408, 425, 429})
 _SOFT_403_STATUSES = frozenset({401, 403})
 
 
-def _make_ssl_context() -> ssl.SSLContext:
+def _make_ssl_context(ca_bundle: str | None = None) -> ssl.SSLContext:
     """Build an SSL context tolerant of CDNs that mishandle TLS internals.
 
     Some CDNs (notably Akamai) send TLS 1.3 session tickets that can hang
@@ -65,6 +66,14 @@ def _make_ssl_context() -> ssl.SSLContext:
     import certifi
 
     ctx = ssl.create_default_context(cafile=certifi.where())
+    if ca_bundle is not None:
+        from pathlib import Path
+
+        if re.fullmatch(r"[a-z0-9-]+", ca_bundle) is None:
+            raise ValueError("Invalid packaged TLS CA bundle name")
+        ctx.load_verify_locations(
+            cafile=Path(__file__).with_name("certificates") / f"{ca_bundle}.crt"
+        )
     ctx.options |= ssl.OP_NO_TICKET
     op_legacy_server_connect = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0x4)
     ctx.options |= op_legacy_server_connect
@@ -187,6 +196,12 @@ async def client_for_config(
     fresh retrying client with TLS verification disabled for that scope only.
     Otherwise reuse the outer source client unchanged.
     """
+    if config and config.get("tls_ca_bundle"):
+        async with build_default_http_client(
+            ca_bundle=str(config["tls_ca_bundle"])
+        ) as scoped_client:
+            yield scoped_client
+        return
     if config and config.get("skip_ssl"):
         async with build_default_http_client(verify_ssl=False) as insecure_client:
             yield insecure_client
@@ -233,7 +248,9 @@ def _is_empty_200_response(response: httpx.Response) -> bool:
     return not response.text.strip()
 
 
-def build_default_http_client(*, verify_ssl: bool = True) -> _RetryingHttpClient:
+def build_default_http_client(
+    *, verify_ssl: bool = True, ca_bundle: str | None = None
+) -> _RetryingHttpClient:
     """Build the default retrying HTTP client for career-site fetches.
 
     Args:
@@ -262,7 +279,7 @@ def build_default_http_client(*, verify_ssl: bool = True) -> _RetryingHttpClient
         max_keepalive_connections=settings.career_site_max_keepalive_connections,
         max_connections=settings.career_site_max_connections,
     )
-    verify: bool | ssl.SSLContext = _make_ssl_context() if verify_ssl else False
+    verify: bool | ssl.SSLContext = _make_ssl_context(ca_bundle) if verify_ssl else False
     headers = dict(DEFAULT_HTTP_HEADERS)
     inner_transport = httpx.AsyncHTTPTransport(verify=verify, limits=limits)
     transport = SSRFGuardedTransport(inner_transport)

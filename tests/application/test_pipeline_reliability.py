@@ -68,7 +68,9 @@ async def test_pending_llm_preserves_observation_and_does_not_emit(
     assert summary.completion_state == "waiting_llm"
     assert summary.next_retry_at == due
     assert summary.emitted == 0 and summary.rejected == 0
-    assert summary.failed > 0
+    assert summary.failed == 0
+    assert summary.by_source_kind["debug"].deferred == 1
+    assert summary.by_source_id["debug:debug"].deferred == 1
     assert not await store.has_processed(processed_key_for_raw_item(item))
     assert summary.llm_health_error == reason
 
@@ -80,6 +82,53 @@ class ExplodingSink:
 
     async def flush(self) -> None:
         raise OSError("secondary sink flush failed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("waiting", [False, True])
+async def test_fanout_settles_parent_claim_after_children(tmp_path: Path, waiting: bool) -> None:
+    from job_ftch.nodes.dedup import DedupNode
+
+    parent = RawItem(
+        source_kind=SourceKind.DEBUG, source_name="digest", external_id="parent", text="digest"
+    )
+    child = RawItem(
+        source_kind=SourceKind.DEBUG, source_name="digest", external_id="child", text="vacancy"
+    )
+    store = InMemoryStore()
+
+    class Candidate:
+        def materialize_raw_item(self):
+            return child
+
+    class Split:
+        is_fan_out_stage = True
+
+        async def process(self, _):
+            return (Candidate(),)
+
+    class Finish:
+        async def process(self, item):
+            if waiting:
+                raise LLMRequestDeferredError("pending", datetime.now(UTC) + timedelta(seconds=30))
+            return item
+
+    pipeline = Pipeline(
+        source=StubSource([parent]),
+        sanitize_node=SanitizeNode(),
+        nodes=[DedupNode(store, defer_commit=True), Split(), Finish()],
+        sink=JsonFileSink(tmp_path / "out.json"),
+        store=store,
+    )
+    result = await pipeline.run()
+    assert await store.has_processed(processed_key_for_raw_item(parent)) is (not waiting)
+    if waiting:
+        other = DedupNode(store, defer_commit=True)
+        assert await other.process(parent) is parent
+        await other.release_claim(parent.stable_id)
+        assert result.emitted == 0 and result.completion_state == "waiting_llm"
+    else:
+        assert result.emitted == 1 and result.failed == 0
 
 
 @pytest.mark.asyncio

@@ -84,7 +84,7 @@ class DynamiteJobsParser:
         api_url = "https://49hkl9g3sb-dsn.algolia.net/1/indexes/prod_jobs/query"
 
         headers = {
-            "x-algolia-api-key": "578864e6f2d8bc38a05a8f3302d5a9ac",  # gitleaks:allow
+            "x-algolia-api-key": "578864e6f2d8bc38a05a8f3302d5a9ac",  # pragma: allowlist secret; gitleaks:allow (public search key)
             "x-algolia-application-id": "49HKL9G3SB",
             "content-type": "application/x-www-form-urlencoded",
         }

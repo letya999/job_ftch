@@ -18,6 +18,8 @@ EXPECTED_PRESENT = (
     # Gitleaks discovers this bridge config automatically when invoked outside
     # the GitHub workflow; its rules remain owned by .repo-safety/gitleaks.toml.
     ".gitleaks.toml",
+    # Opengrep discovers this file only at the root, including outside CI.
+    ".semgrepignore",
     ".repo-safety/pre-commit-config.yaml",
     ".repo-safety/gitleaks.toml",
     ".repo-safety/detect-secrets.baseline",
@@ -29,7 +31,6 @@ EXPECTED_PRESENT = (
 EXPECTED_ABSENT = (
     ".pre-commit-config.yaml",
     ".secrets.baseline",
-    ".semgrepignore",
     "bandit.yaml",
     "renovate.json",
 )
@@ -42,6 +43,13 @@ def _ensure_paths() -> None:
         raise SystemExit(f"missing relocated safety assets: {', '.join(missing)}")
     if unexpected:
         raise SystemExit(f"unexpected root-level safety assets: {', '.join(unexpected)}")
+    exclusions = {
+        line.strip()
+        for line in (ROOT / ".semgrepignore").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    if exclusions != {".runtime/", ".work/", ".venv/"}:
+        raise SystemExit("Opengrep exclusions must cover only local runtime artifacts")
 
 
 def _ensure_workflow_references() -> None:
