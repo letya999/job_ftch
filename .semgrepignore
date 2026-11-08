@@ -1,0 +1,4 @@
+# Local runtime artifacts are not shipped; Windows may quarantine downloaded browser files here.
+.runtime/
+.work/
+.venv/

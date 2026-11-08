@@ -72,6 +72,8 @@ Queue state lives in PostgreSQL; Redis is not required. A logical session lasts 
 
 Follow the [queue and home egress runbook](docs/operations/llm-queue-and-home-egress.md) for configuration, Android setup, status commands and recovery. Local pacing cannot increase provider quotas or guarantee protection from account restrictions.
 
+CLIProxy continuations resume immutable observations instead of collecting every source again. Accepted publication candidates survive timestamp windows and restarts; the target ledger prevents duplicate delivery. Reports distinguish attempt results, new candidates and deferred work.
+
 ## Operate and recover
 
 - [Production deployment](docs/deploy.md): containers, durable state and readiness checks.

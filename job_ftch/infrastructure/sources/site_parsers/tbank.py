@@ -129,6 +129,7 @@ class TbankCareerParser:
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
         return SiteRuntimeDefaults(
+            extra={"tls_ca_bundle": "tbank-russian-root"},
             url_filter=(
                 r"tbank\.ru/career/(?:it/)?vacanc(?:y|ies)/"
                 r"(?:[a-z0-9_-]+/)+[a-z0-9_-]+/?$"

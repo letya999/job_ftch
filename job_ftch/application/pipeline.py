@@ -32,9 +32,11 @@ from job_ftch.application.dedup_settlement import (
 )
 from job_ftch.application.drops import RawItemDropped
 from job_ftch.application.item_decision_trace import record_item_decision_trace
+from job_ftch.application.llm_continuation import observation_continuation, requires_replay
 from job_ftch.application.llm_dispatch import LLMRequestDeferredError, llm_item_session, llm_run
 from job_ftch.application.logging import sanitize_string
 from job_ftch.application.outbox import recover_pending_outbox
+from job_ftch.application.publication_backlog import record_publish_candidate
 from job_ftch.application.rejections import RawItemRejected
 from job_ftch.application.resolver import DeferredResolverQueue
 from job_ftch.application.run_budget import AsyncCallBudget
@@ -171,6 +173,8 @@ class SourceRunStats(StatsBase):
 
 @dataclass(slots=True)
 class RunSummary(StatsBase):
+    replayed_observations: int = 0
+    new_publish_candidates: int = 0
     by_source_kind: dict[str, SourceRunStats] = field(default_factory=dict)
     by_source_id: dict[str, SourceRunStats] = field(default_factory=dict)
     tenant_id: str | None = None
@@ -330,7 +334,6 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 completion_state="waiting_llm",
                 next_retry_at=exc.retry_at,
                 llm_health_error=exc.reason,
-                failed=1,
             ).finish()
 
     async def _run(self, max_items: int | None = None) -> RunSummary:
@@ -940,6 +943,12 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 ) or interrupted
             for _ in range(int(res.get("fanout_limited", 0))):
                 summary.record_source_drop(source_kind, "max_items_budget", source_name)
+            terminal = all(child.get("finalized", False) for child in res.get("children", []))
+            terminal = terminal and not res.get("fanout_limited", 0)
+            await self._settle_dedup_claims(item, commit=terminal)
+            if terminal and processed_key is not None:
+                await self._store.mark_processed(processed_key)
+            res["finalized"] = terminal
             return interrupted
 
         if outcome == "pre_quarantined":
@@ -956,6 +965,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
             return False
 
         if outcome == "already_processed":
+            res["finalized"] = True
             summary.record_source_drop(source_kind, "already_processed", source_name)
             record_item_decision_trace(
                 summary=summary,
@@ -1039,6 +1049,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     await self._settle_dedup_claims(item, commit=True)
                     await self._store.mark_processed(processed_key)
                     await self._set_run_state("pipeline.last_processed_key", processed_key)
+                res["finalized"] = True
                 record_item_decision_trace(
                     summary=summary,
                     result=res,
@@ -1050,6 +1061,12 @@ class Pipeline[PipelineInput, PipelineOutput]:
             try:
                 outbox_targets = await self._enqueue_outbox(item, current)
                 await self._emit_outbox_targets(current, outbox_targets)
+                if (
+                    isinstance(current, JobRecord)
+                    and current.routing_decision is MatchDecision.ACCEPT
+                    and await record_publish_candidate(self._store, current)
+                ):
+                    summary.new_publish_candidates += 1
                 summary.emitted += 1
                 summary.source_stats(source_kind).emitted += 1
                 if source_identity is not None:
@@ -1059,6 +1076,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 finalized = True
             except Exception as exc:
                 final_status = "FAILED"
+                res["outcome"] = "failed"
                 trace_drop_reason = "sink_emit_failed"
                 trace_drop_stage = self._sink.__class__.__name__
                 summary.record_failure()
@@ -1078,9 +1096,10 @@ class Pipeline[PipelineInput, PipelineOutput]:
             final_status = "DEFERRED"
             trace_drop_reason = pending.reason
             summary.record_deferred(pending.reason)
+            summary.source_stats(source_kind).record_deferred(pending.reason)
+            if source_identity is not None:
+                source_identity.record_deferred(pending.reason)
             summary.llm_health_error = pending.reason
-            # Source cursors commit only with zero failures. Pending work must replay.
-            summary.record_failure()
             summary.completion_state = "waiting_llm"
             summary.next_retry_at = min(summary.next_retry_at or pending.retry_at, pending.retry_at)
             run_interrupted = True
@@ -1209,6 +1228,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
 
         if not finalized:
             await self._settle_dedup_claims(item, commit=False)
+        res["finalized"] = finalized
         record_item_decision_trace(
             summary=summary,
             result=res,
@@ -1351,7 +1371,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         """Persist raw input before any suppression or mutable processing."""
         content_hash = content_hash_for_raw_item(item)
         try:
-            await self._store.record_observation(
+            entry = await self._store.record_observation(
                 ObservationLedgerEntry(
                     observation_id=f"{self._tenant_id}:{item.stable_id}:{content_hash}",
                     tenant_id=self._tenant_id,
@@ -1365,6 +1385,10 @@ class Pipeline[PipelineInput, PipelineOutput]:
             # A malformed envelope must still reach SanitizeNode and its
             # quarantine lane; only valid immutable observations enter ledger.
             self._logger.info("observation_ledger_skipped_invalid_raw_item")
+            return
+        checkpoint = observation_continuation.get()
+        if checkpoint is not None:
+            await checkpoint.add(entry)
 
     async def _run_concurrent(
         self, summary: RunSummary, max_items: int | None, settings: Any
@@ -1408,6 +1432,16 @@ class Pipeline[PipelineInput, PipelineOutput]:
                         continue
                     if await self._finalize_item_result(res, summary):
                         interrupted = True
+                    checkpoint = observation_continuation.get()
+                    original = res["item"]
+                    if (
+                        checkpoint is not None
+                        and isinstance(original, RawItem)
+                        and not requires_replay(res)
+                    ):
+                        await checkpoint.complete(
+                            original.stable_id, content_hash_for_raw_item(original)
+                        )
                 if not wait_all:
                     break
             return interrupted
@@ -1437,6 +1471,23 @@ class Pipeline[PipelineInput, PipelineOutput]:
 
                 pulled += 1
 
+                if (
+                    observation_continuation.get() is not None
+                    and summary.completion_state == "waiting_llm"
+                    and isinstance(item, RawItem)
+                ):
+                    await self._record_observation(item)
+                    summary.fetched += 1
+                    summary.source_stats(item.source_kind).fetched += 1
+                    identity = summary.source_identity_stats(item.source_kind, item.source_name)
+                    if identity is not None:
+                        identity.fetched += 1
+                    summary.record_deferred("llm_backpressure")
+                    summary.source_stats(item.source_kind).record_deferred("llm_backpressure")
+                    if identity is not None:
+                        identity.record_deferred("llm_backpressure")
+                    continue
+
                 key = processed_key_for_raw_item(item) if isinstance(item, RawItem) else None
                 if key is not None and key in seen_keys:
                     # Duplicate processed_key already seen this run — drop it
@@ -1458,7 +1509,10 @@ class Pipeline[PipelineInput, PipelineOutput]:
 
                 if len(pending) >= concurrency and await _drain_pending(wait_all=False):
                     run_interrupted = True
-                    if summary.completion_state == "waiting_llm":
+                    if (
+                        summary.completion_state == "waiting_llm"
+                        and observation_continuation.get() is None
+                    ):
                         break
 
             if await _drain_pending(wait_all=True):

@@ -1168,9 +1168,12 @@ class CareerSiteSource(Source["RawItem"]):
                 freshness_undated_before = self.stats.freshness_undated_passed
                 try:
                     if supports_discover:
-                        urls: list[str] = await await_with_source_deadline(
-                            site_parser.discover(parser_spec, self.http)
-                        )
+                        async with client_for_config(
+                            self.http, parser_monitor_config
+                        ) as parser_http:
+                            urls: list[str] = await await_with_source_deadline(
+                                site_parser.discover(parser_spec, parser_http)
+                            )
                         if urls:
                             self._trusted_parser_urls.update(urls)
                             self.stats.monitored = len(urls)
@@ -2948,7 +2951,10 @@ class CareerSiteSource(Source["RawItem"]):
         response = None
         rendered_with_browser = False
         protected_failure = False
-        async with client_for_config(self.http, self.spec.scraper_config) as scrape_http:
+        transport_config = dict(self.spec.scraper_config)
+        if self.spec.monitor_config.get("tls_ca_bundle"):
+            transport_config.setdefault("tls_ca_bundle", self.spec.monitor_config["tls_ca_bundle"])
+        async with client_for_config(self.http, transport_config) as scrape_http:
             try:
                 response = await scrape_http.get(url, follow_redirects=True)
                 prefetched_html = getattr(response, "text", None)

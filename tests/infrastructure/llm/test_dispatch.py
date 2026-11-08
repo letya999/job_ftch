@@ -528,6 +528,31 @@ async def test_real_instructor_propagates_pending_instead_of_retrying(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [asyncio.CancelledError, RuntimeError])
+async def test_cancelled_run_resumes_but_unexpected_failure_requires_review(
+    dispatch_settings, error_type
+):
+    from job_ftch.infrastructure.llm.dispatch_session import CliproxyRun
+
+    settings, name = dispatch_settings
+    protect(settings, name)
+    with pytest.raises(error_type):
+        async with CliproxyRun(settings, name) as first:
+            identity = first.run_id
+            raise error_type()
+    if error_type is asyncio.CancelledError:
+        async with CliproxyRun(settings, name) as restarted:
+            assert restarted.run_id == identity
+            await restarted.finish({"completion_state": "completed"})
+    else:
+        with pytest.raises(LLMRequestDeferredError) as held:
+            async with CliproxyRun(settings, name):
+                pytest.fail("Unexpected failures must not automatically resume")
+        assert held.value.requires_operator
+        assert held.value.request_id == identity
+
+
+@pytest.mark.asyncio
 async def test_cliproxy_sessions_resume_then_rotate_and_keep_item_requests_distinct(
     dispatch_settings,
 ):
@@ -865,11 +890,14 @@ async def test_tenant_runner_wires_durable_run_context_only_around_protected_wor
     from job_ftch.application.llm_dispatch import llm_run
     from job_ftch.application.pipeline import RunSummary
     from job_ftch.application.tenant_runner import TenantRunner
+    from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
     settings, name = dispatch_settings
     protect(settings, name)
     runner = object.__new__(TenantRunner)
-    monkeypatch.setattr(runner, "get_runtime", lambda _: SimpleNamespace(settings=settings))
+    monkeypatch.setattr(
+        runner, "get_runtime", lambda _: SimpleNamespace(settings=settings, store=InMemoryStore())
+    )
     seen = []
 
     async def ingest(*args, **kwargs):

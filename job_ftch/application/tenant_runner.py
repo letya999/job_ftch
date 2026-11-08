@@ -34,6 +34,7 @@ from job_ftch.application.builder import (
 from job_ftch.application.builder import (
     build_llm as _legacy_build_llm,
 )
+from job_ftch.application.llm_continuation import continuation_scope, observation_continuation
 from job_ftch.application.llm_dispatch import LLMRequestDeferredError, uses_cliproxy_runs
 from job_ftch.application.llm_quota import (
     DEFAULT_QUOTA_MAX_RETRIES,
@@ -1823,7 +1824,7 @@ class TenantRunner:
         runtime: TenantRuntime,
         summary: RunSummary,
     ) -> None:
-        """Persist a run that ended before the pipeline builder was dispatched."""
+        """Persist a run completed outside normal source acquisition."""
         if not summary.source_run_id:
             return
         from job_ftch.application.run_stats import build_pipeline_run_stats, build_source_run_stats
@@ -1912,7 +1913,8 @@ class TenantRunner:
                 attempt_run_id=kwargs["run_id"],
                 parent_run_id=_parent_run_id,
             ) as session:
-                summary = await self._run_tenant(tenant_id, **kwargs)
+                with continuation_scope(runtime.store, session.run_id, tenant_id):
+                    summary = await self._run_tenant(tenant_id, **kwargs)
                 run_summary = summary.as_dict()
                 if _parent_run_id:
                     list_active = getattr(runtime.store, "list_active_ingest_tasks", None)
@@ -1932,7 +1934,6 @@ class TenantRunner:
                 completion_state="waiting_llm",
                 next_retry_at=exc.retry_at,
                 llm_health_error=exc.reason,
-                failed=1,
                 trigger=trigger,
             ).finish()
             await runtime.store.set_run_state("bot_scheduler:next_due_at", exc.retry_at.isoformat())
@@ -2312,7 +2313,6 @@ class TenantRunner:
                 completion_state="waiting_llm",
                 next_retry_at=exc.retry_at,
                 llm_health_error="LLM запрос ожидает выполнения.",
-                failed=1,
             ).finish()
             await runtime.store.set_run_state("bot_scheduler:next_due_at", exc.retry_at.isoformat())
             await self._persist_terminal_summary(runtime, summary)
@@ -2348,6 +2348,43 @@ class TenantRunner:
         ingest_worker_id: str | None = None,
     ) -> RunSummary:
         runtime = self.get_runtime(tenant_id)
+        checkpoint = observation_continuation.get()
+        if checkpoint is not None:
+            await checkpoint.load()
+            if checkpoint.references:
+                entries = await checkpoint.entries()
+                catalog, prompts = await self._build_runtime_catalog(runtime, user_id=user_id)
+                builder, _ = await self._build_runtime_builder(
+                    runtime,
+                    effective_sources=[],
+                    catalog=catalog,
+                    run_id=run_id,
+                    user_id=user_id,
+                    relevance_prompts=prompts,
+                )
+                builder.with_runtime_source(_ReplaySource(entries))
+                with collect_llm_usage() as usage:
+                    summary = await builder.run_async(max_items=None)
+                summary.tenant_id = tenant_id
+                summary.trigger = trigger
+                summary.config_fingerprint = config_fingerprint
+                summary.replayed_observations = summary.fetched
+                summary.llm_usage_requests = usage.requests
+                summary.llm_tokens_in = usage.tokens_in
+                summary.llm_tokens_out = usage.tokens_out
+                summary.llm_cached_tokens_in = usage.cached_tokens_in
+                summary.llm_latency_ms = usage.latency_ms
+                summary.llm_cost_usd = usage.cost_usd
+                summary.llm_cost_is_complete = usage.cost_is_complete
+                summary.llm_cost_pricing_version = pricing_version()
+                summary.llm_cost_unknown_models = sorted(usage.unknown_pricing_models)
+                checkpoint.keep_pending(summary)
+                if summary.next_retry_at:
+                    await runtime.store.set_run_state(
+                        "bot_scheduler:next_due_at", summary.next_retry_at.isoformat()
+                    )
+                await self._persist_terminal_summary(runtime, summary)
+                return summary
         await self._ensure_runtime_sources_loaded(runtime)
 
         # Apply Task 3 (Rate Limit), Task 4 (Jitter), Task 5 (Auto-pause)
@@ -2557,7 +2594,7 @@ class TenantRunner:
                         summary = await builder.run_async(
                             max_items=None if personal_mode else max_items
                         )
-                        if summary.failed:
+                        if summary.failed or summary.completion_state == "waiting_llm":
                             pending_cursors.clear()
                 summary.llm_usage_requests = usage.requests
                 summary.llm_tokens_in = usage.tokens_in
@@ -2588,6 +2625,8 @@ class TenantRunner:
             return summary
 
         summary.tenant_id = tenant_id
+        if checkpoint is not None:
+            checkpoint.keep_pending(summary)
         await self._schedule_ingest_continuations(
             runtime,
             summary,
@@ -4023,6 +4062,26 @@ class TenantRunner:
         if min_score is not None:
             jobs = [job for job in jobs if (job.best_score or 0.0) >= min_score]
         return jobs[:limit]
+
+    async def pending_publish_jobs(
+        self, tenant_id: str, *, target: str, limit: int = 100
+    ) -> list[JobRecord]:
+        """Read accepted candidates independently of source fetch timestamps."""
+        from job_ftch.application.publication_backlog import pending_candidate_ids
+
+        runtime = self.get_runtime(tenant_id)
+        jobs = []
+        missing = 0
+        for identity in sorted(await pending_candidate_ids(runtime.store, target)):
+            job = await runtime.job_backend.get_job(identity)
+            if job is None:
+                missing += 1
+                continue
+            jobs.append(job)
+            if len(jobs) >= limit:
+                break
+        await runtime.store.set_run_state("bot_publish:missing_candidates", str(missing))
+        return jobs
 
     async def list_jobs(
         self,

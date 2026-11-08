@@ -70,6 +70,9 @@ def build_pipeline_run_stats(summary: RunSummary) -> PipelineRunStats:
         elif status not in {"skipped", "not_due", "paused"}:
             ok_sources += 1
     extra = {
+        "replayed_observations": summary.replayed_observations,
+        "new_publish_candidates": summary.new_publish_candidates,
+        "deferred": summary.deferred,
         "trigger": summary.trigger,
         "completion_state": summary.completion_state,
         "llm_health_error": summary.llm_health_error,

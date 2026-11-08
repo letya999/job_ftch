@@ -37,6 +37,6 @@ async def test_managed_scraper_zenrows() -> None:
         assert url == "https://api.zenrows.com/v1/"
         assert kwargs["params"]["url"] == "https://example.com/jobs"
         assert "apikey" in kwargs["params"]
-        assert kwargs["params"]["apikey"] == "zenrows_secret"
+        assert kwargs["params"]["apikey"] == "zenrows_secret"  # pragma: allowlist secret
         assert "authorization" not in kwargs["headers"]
         assert "Authorization" not in kwargs["headers"]

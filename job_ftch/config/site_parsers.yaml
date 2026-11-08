@@ -379,6 +379,8 @@ parsers:
       scroll_px: 2500
       stale_rounds: 3
   - name: tbank_career
+    extra:
+      tls_ca_bundle: tbank-russian-root
     domain_pattern: "^https?://(?:www\\.)?tbank\\.ru/career"
     has_custom_parse: true
     supports_discover: true

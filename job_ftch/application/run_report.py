@@ -76,6 +76,10 @@ class RuntimeRunReport:
     completion_state: str = "completed"
     llm_quota_exhausted: bool = False
     llm_health_error: str = ""
+    deferred: int = 0
+    review: int = 0
+    replayed_observations: int = 0
+    new_publish_candidates: int = 0
 
     @property
     def seen_dominates_drops(self) -> bool:
@@ -126,6 +130,10 @@ def build_runtime_run_report(summary: object, *, duration_seconds: int) -> Runti
         }
     }
     return RuntimeRunReport(
+        deferred=int(getattr(summary, "deferred", 0) or 0),
+        review=int(getattr(summary, "review", 0) or 0),
+        replayed_observations=int(getattr(summary, "replayed_observations", 0) or 0),
+        new_publish_candidates=int(getattr(summary, "new_publish_candidates", 0) or 0),
         duration_seconds=max(0, int(duration_seconds)),
         fetched=int(getattr(summary, "fetched", 0) or 0),
         extracted=int(getattr(summary, "extracted", 0) or 0),
@@ -158,8 +166,13 @@ def render_runtime_run_report_text(report: RuntimeRunReport) -> str:
     funnel_parts += [
         f"🔄 Дубликаты:        {report.duplicates}",
         f"⚙️ Обработано:       {report.extracted}",
-        f"⭐ Найдено вакансий: {report.emitted}",
+        f"⭐ Принято в этой попытке: {report.emitted}",
+        f"🆕 Новых кандидатов на публикацию: {report.new_publish_candidates}",
+        f"🔎 Требуют проверки: {report.review}",
+        f"⏳ Отложено: {report.deferred}",
     ]
+    if report.replayed_observations:
+        funnel_parts.append(f"↪️ Из сохранённых наблюдений: {report.replayed_observations}")
     text = "\n".join(funnel_parts)
     if report.notable_drop_reasons:
         reasons_str = ", ".join(
@@ -174,8 +187,11 @@ def render_runtime_run_report_text(report: RuntimeRunReport) -> str:
             for item in report.source_failures
         ]
         text += "\n<i>Проблемные источники: " + "; ".join(problem_lines) + "</i>"
-    if report.completion_state == "waiting_llm":
+    if report.completion_state == "waiting_llm" and report.llm_health_error == "continuation_retry":
+        text += "\n\n⏳ <b>Продолжение обработки:</b> сохранённые наблюдения ожидают повторной попытки после ошибки."
+    elif report.completion_state == "waiting_llm":
         text += "\n\n⏳ <b>LLM: запрос сохранён в очереди.</b> Обработка будет продолжена."
+        text += " Счётчики этой попытки нельзя суммировать с предыдущими как уникальные вакансии."
     elif report.llm_quota_exhausted:
         text += "\n\n⚠️ <b>LLM: квота исчерпана.</b> "
         text += html.escape(report.llm_health_error or "Новые обращения временно остановлены.")

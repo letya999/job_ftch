@@ -7,7 +7,7 @@ def test_log_url_drops_query_fragment_and_userinfo() -> None:
     assert (
         _sanitize_value(
             "url",
-            "https://user:password@example.test/jobs?token=secret#fragment",
+            "https://user:password@example.test/jobs?token=secret#fragment",  # pragma: allowlist secret
         )
         == "https://example.test/jobs"
     )
@@ -16,12 +16,21 @@ def test_log_url_drops_query_fragment_and_userinfo() -> None:
 def test_log_sanitizer_masks_cookie_token_and_proxy_values() -> None:
     assert _sanitize_value("cookies", {"cf_clearance": "cookie-secret"}) == "***"
     assert _sanitize_value("captcha_token", "token-secret") == "***"
-    assert _sanitize_value("proxy_url", "http://user:password@proxy.test") == "***"
+    assert (
+        _sanitize_value(
+            "proxy_url",
+            "http://user:password@proxy.test",  # pragma: allowlist secret
+        )
+        == "***"
+    )
 
 
 def test_exception_string_redacts_dsn_password() -> None:
     assert (
-        _sanitize_value("error", "Failed to connect to mysql://user:secret123@host:3306/db")
+        _sanitize_value(
+            "error",
+            "Failed to connect to mysql://user:secret123@host:3306/db",  # pragma: allowlist secret
+        )
         == "Failed to connect to mysql://user:***@host:3306/db"
     )
 

@@ -7,7 +7,7 @@ from job_ftch.infrastructure.backends.jobs.postgres import PostgreSQLJobBackend
 
 
 class _Settings:
-    store_dsn = "postgresql://user:pass@localhost/db"
+    store_dsn = "postgresql://user:pass@localhost/db"  # pragma: allowlist secret
     store_pool_min = 1
     store_pool_max = 2
     search_language = "simple"

@@ -18,7 +18,7 @@ def test_api_endpoint_persists_shape_without_credentials_or_values(tmp_path) -> 
     intel = DomainIntelligence(path)
     intel.add_api_endpoint(
         "example.test",
-        "https://user:password@example.test/api/jobs?page=2&token=secret#private",
+        "https://user:password@example.test/api/jobs?page=2&token=secret#private",  # pragma: allowlist secret (example credential)
     )
     intel.save()
     raw = path.read_text(encoding="utf-8")

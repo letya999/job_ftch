@@ -114,7 +114,7 @@ async def test_auto_backend_resolving_to_postgres_does_not_silently_fall_back(
     )
     settings = Settings(
         store_backend="auto",
-        store_dsn="postgresql://user:pass@localhost/db",
+        store_dsn="postgresql://user:pass@localhost/db",  # pragma: allowlist secret (example credential)
         store_fallback_on_error=True,
         store_allow_fallback=False,
     )
@@ -161,7 +161,7 @@ async def test_postgres_auto_fallback_can_be_explicitly_allowed(
     )
     settings = Settings(
         store_backend="auto",
-        store_dsn="postgresql://user:pass@localhost/db",
+        store_dsn="postgresql://user:pass@localhost/db",  # pragma: allowlist secret
         store_fallback_on_error=True,
         store_allow_fallback=True,
     )
