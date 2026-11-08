@@ -32,7 +32,7 @@ from job_ftch.application.dedup_settlement import (
 )
 from job_ftch.application.drops import RawItemDropped
 from job_ftch.application.item_decision_trace import record_item_decision_trace
-from job_ftch.application.llm_dispatch import LLMRequestDeferredError, llm_item_session
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError, llm_item_session, llm_run
 from job_ftch.application.logging import sanitize_string
 from job_ftch.application.outbox import recover_pending_outbox
 from job_ftch.application.rejections import RawItemRejected
@@ -278,6 +278,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         decision_version: str = "pipeline-v1",
         tenant_id: str = "default",
         settings: Settings | None = None,
+        llm_run_context: Any = None,
     ) -> None:
         if not (
             isinstance(sanitize_node, SanitizeNode)
@@ -304,6 +305,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self._source_run_id = source_run_id
         self._active_source_run_id: str | None = source_run_id
         self._settings = settings or get_settings()
+        self._llm_run_context = llm_run_context
         self._delivery_targets = {target.target_id: target for target in delivery_targets}
         if len(self._delivery_targets) != len(delivery_targets):
             raise ValueError("Delivery target IDs must be unique")
@@ -316,6 +318,22 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self._tracer = trace.get_tracer("job_ftch.pipeline")
 
     async def run(self, max_items: int | None = None) -> RunSummary:
+        if self._llm_run_context is None or llm_run.get():
+            return await self._run(max_items)
+        try:
+            async with self._llm_run_context() as session:
+                summary = await self._run(max_items)
+                await session.finish(summary.as_dict())
+                return summary
+        except LLMRequestDeferredError as exc:
+            return RunSummary(
+                completion_state="waiting_llm",
+                next_retry_at=exc.retry_at,
+                llm_health_error=exc.reason,
+                failed=1,
+            ).finish()
+
+    async def _run(self, max_items: int | None = None) -> RunSummary:
         settings = self._settings
         self._decision_version = str(getattr(settings, "pipeline_decision_version", "pipeline-v1"))
         summary = RunSummary()
@@ -1054,8 +1072,9 @@ class Pipeline[PipelineInput, PipelineOutput]:
         elif outcome == "llm_wait":
             pending = res["exc"]
             final_status = "DEFERRED"
-            trace_drop_reason = "llm_pending"
-            summary.record_deferred("llm_pending")
+            trace_drop_reason = pending.reason
+            summary.record_deferred(pending.reason)
+            summary.llm_health_error = pending.reason
             # Source cursors commit only with zero failures. Pending work must replay.
             summary.record_failure()
             summary.completion_state = "waiting_llm"

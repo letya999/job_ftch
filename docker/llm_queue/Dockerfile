@@ -3,7 +3,7 @@ WORKDIR /app
 RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser
 COPY pyproject.toml uv.lock README.md LICENSE ./
 RUN pip install --no-cache-dir uv==0.9.26 \
-    && uv sync --locked --no-dev --extra llm_queue --no-install-project
+    && uv sync --locked --no-dev --extra llm_queue --extra tracing --no-install-project
 COPY --chown=appuser:appuser job_ftch ./job_ftch
 COPY --chown=appuser:appuser config ./config
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app

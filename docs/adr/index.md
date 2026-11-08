@@ -115,6 +115,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [104 — CLIProxy as the production ETL provider](104-cliproxy-main-etl-production-route.md) - Explicit node bindings allow a controlled CLIProxy route for the production bot when direct OpenAI quota blocks ingestion. (Updated: 2026-11-03)
 - [105 — Paced Telegram channel delivery](105-paced-channel-delivery.md) - Space channel posts without changing ingest frequency or LLM usage. (Updated: 2026-11-03)
 - [106 — Optional PostgreSQL LLM dispatch](106-optional-postgres-llm-dispatch.md) - Provider-neutral durable LLM requests, Procrastinate execution, shared admission and optional home egress. (Updated: 2026-11-08)
+- [107 — CLIProxy run sessions and resilient admission](107-cliproxy-run-resilience.md) - CLIProxy-only durable run affinity, paced admission, classified waits and bounded run reports. (Updated: 2026-11-08)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

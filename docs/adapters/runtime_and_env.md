@@ -19,6 +19,7 @@ updated: 2026-11-03
 - `config/runtime.cliproxy.yaml` — legacy overlay; глобальный gateway не переключает именованные ETL bindings.
 - `docs/operations/cliproxy-vps.md` — Compose sidecar, loopback ports, Google OAuth и подключение к bot.
 - `docs/operations/llm-queue-and-home-egress.md` — optional PostgreSQL queue, shared quota scopes and Android home egress.
+- CLIProxy-only run sessions, jitter, classified deferred states and optional aggregate reports require an explicit `gateway: cliproxy` queued profile (ADR 107); direct compatible requests retain their previous behavior.
 - `job_ftch/adapters/telegram_bot/runtime.dev.yaml` — bot-специфичный dev runtime.
 - `job_ftch/adapters/telegram_bot/runtime.prod.yaml` — bot-специфичный prod runtime, включая явные CLIProxy ETL bindings по ADR 102.
 - `job_ftch/adapters/telegram_bot/config/tenants/*.yaml` — tenant-level sources и wiring.

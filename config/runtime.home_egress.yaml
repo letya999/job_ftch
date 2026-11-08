@@ -5,6 +5,8 @@ llm_provider_profiles:
     backend: openai
     capabilities: [text, structured]
   cliproxy_main:
+    gateway: cliproxy
+    timeout_seconds: 120.0
     backend: openai
     base_url: http://cliproxy:8317/v1
     credential_ref: JOB_FTCH_CLIPROXY_API_KEY
@@ -15,6 +17,8 @@ llm_provider_profiles:
     session_affinity: true
     egress_ready_url: http://llm-home-egress:1054/ready
   cliproxy_captcha:
+    gateway: cliproxy
+    timeout_seconds: 20.0
     backend: openai
     base_url: http://cliproxy:8317/v1
     credential_ref: JOB_FTCH_CLIPROXY_API_KEY

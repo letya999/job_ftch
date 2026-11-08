@@ -8,7 +8,6 @@ and the profile decision in one response.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 from contextvars import ContextVar
@@ -17,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import ConfigDict, Field
 
 from job_ftch.application.graph.params import int_param
-from job_ftch.application.llm_dispatch import LLMRequestDeferredError
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError, llm_deadline
 from job_ftch.domain import JobDraft, RawItem  # noqa: TC001
 from job_ftch.domain.relevance import RelevanceClassification
 from job_ftch.nodes.extraction import CoreExtractedJobFields, ExtractedJobFields, ExtractionNode
@@ -180,7 +179,7 @@ class DecisionExtractionNode(ExtractionNode):
         try:
             # The strict structured-output path is bounded here, rather than
             # relying on a raw JSON response and the provider's retry loop.
-            async with asyncio.timeout(self._request_timeout_seconds):
+            async with llm_deadline(self._request_timeout_seconds, self._llm):
                 combined = await self._llm.extract(prompt, schema)
             await self._store.set_run_state(cache_key, combined.model_dump_json())
             self._set_decision(combined, prompt_variant)

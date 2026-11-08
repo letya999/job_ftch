@@ -48,6 +48,67 @@ worker запускается в Linux-контейнере.
 
 ## Сервер: очередь
 
+### Дополнительная защита только CLIProxy
+
+ADR 107 расширяет ADR 106. Только профиль с `gateway: cliproxy` и
+`execution: queued` получает новые механизмы. `llm_gateway`, имя профиля и
+hostname не используются как эвристика. Inline/direct compatible API сохраняет
+прежнее поведение; direct и CLIProxy не могут делить один quota scope.
+
+Production overlay задаёт минимум 30 секунд между началами запросов плюс
+`jitter_seconds: 10`. Дополнительно учитывается равномерное распределение
+часового call/token budget. На плановом старте выбирается однократное смещение
+`run_jitter_seconds: 300`, сохраняемое в БД. Это локальные ограничения нагрузки,
+не обещание допустимых Google значений. После простоя лимиты не обнуляются.
+Основной CLIProxy HTTP timeout — 120 секунд, OCR — 20 секунд. Caller не ждёт
+полный inference: queued wait остаётся ограниченным, затем работа продолжается
+через deferred. Потеря ответа всё равно требует проверки оператора.
+
+Текстовые CLIProxy bindings получают одну логическую сессию на запуск; отложенная
+работа с той же выборкой источников/пользователем продолжает её после рестарта.
+Каждая вакансия имеет отдельный request identity и prompt. Общая affinity не
+приклеивает историю других вакансий. OCR делит account budget и наследует run
+session, если вызван внутри такого запуска; standalone OCR сохраняет item scope.
+CLIProxy получает `X-Session-ID`; конфигурационный helper включает affinity с
+TTL 168h. Строгая привязка сохраняет один credential на экземпляр CLIProxy.
+При замене Google-аккаунта увеличьте `account_generation` и разберите старый run.
+
+Сохраняются структурированные Google RetryInfo, quotaResetDelay/TimeStamp и
+CLIProxy model_cooldown. Общий RESOURCE_EXHAUSTED не объявляется автоматически
+исчерпанием квоты. Длительное ожидание освобождает worker. Model circuit после
+серии 5xx/transport failures делает одну сериализованную recovery attempt;
+авторизация, квота и потеря сети учитываются отдельно.
+
+Очередь, operator-required ответ, внешний deadline и переполнение не дают
+частичную extraction и не помечают наблюдение processed. Состояния failed,
+expired и uncertain сохраняют причину для оператора. Смена scheduling policy
+не инвалидирует результаты; semantic/route changes требуют разбора pending.
+
+`run_summary_enabled: true` ставит максимум один полезный отчёт после завершения
+реальной работы. В prompt входят только агрегаты и счётчики; бюджет и session
+общие с запуском, output ограничен 512 токенами. Ошибка отчёта не повторяет ingest.
+У пустого запуска нет дополнительной генерации. Никаких опечаток, маскирующих
+запросов, искусственного прогрева и генераций во время простоя нет. Одна коррекция
+JSON допускается только после настоящей ошибки schema validation.
+
+`status` показывает запросы/причины/attempts/tokens, model circuits и последние
+run IDs. `report RUN_ID` показывает сохранённую статистику и готовый анализ.
+`release-run RUN_ID` разрешён после разбора и отмены outstanding запросов; он не
+снимает account pause. `cancel REQUEST_ID` не доказывает отсутствие inference.
+Для uncertain сначала проверьте реальный исход, затем осознанно отмените запрос.
+Не автоматизируйте release/resume при auth, verification или unknown outcome.
+`resume` отклоняется, пока в защищённом scope есть uncertain-запросы.
+
+Метрики `job_ftch.cliproxy.*` экспортируются через существующий OpenTelemetry
+runtime: attempts, outcomes, waits, circuit transitions, latency и oldest age.
+Operator-required/circuit transitions пишутся без payload и credentials. Bot
+получает reason через существующие deferred/scheduler reports.
+
+Перед переходом с ADR 106 остановите новых producers и дождитесь drain старой
+очереди. Неразобранные unknown outcomes не переносите автоматической повторной
+отправкой. Запустите `init`, обновите runtime overlay и пересоздайте клиентов/worker.
+Сохраните PostgreSQL backup и старый image. Изменение schema аддитивное.
+
 Перед обновлением сохраните текущий image tag и backup БД. Не сбрасывайте state.
 Добавьте overlay после базового production Compose, включите профиль `llm-queue`:
 

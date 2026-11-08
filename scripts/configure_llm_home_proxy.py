@@ -25,6 +25,9 @@ def configure(path: Path, backup_dir: Path) -> Path:
         retry = config
     retry["request-retry"] = 0
     retry["max-retry-credentials"] = 1
+    routing = config.setdefault("routing", {})
+    routing["session-affinity"] = True
+    routing["session-affinity-ttl"] = "168h"
     backup_dir.mkdir(parents=True, exist_ok=True)
     backup_dir.chmod(0o700)
     backup = backup_dir / f"cliproxy-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}.yaml"

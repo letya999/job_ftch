@@ -34,7 +34,7 @@ from job_ftch.application.builder import (
 from job_ftch.application.builder import (
     build_llm as _legacy_build_llm,
 )
-from job_ftch.application.llm_dispatch import LLMRequestDeferredError
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError, uses_cliproxy_runs
 from job_ftch.application.llm_quota import (
     DEFAULT_QUOTA_MAX_RETRIES,
     DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
@@ -733,6 +733,7 @@ class TenantRunner:
                 trigger=task.trigger,
                 _from_ingest_queue=True,
                 _ingest_task_id=task.task_id,
+                **({"_parent_run_id": task.run_id} if uses_cliproxy_runs(settings) else {}),
             )
         except asyncio.CancelledError:
             raise
@@ -1865,6 +1866,80 @@ class TenantRunner:
             )
 
     async def run_tenant(
+        self,
+        tenant_id: str,
+        *,
+        run_id: str | None = None,
+        max_items: int | None = None,
+        user_id: str | None = None,
+        source_ids: Sequence[str] | None = None,
+        bypass_override: str | None = None,
+        parser_override: str | None = None,
+        ignore_schedule_gates: bool = False,
+        operator_session_id: str | None = None,
+        personal_mode: bool = False,
+        trigger: str = "manual",
+        _from_ingest_queue: bool = False,
+        _ingest_task_id: str | None = None,
+        _parent_run_id: str | None = None,
+    ) -> RunSummary:
+        runtime = self.get_runtime(tenant_id)
+        kwargs: dict[str, Any] = dict(
+            run_id=run_id,
+            max_items=max_items,
+            user_id=user_id,
+            source_ids=source_ids,
+            bypass_override=bypass_override,
+            parser_override=parser_override,
+            ignore_schedule_gates=ignore_schedule_gates,
+            operator_session_id=operator_session_id,
+            personal_mode=personal_mode,
+            trigger=trigger,
+            _from_ingest_queue=_from_ingest_queue,
+            _ingest_task_id=_ingest_task_id,
+        )
+        if not uses_cliproxy_runs(runtime.settings):
+            return await self._run_tenant(tenant_id, **kwargs)
+        kwargs["run_id"] = run_id or uuid.uuid4().hex
+        from job_ftch.infrastructure.llm.dispatch_session import CliproxyRun, run_selector
+
+        try:
+            async with CliproxyRun(
+                runtime.settings,
+                tenant_id,
+                selector=run_selector(user_id, source_ids, personal_mode),
+                trigger=trigger,
+                attempt_run_id=kwargs["run_id"],
+                parent_run_id=_parent_run_id,
+            ) as session:
+                summary = await self._run_tenant(tenant_id, **kwargs)
+                run_summary = summary.as_dict()
+                if _parent_run_id:
+                    list_active = getattr(runtime.store, "list_active_ingest_tasks", None)
+                    if callable(list_active):
+                        active = await list_active(tenant_id)
+                        if any(
+                            task.run_id == _parent_run_id and task.task_id != _ingest_task_id
+                            for task in active
+                        ):
+                            run_summary["completion_state"] = "waiting_continuations"
+                await session.finish(run_summary)
+                return summary
+        except LLMRequestDeferredError as exc:
+            summary = RunSummary(
+                tenant_id=tenant_id,
+                source_run_id=run_id or uuid.uuid4().hex,
+                completion_state="waiting_llm",
+                next_retry_at=exc.retry_at,
+                llm_health_error=exc.reason,
+                failed=1,
+                trigger=trigger,
+            ).finish()
+            await runtime.store.set_run_state("bot_scheduler:next_due_at", exc.retry_at.isoformat())
+            await self._persist_terminal_summary(runtime, summary)
+            return summary
+
+    async def _run_tenant(
         self,
         tenant_id: str,
         *,

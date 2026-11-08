@@ -13,6 +13,8 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from pydantic import SecretStr
 
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
+
 if TYPE_CHECKING:
     from psycopg import AsyncConnection
     from psycopg_pool import AsyncConnectionPool
@@ -36,13 +38,72 @@ CREATE TABLE IF NOT EXISTS jf_llm_scopes (
     window_start timestamptz NOT NULL DEFAULT now(), calls bigint NOT NULL DEFAULT 0,
     tokens bigint NOT NULL DEFAULT 0, paused_reason text
 );
+ALTER TABLE jf_llm_requests ADD COLUMN IF NOT EXISTS logical_run_id text;
+ALTER TABLE jf_llm_requests ADD COLUMN IF NOT EXISTS operation text NOT NULL DEFAULT 'work';
+ALTER TABLE jf_llm_requests ADD COLUMN IF NOT EXISTS actual_tokens bigint;
+CREATE TABLE IF NOT EXISTS jf_llm_model_state (
+    scope text NOT NULL, model text NOT NULL,
+    not_before timestamptz NOT NULL DEFAULT now(), failures integer NOT NULL DEFAULT 0,
+    circuit_open boolean NOT NULL DEFAULT false, reason text, last_failure_at timestamptz,
+    PRIMARY KEY(scope,model)
+);
+CREATE TABLE IF NOT EXISTS jf_llm_runs (
+    run_id text PRIMARY KEY, tenant_id text NOT NULL, selector text NOT NULL,
+    routes text NOT NULL, state text NOT NULL DEFAULT 'active',
+    not_before timestamptz NOT NULL DEFAULT now(), expires_at timestamptz NOT NULL,
+    summary jsonb, report_request_id text,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS jf_llm_runs_active ON jf_llm_runs(tenant_id,selector,state);
+ALTER TABLE jf_llm_runs ADD COLUMN IF NOT EXISTS reason text;
+ALTER TABLE jf_llm_runs ADD COLUMN IF NOT EXISTS source_run_ids text[] NOT NULL DEFAULT '{}';
 """
+
+
+def route_revision(settings: Settings, name: str) -> str:
+    profile = settings.llm_provider_profiles[name]
+    value = json.dumps(
+        [
+            profile.base_url,
+            profile.credential_ref,
+            profile.quota_scope,
+            profile.egress_ready_url,
+            profile.account_generation,
+        ]
+    )
+    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def profile_revision(settings: Settings, name: str) -> str:
     profile = settings.llm_provider_profiles[name]
     policy = settings.llm_dispatch_policies[profile.quota_scope or name]
-    value = json.dumps([profile.model_dump(mode="json"), policy.model_dump()], sort_keys=True)
+    if profile.cliproxy_dispatch:
+        # Scheduling changes must not invalidate saved inference or parked work.
+        value = json.dumps(
+            profile.model_dump(
+                mode="json", exclude={"timeout_seconds", "max_retries", "session_affinity"}
+            ),
+            sort_keys=True,
+        )
+    else:
+        # Preserve ADR 106 request identity for existing generic queued routes.
+        value = json.dumps(
+            [
+                profile.model_dump(mode="json", exclude={"gateway", "account_generation"}),
+                policy.model_dump(
+                    exclude={
+                        "jitter_seconds",
+                        "run_jitter_seconds",
+                        "preflight_cache_seconds",
+                        "circuit_failure_threshold",
+                        "circuit_cooldown_seconds",
+                        "circuit_max_cooldown_seconds",
+                        "run_summary_enabled",
+                    }
+                ),
+            ],
+            sort_keys=True,
+        )
     return hashlib.sha256(value.encode()).hexdigest()
 
 
@@ -106,6 +167,9 @@ class DispatchStore:
         payload: dict[str, Any],
         *,
         refresh_seconds: int | None = None,
+        logical_run_id: str | None = None,
+        operation: str = "work",
+        item_identity: str = "",
     ) -> str:
         await self.open()
         profile = self.settings.llm_provider_profiles[name]
@@ -113,6 +177,20 @@ class DispatchStore:
         policy = self.settings.llm_dispatch_policies[scope]
         revision = profile_revision(self.settings, name)
         canonical = json.dumps([tenant, name, revision, session, payload], sort_keys=True)
+        if profile.cliproxy_dispatch:
+            canonical = json.dumps(
+                [
+                    tenant,
+                    name,
+                    revision,
+                    None if operation == "preflight" else logical_run_id,
+                    item_identity
+                    or (session if not logical_run_id and operation != "preflight" else ""),
+                    operation,
+                    payload,
+                ],
+                sort_keys=True,
+            )
         request_id = hashlib.sha256(canonical.encode()).hexdigest()
         expires = datetime.now(UTC) + timedelta(seconds=policy.request_ttl_seconds)
         async with self.pool.connection() as conn, conn.transaction():
@@ -140,12 +218,29 @@ class DispatchStore:
                 )
             ).fetchone()
             if count and count["n"] >= policy.max_pending_per_tenant:
+                if profile.cliproxy_dispatch:
+                    raise LLMRequestDeferredError(
+                        request_id,
+                        datetime.now(UTC) + timedelta(seconds=30),
+                        reason="queue_capacity",
+                    )
                 raise RuntimeError("LLM queue tenant capacity exceeded")
             await conn.execute(
                 "INSERT INTO jf_llm_requests "
-                "(request_id,tenant_id,profile,scope,revision,session_id,payload,expires_at) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                (request_id, tenant, name, scope, revision, session, Jsonb(payload), expires),
+                "(request_id,tenant_id,profile,scope,revision,session_id,payload,expires_at,logical_run_id,operation) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    request_id,
+                    tenant,
+                    name,
+                    scope,
+                    revision,
+                    session,
+                    Jsonb(payload),
+                    expires,
+                    logical_run_id,
+                    operation,
+                ),
             )
             job_id = await self.app.configure_task(
                 "job_ftch.llm.execute",
@@ -175,8 +270,9 @@ class DispatchStore:
         async with self.pool.connection() as conn:
             rows = await (
                 await conn.execute(
-                    "SELECT profile,state,count(*) AS count,min(created_at) AS oldest "
-                    "FROM jf_llm_requests GROUP BY profile,state ORDER BY profile,state"
+                    "SELECT profile,state,error AS reason,count(*) AS count,min(created_at) AS oldest,"
+                    "min(next_run_at) AS next_run_at,sum(attempts) AS attempts,sum(actual_tokens) AS actual_tokens "
+                    "FROM jf_llm_requests GROUP BY profile,state,error ORDER BY profile,state"
                 )
             ).fetchall()
             scopes = await (
@@ -185,4 +281,17 @@ class DispatchStore:
                     "ORDER BY scope"
                 )
             ).fetchall()
-        return {"requests": [dict(row) for row in rows], "scopes": [dict(row) for row in scopes]}
+            models = await (
+                await conn.execute("SELECT * FROM jf_llm_model_state ORDER BY scope,model")
+            ).fetchall()
+            runs = await (
+                await conn.execute(
+                    "SELECT run_id,tenant_id,state,reason,not_before,expires_at,report_request_id FROM jf_llm_runs ORDER BY updated_at DESC LIMIT 50"
+                )
+            ).fetchall()
+        return {
+            "requests": [dict(row) for row in rows],
+            "scopes": [dict(row) for row in scopes],
+            "models": [dict(row) for row in models],
+            "runs": [dict(row) for row in runs],
+        }

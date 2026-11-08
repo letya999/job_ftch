@@ -61,6 +61,13 @@ class LLMDispatchPolicy(BaseModel):
     wait_seconds: float = Field(default=10.0, gt=0, le=120)
     retry_delay_seconds: float = Field(default=60, ge=1, le=86400)
     retention_seconds: int = Field(default=86400, ge=60, le=604800)
+    jitter_seconds: float = Field(default=10, ge=0, le=300)
+    run_jitter_seconds: float = Field(default=300, ge=0, le=3600)
+    preflight_cache_seconds: int = Field(default=300, ge=0, le=3600)
+    circuit_failure_threshold: int = Field(default=3, ge=1, le=20)
+    circuit_cooldown_seconds: int = Field(default=60, ge=1, le=3600)
+    circuit_max_cooldown_seconds: int = Field(default=900, ge=1, le=86400)
+    run_summary_enabled: bool = False
 
 
 class LLMProviderProfile(BaseModel):
@@ -81,6 +88,12 @@ class LLMProviderProfile(BaseModel):
     quota_scope: str | None = None
     session_affinity: bool = False
     egress_ready_url: str | None = None
+    gateway: Literal["direct", "cliproxy"] = "direct"
+    account_generation: int = Field(default=0, ge=0)
+
+    @property
+    def cliproxy_dispatch(self) -> bool:
+        return self.gateway == "cliproxy" and self.execution == "queued"
 
 
 class LLMProviderBinding(BaseModel):
@@ -882,6 +895,14 @@ class Settings(BaseSettings):
                 char in profile.credential_ref for char in "\\/\n\r"
             ):
                 raise ValueError("LLM credential_ref must be an environment reference")
+        for scope in self.llm_dispatch_policies:
+            routes = {
+                profile.gateway
+                for name, profile in profiles.items()
+                if profile.execution == "queued" and (profile.quota_scope or name) == scope
+            }
+            if len(routes) > 1:
+                raise ValueError("Direct and CLIProxy routes cannot share one quota_scope")
         for name, binding in bindings.items():
             if not name.strip() or not binding.provider.strip() or not binding.model.strip():
                 raise ValueError("LLM binding names, providers and models must not be blank")

@@ -41,12 +41,17 @@ class DroppingNode:
 
 
 @pytest.mark.asyncio
-async def test_pending_llm_preserves_observation_and_does_not_emit(tmp_path: Path) -> None:
+@pytest.mark.parametrize("reason", ["llm_pending", "auth", "queue_capacity", "expired"])
+async def test_pending_llm_preserves_observation_and_does_not_emit(
+    tmp_path: Path, reason: str
+) -> None:
     due = datetime.now(UTC) + timedelta(minutes=2)
 
     class PendingNode:
         async def process(self, item):
-            raise LLMRequestDeferredError("request-7", due)
+            raise LLMRequestDeferredError(
+                "request-7", due, reason=reason, requires_operator=reason in {"auth", "expired"}
+            )
 
     item = RawItem(
         source_kind=SourceKind.DEBUG, source_name="debug", external_id="pending", text="one"
@@ -65,6 +70,7 @@ async def test_pending_llm_preserves_observation_and_does_not_emit(tmp_path: Pat
     assert summary.emitted == 0 and summary.rejected == 0
     assert summary.failed > 0
     assert not await store.has_processed(processed_key_for_raw_item(item))
+    assert summary.llm_health_error == reason
 
 
 class ExplodingSink:

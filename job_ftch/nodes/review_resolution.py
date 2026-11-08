@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
 
 from job_ftch.application.graph.params import float_param, int_param
-from job_ftch.application.llm_dispatch import LLMRequestDeferredError
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError, llm_deadline
 from job_ftch.domain import JobRecord, MatchDecision  # noqa: TC001
 
 if TYPE_CHECKING:
@@ -57,7 +56,7 @@ class ReviewResolutionNode:
         self._calls += 1
         prompt = self._prompt(item, primary)
         try:
-            async with asyncio.timeout(self._timeout_seconds):
+            async with llm_deadline(self._timeout_seconds, self._llm):
                 result = await self._llm.extract(prompt, ReviewResolution)
         except LLMRequestDeferredError:
             raise

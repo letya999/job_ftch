@@ -10,8 +10,11 @@ import asyncio
 import contextlib
 import json
 import os
+import urllib.error
+import urllib.request
 from pathlib import Path
 from tempfile import gettempdir
+from time import monotonic
 from typing import Any
 
 
@@ -41,6 +44,21 @@ class HomeEgress:
         self.clients: set[asyncio.StreamWriter] = set()
         self.pin = Path("/var/lib/tailscale/home-exit-id")
         self.hostname = os.environ.get("JOB_FTCH_HOME_EXIT_NODE", "android-home")
+        self._probe_at = 0.0
+        self._internet_ready = False
+
+    def probe_internet(self) -> bool:
+        # Always traverse the selected userspace exit; never use the host route.
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler(
+                {"https": "http://127.0.0.1:1056", "http": "http://127.0.0.1:1056"}
+            )
+        )
+        try:
+            with opener.open("https://www.gstatic.com/generate_204", timeout=5) as response:
+                return bool(response.status == 204)
+        except (OSError, urllib.error.URLError, TimeoutError):
+            return False
 
     async def command(self, *args: str) -> tuple[int, str]:
         process = await asyncio.create_subprocess_exec(
@@ -87,6 +105,14 @@ class HomeEgress:
                 )
                 if next_ready and not pinned_id:
                     self.pin.write_text(str(peer["ID"]))
+                if next_ready:
+                    if monotonic() >= self._probe_at:
+                        self._internet_ready = await asyncio.to_thread(self.probe_internet)
+                        self._probe_at = monotonic() + (60 if self._internet_ready else 10)
+                    next_ready = self._internet_ready
+            if not peer:
+                self._internet_ready = False
+                self._probe_at = 0
             self.ready = next_ready
             if not self.ready:
                 for client in tuple(self.clients):

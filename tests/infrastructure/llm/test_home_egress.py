@@ -51,3 +51,37 @@ async def test_proxy_returns_503_before_phone_is_ready():
         assert not egress.clients
         writer.close()
         await writer.wait_closed()
+
+
+@pytest.mark.parametrize("online", [False, True])
+def test_internet_probe_uses_only_selected_local_exit_proxy(monkeypatch, online):
+    from types import SimpleNamespace
+    from urllib.error import URLError
+
+    from job_ftch.infrastructure.llm import home_egress
+
+    handlers = []
+
+    class Probe:
+        def open(self, url, timeout):
+            assert url == "https://www.gstatic.com/generate_204" and timeout == 5
+            if not online:
+                raise URLError("phone has no internet")
+            return self
+
+        def __enter__(self):
+            return SimpleNamespace(status=204)
+
+        def __exit__(self, *args):
+            return None
+
+    def opener(handler):
+        handlers.append(handler)
+        return Probe()
+
+    monkeypatch.setattr(home_egress.urllib.request, "build_opener", opener)
+    assert HomeEgress().probe_internet() is online
+    assert handlers[0].proxies == {
+        "https": "http://127.0.0.1:1056",
+        "http": "http://127.0.0.1:1056",
+    }
