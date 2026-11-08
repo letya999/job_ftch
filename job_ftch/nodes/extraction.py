@@ -16,6 +16,7 @@ from pydantic import (
 )
 
 from job_ftch.application.drops import RawItemDropped
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 from job_ftch.application.llm_usage import llm_node_context
 from job_ftch.domain import (
     CompensationRange,
@@ -924,6 +925,8 @@ class ExtractionNode:
                 span.set_attribute("job_ftch.extraction.error_type", "schema")
                 span.set_attribute("job_ftch.extraction.error", str(exc))
                 return ExtractedJobFields(), True
+            except LLMRequestDeferredError:
+                raise
             except Exception as exc:
                 # LLM/network failure — instructor already retried max_retries
                 # times; this is the final fallback.

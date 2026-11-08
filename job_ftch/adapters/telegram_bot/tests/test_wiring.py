@@ -255,11 +255,18 @@ async def test_scheduler_retries_run_left_incomplete_by_restart(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("initial_pending", [True, False])
 async def test_scheduler_recovers_pending_publish_before_next_run(
     monkeypatch: pytest.MonkeyPatch,
+    initial_pending: bool,
 ) -> None:
+    sleeps = 0
+
     async def fake_sleep(_seconds: float) -> None:
-        raise asyncio.CancelledError
+        nonlocal sleeps
+        sleeps += 1
+        if initial_pending or sleeps > 1:
+            raise asyncio.CancelledError
 
     monkeypatch.setattr("job_ftch.adapters.telegram_bot.main.asyncio.sleep", fake_sleep)
     monkeypatch.setattr(
@@ -288,6 +295,11 @@ async def test_scheduler_recovers_pending_publish_before_next_run(
         "bot_scheduler:pending_publish_since": "2026-08-02T16:00:00+00:00",
         "bot_scheduler:last_publish_attempt_at": "2026-08-02T16:01:00+00:00",
     }
+    if not initial_pending:
+        store_state.clear()
+    monkeypatch.setattr(
+        "job_ftch.adapters.telegram_bot.main._send_scheduler_run_report", AsyncMock()
+    )
 
     async def _get_state(key: str) -> str | None:
         return store_state.get(key)
@@ -307,7 +319,15 @@ async def test_scheduler_recovers_pending_publish_before_next_run(
     runner.get_publish_channel = AsyncMock(return_value="@out")
     runner.get_publish_user_id = AsyncMock(return_value="123")
     runner.has_candidate_profile_data = AsyncMock(return_value=True)
-    runner.run_tenant = AsyncMock()
+    runner.run_tenant = AsyncMock(
+        return_value=SimpleNamespace(
+            emitted=1,
+            completion_state="waiting_llm",
+            source_run_id="pending-run",
+            next_retry_at=datetime.now(UTC) + timedelta(minutes=1),
+            llm_health_error="llm_pending",
+        )
+    )
     runner.latest_jobs = AsyncMock(
         return_value=[
             SimpleNamespace(
@@ -325,7 +345,12 @@ async def test_scheduler_recovers_pending_publish_before_next_run(
     with pytest.raises(asyncio.CancelledError):
         await _run_scheduler_loop(runner, bot)
 
-    runner.run_tenant.assert_not_called()
+    if initial_pending:
+        runner.run_tenant.assert_not_called()
+    else:
+        runner.run_tenant.assert_awaited_once()
+        assert store_state["bot_scheduler:last_run_emitted"] == "1"
+        assert "bot_scheduler:last_success_at" not in store_state
     runner.latest_jobs.assert_awaited_once()
     assert store_state["bot_scheduler:pending_publish_since"] == ""
     assert store_state["bot_scheduler:last_publish_sent"] == "1"

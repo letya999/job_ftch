@@ -174,7 +174,9 @@ def render_runtime_run_report_text(report: RuntimeRunReport) -> str:
             for item in report.source_failures
         ]
         text += "\n<i>Проблемные источники: " + "; ".join(problem_lines) + "</i>"
-    if report.llm_quota_exhausted:
+    if report.completion_state == "waiting_llm":
+        text += "\n\n⏳ <b>LLM: запрос сохранён в очереди.</b> Обработка будет продолжена."
+    elif report.llm_quota_exhausted:
         text += "\n\n⚠️ <b>LLM: квота исчерпана.</b> "
         text += html.escape(report.llm_health_error or "Новые обращения временно остановлены.")
     elif report.llm_health_error:

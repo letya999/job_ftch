@@ -18,6 +18,7 @@ import structlog
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 from job_ftch.domain import (
     CompiledOntology,
     CompiledOntologyRelation,
@@ -344,6 +345,8 @@ class LLMCompiledTerm(BaseModel):
     def to_domain(self) -> CompiledOntologyTerm | None:
         try:
             return CompiledOntologyTerm.model_validate(self.model_dump())
+        except LLMRequestDeferredError:
+            raise
         except Exception:  # noqa: BLE001 - drop one bad LLM term, keep the chunk
             return None
 
@@ -382,6 +385,8 @@ class LLMCompiledRelation(BaseModel):
     def to_domain(self) -> CompiledOntologyRelation | None:
         try:
             return CompiledOntologyRelation.model_validate(self.model_dump())
+        except LLMRequestDeferredError:
+            raise
         except Exception:  # noqa: BLE001 - drop one bad LLM relation
             return None
 
@@ -507,6 +512,8 @@ def _compile_timeout_seconds(explicit: float | None) -> float:
         from job_ftch.config import get_settings
 
         return float(get_settings().ontology_compiler_timeout_seconds)
+    except LLMRequestDeferredError:
+        raise
     except Exception:  # noqa: BLE001 - compiler must still run without settings
         return 120.0
 
@@ -629,6 +636,8 @@ async def _classify_schema(
         except TypeError:
             raw = await classify(prompt, schema)
         return _normalize_classify_result(raw, schema)
+    except LLMRequestDeferredError:
+        raise
     except Exception as exc:  # noqa: BLE001 - one bad LLM chunk must not abort compile
         log.warning(
             "ontology_compiler_classify_failed",

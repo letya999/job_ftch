@@ -96,6 +96,7 @@ def test_run_many_materializes_fanout_candidates_and_keeps_independent_outcomes(
     )
     reports = asyncio.run(executor.run_many(Raw("source")))
     assert [report.status for report in reports] == ["ACCEPT", "REJECT"]
+    assert [report.source_item.stable_id for report in reports] == ["a", "b"]
 
 
 def test_run_many_does_not_settle_claims_itself() -> None:

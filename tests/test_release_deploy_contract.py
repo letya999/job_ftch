@@ -100,7 +100,10 @@ def test_prod_bot_image_copies_current_source_over_runtime_base() -> None:
     text = TELEGRAM_DOCKERFILE_PROD.read_text(encoding="utf-8")
 
     assert "COPY --chown=appuser:appuser . /app" in text
-    assert "uv sync" not in text
+    assert "ARG INSTALL_LLM_QUEUE=0" in text
+    assert 'if [ "$INSTALL_LLM_QUEUE" = "1" ]' in text
+    assert "uv sync --locked --inexact --no-dev" in text
+    assert "--extra llm_queue --no-install-project" in text
     assert "patchright install" not in text
     assert "camoufox fetch" not in text
     assert "cloakbrowser install" not in text

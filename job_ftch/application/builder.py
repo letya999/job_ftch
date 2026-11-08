@@ -512,6 +512,17 @@ class PipelineBuilder:
             processing_nodes.insert(0, snapshot_filter)
         if processing_nodes and isinstance(processing_nodes[0], SnapshotFilterNode):
             snapshot_filter = cast(SnapshotFilterNode, processing_nodes.pop(0))
+        llm_run_context = None
+        from job_ftch.application.llm_dispatch import uses_cliproxy_runs
+
+        if self._settings is not None and uses_cliproxy_runs(self._settings):
+            from functools import partial
+
+            from job_ftch.infrastructure.llm.dispatch_session import CliproxyRun
+
+            llm_run_context = partial(
+                CliproxyRun, self._settings, self._tenant_id, selector="library"
+            )
         return Pipeline(
             source=source,
             sanitize_node=sanitize_node,
@@ -527,6 +538,7 @@ class PipelineBuilder:
             decision_version=self._decision_version,
             tenant_id=self._tenant_id,
             settings=self._settings,
+            llm_run_context=llm_run_context,
         )
 
     async def run_async(self, *, max_items: int | None = None) -> RunSummary:
@@ -846,7 +858,7 @@ def configure(path: str | Path) -> PipelineBuilder:
     auth = EnvAuthProvider()
     store = cast(Store, create_store(settings))
     job_group_store = cast(JobGroupStore, create_job_group_store(settings))
-    llm = cast("LLMProvider", create_llm(settings))
+    llm = build_llm(settings)
     catalog = load_profile_catalog(settings)
     run_id = uuid4().hex
     sanitize_node, _snapshot_filter, nodes = build_nodes(
@@ -2052,6 +2064,15 @@ async def build_store(settings: Settings) -> Store:
 
 
 def build_llm(settings: Settings) -> LLMProvider:
+    binding = settings.llm_bindings.get("extraction")
+    if binding is not None:
+        profile = settings.llm_provider_profiles.get(binding.provider)
+        if profile is not None and (profile.execution == "queued" or profile.session_affinity):
+            from job_ftch.application.provider_routing import build_llm_bindings
+
+            return cast(
+                "LLMProvider", build_llm_bindings(settings, names=("extraction",))["extraction"]
+            )
     return cast(LLMProvider, create_llm(settings))
 
 

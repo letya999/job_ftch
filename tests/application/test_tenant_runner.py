@@ -99,6 +99,44 @@ async def test_binding_failure_uses_durable_pause_before_next_binding_probe(monk
 
 
 @pytest.mark.asyncio
+async def test_deferred_catalog_or_pipeline_request_persists_waiting_summary(monkeypatch) -> None:
+    from job_ftch.application.llm_dispatch import LLMRequestDeferredError
+
+    settings = _isolated_base_settings().model_copy(
+        update={
+            "store_backend": "memory",
+            "job_group_store_backend": "memory",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "llm_backend": "heuristic",
+        }
+    )
+    tenant = TenantConfig(tenant_id="pending-lane", display_name="Pending lane")
+    runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    due = datetime(2030, 1, 1, tzinfo=UTC)
+
+    async def pending(*args, **kwargs):
+        raise LLMRequestDeferredError("durable-request", due)
+
+    monkeypatch.setattr(runner, "_run_tenant_bound", pending)
+    try:
+        summary = await runner.run_tenant("pending-lane", ignore_schedule_gates=True)
+        assert (summary.completion_state, summary.next_retry_at) == ("waiting_llm", due)
+        assert summary.failed == 1
+        assert (
+            await runner.get_runtime("pending-lane").store.get_run_state(
+                "bot_scheduler:next_due_at"
+            )
+            == due.isoformat()
+        )
+        stored = await runner.get_run(summary.source_run_id or "", tenant_id="pending-lane")
+        assert stored is not None
+        assert stored.completion_state == "waiting_llm"
+    finally:
+        await runner.close()
+
+
+@pytest.mark.asyncio
 async def test_disabled_tenant_persists_terminal_run_summary() -> None:
     settings = _isolated_base_settings().model_copy(
         update={

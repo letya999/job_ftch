@@ -34,6 +34,7 @@ from job_ftch.application.builder import (
 from job_ftch.application.builder import (
     build_llm as _legacy_build_llm,
 )
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError, uses_cliproxy_runs
 from job_ftch.application.llm_quota import (
     DEFAULT_QUOTA_MAX_RETRIES,
     DEFAULT_QUOTA_RETRY_DELAY_SECONDS,
@@ -732,6 +733,7 @@ class TenantRunner:
                 trigger=task.trigger,
                 _from_ingest_queue=True,
                 _ingest_task_id=task.task_id,
+                **({"_parent_run_id": task.run_id} if uses_cliproxy_runs(settings) else {}),
             )
         except asyncio.CancelledError:
             raise
@@ -788,7 +790,11 @@ class TenantRunner:
                 error="ingest_queue_policy_blocked",
             )
             return
-        if summary.completion_state in {"llm_preflight_blocked", "llm_quota_exhausted"}:
+        if summary.completion_state in {
+            "llm_preflight_blocked",
+            "llm_quota_exhausted",
+            "waiting_llm",
+        }:
             await store.defer_ingest_task(
                 task,
                 self._ingest_worker_id,
@@ -1875,6 +1881,80 @@ class TenantRunner:
         trigger: str = "manual",
         _from_ingest_queue: bool = False,
         _ingest_task_id: str | None = None,
+        _parent_run_id: str | None = None,
+    ) -> RunSummary:
+        runtime = self.get_runtime(tenant_id)
+        kwargs: dict[str, Any] = dict(
+            run_id=run_id,
+            max_items=max_items,
+            user_id=user_id,
+            source_ids=source_ids,
+            bypass_override=bypass_override,
+            parser_override=parser_override,
+            ignore_schedule_gates=ignore_schedule_gates,
+            operator_session_id=operator_session_id,
+            personal_mode=personal_mode,
+            trigger=trigger,
+            _from_ingest_queue=_from_ingest_queue,
+            _ingest_task_id=_ingest_task_id,
+        )
+        if not uses_cliproxy_runs(runtime.settings):
+            return await self._run_tenant(tenant_id, **kwargs)
+        kwargs["run_id"] = run_id or uuid.uuid4().hex
+        from job_ftch.infrastructure.llm.dispatch_session import CliproxyRun, run_selector
+
+        try:
+            async with CliproxyRun(
+                runtime.settings,
+                tenant_id,
+                selector=run_selector(user_id, source_ids, personal_mode),
+                trigger=trigger,
+                attempt_run_id=kwargs["run_id"],
+                parent_run_id=_parent_run_id,
+            ) as session:
+                summary = await self._run_tenant(tenant_id, **kwargs)
+                run_summary = summary.as_dict()
+                if _parent_run_id:
+                    list_active = getattr(runtime.store, "list_active_ingest_tasks", None)
+                    if callable(list_active):
+                        active = await list_active(tenant_id)
+                        if any(
+                            task.run_id == _parent_run_id and task.task_id != _ingest_task_id
+                            for task in active
+                        ):
+                            run_summary["completion_state"] = "waiting_continuations"
+                await session.finish(run_summary)
+                return summary
+        except LLMRequestDeferredError as exc:
+            summary = RunSummary(
+                tenant_id=tenant_id,
+                source_run_id=run_id or uuid.uuid4().hex,
+                completion_state="waiting_llm",
+                next_retry_at=exc.retry_at,
+                llm_health_error=exc.reason,
+                failed=1,
+                trigger=trigger,
+            ).finish()
+            await runtime.store.set_run_state("bot_scheduler:next_due_at", exc.retry_at.isoformat())
+            await self._persist_terminal_summary(runtime, summary)
+            return summary
+
+    async def _run_tenant(
+        self,
+        tenant_id: str,
+        *,
+        run_id: str | None = None,
+        max_items: int | None = None,
+        user_id: str | None = None,
+        source_ids: Sequence[str] | None = None,
+        bypass_override: str | None = None,
+        parser_override: str | None = None,
+        ignore_schedule_gates: bool = False,
+        operator_session_id: str | None = None,
+        personal_mode: bool = False,
+        trigger: str = "manual",
+        _from_ingest_queue: bool = False,
+        _ingest_task_id: str | None = None,
     ) -> RunSummary:
         """Run acquisition and policy under one correlated trace/run id."""
         run_id = run_id or uuid.uuid4().hex
@@ -2135,7 +2215,11 @@ class TenantRunner:
                             source_run_id=run_id,
                             trigger=trigger,
                             config_fingerprint=config_fingerprint,
-                            completion_state="llm_preflight_blocked",
+                            completion_state=(
+                                "waiting_llm"
+                                if preflight.status == "waiting_llm"
+                                else "llm_preflight_blocked"
+                            ),
                             next_retry_at=preflight.retry_at,
                             llm_quota_exhausted=preflight.quota_exhausted,
                             llm_health_error=preflight.message,
@@ -2169,6 +2253,11 @@ class TenantRunner:
                             ingest_task_id=_ingest_task_id,
                             ingest_worker_id=self._ingest_worker_id if _from_ingest_queue else None,
                         )
+                        if summary.completion_state == "waiting_llm" and summary.next_retry_at:
+                            await runtime.store.set_run_state(
+                                "bot_scheduler:next_due_at", summary.next_retry_at.isoformat()
+                            )
+                            await self._persist_terminal_summary(runtime, summary)
                         if getattr(runtime.llm_provider, "quota_exhausted", False):
                             decision = await note_llm_quota_failure(
                                 runtime.store,
@@ -2214,6 +2303,20 @@ class TenantRunner:
                 span.set_attribute("job_ftch.routing_accepted", summary.emitted)
                 span.set_attribute("job_ftch.failed", summary.failed)
                 return summary
+        except LLMRequestDeferredError as exc:
+            summary = RunSummary(
+                tenant_id=tenant_id,
+                source_run_id=run_id,
+                trigger=trigger,
+                config_fingerprint=config_fingerprint,
+                completion_state="waiting_llm",
+                next_retry_at=exc.retry_at,
+                llm_health_error="LLM запрос ожидает выполнения.",
+                failed=1,
+            ).finish()
+            await runtime.store.set_run_state("bot_scheduler:next_due_at", exc.retry_at.isoformat())
+            await self._persist_terminal_summary(runtime, summary)
+            return summary
         finally:
             await run_lock.aclose()
             if attach_token is not None:

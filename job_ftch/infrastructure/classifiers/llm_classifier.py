@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from job_ftch.application.contracts import ClassificationResult
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 from job_ftch.domain import PostType  # noqa: TCH001
 
 if TYPE_CHECKING:
@@ -36,6 +37,8 @@ class LLMClassifierProvider:
             label = result.post_type.value
             confidence = result.ai_relevance if label == "job_posting" else 0.9
             return ClassificationResult(label, confidence, self.model_id)
+        except LLMRequestDeferredError:
+            raise
         except Exception:
             return ClassificationResult("unknown", 0.0, self.model_id)
 

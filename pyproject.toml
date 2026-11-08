@@ -1,6 +1,6 @@
 [project]
 name = "job-ftch"
-version = "0.0.32"
+version = "0.0.33"
 description = "Open-source async pipeline for ingesting AI/tech job vacancies from Telegram and career sites"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -137,6 +137,10 @@ all = [
     "tenacity>=8.2",
     "trafilatura>=1.8",
     "extruct>=0.16",
+]
+llm-queue = [
+    "procrastinate==3.10.0",
+    "psycopg[binary,pool]>=3.2,<4",
 ]
 
 [project.scripts]

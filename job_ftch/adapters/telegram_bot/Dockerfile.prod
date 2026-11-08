@@ -9,6 +9,11 @@ COPY --chown=appuser:appuser . /app
 
 USER root
 RUN install -d -o appuser -g appuser /app/.tenant_locks
+ARG INSTALL_LLM_QUEUE=0
+RUN if [ "$INSTALL_LLM_QUEUE" = "1" ]; then \
+      UV_NO_CACHE=1 UV_LINK_MODE=copy uv sync --locked --inexact --no-dev \
+      --extra llm_queue --no-install-project; \
+    fi
 USER appuser
 
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app \

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from job_ftch.application.graph.params import int_param
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 from job_ftch.domain import JobRecord, MatchDecision, PresentableJob
 
 if TYPE_CHECKING:
@@ -157,6 +158,8 @@ class PresentableTextNode:
                 return item.model_copy(
                     update={"presentable": PresentableJob.model_validate_json(cached)}
                 )
+            except LLMRequestDeferredError:
+                raise
             except Exception:
                 logger.debug("presentable_cache_decode_failed", source_id=source_id, exc_info=True)
 
@@ -183,6 +186,8 @@ class PresentableTextNode:
 
         try:
             result: Any = await present_fn(_build_presentable_prompt(item), PresentableJob)
+        except LLMRequestDeferredError:
+            raise
         except Exception as exc:
             logger.warning("presentable_llm_failed", error=str(exc), source_id=source_id)
             return item.model_copy(update={"presentable": _template_present(item)})

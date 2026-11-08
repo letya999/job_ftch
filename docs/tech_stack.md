@@ -69,8 +69,9 @@ OpenTelemetry, Pillow, pypdf, setuptools and virtualenv in the lockfile.
 | `[camoufox]` | `camoufox` | Firefox anti-detect tier |
 | `[nodriver]` | `nodriver` | CDP-native browser tier |
 | `[parity_lab]` | `cryptography`, `httpx[http2]`, `hypercorn[h3]`, `maxminddb`, `starlette` | Local-only browser/network parity lab |
-| `[tracing]` | OTLP HTTP exporter | OpenObserve export |
+| `[tracing]` | OTLP HTTP exporter | OpenObserve export; enabled in the optional LLM worker image for CLIProxy dispatch metrics |
 | `[resilience]` | `tenacity` | Explicit retry helpers |
+| `[llm_queue]` | `procrastinate`, `psycopg` | Optional PostgreSQL LLM dispatch; isolated from inline clients and the asyncpg store |
 | `[ollama]` | `httpx` | Ollama-compatible LLM path |
 
 `[all]` объединяет shipped runtime optional stack. Local-only lab/tooling extras

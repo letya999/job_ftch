@@ -57,6 +57,42 @@ This evaluates a committed local fixture; it does not contact live sources or pu
 
 The Telegram bot is the primary production deployment. Other adapters have their own maturity levels; see [runtime and environment](docs/adapters/runtime_and_env.md) and [quality gates](docs/operations/ci-cd.md). Site parsing depends on upstream pages and is checked source by source; green CI does not prove every live job board works.
 
+## Choose an LLM route
+
+Start with a token and an OpenAI-compatible endpoint. Additional services are optional:
+
+| Mode | Requirements | Behavior |
+| --- | --- | --- |
+| Direct compatible API | Endpoint, model and API token | Inline calls; no dispatch queue or phone required |
+| Queued compatible API | PostgreSQL, worker and `llm-queue` extra | Durable requests, shared budgets and deferred continuation |
+| Protected CLIProxyAPI | CLIProxyAPI profile with `gateway: cliproxy` and `execution: queued` | Run affinity, jitter, classified cooldowns, circuit breaker and optional completion report |
+| CLIProxyAPI with home egress | Protected CLIProxyAPI plus Tailscale and an Android exit node | Required traffic uses the pinned phone; an unavailable exit pauses dispatch |
+
+Queue state lives in PostgreSQL; Redis is not required. A logical session lasts for one run and its deferred continuations, including restarts. Each vacancy keeps its own prompt and request identity. Shared affinity does not combine unrelated conversations. A direct profile does not inherit CLIProxy-specific behavior.
+
+Follow the [queue and home egress runbook](docs/operations/llm-queue-and-home-egress.md) for configuration, Android setup, status commands and recovery. Local pacing cannot increase provider quotas or guarantee protection from account restrictions.
+
+## Operate and recover
+
+- [Production deployment](docs/deploy.md): containers, durable state and readiness checks.
+- [LLM dispatch](docs/operations/llm-queue-and-home-egress.md): inspect pending work, cooldowns and operator holds.
+- [Publication recovery](docs/deploy.md#сверка-неопределённой-публикации): reconcile a lost Telegram response before resending a card.
+- [Release checklist](docs/release_checklist.md): tests, secret scanning, CI and deployment parity.
+
+Keep API tokens, OAuth credentials, Telegram sessions and Tailscale state outside Git and image build contexts. Back up the database and private state before updating. Preserve the active Compose overlays during upgrades: starting only the base stack does not retain an optional queue or home route.
+
+An unknown LLM outcome and an unknown Telegram delivery are separate holds. Restoring the model route does not confirm whether a card was delivered. Use the matching recovery procedure; the request store and publication ledger prevent automatic blind replays.
+
+## Check a change
+
+```bash
+just code-verify
+just tests-all
+just docs-verify
+```
+
+These commands cover code/type checks, the non-network test suite and documentation. Queue integration tests require a disposable PostgreSQL database; CI supplies one. See [CI/CD](docs/operations/ci-cd.md) for optional extras, browser checks and the full release gate.
+
 ## Other projects in this space
 
 These are independent examples of related approaches, not components of JobFetch:
