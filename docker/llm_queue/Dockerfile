@@ -4,8 +4,8 @@ RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser
 COPY pyproject.toml uv.lock README.md LICENSE ./
 RUN pip install --no-cache-dir uv==0.9.26 \
     && uv sync --locked --no-dev --extra llm_queue --no-install-project
-COPY job_ftch ./job_ftch
-COPY config ./config
+COPY --chown=appuser:appuser job_ftch ./job_ftch
+COPY --chown=appuser:appuser config ./config
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app
 USER appuser
 CMD ["python", "-m", "job_ftch.infrastructure.llm.dispatch_worker", "worker"]
