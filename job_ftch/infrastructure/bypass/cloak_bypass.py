@@ -22,7 +22,7 @@ The defaults can be overridden through `bypass_config`:
         humanize: false
         geoip: false
         headless: true
-        proxy: socks5://user:pass@residential:1080
+        proxy: socks5://user:pass@residential:1080  # pragma: allowlist secret (example credential)
 """
 
 from __future__ import annotations

@@ -21,7 +21,7 @@ def test_extract_job_keys_reads_jk_ids_from_listing_links() -> None:
 
     keys = _extract_job_keys(html, IndeedParser()._job_key_re(), limit=5)
 
-    assert keys == ["b16f311ae0b6990b", "a06375629baf873c"]
+    assert keys == ["b16f311ae0b6990b", "a06375629baf873c"]  # pragma: allowlist secret
 
 
 def test_extract_detail_urls_builds_viewjob_links() -> None:
