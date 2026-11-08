@@ -7,14 +7,17 @@ import base64
 import json
 import logging
 import os
+import re
+import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote, urlsplit
 
 from opentelemetry import metrics
 from opentelemetry.metrics import Observation
+from opentelemetry.sdk.trace import SpanProcessor
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -26,6 +29,135 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_trace_span(span: Any) -> Any:
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import ReadableSpan
+    from opentelemetry.trace import SpanContext
+    from opentelemetry.trace.status import Status
+
+    def clean_context(context: Any) -> Any:
+        if context is None:
+            return None
+        return SpanContext(
+            trace_id=context.trace_id,
+            span_id=context.span_id,
+            is_remote=context.is_remote,
+            trace_flags=context.trace_flags,
+        )
+
+    attributes: dict[str, object] = {}
+    original = span.attributes or {}
+    run_id = original.get("job_ftch.source_run_id")
+    if isinstance(run_id, str) and re.fullmatch(r"[0-9a-f]{32}", run_id):
+        attributes["job_ftch.source_run_id"] = run_id
+    for key in ("job_ftch.fetched", "job_ftch.extracted", "job_ftch.emitted"):
+        value = original.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            attributes[key] = value
+    known_names = {
+        "ingest.run",
+        "bot.run",
+        "pipeline.run",
+        "pipeline.item",
+        "pipeline.node",
+        "pipeline.item.decision",
+        "extraction.generation",
+        "post_type.classify",
+        "match_scoring.score",
+        "hard_filter.check",
+        "garbage_filter.check",
+        "semantic_prefilter.check",
+        "tfidf_logreg_prefilter.check",
+    }
+    name = span.name if span.name in known_names else "job_ftch.span"
+    if span.name.startswith("graph.node."):
+        name = "graph.node"
+    return ReadableSpan(
+        name=name,
+        context=clean_context(span.context),
+        parent=clean_context(span.parent),
+        resource=Resource({"service.name": "job_ftch"}),
+        attributes=cast("Any", attributes),
+        status=Status(span.status.status_code),
+        start_time=span.start_time,
+        end_time=span.end_time,
+    )
+
+
+class _SafeTraceProcessor(SpanProcessor):
+    def __init__(self, exporter: Any) -> None:
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        self._delegate: Any = BatchSpanProcessor(
+            exporter, max_queue_size=2048, max_export_batch_size=128
+        )
+
+    def on_start(self, span: Any, parent_context: Any = None) -> None:
+        return None
+
+    def _on_ending(self, span: Any) -> None:
+        return None
+
+    def on_end(self, span: Any) -> None:
+        try:
+            self._delegate.on_end(_safe_trace_span(span))
+        except Exception:
+            logger.warning("Safe trace could not be queued")
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return bool(self._delegate.force_flush(timeout_millis))
+
+    def shutdown(self) -> None:
+        self._delegate.shutdown()
+
+
+_trace_setup_lock = threading.Lock()
+
+
+def _configure_safe_trace_export(settings: Settings) -> bool:
+    with _trace_setup_lock:
+        return _configure_safe_trace_export_locked(settings)
+
+
+def _configure_safe_trace_export_locked(settings: Settings) -> bool:
+    if not (
+        settings.tracing_enabled
+        and settings.openobserve_enabled
+        and settings.openobserve_url
+        and settings.openobserve_username
+        and settings.openobserve_password
+    ):
+        return False
+    from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+
+    provider = trace.get_tracer_provider()
+    if isinstance(provider, trace.ProxyTracerProvider):
+        provider = TracerProvider(resource=Resource({"service.name": "job_ftch"}))
+        trace.set_tracer_provider(provider)
+    if not isinstance(provider, TracerProvider):
+        return False
+    if getattr(provider, "_job_ftch_safe_trace_processor", None) is not None:
+        return True
+    base = _resolve_openobserve_url(settings.openobserve_url)
+    org = quote(settings.openobserve_org.strip() or "default", safe="")
+    secret = settings.openobserve_password.get_secret_value()
+    auth = base64.b64encode(f"{settings.openobserve_username}:{secret}".encode()).decode()
+    exporter = OTLPSpanExporter(
+        endpoint=f"{base}/api/{org}/v1/traces",
+        headers={"Authorization": f"Basic {auth}", "stream-name": "job_ftch_traces"},
+        timeout=settings.openobserve_timeout_seconds,
+    )
+    processor = _SafeTraceProcessor(exporter)
+    provider.add_span_processor(processor)
+    setattr(provider, "_job_ftch_safe_trace_processor", processor)  # noqa: B010
+    return True
+
+
 _configured = False
 _shutdown = False
 _meter_provider: Any | None = None
@@ -40,6 +172,7 @@ _runtime_state_snapshots: dict[str, list[tuple[float, dict[str, str]]]] = {}
 _CORRELATION_FIELDS = frozenset(
     {
         "source_run_id",
+        "parent_run_id",
         "tenant_id",
         "graph_hash",
         "source_id",

@@ -145,6 +145,8 @@ Source.fetch()
 Production binding:
 
 - runtime: `config/runtime.prod.yaml`;
+- Telegram bot overlay: `job_ftch/adapters/telegram_bot/runtime.prod.yaml`,
+  where the main LLM bindings use CLIProxy per [ADR 104](adr/104-cliproxy-main-etl-production-route.md);
 - graph: `config/pipelines/evidence_v2_compact_prefilter.yaml`;
 - graph hash:
   `0d73de0663d220da62e37d9a41159542547d167f9f096088f7ae85ec587e44fb`.

@@ -1,7 +1,7 @@
 ---
 title: "Provider routing and production recovery"
-description: "Requirements for node-scoped LLM routing, CAPTCHA-only CLIProxyAPI, truthful Telegram delivery and source recovery."
-updated: 2026-09-30
+description: "Requirements for node-scoped LLM routing, explicit CLIProxyAPI routes, truthful Telegram delivery and source recovery."
+updated: 2026-11-03
 ---
 # Provider routing and production recovery
 
@@ -12,22 +12,24 @@ updated: 2026-09-30
 ## Goal
 
 Make provider/model selection explicit for each LLM-consuming graph node,
-restrict CLIProxyAPI to image CAPTCHA recognition, keep the application alive
+keep the application alive
 during provider degradation, report actionable failures to Telegram and
 OpenObserve, restore truthful publication accounting, and repair failing source
-routes using phase-level evidence.
+routes using phase-level evidence. The initial CAPTCHA-only CLIProxy policy is
+extended for the Telegram production ETL by [ADR 104](../adr/104-cliproxy-main-etl-production-route.md).
 
 ## Scope
 
 ### Provider and model routing
 
 - Named provider profiles contain endpoint, credential reference, timeout,
-  retry, capability and session-storage configuration.
+  retry, structured-response mode, capability and session-storage configuration.
 - Graph nodes select a provider profile and model independently.
-- The production defaults use the OpenAI profile for ETL extraction,
-  relevance and ontology compilation.
-- CLIProxyAPI is assigned to `cliproxy_image` with
-  `gemini-3.8-flash-high`; it is not a main-ETL default.
+- The frozen production recipe uses the OpenAI profile for ETL extraction,
+  relevance and ontology compilation. The Telegram production overlay explicitly
+  binds extraction, relevance, ontology and presentation to CLIProxy under ADR 104.
+- CLIProxyAPI also serves the independent `cliproxy_image` binding with
+  `gemini-3.8-flash-high` when that route is enabled.
 - Configuration files contain references to secrets, never secret values.
 - Existing global gateway settings are migrated with explicit warnings; no
   compatibility path may silently change a model.

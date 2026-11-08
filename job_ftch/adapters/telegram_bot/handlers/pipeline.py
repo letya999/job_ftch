@@ -20,7 +20,7 @@ from job_ftch.adapters.telegram_bot.formatter import resolve_job_url
 from job_ftch.adapters.telegram_bot.handlers.feedback import build_feedback_markup
 from job_ftch.adapters.telegram_bot.sender import ReplyCardSender, TelegramCardSender
 from job_ftch.adapters.telegram_bot.utils import safe_error_reply
-from job_ftch.application.channel_publisher import publish_jobs
+from job_ftch.application.channel_publisher import channel_throttle_seconds, publish_jobs
 from job_ftch.application.run_report import (
     build_runtime_run_report,
     render_runtime_run_footer,
@@ -485,6 +485,7 @@ async def run_pipeline_for_chat(
                     ),
                     store=channel_store,
                     send_limit=send_limit,
+                    throttle_seconds=channel_throttle_seconds(_settings),
                 )
                 chan_count = channel_outcome.sent
                 publish_error: str | None = channel_outcome.error

@@ -42,6 +42,7 @@ _DECISIONS: dict[FailureKind, TransitionDecision] = {
     FailureKind.BLOCKED_IP: TransitionDecision(TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK),
     FailureKind.BLOCKED: TransitionDecision(TransitionAction.ACTIVATE_PROXY_THEN_FALLBACK),
     FailureKind.TLS_ERROR: TransitionDecision(TransitionAction.TLS_IMPERSONATION),
+    FailureKind.CERTIFICATE_ERROR: TransitionDecision(TransitionAction.TERMINAL),
     FailureKind.BLOCKED_FINGERPRINT: TransitionDecision(
         TransitionAction.FINGERPRINT_RESISTANT_ENGINE,
         preserves_engine=False,

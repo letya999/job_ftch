@@ -110,6 +110,8 @@ content можно пропустить, changed content надо переигр
 
 `source health` — runtime состояние источника: failures, pause/probe logic,
 drift и degraded behavior. Оно не должно подменять terminal relevance decision.
+Падение числа новых публикаций при успешном fetch остаётся метрикой drift:
+повторные вакансии и нерелевантные карточки не означают поломку источника.
 
 ## Ошибки, которые ломают слой
 

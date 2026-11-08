@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-labelledby="title desc">
+  <title id="title">JobFetch</title>
+  <desc id="desc">Job signals flow through extraction, relevance and publication.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1"><stop offset="0" stop-color="#0c1017"/><stop offset="1" stop-color="#1c2630"/></linearGradient>
+    <linearGradient id="accent" x2="1" y2="0"><stop offset="0" stop-color="#ee8d54"/><stop offset="1" stop-color="#f4c77b"/></linearGradient>
+  </defs>
+  <rect width="1200" height="340" rx="24" fill="url(#background)"/>
+  <path d="M0 85H1200M0 170H1200M0 255H1200M150 0V340M300 0V340M450 0V340M600 0V340M750 0V340M900 0V340M1050 0V340" stroke="#35404a" stroke-opacity=".28"/>
+  <rect x="38" y="38" width="1124" height="264" rx="16" fill="none" stroke="#e98a55" stroke-opacity=".64" stroke-width="2"/>
+  <path d="M86 89h32l-8 16h-32zm-12 23h32l-8 16H66zm-12 23h32l-8 16H54z" fill="url(#accent)"/>
+  <text x="142" y="142" fill="#f7f4ef" font-family="Arial,Helvetica,sans-serif" font-size="76" font-weight="800" letter-spacing="-3">JOB_FTCH</text>
+  <text x="145" y="184" fill="#d7d0c7" font-family="Arial,Helvetica,sans-serif" font-size="22" letter-spacing="1">VACANCIES WITH SIGNAL, CONTEXT AND EVIDENCE</text>
+  <path d="M146 238h770" stroke="#e98a55" stroke-opacity=".58" stroke-width="2"/>
+  <g fill="#101720" stroke="#f3b877" stroke-width="2"><circle cx="165" cy="238" r="8"/><circle cx="410" cy="238" r="8"/><circle cx="665" cy="238" r="8"/><circle cx="905" cy="238" r="8"/></g>
+  <g fill="#e6e2dd" font-family="Arial,Helvetica,sans-serif" font-size="15" font-weight="700" letter-spacing="1.5"><text x="145" y="272">COLLECT</text><text x="385" y="272">EXTRACT</text><text x="635" y="272">EVALUATE</text><text x="875" y="272">PUBLISH</text></g>
+</svg>

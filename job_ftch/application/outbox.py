@@ -25,18 +25,18 @@ async def recover_pending_outbox(
         if claim is not None and not await claim(record):
             continue
         try:
-            await deliver(record)
-        except Exception:  # caller owns retry/backoff policy
-            logger.exception(
-                "outbox_recovery_delivery_failed",
-                idempotency_key=record.idempotency_key,
-                sink_name=record.sink_name,
-            )
+            try:
+                await deliver(record)
+            except Exception:  # caller owns retry/backoff policy
+                logger.exception(
+                    "outbox_recovery_delivery_failed",
+                    idempotency_key=record.idempotency_key,
+                    sink_name=record.sink_name,
+                )
+                continue
+            await store.mark_outbox_delivered(record.idempotency_key)
+            delivered += 1
+        finally:
             if release is not None:
                 await release(record)
-            continue
-        await store.mark_outbox_delivered(record.idempotency_key)
-        if release is not None:
-            await release(record)
-        delivered += 1
     return delivered

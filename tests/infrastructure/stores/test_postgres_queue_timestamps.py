@@ -31,7 +31,7 @@ async def test_postgres_queue_writes_native_timestamps() -> None:
     await store.record_ingest_rate_limit(
         "scope", cooldown_until=now, retry_after_seconds=30, status_code=429
     )
-    timestamp_positions = ((13, 17, 18), (1, 2), (1, 3), (2, 3), (1, 4))
+    timestamp_positions = ((13, 17, 18), (1, 2), (2, 4), (2, 3), (1, 4))
     for call, positions in zip(execute.call_args_list, timestamp_positions, strict=True):
         params = call.args[1]
         for position in positions:

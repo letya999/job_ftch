@@ -99,6 +99,44 @@ async def test_binding_failure_uses_durable_pause_before_next_binding_probe(monk
 
 
 @pytest.mark.asyncio
+async def test_deferred_catalog_or_pipeline_request_persists_waiting_summary(monkeypatch) -> None:
+    from job_ftch.application.llm_dispatch import LLMRequestDeferredError
+
+    settings = _isolated_base_settings().model_copy(
+        update={
+            "store_backend": "memory",
+            "job_group_store_backend": "memory",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "llm_backend": "heuristic",
+        }
+    )
+    tenant = TenantConfig(tenant_id="pending-lane", display_name="Pending lane")
+    runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    due = datetime(2030, 1, 1, tzinfo=UTC)
+
+    async def pending(*args, **kwargs):
+        raise LLMRequestDeferredError("durable-request", due)
+
+    monkeypatch.setattr(runner, "_run_tenant_bound", pending)
+    try:
+        summary = await runner.run_tenant("pending-lane", ignore_schedule_gates=True)
+        assert (summary.completion_state, summary.next_retry_at) == ("waiting_llm", due)
+        assert summary.failed == 1
+        assert (
+            await runner.get_runtime("pending-lane").store.get_run_state(
+                "bot_scheduler:next_due_at"
+            )
+            == due.isoformat()
+        )
+        stored = await runner.get_run(summary.source_run_id or "", tenant_id="pending-lane")
+        assert stored is not None
+        assert stored.completion_state == "waiting_llm"
+    finally:
+        await runner.close()
+
+
+@pytest.mark.asyncio
 async def test_disabled_tenant_persists_terminal_run_summary() -> None:
     settings = _isolated_base_settings().model_copy(
         update={
@@ -1634,7 +1672,7 @@ async def test_tenant_runner_persists_candidate_profiles_and_reranks_latest_jobs
         await runner.close()
 
 
-def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
+def test_update_source_health_payload_keeps_drift_as_metric_when_fetch_succeeds() -> None:
     stats = SourceRunStats(emitted=0, failed=0, fetched=2)
     payload = _update_source_health_payload(
         SourceHealth(
@@ -1661,9 +1699,19 @@ def test_update_source_health_payload_marks_drift_and_failure_streak() -> None:
         finished_at=datetime(2026, 6, 13, tzinfo=UTC),
     )
 
-    assert payload.degraded is True
-    assert payload.status == "degraded"
+    assert payload.degraded is False
+    assert payload.status == "healthy"
     assert payload.drift_ratio == 0.0
+
+    empty_payload = _update_source_health_payload(
+        payload,
+        source_id="career_site:bcc_ml",
+        source_kind="career_site",
+        source_name="bcc_ml",
+        stats=SourceRunStats(fetched=0, emitted=0, failed=0),
+        finished_at=datetime(2026, 6, 13, 0, 30, tzinfo=UTC),
+    )
+    assert empty_payload.status == "degraded"
 
     failed = SourceRunStats(emitted=0, failed=1)
     failed_payload = _update_source_health_payload(
@@ -1904,6 +1952,120 @@ profiles:
 
     await runner_one.close()
     await runner_two.close()
+
+
+@pytest.mark.asyncio
+async def test_delayed_queue_precheck_cannot_start_overlapping_tenant_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture_path = tmp_path / "fixture.json"
+    _write_fixture(fixture_path)
+    profile_path = tmp_path / "profiles.yaml"
+    profile_path.write_text(
+        "catalog_name: concurrency_test\nprofiles:\n  - profile_id: ml\n"
+        '    name: ML Engineer\n    target_roles: ["ML Engineer"]\n    preferred_skills: ["ML"]\n',
+        encoding="utf-8",
+    )
+    tenant = TenantConfig.model_validate(
+        {
+            "tenant_id": "ai_jobs",
+            "display_name": "AI Jobs",
+            "sources": [{"type": "local_fixture", "path": fixture_path.as_posix()}],
+            "store_backend": "sqlite",
+            "store_path": str(tmp_path / "{tenant_id}" / "store.db"),
+            "job_group_store_backend": "sqlite",
+            "job_backend": "sqlite",
+            "search_backend": "sqlite",
+            "filter_profile_path": str(profile_path),
+            "output": {"path": str(tmp_path / "artifacts" / "{tenant_id}.json")},
+        }
+    )
+    settings = _isolated_base_settings().model_copy(
+        update={"relevance_shot_threshold": -10.0, "ingest_queue_enabled": True}
+    )
+    first_runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    second_runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    monkeypatch.setattr(
+        tenant_runner_module, "build_llm", lambda settings: _AcceptingHeuristicLLMProvider()
+    )
+    for runner in (first_runner, second_runner):
+        runner.get_runtime("ai_jobs").llm_provider = _AcceptingHeuristicLLMProvider()
+
+    first_locked = asyncio.Event()
+    release_first = asyncio.Event()
+    release_precheck = asyncio.Event()
+    second_started = asyncio.Event()
+    first_bound = first_runner._run_tenant_bound
+    second_store = second_runner.get_runtime("ai_jobs").store
+    original_precheck = second_store.list_active_ingest_tasks
+
+    async def hold_first(*args, **kwargs):
+        first_locked.set()
+        await release_first.wait()
+        return await first_bound(*args, **kwargs)
+
+    async def delay_second_precheck(*args, **kwargs):
+        await release_precheck.wait()
+        return await original_precheck(*args, **kwargs)
+
+    async def run_second():
+        second_started.set()
+        return await second_runner.run_tenant("ai_jobs")
+
+    monkeypatch.setattr(first_runner, "_run_tenant_bound", hold_first)
+    monkeypatch.setattr(second_store, "list_active_ingest_tasks", delay_second_precheck)
+    try:
+        first_task = asyncio.create_task(first_runner.run_tenant("ai_jobs"))
+        await asyncio.wait_for(first_locked.wait(), timeout=30)
+        second_task = asyncio.create_task(run_second())
+        await second_started.wait()
+        await asyncio.sleep(0)
+        release_first.set()
+        first = await asyncio.wait_for(first_task, timeout=60)
+        release_precheck.set()
+        second = await asyncio.wait_for(second_task, timeout=60)
+        assert first.emitted == 1
+        payload = json.loads((tmp_path / "artifacts" / "ai_jobs.json").read_text(encoding="utf-8"))
+        assert len(payload["items"]) == 1
+        assert second.skipped_already_active
+    finally:
+        release_first.set()
+        release_precheck.set()
+        await first_runner.close()
+        await second_runner.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_queue_precheck_releases_tenant_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tenant = TenantConfig(tenant_id="cancel_precheck", display_name="Cancel precheck")
+    settings = _isolated_base_settings().model_copy(
+        update={"store_path": tmp_path / "store.db", "ingest_queue_enabled": True}
+    )
+    runner = TenantRunner.from_tenants([tenant], base_settings=settings)
+    runtime = runner.get_runtime("cancel_precheck")
+    entered = asyncio.Event()
+
+    async def stalled_precheck(*args, **kwargs):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(runtime.store, "list_active_ingest_tasks", stalled_precheck)
+    task = asyncio.create_task(runner.run_tenant("cancel_precheck"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=20)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not runner.tenant_run_is_active("cancel_precheck")
+        async with tenant_runner_module._tenant_run_lock(
+            runtime.settings, "cancel_precheck", timeout=0
+        ):
+            pass
+    finally:
+        task.cancel()
+        await runner.close()
 
 
 @pytest.mark.asyncio

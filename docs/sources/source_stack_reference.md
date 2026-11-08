@@ -81,6 +81,11 @@ career sites: `hh`, `superjob`, `rabota`, `djinni`, `dou`, `habr`,
 `sber`, `tbank`, `ozon`, `kaspi`, `raiffeisen`, `payme`, and many regional or
 company-specific parsers.
 
+The JetBrains career adapter reads the company's published Greenhouse listing
+and fetches the matching European Greenhouse detail page for each job. It emits
+the detail only when the title and description are present; malformed feeds and
+detail pages remain visible as source failures instead of empty vacancies.
+
 When adding a parser:
 
 - implement the `SiteParser` protocol from `site_parsers/base.py`;

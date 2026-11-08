@@ -6,7 +6,7 @@ import functools
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -48,6 +48,28 @@ _VALID_LLM_GATEWAYS = {"openai", "cliproxy"}
 logger = logging.getLogger(__name__)
 
 
+class LLMDispatchPolicy(BaseModel):
+    """Shared quota policy; scope names identify upstream accounts, not tenants."""
+
+    model_config = ConfigDict(extra="forbid")
+    min_interval_seconds: float = Field(default=10.0, ge=0, le=3600)
+    max_calls_per_hour: int = Field(default=120, gt=0)
+    max_tokens_per_hour: int = Field(default=500_000, gt=0)
+    max_pending_per_tenant: int = Field(default=100, gt=0)
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    request_ttl_seconds: int = Field(default=86400, ge=30, le=604800)
+    wait_seconds: float = Field(default=10.0, gt=0, le=120)
+    retry_delay_seconds: float = Field(default=60, ge=1, le=86400)
+    retention_seconds: int = Field(default=86400, ge=60, le=604800)
+    jitter_seconds: float = Field(default=10, ge=0, le=300)
+    run_jitter_seconds: float = Field(default=300, ge=0, le=3600)
+    preflight_cache_seconds: int = Field(default=300, ge=0, le=3600)
+    circuit_failure_threshold: int = Field(default=3, ge=1, le=20)
+    circuit_cooldown_seconds: int = Field(default=60, ge=1, le=3600)
+    circuit_max_cooldown_seconds: int = Field(default=900, ge=1, le=86400)
+    run_summary_enabled: bool = False
+
+
 class LLMProviderProfile(BaseModel):
     """Named, secret-free provider transport and capability policy."""
 
@@ -58,9 +80,20 @@ class LLMProviderProfile(BaseModel):
     credential_ref: str = "JOB_FTCH_OPENAI_API_KEY"
     timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     max_retries: int = Field(default=2, ge=0, le=10)
+    structured_mode: Literal["tools", "json"] = "tools"
     capabilities: tuple[str, ...] = ("text", "structured")
     models: tuple[str, ...] = ()
     session_dir: Path | None = None
+    execution: Literal["inline", "queued"] = "inline"
+    quota_scope: str | None = None
+    session_affinity: bool = False
+    egress_ready_url: str | None = None
+    gateway: Literal["direct", "cliproxy"] = "direct"
+    account_generation: int = Field(default=0, ge=0)
+
+    @property
+    def cliproxy_dispatch(self) -> bool:
+        return self.gateway == "cliproxy" and self.execution == "queued"
 
 
 class LLMProviderBinding(BaseModel):
@@ -273,6 +306,7 @@ class Settings(BaseSettings):
     posting_min_quality_score: float = Field(default=0.8, ge=0.0, le=1.0)
     routing_accept_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
     bot_send_limit_per_run: int = Field(default=100, ge=1, le=100)
+    bot_channel_throttle_seconds: float = Field(default=3.5, ge=0.0, le=120.0)
     extraction_min_search_relevance: float = Field(default=0.0, ge=0.0, le=1.0)
     # TD-017 heuristic extraction fast-path. Default OFF: skipping the LLM
     # extraction for trusted ATS payloads also skips the fields (skills,
@@ -341,6 +375,11 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     openai_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     openai_max_retries: int = Field(default=2, ge=0, le=10)
+    llm_structured_mode: Literal["tools", "json"] = "tools"
+    llm_queue_dsn: SecretStr | None = None
+    llm_dispatch_policies: dict[str, LLMDispatchPolicy] = Field(default_factory=dict)
+    # Effective named profile set by composition, never inferred from a hostname.
+    llm_queue_profile: str | None = None
     llm_preflight_enabled: bool = True
     llm_preflight_timeout_seconds: float = Field(default=15.0, gt=0.0, le=120.0)
     llm_quota_retry_delay_seconds: int = Field(default=1800, ge=60, le=86400)
@@ -477,6 +516,7 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     fingerprinter_timeout_seconds: float = Field(default=8.0, gt=0.0, le=300.0)
     store_path: Path = Path(".runtime/job_ftch.db")
+    tenant_lock_dir: Path | None = None
     store_dsn: SecretStr | None = None
     http_proxy_list: Annotated[list[str], NoDecode] = Field(default_factory=list)
     store_pool_min: int = Field(default=2, gt=0)
@@ -581,6 +621,7 @@ class Settings(BaseSettings):
         extra="ignore",
         case_sensitive=False,
         populate_by_name=True,
+        hide_input_in_errors=True,
     )
 
     @classmethod
@@ -840,10 +881,28 @@ class Settings(BaseSettings):
         for name, profile in profiles.items():
             if not name.strip() or not profile.backend.strip():
                 raise ValueError("LLM provider profile names and backends must not be blank")
+            if profile.execution == "queued":
+                if profile.backend != "openai":
+                    raise ValueError("Queued execution requires an OpenAI-compatible backend")
+                scope = profile.quota_scope or name
+                if scope not in self.llm_dispatch_policies:
+                    raise ValueError(f"Missing LLM dispatch policy: {scope}")
+                dsn = self.llm_queue_dsn or self.store_dsn
+                raw_dsn = dsn.get_secret_value() if isinstance(dsn, SecretStr) else str(dsn or "")
+                if not raw_dsn.startswith(("postgresql://", "postgres://")):
+                    raise ValueError("Queued LLM execution requires PostgreSQL")
             if not profile.credential_ref.strip() or any(
                 char in profile.credential_ref for char in "\\/\n\r"
             ):
                 raise ValueError("LLM credential_ref must be an environment reference")
+        for scope in self.llm_dispatch_policies:
+            routes = {
+                profile.gateway
+                for name, profile in profiles.items()
+                if profile.execution == "queued" and (profile.quota_scope or name) == scope
+            }
+            if len(routes) > 1:
+                raise ValueError("Direct and CLIProxy routes cannot share one quota_scope")
         for name, binding in bindings.items():
             if not name.strip() or not binding.provider.strip() or not binding.model.strip():
                 raise ValueError("LLM binding names, providers and models must not be blank")

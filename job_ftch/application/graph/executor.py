@@ -12,6 +12,8 @@ from typing import Any
 
 from opentelemetry import trace
 
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
+
 from .conditions import ConditionResult, evaluate_condition
 from .contracts import (
     CompiledGraph,
@@ -33,6 +35,7 @@ class ExecutionReport:
     node_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
     node_events: dict[str, dict[str, Any]] = field(default_factory=dict)
     evidence: EvidenceBundle = field(default_factory=EvidenceBundle)
+    source_item: Any = field(default=None, repr=False)
 
 
 class GraphExecutor:
@@ -110,7 +113,12 @@ class GraphExecutor:
         return reports[0]
 
     async def run_many(self, item: Any) -> list[ExecutionReport]:
-        return await self._run_from(item, 0)
+        settlement_ids: set[str] = set()
+        try:
+            return await self._run_from(item, 0, settlement_ids)
+        except LLMRequestDeferredError as exc:
+            exc.settlement_item_ids = tuple(sorted(settlement_ids | set(exc.settlement_item_ids)))
+            raise
 
     def settlement_participants(self) -> tuple[Any, ...]:
         from job_ftch.application.dedup_settlement import DedupSettlement
@@ -123,8 +131,12 @@ class GraphExecutor:
                 result.append(node)
         return tuple(result)
 
-    async def _run_from(self, item: Any, start_index: int) -> list[ExecutionReport]:
-        report = ExecutionReport(item=item)
+    async def _run_from(
+        self, item: Any, start_index: int, settlement_ids: set[str]
+    ) -> list[ExecutionReport]:
+        if item_id := getattr(item, "stable_id", None):
+            settlement_ids.add(str(item_id))
+        report = ExecutionReport(item=item, source_item=item)
         nodes = {node.id: node for node in self.graph.spec.nodes}
         background: dict[str, asyncio.Task[Any]] = {}
         values: dict[str, Any] = {}
@@ -236,7 +248,9 @@ class GraphExecutor:
                 return [
                     child
                     for candidate in result
-                    for child in await self._run_from(_materialize(candidate), index + 1)
+                    for child in await self._run_from(
+                        _materialize(candidate), index + 1, settlement_ids
+                    )
                 ]
             if result is None and spec.effect == EffectMode.GATE and not spec.shadow:
                 self._update_event(report, spec.id, outcome="drop", reason="gate_returned_none")
@@ -280,6 +294,8 @@ class GraphExecutor:
                 values[node_id] = result
                 if result is not None and type(result) is type(report.item):
                     report.item = self._merge_payload(report.item, result)
+            except LLMRequestDeferredError:
+                raise
             except Exception as exc:  # optional evidence becomes unknown
                 report.diagnostics.append({"node": node_id, "reason": "unknown", "error": str(exc)})
             tasks.pop(node_id, None)
@@ -341,6 +357,8 @@ class GraphExecutor:
             reason = "timeout"
             report.diagnostics.append({"node": spec.id, "reason": "timeout"})
             return None
+        except LLMRequestDeferredError:
+            raise
         except Exception as exc:
             if exc.__class__.__name__ in {"RawItemDropped", "RawItemRejected"}:
                 outcome = "drop"
@@ -417,6 +435,8 @@ class GraphExecutor:
             try:
                 current.metadata = merged
                 return current
+            except LLMRequestDeferredError:
+                raise
             except Exception:
                 return incoming
         return incoming

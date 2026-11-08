@@ -59,7 +59,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [050 — Browser Session Bypass Protocol](050-browser-session-bypass-protocol.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
 - [051 — Production-equivalent evaluation and graph contract](051-production-equivalent-evaluation-and-graph-contract.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
 - [052 — Immutable observation ledger and content-versioned replay](052-immutable-observation-ledger-and-content-versioned-replay.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
-- [053 — Durable outbox and delivery idempotency](053-durable-outbox-and-delivery-idempotency.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
+- [053 — Durable outbox and delivery idempotency](053-durable-outbox-and-delivery-idempotency.md) - **Status**: ACCEPTED (Updated: 2026-11-03)
 - [054 — Terminal, deferred and retryable pipeline states](054-terminal-deferred-and-retryable-pipeline-states.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
 - [055 — One-to-many candidate segmentation contract](055-one-to-many-candidate-segmentation-contract.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
 - [056 — Structured evidence, jobness, and extraction](056-structured-evidence-jobness-and-extraction.md) - **Status**: ACCEPTED (Updated: 2026-07-24)
@@ -110,6 +110,12 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [099 — Durable ingest continuation for upstream rate limits](099-durable-ingest-rate-limit-queue.md) - Durable source-run continuation for upstream rate limits. (Updated: 2026-09-16)
 - [100 — Node-scoped LLM providers and graceful degradation](100-node-scoped-llm-provider-routing.md) - Graph nodes select named provider/model bindings; provider outages degrade dependent work without stopping the service. (Updated: 2026-09-30)
 - [101 — Commit Telegram cursors after a successful run](101-commit-source-cursors-after-run.md) - Defer tenant Telegram cursors until pipeline processing finishes so interrupted runs replay unread messages. (Updated: 2026-10-18)
+- [102 — Неопределённая доставка Telegram](102-uncertain-telegram-delivery.md) - Durable publication attempts, receipts and operator reconciliation. (Updated: 2026-10-27)
+- [103 — Безопасные трассы в OpenObserve](103-safe-openobserve-tracing.md) - Экспорт ограниченных технических span без содержимого вакансий и секретов. (Updated: 2026-10-27)
+- [104 — CLIProxy as the production ETL provider](104-cliproxy-main-etl-production-route.md) - Explicit node bindings allow a controlled CLIProxy route for the production bot when direct OpenAI quota blocks ingestion. (Updated: 2026-11-03)
+- [105 — Paced Telegram channel delivery](105-paced-channel-delivery.md) - Space channel posts without changing ingest frequency or LLM usage. (Updated: 2026-11-03)
+- [106 — Optional PostgreSQL LLM dispatch](106-optional-postgres-llm-dispatch.md) - Provider-neutral durable LLM requests, Procrastinate execution, shared admission and optional home egress. (Updated: 2026-11-08)
+- [107 — CLIProxy run sessions and resilient admission](107-cliproxy-run-resilience.md) - CLIProxy-only durable run affinity, paced admission, classified waits and bounded run reports. (Updated: 2026-11-08)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

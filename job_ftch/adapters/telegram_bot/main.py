@@ -32,6 +32,7 @@ from job_ftch.adapters.telegram_bot.middlewares.di import DIMiddleware
 from job_ftch.adapters.telegram_bot.middlewares.throttling import ThrottlingMiddleware
 from job_ftch.adapters.telegram_bot.sender import TelegramCardSender
 from job_ftch.application.channel_publisher import (
+    channel_throttle_seconds,
     publish_jobs,
     remaining_publish_candidates,
 )
@@ -236,6 +237,7 @@ async def _recover_pending_scheduler_publish(
         ),
         store=store,
         send_limit=send_limit,
+        throttle_seconds=channel_throttle_seconds(runtime.settings),
         sleep=asyncio.sleep,
     )
     remaining = remaining_publish_candidates(len(eligible), outcome)
@@ -331,7 +333,9 @@ async def _send_scheduler_run_report(
         logger.warning("scheduler_owner_report_state_failed", tenant_id=tenant_id, error=str(exc))
     report = build_runtime_run_report(run_result, duration_seconds=duration_seconds)
     footer = render_runtime_run_footer(report)
-    if report.completion_state == "llm_preflight_blocked":
+    if report.completion_state == "waiting_llm":
+        heading = "⏳ Автозапуск ожидает LLM-очередь"
+    elif report.completion_state == "llm_preflight_blocked":
         heading = "⚠️ Автозапуск пропущен: LLM недоступна"
     elif report.llm_quota_exhausted:
         heading = "⚠️ Автозапуск завершён с проблемой LLM"
@@ -751,7 +755,24 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         error=run_err,
                     )
                     continue
-                if getattr(run_result, "completion_state", "") == "llm_preflight_blocked":
+                if getattr(run_result, "completion_state", "") in {
+                    "llm_preflight_blocked",
+                    "waiting_llm",
+                }:
+                    emitted = getattr(run_result, "emitted", 0)
+                    queued_publish = bool(emitted > 0 and publish_channel and publish_user_id)
+                    if queued_publish:
+                        pending_since = _parse_scheduler_timestamp(
+                            await _maybe_await(
+                                store.get_run_state("bot_scheduler:pending_publish_since")
+                            )
+                        )
+                        await _maybe_await(
+                            store.set_run_state(
+                                "bot_scheduler:pending_publish_since",
+                                min(t_start, pending_since or t_start).isoformat(),
+                            )
+                        )
                     preflight_message = str(
                         getattr(run_result, "llm_health_error", "llm_unavailable")
                         or "llm_unavailable"
@@ -763,29 +784,42 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         run_id=str(getattr(run_result, "source_run_id", "") or ""),
                         run_finished_at=datetime.now(UTC).isoformat(),
                         run_error=preflight_message,
-                        publish_state="skipped",
-                        publish_reason="llm_preflight_blocked",
+                        publish_state="pending" if queued_publish else "skipped",
+                        publish_reason="" if queued_publish else "llm_preflight_blocked",
                     )
                     await _maybe_await(
                         store.set_run_state("bot_scheduler:last_error", preflight_message)
                     )
-                    await _maybe_await(store.set_run_state("bot_scheduler:last_run_emitted", "0"))
-                    await _send_scheduler_run_report(
-                        bot,
-                        store=store,
-                        tenant_id=tenant_id,
-                        publish_user_id=publish_user_id,
-                        run_result=run_result,
-                        duration_seconds=int(time.monotonic() - run_monotonic_start),
-                        channel_sent=0,
-                        skipped_reason="ingestion не запускался",
+                    await _maybe_await(
+                        store.set_run_state("bot_scheduler:last_run_emitted", str(emitted))
                     )
+                    notice = str(getattr(run_result, "completion_state", ""))
+                    if (
+                        await _maybe_await(store.get_run_state("bot_scheduler:llm_notice"))
+                        != notice
+                    ):
+                        await _send_scheduler_run_report(
+                            bot,
+                            store=store,
+                            tenant_id=tenant_id,
+                            publish_user_id=publish_user_id,
+                            run_result=run_result,
+                            duration_seconds=int(time.monotonic() - run_monotonic_start),
+                            channel_sent=0,
+                            skipped_reason=(
+                                "обработка ожидает LLM"
+                                if notice == "waiting_llm"
+                                else "ingestion не запускался"
+                            ),
+                        )
+                        await _maybe_await(store.set_run_state("bot_scheduler:llm_notice", notice))
                     logger.info(
                         "scheduler_skipped_llm_preflight",
                         tenant_id=tenant_id,
                         retry_at=str(getattr(run_result, "next_retry_at", "") or ""),
                     )
                     continue
+                await _maybe_await(store.set_run_state("bot_scheduler:llm_notice", ""))
                 # Nothing ran (tenant lock held elsewhere): do not record a success
                 # timestamp, or the scheduler would look healthy while idling.
                 if getattr(run_result, "skipped_already_active", False) is True:
@@ -1004,6 +1038,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         ),
                         store=store,
                         send_limit=send_limit,
+                        throttle_seconds=channel_throttle_seconds(settings),
                         # Passed explicitly (rather than relying on the default) so
                         # this module's asyncio.sleep stays the single patch point
                         # for driving the loop in tests.

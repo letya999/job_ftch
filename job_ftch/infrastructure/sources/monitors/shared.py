@@ -162,23 +162,24 @@ def check_ats_redirect(html: str, board_url: str) -> None:
     if not html:
         return
 
-    from job_ftch.infrastructure.sources.site_fingerprinter import _specific_monitor_from_text
+    from job_ftch.infrastructure.sources.site_fingerprinter import (
+        _board_navigation_targets,
+        _specific_monitor_from_text,
+    )
 
     ats_name = _specific_monitor_from_text(board_url, html)
     if ats_name:
-        import re
-
         from job_ftch.application.registry import get_all_monitor_entries
 
         entries = get_all_monitor_entries()
         entry = next((e for e in entries if e.name == ats_name), None)
         if entry and entry.assessment_hint:
-            for pattern in entry.assessment_hint.url_patterns:
-                match = re.search(
-                    r'["\'](https?://[^"\']*?' + pattern + r'[^"\']*?)["\']', html, re.IGNORECASE
-                )
-                if match:
-                    raise AtsRedirectException(ats_name, match.group(1))
+            for target in _board_navigation_targets(html):
+                if any(
+                    re.search(pattern, target, re.IGNORECASE)
+                    for pattern in entry.assessment_hint.url_patterns
+                ):
+                    raise AtsRedirectException(ats_name, target)
 
 
 async def fetch_page_text(

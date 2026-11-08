@@ -6,4 +6,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 
 ## Files On This Level
 
+- [test_cliproxy_policy.py](test_cliproxy_policy.py)
+- [test_dispatch.py](test_dispatch.py)
+- [test_home_egress.py](test_home_egress.py)
 - [test_openai_provider.py](test_openai_provider.py)

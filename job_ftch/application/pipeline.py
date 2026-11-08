@@ -32,6 +32,7 @@ from job_ftch.application.dedup_settlement import (
 )
 from job_ftch.application.drops import RawItemDropped
 from job_ftch.application.item_decision_trace import record_item_decision_trace
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError, llm_item_session, llm_run
 from job_ftch.application.logging import sanitize_string
 from job_ftch.application.outbox import recover_pending_outbox
 from job_ftch.application.rejections import RawItemRejected
@@ -277,6 +278,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
         decision_version: str = "pipeline-v1",
         tenant_id: str = "default",
         settings: Settings | None = None,
+        llm_run_context: Any = None,
     ) -> None:
         if not (
             isinstance(sanitize_node, SanitizeNode)
@@ -302,7 +304,8 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self._item_concurrency = max(1, pipeline_item_concurrency)
         self._source_run_id = source_run_id
         self._active_source_run_id: str | None = source_run_id
-        self._settings = settings
+        self._settings = settings or get_settings()
+        self._llm_run_context = llm_run_context
         self._delivery_targets = {target.target_id: target for target in delivery_targets}
         if len(self._delivery_targets) != len(delivery_targets):
             raise ValueError("Delivery target IDs must be unique")
@@ -315,7 +318,25 @@ class Pipeline[PipelineInput, PipelineOutput]:
         self._tracer = trace.get_tracer("job_ftch.pipeline")
 
     async def run(self, max_items: int | None = None) -> RunSummary:
-        settings = self._settings or get_settings()
+        if self._llm_run_context is None or llm_run.get():
+            return await self._run(max_items)
+        try:
+            async with self._llm_run_context() as session:
+                summary = await self._run(max_items)
+                await session.finish(summary.as_dict())
+                return summary
+        except LLMRequestDeferredError as exc:
+            return RunSummary(
+                completion_state="waiting_llm",
+                next_retry_at=exc.retry_at,
+                llm_health_error=exc.reason,
+                failed=1,
+            ).finish()
+
+    async def _run(self, max_items: int | None = None) -> RunSummary:
+        # A continuation can acquire fresh claims for items settled in the previous attempt.
+        self._settlement = DedupSettlementCoordinator(collect_settlement_participants(self._nodes))
+        settings = self._settings
         self._decision_version = str(getattr(settings, "pipeline_decision_version", "pipeline-v1"))
         summary = RunSummary()
         summary.source_run_id = self._source_run_id or uuid4().hex
@@ -452,7 +473,10 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 )
 
         if run_interrupted:
-            await self._set_run_state("pipeline.status", "failed")
+            await self._set_run_state(
+                "pipeline.status",
+                "waiting_llm" if summary.completion_state == "waiting_llm" else "failed",
+            )
         elif summary.failed > 0:
             await self._set_run_state("pipeline.status", "completed_with_failures")
         else:
@@ -621,7 +645,10 @@ class Pipeline[PipelineInput, PipelineOutput]:
         if await self._handle_pre_quarantined_item_worker(item, result):
             return result
 
-        with self._tracer.start_as_current_span("pipeline.item") as item_span:
+        with (
+            llm_item_session(f"{self._tenant_id}:{item_id}"),
+            self._tracer.start_as_current_span("pipeline.item") as item_span,
+        ):
             item_span.set_attribute("job_ftch.item_id", str(item_id or ""))
             item_span.set_attribute("job_ftch.source_name", str(source_name or ""))
             item_span.set_attribute(
@@ -721,6 +748,8 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     result["outcome"] = "deferred" if work_state == "deferred" else "emitted"
                     item_span.set_attribute("job_ftch.result", result["outcome"])
                     item_span.set_attribute("job_ftch.exit_stage", result["outcome"])
+            except LLMRequestDeferredError as exc:
+                result.update(outcome="llm_wait", exc=exc)
             except RawItemDropped as exc:
                 result["outcome"] = "dropped_exc"
                 result["exc"] = exc
@@ -844,6 +873,8 @@ class Pipeline[PipelineInput, PipelineOutput]:
                         (getattr(current, "metadata", {}) or {}).get("work_state") or ""
                     )
                     child["outcome"] = "deferred" if work_state == "deferred" else "emitted"
+            except LLMRequestDeferredError as exc:
+                child.update(outcome="llm_wait", exc=exc)
             except RawItemDropped as exc:
                 child.update(
                     outcome="dropped_exc",
@@ -1040,6 +1071,20 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 self._logger.exception("pipeline_sink_emit_failed", item_id=item_id, error=str(exc))
                 # Match sequential semantics: per-item sink.emit failures leave
                 # the run in completed_with_failures, preserving successful items.
+        elif outcome == "llm_wait":
+            pending = res["exc"]
+            for claim_item_id in pending.settlement_item_ids:
+                await self._settlement.settle(claim_item_id, SettlementOutcome.RELEASE)
+            final_status = "DEFERRED"
+            trace_drop_reason = pending.reason
+            summary.record_deferred(pending.reason)
+            summary.llm_health_error = pending.reason
+            # Source cursors commit only with zero failures. Pending work must replay.
+            summary.record_failure()
+            summary.completion_state = "waiting_llm"
+            summary.next_retry_at = min(summary.next_retry_at or pending.retry_at, pending.retry_at)
+            run_interrupted = True
+            finalized = False
         elif outcome == "deferred":
             current = res.get("current")
             final_status = "DEFERRED"
@@ -1255,8 +1300,6 @@ class Pipeline[PipelineInput, PipelineOutput]:
 
     async def _recover_pending_outbox(self) -> None:
         """Replay only the still-pending leaf target for each durable record."""
-        if not self._delivery_targets:
-            return
 
         async def deliver(record: OutboxRecord) -> None:
             try:
@@ -1415,6 +1458,8 @@ class Pipeline[PipelineInput, PipelineOutput]:
 
                 if len(pending) >= concurrency and await _drain_pending(wait_all=False):
                     run_interrupted = True
+                    if summary.completion_state == "waiting_llm":
+                        break
 
             if await _drain_pending(wait_all=True):
                 run_interrupted = True

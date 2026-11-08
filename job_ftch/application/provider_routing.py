@@ -103,7 +103,18 @@ def _profile_settings(
             "openai_api_key": credential,
             "openai_model": model,
             "openai_timeout_seconds": profile.timeout_seconds,
-            "openai_max_retries": profile.max_retries,
+            "openai_max_retries": 0 if profile.execution == "queued" else profile.max_retries,
+            "llm_structured_mode": profile.structured_mode,
+            "llm_queue_profile": next(
+                (
+                    name
+                    for name, configured in settings.llm_provider_profiles.items()
+                    if configured is profile
+                ),
+                None,
+            )
+            if profile.execution == "queued" or profile.session_affinity
+            else None,
         }
     )
 
@@ -169,12 +180,15 @@ async def preflight_bindings(
     """Probe required graph bindings and apply only their declared fallbacks."""
     checked: dict[str, BindingPreflight] = {}
     switches: list[dict[str, object]] = []
+    probes: dict[int, LLMPreflightResult] = {}
     for name in names:
         requested = settings.llm_bindings.get(name)
         if requested is None:
             raise ValueError(f"Missing LLM binding for graph node: {name}")
         provider = providers[name]
-        result = await run_llm_preflight(provider)
+        if id(provider) not in probes:
+            probes[id(provider)] = await run_llm_preflight(provider)
+        result = probes[id(provider)]
         resolved = ResolvedLLMBinding(
             name=name,
             requested_provider=requested.provider,

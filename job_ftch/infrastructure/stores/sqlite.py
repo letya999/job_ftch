@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,11 @@ if TYPE_CHECKING:
 class SQLiteStore(SQLStoreAdapter):
     """SQLite-backed persistent store using aiosqlite."""
 
+    def _is_unique_violation(self, error: Exception) -> bool:
+        return isinstance(error, sqlite3.IntegrityError) and getattr(
+            error, "sqlite_errorcode", None
+        ) in {sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY, sqlite3.SQLITE_CONSTRAINT_UNIQUE}
+
     _SQL_KV_GET = "SELECT value FROM jf_kv WHERE key = ?"
     _SQL_KV_UPSERT = """
         INSERT INTO jf_kv (key, value, updated_at)
@@ -35,8 +41,13 @@ class SQLiteStore(SQLStoreAdapter):
     _SQL_SET_MEMBERS = "SELECT member FROM jf_set WHERE key = ?"
     _SQL_OUTBOX_ENQUEUE = "INSERT OR IGNORE INTO jf_outbox (outbox_id, tenant_id, idempotency_key, state, payload_json) VALUES (?, ?, ?, ?, ?)"
     _SQL_OUTBOX_GET = "SELECT payload_json, state FROM jf_outbox WHERE idempotency_key = ?"
+    _SQL_OUTBOX_ATTEMPT = "SELECT payload_json, state FROM jf_outbox WHERE tenant_id = ? AND json_extract(payload_json, '$.sink_name') = ? AND json_extract(payload_json, '$.delivery_payload.attempt_id') = ?"
     _SQL_OUTBOX_PENDING = "SELECT payload_json, state FROM jf_outbox WHERE state = ? AND tenant_id = ? ORDER BY updated_at ASC LIMIT ?"
     _SQL_OUTBOX_DELIVERED = "UPDATE jf_outbox SET state = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE idempotency_key = ?"
+    _SQL_OUTBOX_RELEASE_UNCERTAIN = (
+        "DELETE FROM jf_outbox WHERE idempotency_key = ? AND state = ? AND payload_json = ?"
+    )
+    _SQL_OUTBOX_CONFIRM_UNCERTAIN = "UPDATE jf_outbox SET state = ?, payload_json = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE idempotency_key = ? AND state = ? AND payload_json = ?"
     _SQL_DEDUP_CLAIM_ACQUIRE = """
         INSERT INTO jf_dedup_claims (claim_key, owner_id, expires_at)
         VALUES (?, ?, datetime('now', '+' || ? || ' seconds'))
@@ -135,7 +146,8 @@ class SQLiteStore(SQLStoreAdapter):
     """
     _SQL_INGEST_TASK_DEFER = """
         UPDATE jf_ingest_tasks
-        SET state=?, available_at=?, lease_owner=NULL, lease_until=NULL,
+        SET attempt=CASE WHEN ? THEN MAX(attempt-1, 0) ELSE attempt END,
+            state=?, available_at=?, lease_owner=NULL, lease_until=NULL,
             last_error=?, updated_at=?
         WHERE task_id=? AND lease_owner=? AND state='leased'
     """

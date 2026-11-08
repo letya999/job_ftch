@@ -170,12 +170,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         disabled_sources = [source for source in sources if source.get("enabled") is not True]
         source_count = len(active_sources)
         telemetry = {
-            "langfuse_configured": bool(
-                settings.tracing_enabled
-                and settings.langfuse_host
-                and settings.langfuse_public_key
-                and settings.langfuse_secret_key
-            ),
+            "langfuse_configured": False,
             "openobserve_configured": bool(
                 settings.openobserve_enabled
                 and settings.openobserve_url

@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 import structlog
 from pydantic import BaseModel, ConfigDict, Field
 
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
+
 if TYPE_CHECKING:
     from job_ftch.application.contracts import LLMProvider, Store
     from job_ftch.domain.profile import ProfileCatalog, SearchProfile
@@ -191,6 +193,8 @@ async def build_relevance_prompt_from_profile(
                         "relevance_prompt_cached", profile_id=profile_id, hash=current_hash
                     )
                     return cached_prompt
+        except LLMRequestDeferredError:
+            raise
         except Exception:
             pass
 
@@ -264,6 +268,9 @@ async def build_relevance_prompt_from_profile(
         await store.set_run_state(cache_key, cached_value)
         logger.info("relevance_prompt_generated", profile_id=profile_id, hash=current_hash)
         return generated
+
+    except LLMRequestDeferredError:
+        raise
 
     except Exception as exc:
         logger.warning("relevance_prompt_generation_failed", profile_id=profile_id, error=str(exc))

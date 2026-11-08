@@ -619,24 +619,26 @@ class NodriverBypass:
             await asyncio.sleep(0.1)
             browser = await _start()
         logger.info("nodriver_started", elapsed_seconds=round(time.monotonic() - started_at, 3))
-        proxy_url = (
-            config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY") if use_proxy else None
-        )
-        if proxy_url:
-            tab = await browser.create_context(
-                proxy_server=proxy_url,
-                proxy_bypass_list="localhost",
-            )
-        else:
-            tab = await browser.get("about:blank")
-        page = _NodriverPageAdapter(
-            tab,
-            cookies=config.get("cookies"),
-            viewport=viewport,
-            timezone_id=str(config.get("timezone_id") or "") or None,
-        )
-        await page.initialize()
         try:
+            proxy_url = (
+                config.get("_proxy_url") or os.environ.get("JOB_FTCH_HTTP_PROXY")
+                if use_proxy
+                else None
+            )
+            if proxy_url:
+                tab = await browser.create_context(
+                    proxy_server=proxy_url,
+                    proxy_bypass_list="localhost",
+                )
+            else:
+                tab = await browser.get("about:blank")
+            page = _NodriverPageAdapter(
+                tab,
+                cookies=config.get("cookies"),
+                viewport=viewport,
+                timezone_id=str(config.get("timezone_id") or "") or None,
+            )
+            await page.initialize()
             if config.get("warmup_url"):
                 await page.goto(
                     str(config["warmup_url"]),

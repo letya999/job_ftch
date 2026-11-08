@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from job_ftch.domain.models import CompensationPeriod, CompensationRange, Job, SourceKind, WorkMode
-from job_ftch.publication.dedup import deduplicate_for_publish
+from job_ftch.publication.dedup import deduplicate_for_publish, same_vacancy
 
 
 def _job(
@@ -72,3 +72,31 @@ class TestDedup:
         b = _job("ML Engineer", "Acme")
         result = deduplicate_for_publish([a, b])
         assert len(result) == 1
+
+    def test_reposted_description_matches_across_company_labels(self) -> None:
+        body = "Build and maintain production AI agents for customer support. " * 4
+        a = _job("AI Agent Engineer", "Sber").model_copy(
+            update={"description": f"AI Agent Engineer. {body}", "location": "Москва"}
+        )
+        b = _job("AI Agent Engineer", "Sberbank").model_copy(
+            update={
+                "description": f"AI Agent Engineer at Sberbank. {body}",
+                "location": "Москва, Россия",
+            }
+        )
+        assert same_vacancy(a, b) is True
+
+    def test_same_title_with_different_work_is_not_merged(self) -> None:
+        a = _job("ML Engineer", "Acme").model_copy(
+            update={"description": "Build recommendation systems. " * 8}
+        )
+        b = _job("ML Engineer", "Acme").model_copy(
+            update={"description": "Build fraud detection models. " * 8}
+        )
+        assert same_vacancy(a, b) is False
+
+    def test_identical_template_at_different_companies_is_not_merged(self) -> None:
+        body = "Build and maintain production AI agents for customer support. " * 4
+        a = _job("AI Agent Engineer", "Acme").model_copy(update={"description": body})
+        b = _job("AI Agent Engineer", "Beta").model_copy(update={"description": body})
+        assert same_vacancy(a, b) is False

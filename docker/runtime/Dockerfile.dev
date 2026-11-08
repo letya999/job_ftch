@@ -19,7 +19,7 @@ COPY pyproject.toml README.md LICENSE uv.lock ./
 RUN mkdir -p job_ftch scripts && touch job_ftch/__init__.py
 
 RUN /usr/local/bin/python -m pip install --no-cache-dir "uv==0.9.26" \
-    && uv sync --locked --no-dev --all-extras
+    && uv sync --locked --no-dev --all-extras --no-install-project
 ENV PATH="/app/.venv/bin:$PATH"
 RUN patchright install --with-deps chromium
 # Camoufox is Firefox-based and needs GTK, which the Chromium dep set does not provide.
@@ -32,6 +32,7 @@ RUN python -c "from camoufox.__main__ import CamoufoxUpdate; from camoufox.pkgma
 RUN python -m cloakbrowser install
 
 COPY . /app
+RUN uv pip install --python /app/.venv/bin/python --no-deps .
 RUN python scripts/verify_browser_runtime.py
 
 ENV PYTHONPATH=/app

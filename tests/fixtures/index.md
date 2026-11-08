@@ -8,3 +8,4 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 
 - [extraction index](extraction/index.md)
 - [fpcheck index](fpcheck/index.md)
+- [source_pages index](source_pages/index.md)

@@ -3,17 +3,15 @@ and free-form text generation.
 
 LLM touchpoints (per ADR-019):
 
-1. ``extract(text, schema)`` — generic Pydantic extraction (instructor + tools).
+1. ``extract(text, schema)`` — generic Pydantic extraction (instructor).
 2. ``classify(prompt, schema)`` — low-confidence relevance classification.
 3. ``present(job, schema)`` — presentable text formatting for Telegram.
 4. ``generate_text(system, user)`` — free-form text (used by the dynamic
    relevance-prompt builder, which has no schema to constrain to).
 
-The structured methods go through the ``instructor.from_provider`` client
-(TOOLS mode) which patches ``chat.completions.create`` and requires a
-``response_model`` for every call. TOOLS (not TOOLS_STRICT) is required for
-OpenAI-compatible gateways such as CLIProxyAPI that reject strict function
-schemas when optional Pydantic fields are omitted from ``required``.
+The structured methods go through the ``instructor.from_provider`` client,
+which requires a ``response_model`` for every call. The default is TOOLS;
+profiles whose gateway returns structured JSON as message content use JSON.
 ``generate_text`` cannot use the same client because it has no schema — it
 would fail with ``AsyncInstructor.create() missing 'response_model'``. We
 therefore hold a second, raw ``AsyncOpenAI`` client alongside the instructor
@@ -23,10 +21,14 @@ client and use it for free-form text. The two share HTTP settings.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 import structlog
+
+if TYPE_CHECKING:
+    from openai.types.chat import ChatCompletionMessageParam
 
 try:
     import instructor
@@ -44,6 +46,12 @@ except ImportError:
     AsyncOpenAI = None  # type: ignore[assignment,misc]
     _OPENAI_AVAILABLE = False
 
+from job_ftch.application.llm_dispatch import (
+    LLMRequestDeferredError,
+    deferred_from_error,
+    llm_deadline,
+    llm_run,
+)
 from job_ftch.application.llm_quota import (
     LLMPreflightResult,
     LLMQuotaExhaustedError,
@@ -157,6 +165,9 @@ class OpenAIInstructorLLMProvider:
         timeout_seconds: float,
         max_retries: int,
         preflight_timeout_seconds: float | None = None,
+        structured_mode: str = "tools",
+        http_client: Any = None,
+        cliproxy_protection: bool = False,
     ) -> None:
         if not _INSTRUCTOR_AVAILABLE:
             raise ImportError(
@@ -168,10 +179,13 @@ class OpenAIInstructorLLMProvider:
         self.model_id = model
         self.provider_id = "openai"
         self._max_retries = max_retries
+        self._cliproxy_protection = cliproxy_protection
+        self.durable_dispatch = cliproxy_protection
         self._timeout_seconds = timeout_seconds
         self._preflight_timeout_seconds = preflight_timeout_seconds or min(timeout_seconds, 15.0)
         self._quota_exhausted = False
         self._last_llm_error = ""
+        self.pending_retry_at: Any = None
         # The SDK timeout is per HTTP attempt. Instructor may retry parsing
         # internally, so retain an outer deadline for the whole operation.
         # Without it a stalled response can hold an eval run forever.
@@ -180,19 +194,18 @@ class OpenAIInstructorLLMProvider:
         # an AsyncInstructor that wraps the underlying AsyncOpenAI but
         # rewrites ``.create()`` to require ``response_model``. We use
         # this for extract / classify / present.
-        # TOOLS (not TOOLS_STRICT): CLIProxy/Codex gateways reject strict
-        # function schemas when optional Pydantic fields are omitted from
-        # ``required`` (HTTP 400 invalid_function_parameters). Non-strict
-        # tools still return structured args and work across OpenAI-compatible
-        # proxies used for local subscription routing.
+        # Some gateways return JSON content instead of tool calls for real
+        # prompts; the named profile selects the parsing mode.
+        client_kwargs = {"http_client": http_client} if http_client is not None else {}
         self._client = instructor.from_provider(
             f"openai/{model}",
-            mode=instructor.Mode.TOOLS,
+            mode=instructor.Mode.JSON if structured_mode == "json" else instructor.Mode.TOOLS,
             async_client=True,
             api_key=api_key,
             base_url=base_url,
             timeout=timeout_seconds,
             max_retries=0,
+            **client_kwargs,
         )
         # Free-form-text client. A bare AsyncOpenAI is needed because
         # the instructor wrapper above cannot do schema-less
@@ -202,6 +215,7 @@ class OpenAIInstructorLLMProvider:
             base_url=base_url,
             timeout=timeout_seconds,
             max_retries=0,
+            **client_kwargs,
         )
 
     @property
@@ -220,9 +234,20 @@ class OpenAIInstructorLLMProvider:
                 response = await self._raw_client.chat.completions.create(
                     model=self._model,
                     messages=[{"role": "user", "content": "Reply with OK."}],
+                    extra_headers={"x-job-ftch-operation": "preflight"},
                     **_completion_token_limit_kwargs(self._model, 8),
                 )
         except Exception as exc:
+            if pending := deferred_from_error(exc):
+                self.pending_retry_at = pending.retry_at
+                return LLMPreflightResult(
+                    available=False,
+                    error="llm_request_pending"
+                    if pending.reason == "llm_pending"
+                    else pending.reason,
+                    model=self._model,
+                    retry_at=pending.retry_at,
+                )
             self._last_llm_error = safe_llm_error(exc)
             if is_quota_exhausted_error(exc):
                 self._quota_exhausted = True
@@ -309,11 +334,17 @@ class OpenAIInstructorLLMProvider:
         explicit_timeout = timeout_seconds is not None
         operation_timeout = per_attempt if explicit_timeout else self._operation_timeout_seconds
         instructor_retries = 0
+        messages: list[ChatCompletionMessageParam] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text},
+        ]
         request_kwargs: dict[str, Any] = _completion_token_limit_kwargs(self._model, max_tokens)
         if timeout_seconds is not None:
             request_kwargs["timeout"] = timeout_seconds
-        async with asyncio.timeout(operation_timeout):
+        async with llm_deadline(operation_timeout, self):
             attempts = 1 if explicit_timeout else self._max_retries + 1
+            if self._cliproxy_protection and not explicit_timeout:
+                attempts = 2
             for attempt in range(attempts):
                 try:
                     response, completion = await self._client.create_with_completion(
@@ -321,20 +352,38 @@ class OpenAIInstructorLLMProvider:
                         response_model=schema,
                         max_retries=instructor_retries,
                         temperature=_STRUCTURED_TEMPERATURE,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": text},
-                        ],
+                        messages=messages,
                         **request_kwargs,
                     )
                     break
                 except Exception as exc:
+                    if pending := deferred_from_error(exc):
+                        self.pending_retry_at = pending.retry_at
+                        raise pending from exc
                     if is_quota_exhausted_error(exc):
                         self._quota_exhausted = True
                         self._last_llm_error = safe_llm_error(exc)
                         raise LLMQuotaExhaustedError("llm_quota_exhausted") from exc
                     retry_reason = llm_error_reason(exc)
                     retryable = retry_reason not in {"auth", "model"}
+                    if self._cliproxy_protection:
+                        from pydantic import ValidationError
+
+                        cause: BaseException | None = exc
+                        seen: set[int] = set()
+                        validation = False
+                        while cause is not None and id(cause) not in seen:
+                            seen.add(id(cause))
+                            validation = validation or isinstance(cause, ValidationError)
+                            cause = cause.__cause__ or cause.__context__
+                        retryable = validation
+                        if validation:
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": "The previous response failed schema validation. Return a corrected JSON object matching the required schema. Do not add commentary.",
+                                }
+                            )
                     logger.warning(
                         "openai_call_retry"
                         if attempt < attempts - 1 and retryable
@@ -354,6 +403,15 @@ class OpenAIInstructorLLMProvider:
                         latency_ms=round((monotonic() - started) * 1000),
                     )
                     if attempt >= attempts - 1 or not retryable:
+                        if self._cliproxy_protection:
+                            raise LLMRequestDeferredError(
+                                llm_run.get() or "structured",
+                                datetime.now(UTC) + timedelta(minutes=5),
+                                reason="schema_validation_failed"
+                                if retryable
+                                else "provider_request_failed",
+                                requires_operator=True,
+                            ) from exc
                         raise
                     await asyncio.sleep(min(0.5 * (2**attempt), 2.0))
         record_provider_usage(
@@ -379,7 +437,7 @@ class OpenAIInstructorLLMProvider:
         self._raise_if_quota_exhausted()
         started = monotonic()
         try:
-            async with asyncio.timeout(self._operation_timeout_seconds):
+            async with llm_deadline(self._operation_timeout_seconds, self):
                 response = await self._raw_client.chat.completions.create(
                     model=self._model,
                     messages=[
@@ -390,6 +448,16 @@ class OpenAIInstructorLLMProvider:
                     **_completion_token_limit_kwargs(self._model, _GENERATE_MAX_TOKENS),
                 )
         except Exception as exc:
+            if pending := deferred_from_error(exc):
+                self.pending_retry_at = pending.retry_at
+                raise pending from exc
+            if self._cliproxy_protection:
+                raise LLMRequestDeferredError(
+                    llm_run.get() or "generate",
+                    datetime.now(UTC) + timedelta(minutes=5),
+                    reason="provider_request_failed",
+                    requires_operator=True,
+                ) from exc
             if is_quota_exhausted_error(exc):
                 self._quota_exhausted = True
                 self._last_llm_error = safe_llm_error(exc)
@@ -430,6 +498,27 @@ def _build_openai_llm(settings: Settings) -> OpenAIInstructorLLMProvider:
     if settings.openai_api_key is None:
         msg = "openai_api_key is required when llm_backend=openai."
         raise ValueError(msg)
+    http_client = None
+    if settings.llm_queue_profile:
+        import httpx
+        from structlog.contextvars import get_contextvars
+
+        from job_ftch.application.llm_dispatch import session_identifier
+
+        profile = settings.llm_provider_profiles[settings.llm_queue_profile]
+        if profile.execution == "queued":
+            from job_ftch.infrastructure.llm.dispatch_transport import QueuedLLMTransport
+
+            http_client = httpx.AsyncClient(
+                transport=QueuedLLMTransport(settings, settings.llm_queue_profile)
+            )
+        elif profile.session_affinity:
+
+            async def pin_session(request: httpx.Request) -> None:
+                tenant = str(get_contextvars().get("tenant_id") or settings.tenant_id)
+                request.headers["X-Session-ID"] = session_identifier(tenant, await request.aread())
+
+            http_client = httpx.AsyncClient(event_hooks={"request": [pin_session]})
     return OpenAIInstructorLLMProvider(
         api_key=settings.openai_api_key.get_secret_value(),
         model=settings.openai_model,
@@ -437,4 +526,10 @@ def _build_openai_llm(settings: Settings) -> OpenAIInstructorLLMProvider:
         timeout_seconds=settings.openai_timeout_seconds,
         max_retries=settings.openai_max_retries,
         preflight_timeout_seconds=settings.llm_preflight_timeout_seconds,
+        http_client=http_client,
+        structured_mode=settings.llm_structured_mode,
+        cliproxy_protection=bool(
+            settings.llm_queue_profile
+            and settings.llm_provider_profiles[settings.llm_queue_profile].cliproxy_dispatch
+        ),
     )

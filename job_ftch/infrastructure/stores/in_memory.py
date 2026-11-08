@@ -231,7 +231,14 @@ class InMemoryStore:
 
     async def enqueue_outbox(self, record: OutboxRecord) -> OutboxRecord:
         return self._outbox.setdefault(
-            record.idempotency_key, record.model_copy(update={"state": OutboxState.OUTBOXED})
+            record.idempotency_key,
+            record.model_copy(
+                update={
+                    "state": record.state
+                    if record.state is OutboxState.UNCERTAIN
+                    else OutboxState.OUTBOXED
+                }
+            ),
         )
 
     async def list_pending_outbox(
@@ -244,6 +251,27 @@ class InMemoryStore:
             and (tenant_id is None or record.tenant_id == tenant_id)
         )[:limit]
 
+    async def list_uncertain_outbox(
+        self, limit: int = 100, *, tenant_id: str | None = None
+    ) -> tuple[OutboxRecord, ...]:
+        return tuple(
+            record
+            for record in self._outbox.values()
+            if record.state is OutboxState.UNCERTAIN
+            and (tenant_id is None or record.tenant_id == tenant_id)
+        )[:limit]
+
+    async def list_outbox_attempt(
+        self, attempt_id: str, sink_name: str, *, tenant_id: str
+    ) -> tuple[OutboxRecord, ...]:
+        return tuple(
+            record
+            for record in self._outbox.values()
+            if record.tenant_id == tenant_id
+            and record.sink_name == sink_name
+            and record.delivery_payload.get("attempt_id") == attempt_id
+        )
+
     async def mark_outbox_delivered(self, idempotency_key: str) -> OutboxRecord | None:
         record = self._outbox.get(idempotency_key)
         if record is None:
@@ -251,6 +279,30 @@ class InMemoryStore:
         delivered = record.model_copy(update={"state": OutboxState.DELIVERED})
         self._outbox[idempotency_key] = delivered
         return delivered
+
+    async def release_uncertain_outbox(self, record: OutboxRecord) -> None:
+        if (
+            self._outbox.get(record.idempotency_key) == record
+            and record.state is OutboxState.UNCERTAIN
+        ):
+            del self._outbox[record.idempotency_key]
+
+    async def confirm_uncertain_outbox(
+        self, record: OutboxRecord, receipt: dict[str, object]
+    ) -> OutboxRecord | None:
+        if (
+            record.state is not OutboxState.UNCERTAIN
+            or self._outbox.get(record.idempotency_key) != record
+        ):
+            return None
+        confirmed = record.model_copy(
+            update={
+                "state": OutboxState.DELIVERED,
+                "delivery_payload": {**record.delivery_payload, "receipt": receipt},
+            }
+        )
+        self._outbox[record.idempotency_key] = confirmed
+        return confirmed
 
     async def acquire_dedup_claim(self, key: str, owner_id: str, *, ttl_seconds: int) -> bool:
         owner, expiry = self._dedup_claims.get(key, ("", datetime.min.replace(tzinfo=UTC)))
@@ -588,6 +640,7 @@ class InMemoryStore:
         *,
         available_at: datetime,
         error: str | None = None,
+        refund_attempt: bool = False,
     ) -> IngestTask | None:
         current = self._ingest_tasks.get(task.task_id)
         if (
@@ -599,6 +652,7 @@ class InMemoryStore:
         deferred = current.model_copy(
             update={
                 "state": IngestTaskState.WAITING_RATE_LIMIT,
+                "attempt": max(0, current.attempt - 1) if refund_attempt else current.attempt,
                 "available_at": available_at,
                 "lease_owner": None,
                 "lease_until": None,

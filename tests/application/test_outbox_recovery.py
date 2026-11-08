@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from job_ftch.application.outbox import recover_pending_outbox
@@ -76,6 +78,47 @@ async def test_recovery_can_rely_on_destination_idempotency_after_mark_failure()
     assert attempts == 2
     assert effects == {record.idempotency_key}
     assert await store.list_pending_outbox() == ()
+
+
+@pytest.mark.anyio
+async def test_two_recovery_workers_claim_one_pending_record() -> None:
+    store = InMemoryStore()
+    record = OutboxRecord(
+        outbox_id="only-one",
+        observation_id="o",
+        content_hash="a" * 64,
+        decision_version="v1",
+        sink_name="sink",
+        idempotency_key="b" * 64,
+    )
+    await store.enqueue_outbox(record)
+    entered = asyncio.Event()
+    finish = asyncio.Event()
+    effects = 0
+
+    async def deliver(_record: OutboxRecord) -> None:
+        nonlocal effects
+        effects += 1
+        entered.set()
+        await finish.wait()
+
+    async def worker(owner: str) -> int:
+        async def claim(row: OutboxRecord) -> bool:
+            return await store.acquire_dedup_claim(
+                f"outbox_delivery:{row.idempotency_key}", owner, ttl_seconds=300
+            )
+
+        async def release(row: OutboxRecord) -> None:
+            await store.release_dedup_claim(f"outbox_delivery:{row.idempotency_key}", owner)
+
+        return await recover_pending_outbox(store, deliver, claim=claim, release=release)
+
+    first = asyncio.create_task(worker("first"))
+    await entered.wait()
+    assert await worker("second") == 0
+    finish.set()
+    assert await first == 1
+    assert effects == 1
 
 
 @pytest.mark.anyio

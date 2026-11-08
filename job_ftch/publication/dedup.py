@@ -9,6 +9,8 @@ from __future__ import annotations
 import unicodedata
 from typing import TYPE_CHECKING
 
+from rapidfuzz import fuzz
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -16,54 +18,79 @@ if TYPE_CHECKING:
 
 
 def _normalize_text(text: str | None) -> str:
-    if not text:
+    if not isinstance(text, str) or not text:
         return ""
     t = text.strip().lower()
     t = unicodedata.normalize("NFKC", t)
     return " ".join(t.split())
 
 
-def _fingerprint(job: Job) -> str:
-    company = _normalize_text(
-        getattr(job, "company_canonical", None) or getattr(job, "company", None)
+def same_vacancy(first: Job, second: Job) -> bool:
+    """Require matching role and content; metadata alone can describe two openings."""
+    title_a = _normalize_text(getattr(first, "title", None))
+    title_b = _normalize_text(getattr(second, "title", None))
+    if not title_a or not title_b or fuzz.ratio(title_a, title_b) < 90:
+        return False
+
+    company_a = _normalize_text(
+        getattr(first, "company_canonical", None) or getattr(first, "company", None)
     )
-    role = _normalize_text(job.title)
+    company_b = _normalize_text(
+        getattr(second, "company_canonical", None) or getattr(second, "company", None)
+    )
+    if (
+        company_a
+        and company_b
+        and company_a != company_b
+        and (
+            min(len(company_a), len(company_b)) < 4
+            or not (company_a.startswith(company_b) or company_b.startswith(company_a))
+        )
+    ):
+        return False
 
-    comp = getattr(job, "compensation", None)
-    salary = ""
-    if comp is not None:
-        lo = getattr(comp, "min_amount", None) or ""
-        hi = getattr(comp, "max_amount", None) or ""
-        cur = getattr(comp, "currency", "") or ""
-        salary = f"{lo}|{hi}|{cur}"
+    location_a = _normalize_text(getattr(first, "location", None))
+    location_b = _normalize_text(getattr(second, "location", None))
+    if (
+        location_a
+        and location_b
+        and not (
+            location_a == location_b
+            or location_a.startswith(location_b + ",")
+            or location_b.startswith(location_a + ",")
+        )
+    ):
+        return False
 
-    return f"{company}::{role}::{salary}"
+    salary_a = getattr(first, "compensation", None)
+    salary_b = getattr(second, "compensation", None)
+    if salary_a and salary_b and salary_a != salary_b:
+        return False
+
+    desc_a = _normalize_text(getattr(first, "description", None))
+    desc_b = _normalize_text(getattr(second, "description", None))
+    if len(desc_a) >= 120 and len(desc_b) >= 120:
+        # shortcut: missing company labels require almost identical source text;
+        # upgrade when a reliable cross-source company identity is available.
+        threshold = 88 if company_a and company_b else 98
+        return (
+            fuzz.ratio(desc_a, desc_b) >= threshold and fuzz.token_set_ratio(desc_a, desc_b) >= 92
+        )
+
+    return bool(company_a and company_a == company_b and title_a == title_b and desc_a == desc_b)
 
 
 def deduplicate_for_publish(jobs: Sequence[Job]) -> list[Job]:
-    """Remove fingerprint-duplicates, keeping the first occurrence.
-
-    Priority: direct source (career_site) over aggregator, then earlier in list.
-    """
-    seen: dict[str, int] = {}
-    result: list[Job] = list(jobs)
-
-    for idx, job in enumerate(result):
-        fp = _fingerprint(job)
-        if not fp or fp == "::::":
+    """Keep one per confidently matching description, preferring direct sources."""
+    result: list[Job] = []
+    for job in jobs:
+        match = next((idx for idx, prior in enumerate(result) if same_vacancy(job, prior)), None)
+        if match is None:
+            result.append(job)
             continue
-        if fp in seen:
-            prev_idx = seen[fp]
-            prev_kind = getattr(result[prev_idx], "source_kind", None)
-            curr_kind = getattr(job, "source_kind", None)
-            prev_val = prev_kind.value if prev_kind and hasattr(prev_kind, "value") else ""
-            curr_val = curr_kind.value if curr_kind and hasattr(curr_kind, "value") else ""
-            if prev_val != "career_site" and curr_val == "career_site":
-                seen[fp] = idx
-        else:
-            seen[fp] = idx
-
-    keep_indices = set(seen.values())
-    return [
-        job for idx, job in enumerate(result) if idx in keep_indices or _fingerprint(job) == "::::"
-    ]
+        prior = result[match]
+        prior_kind = getattr(getattr(prior, "source_kind", None), "value", "")
+        current_kind = getattr(getattr(job, "source_kind", None), "value", "")
+        if prior_kind != "career_site" and current_kind == "career_site":
+            result[match] = job
+    return result

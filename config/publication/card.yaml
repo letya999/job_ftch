@@ -22,7 +22,7 @@ blocks:
     placeholder: "не указаны"
   - spacer: true
   - field: summary
-    max_len: 180
+    max_len: 260
     omit_if_empty: true
   - field: key_requirements
     prefix: "Нужно: "

@@ -38,6 +38,10 @@ class TenantRunLockError(RuntimeError):
 _PROCESS_TENANT_LOCKS: dict[str, Lock] = {}
 
 
+def _lock_directory(settings: Any) -> Any:
+    return getattr(settings, "tenant_lock_dir", None) or settings.store_path.parent / "tenant_locks"
+
+
 def tenant_run_is_active(settings: Any, tenant_id: str) -> bool:
     """Best-effort check for a live run of `tenant_id` in any process.
 
@@ -47,7 +51,7 @@ def tenant_run_is_active(settings: Any, tenant_id: str) -> bool:
     itself remains the only correctness boundary.
     """
     try:
-        lock_path = settings.store_path.parent / "tenant_locks" / f"{tenant_id}.lock"
+        lock_path = _lock_directory(settings) / f"{tenant_id}.lock"
         if not lock_path.exists():
             return False
 
@@ -64,15 +68,16 @@ def tenant_run_is_active(settings: Any, tenant_id: str) -> bool:
 
 
 @asynccontextmanager
-async def tenant_run_lock(settings: Any, tenant_id: str) -> AsyncIterator[None]:
+async def tenant_run_lock(
+    settings: Any, tenant_id: str, *, timeout: float = 30.0
+) -> AsyncIterator[None]:
     """Acquire a process-safe + process-local lock for `tenant_id`.
 
     Used by `TenantRunner.run_tenant` so two concurrent runs of the same
     tenant do not race on the source snapshot / run summary. The default
-    timeout is 30 seconds; `TimeoutError` is raised if the file-system
-    lock cannot be acquired in that window.
+    timeout is 30 seconds; zero skips immediately when another process holds it.
     """
-    lock_dir = settings.store_path.parent / "tenant_locks"
+    lock_dir = _lock_directory(settings)
     try:
         lock_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -91,7 +96,7 @@ async def tenant_run_lock(settings: Any, tenant_id: str) -> AsyncIterator[None]:
     def _acquire() -> FileLock:
         # Acquisition runs in a worker thread, while cleanup runs on the
         # event-loop thread. Keep FileLock state shared across those threads.
-        flock = FileLock(str(lock_path), timeout=30.0, thread_local=False)
+        flock = FileLock(str(lock_path), timeout=timeout, thread_local=False)
         try:
             flock.acquire()
             return flock

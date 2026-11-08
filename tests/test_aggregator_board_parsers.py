@@ -8,6 +8,7 @@ from job_ftch.application.registry import resolve_site_parser, resolve_site_pars
 from job_ftch.domain.source_spec import CareerSiteSpec
 from job_ftch.infrastructure.sources.site_parsers.aggregator_boards import (
     AgileFluentParser,
+    AIEngineerParser,
     AIJobsAiParser,
     AIJobsComParser,
     AIJobsParser,
@@ -89,6 +90,57 @@ def test_search_builders_keep_target_role_on_supported_aggregators() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ai_engineer_reads_relevant_full_cards_without_detail_requests() -> None:
+    url = "https://ai.engineer/jobs"
+    html = """<section id="acme"><span class="font-extrabold">Acme</span>
+      <div class="bg-white shadow-sm rounded-xl">
+        <span class="font-semibold text-lg">AI Engineer</span>
+        <div class="text-sm text-gray-600">Build and deploy language models with Python.
+          Work with product teams to evaluate quality and improve production systems.</div>
+        <div class="justify-end"><a href="https://jobs.example.com/ai-engineer">More Information</a></div>
+      </div>
+      <div class="bg-white shadow-sm rounded-xl">
+        <span class="font-semibold text-lg">Accountant</span>
+        <div class="text-sm text-gray-600">Support AI teams through payroll and accounting.
+          This job description is long enough to pass the body length check.</div>
+        <div class="justify-end"><a href="https://jobs.example.com/accountant">More Information</a></div>
+      </div>
+      <div class="bg-white shadow-sm rounded-xl">
+        <span class="font-semibold text-lg">AI Engineer</span>
+        <div class="text-sm text-gray-600">Join a growing AI team and build reliable
+          machine learning services for production with our engineers.</div>
+        <div class="justify-end"><a href="https://www.linkedin.com/posts/acme">More Information</a></div>
+      </div>
+    </section>"""
+    client = _Client({url: _Response(html, url)})
+    spec = CareerSiteSpec(
+        url=url,
+        source_name="ai_engineer",
+        limit=2,
+        monitor_config={"_search_keywords": ["AI Engineer"]},
+    )
+
+    items = [item async for item in AIEngineerParser().parse(spec, client)]
+
+    assert len(items) == 1
+    assert str(items[0].url) == "https://jobs.example.com/ai-engineer"
+    assert "Acme" in items[0].text
+    assert items[0].metadata["company"] == "Acme"
+    assert "improve production systems" in items[0].text
+    assert AIEngineerParser.confirmed_empty_on_empty is True
+
+
+@pytest.mark.asyncio
+async def test_ai_engineer_layout_change_is_not_reported_as_empty_board() -> None:
+    url = "https://ai.engineer/jobs"
+    client = _Client({url: _Response("<main>Unknown layout</main>", url)})
+    spec = CareerSiteSpec(url=url, source_name="ai_engineer")
+
+    with pytest.raises(ValueError, match="listing cards not found"):
+        [item async for item in AIEngineerParser().parse(spec, client)]
+
+
+@pytest.mark.asyncio
 async def test_aggregator_detail_follows_external_apply_link() -> None:
     listing = "<a href='/job/role-1'>AI Engineer</a>"
     detail = "<main><h1>AI Engineer</h1><a class='apply' href='https://jobs.example.com/role-1'>Apply</a><p>Build models.</p></main>"
@@ -111,6 +163,43 @@ async def test_aggregator_detail_follows_external_apply_link() -> None:
     assert items[0].metadata["aggregator_url"] == "https://quick-offer.ru/job/role-1"
     assert items[0].metadata["origin_fetched"] is True
     assert "Original vacancy text." in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_quick_offer_excludes_market_analysis_and_related_jobs() -> None:
+    url = "https://quick-offer.ru/job/role-1"
+    html = """<main><article>
+      <div class="JobTitleCard-module__abc__header"><h1>AI Engineer</h1><span>Remote</span></div>
+      <div class="JobSalaryCard-module__abc__card">Медиана 300 000 ₽ в месяц</div>
+      <div class="JobDescription-module__abc__wrapper">Зарплата обсуждается. Build models.</div>
+      <div class="JobSkills-module__abc__wrapper">Python</div>
+      <div class="JobSimilar-module__abc__wrapper">Другая вакансия 500 000 ₽</div>
+    </article></main>"""
+    client = _Client({url: _Response(html, url)})
+    spec = CareerSiteSpec(url=url, source_name="quick", limit=1)
+
+    items = [item async for item in QuickOfferParser().parse(spec, client)]
+
+    assert len(items) == 1
+    assert "Зарплата обсуждается" in items[0].text
+    assert "Python" in items[0].text
+    assert "300 000" not in items[0].text
+    assert "500 000" not in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_quick_offer_missing_description_does_not_use_market_analysis() -> None:
+    url = "https://quick-offer.ru/job/role-1"
+    html = """<main><article>
+      <div class="JobTitleCard-module__abc__header"><h1>AI Engineer</h1></div>
+      <div class="JobSalaryCard-module__abc__card">Медиана 300 000 ₽</div>
+    </article></main>"""
+    client = _Client({url: _Response(html, url)})
+    spec = CareerSiteSpec(url=url, source_name="quick", limit=1)
+
+    items = [item async for item in QuickOfferParser().parse(spec, client)]
+
+    assert items == []
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,7 @@
 ---
 title: "Деплой Telegram bot production stack"
 description: "Production-shape деплой job_ftch: shared runtime image, Telegram bot compose, Postgres и Qdrant."
-updated: 2026-09-30
+updated: 2026-11-08
 ---
 # Деплой Telegram bot production stack
 
@@ -19,7 +19,7 @@ MCP, FastAPI, FastStream и Dagster adapters не входят в этот deplo
 
 - Ubuntu 24.04 или совместимый Linux host.
 - Docker и Docker Compose plugin.
-- Минимум для текущих compose limits: 2 vCPU / 6 GB RAM.
+- Минимум для текущих compose limits: 2 vCPU / 16 GB RAM.
 - Заполненные `.env.prod` и `job_ftch/adapters/telegram_bot/.env.prod`.
 
 ## Подготовка
@@ -80,6 +80,48 @@ healthcheck stale, бот может отвечать на команды, но 
 
 ## Эксплуатация
 
+### Опциональная очередь и домашний выход
+
+Прямой compatible API работает без LLM worker и телефона. Для CLIProxy через
+PostgreSQL сохраните при обновлении полный набор включённых Compose overlays
+и профилей из [runbook](operations/llm-queue-and-home-egress.md).
+Все новые механизмы CLIProxy требуют `gateway: cliproxy` и `execution: queued`.
+
+Храните OAuth credentials и состояние Tailscale вне каталога исходников,
+в защищённом каталоге или постоянном volume. Разворачивайте новый release
+в отдельный каталог; не распаковывайте архив поверх работающего checkout.
+Перед пересозданием CLIProxy проверьте, что bind mount sources существуют
+на хосте, и сохраните резервную копию приватного состояния без вывода содержимого.
+
+После deploy сверьте Git SHA, release tag и runtime version. Проверьте
+readiness, реальный LLM-ответ и подтверждённый receipt публикации. Известный
+`uncertain` сначала разбирает оператор: снятие account pause не должно
+автоматически повторять запрос с потерянным ответом.
+
+### Сверка неопределённой публикации
+
+По [ADR-102](adr/102-uncertain-telegram-delivery.md) потерянный ответ Telegram
+не вызывает автоматическую повторную отправку. `health/ready` сообщает число
+попыток среди первых 100 неопределённых записей как `publish.uncertain_count`;
+при большом количестве это нижняя оценка. Команда ниже только
+читает записи текущего tenant и выводит идентификатор попытки, ID вакансии и
+целевой канал:
+
+```bash
+docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod \
+  -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml exec bot \
+  python scripts/reconcile_publications.py list --tenant ai_jobs
+```
+
+Перед разрешением убедитесь, что соответствующая отправка уже не выполняется,
+и проверьте канал. Только после подтверждения используйте `verified-unsent` с
+`--tenant` и `--record`, если сообщение точно отсутствует, либо
+`verified-delivered` с теми же параметрами и фактическими `--chat-id` и
+`--message-id`, если сообщение найдено. Первая команда разрешает последующий
+повтор; вторая сохраняет подтверждение и не отправляет сообщение. Не угадывайте
+исход неизвестной отправки. Список ограничен 10 000 записями outbox; при
+достижении лимита требуется отдельная обработка оставшихся записей.
+
 Backup Postgres:
 
 ```bash
@@ -102,6 +144,11 @@ docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod \
 
 ## Recovery checks
 
+With OpenObserve configured, `JOB_FTCH_TRACING_ENABLED=true` enables the
+sanitized `job_ftch_traces` stream described in [ADR-103](adr/103-safe-openobserve-tracing.md).
+The bounded exporter is best-effort and can lose spans during overload or a
+crash. Keep OpenObserve retention at seven days; cleanup is asynchronous.
+
 Quota preflight runs before acquisition. After one failed initial quota check,
 allow at most five retries spaced by 30 minutes, then wait until the next
 scheduled window. State survives restarts; successful preflight or a new window
@@ -109,7 +156,13 @@ resets the retry budget. Non-quota provider failures wait until the next window.
 Missed schedule windows coalesce into one current run; pending deliveries remain
 recoverable through the journal and receipts.
 
-The production bot permits two concurrent browser sessions. Browser acquisition
+Rate-limited ingest continuations use an increasing retry delay, capped before
+optional jitter by `JOB_FTCH_INGEST_QUEUE_MAX_WAIT_SECONDS`. An upstream `Retry-After` remains a
+minimum; values exceeding the policy limit require operator attention. Tasks
+already in `needs_operator` are not replayed automatically.
+
+The production bot permits two concurrent browser sessions with a 6 GiB bot
+container limit. Browser acquisition
 also waits for 512 MiB of container memory headroom, within the source deadline.
 Cancellation and failures after browser launch must close the owned session.
 During release verification compare container memory and browser/driver process

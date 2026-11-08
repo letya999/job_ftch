@@ -1,7 +1,7 @@
 ---
 title: "Технологический стек"
 description: "Актуальный стек зависимостей job_ftch по pyproject.toml: core dependencies, extras и запрещённые инструменты."
-updated: 2026-10-02
+updated: 2026-10-27
 ---
 # Технологический стек
 
@@ -22,7 +22,7 @@ updated: 2026-10-02
 |---|---|
 | `pydantic`, `pydantic-settings` | Domain/config models |
 | `httpx` | HTTP ingest/API client |
-| `selectolax`, `trafilatura` | HTML/main-text extraction |
+| `selectolax>=0.3,<1`, `trafilatura` | HTML/main-text extraction; v1 removes the `parser.HTMLParser` API used by existing adapters |
 | `rapidfuzz` | Dedup/string similarity |
 | `structlog` | Structured logging |
 | `opentelemetry-api`, `opentelemetry-sdk` | Telemetry boundary |
@@ -36,8 +36,8 @@ updated: 2026-10-02
 ## Extras
 
 The lockfile keeps transitive PyJWT at a patched release (2.15.1 or newer).
-Security refresh on 2026-10-02 also pins patched pypdf 6.19.0,
-sentence-transformers 5.6.0, urllib3 2.8.0 and virtualenv 21.7.13.
+The 2026-10-27 security refresh updates aiohttp, certifi, FastMCP, filelock,
+OpenTelemetry, Pillow, pypdf, setuptools and virtualenv in the lockfile.
 
 | Extra | Основные зависимости | Назначение |
 |---|---|---|
@@ -64,13 +64,14 @@ sentence-transformers 5.6.0, urllib3 2.8.0 and virtualenv 21.7.13.
 | `[extraction]` | `trafilatura`, `extruct`, `lxml` | Structured extraction |
 | `[realtime]` | `aiohttp`, `websockets` | Realtime/push variants |
 | `[browser]` | `patchright`, `cloakbrowser` | Browser-backed scraping tiers |
-| `[stealth]` | `playwright-stealth`, `curl-cffi==0.16.2` | TLS/browser impersonation |
+| `[stealth]` | `playwright-stealth`, `curl-cffi==0.17.0` | TLS/browser impersonation |
 | `[tls_client]` | `tls-client` | Alternative TLS/HTTP impersonation transport |
 | `[camoufox]` | `camoufox` | Firefox anti-detect tier |
 | `[nodriver]` | `nodriver` | CDP-native browser tier |
 | `[parity_lab]` | `cryptography`, `httpx[http2]`, `hypercorn[h3]`, `maxminddb`, `starlette` | Local-only browser/network parity lab |
-| `[tracing]` | OTLP HTTP exporter | OpenObserve export |
+| `[tracing]` | OTLP HTTP exporter | OpenObserve export; enabled in the optional LLM worker image for CLIProxy dispatch metrics |
 | `[resilience]` | `tenacity` | Explicit retry helpers |
+| `[llm_queue]` | `procrastinate`, `psycopg` | Optional PostgreSQL LLM dispatch; isolated from inline clients and the asyncpg store |
 | `[ollama]` | `httpx` | Ollama-compatible LLM path |
 
 `[all]` объединяет shipped runtime optional stack. Local-only lab/tooling extras

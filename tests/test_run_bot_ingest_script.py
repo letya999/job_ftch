@@ -12,10 +12,42 @@ from scripts.run_bot_ingest import (
     _build_parser,
     _clear_output_artifacts,
     _resolve_user_id,
+    _run,
     _select_runtime,
     _write_report,
     main,
 )
+
+
+@pytest.mark.asyncio
+async def test_preflight_reports_tracing_disabled_without_removed_langfuse_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from job_ftch.config import Settings
+
+    settings = Settings.model_validate({"configs_dir": tmp_path, "tracing_enabled": True})
+    runner = SimpleNamespace(
+        has_candidate_profile_data=AsyncMock(return_value=True),
+        list_sources=AsyncMock(return_value=[]),
+        close=AsyncMock(),
+    )
+    monkeypatch.setattr("job_ftch.config.get_settings", lambda: settings)
+    monkeypatch.setattr("job_ftch.application.tenant_loader.load_tenants", lambda _: [])
+    monkeypatch.setattr(
+        "job_ftch.application.tenant_runner.TenantRunner.from_tenants", lambda *a, **kw: runner
+    )
+    args = _build_parser().parse_args(["--preflight", "--user-id", "42"])
+
+    error = None
+    result = None
+    try:
+        result = await _run(args)
+    except AttributeError as exc:
+        error = str(exc)
+
+    assert error is None, f"preflight referenced a removed setting: {error}"
+    assert result is not None
+    assert result["telemetry"]["langfuse_configured"] is False
 
 
 @pytest.mark.asyncio

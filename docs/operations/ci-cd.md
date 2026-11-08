@@ -1,7 +1,7 @@
 ---
 title: "CI/CD"
 description: "Операционная карта quality gates: локальные just-команды, их соответствие GitHub Actions и порядок перед release."
-updated: 2026-08-11
+updated: 2026-11-08
 ---
 # CI/CD
 
@@ -62,6 +62,10 @@ push в `main`, `dev`, `mvp-release-final`. Он состоит из незав�
 - `release-contract` проверяет graph/runtime, classification, extraction и
   source-outcome contracts;
 - `browser-smoke` устанавливает Chromium и проверяет запуск browser runtime.
+- `llm-dispatch` поднимает отдельный PostgreSQL 16 и проверяет durable queue,
+  общие интервалы между worker, session affinity, cooldown и продолжение pipeline.
+  Используются только тестовые credentials и локальные HTTP mocks; обращения
+  к Google и production БД не нужны.
 
 `tests-smoke` полезен локально, но не заменяет CI `test`: он не измеряет
 coverage и не охватывает весь suite. Для browser runtime и core-only install
@@ -70,7 +74,7 @@ coverage и не охватывает весь suite. Для browser runtime и 
 
 [Docs workflow](../../.github/workflows/docs.yml) повторяет `docs-verify`
 на PR и push и **не** публикует сайт. [Docs Pages workflow](../../.github/workflows/docs-pages.yml)
-собирает MkDocs (`docs_scripts/mkdocs.yml`) и деплоит в GitHub Pages только
+собирает MkDocs (`scripts/docs/mkdocs.yml`) и деплоит в GitHub Pages только
 на push в `main` (и `workflow_dispatch` с `main`): PR checks и deploy
 разделены, permissions минимальны (`contents: read`, `pages: write`,
 `id-token: write`), concurrency group `pages` не отменяет уже идущий deploy.

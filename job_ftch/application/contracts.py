@@ -311,6 +311,7 @@ class IngestQueueStore(Protocol):
         *,
         available_at: _DateTime,
         error: str | None = None,
+        refund_attempt: bool = False,
     ) -> IngestTask | None: ...
 
     async def fail_ingest_task(

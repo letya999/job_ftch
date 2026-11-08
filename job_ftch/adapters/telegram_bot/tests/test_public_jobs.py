@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from job_ftch.adapters.telegram_bot.public_jobs import build_public_jobs_response
+from job_ftch.domain import SkillTag
 
 
 class Store:
@@ -73,3 +74,19 @@ async def test_public_jobs_returns_postgres_catalog_items() -> None:
 async def test_public_jobs_rejects_non_public_tenant() -> None:
     with pytest.raises(LookupError):
         await build_public_jobs_response(Runner(), "private")
+
+
+@pytest.mark.asyncio
+async def test_public_jobs_render_structured_skill_names() -> None:
+    runner = Runner()
+
+    async def latest_jobs(tenant_id: str, *, limit: int) -> list[SimpleNamespace]:
+        jobs = await Runner.latest_jobs(runner, tenant_id, limit=limit)
+        jobs[0].tools_stack = ()
+        jobs[0].skills_explicit = (SkillTag(canonical_name="LLM", source="test"),)
+        return jobs
+
+    runner.latest_jobs = latest_jobs  # type: ignore[method-assign]
+    payload = await build_public_jobs_response(runner, "ai_jobs", limit=1)
+
+    assert payload["jobs"][0]["tags"] == ["LLM"]

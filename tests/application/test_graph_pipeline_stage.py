@@ -29,6 +29,25 @@ async def test_graph_pipeline_stage_preserves_terminal_status(make_raw_item) -> 
     assert result[0].node_events == {"dedup": {"outcome": "drop", "effect": "gate"}}
 
 
+async def test_graph_stage_keeps_child_identity_after_terminal_transform(make_raw_item) -> None:
+    parent = make_raw_item(external_id="parent")
+    child = make_raw_item(external_id="child")
+
+    class Executor:
+        async def run_many(self, item):
+            return [
+                SimpleNamespace(
+                    source_item=child,
+                    item={"decision": "accept"},
+                    status="ACCEPT",
+                    node_events={"terminal": {"effect": "terminal_decision"}},
+                )
+            ]
+
+    result = await GraphPipelineStage(Executor()).process(parent)
+    assert result[0].source_item is child
+
+
 def test_pipeline_graph_result_keeps_terminal_reject_for_rejected_sink(make_job_record) -> None:
     record = make_job_record()
     graph_result = SimpleNamespace(

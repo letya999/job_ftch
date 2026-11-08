@@ -76,6 +76,26 @@ def test_static_dom_detects_external_ats_before_same_site_filtering() -> None:
     assert "servicetitan.wd1.myworkdayjobs.com" in exc_info.value.url
 
 
+def test_inline_vacancy_url_does_not_redirect_aggregator() -> None:
+    from job_ftch.infrastructure.sources.site_fingerprinter import _specific_monitor_from_text
+
+    html = (
+        '<script type="application/json">'
+        '{"url":"https://primestar.jobs.personio.de/job/123"}'
+        "</script><a href='/jobs/engineer'>Engineer</a>"
+    )
+
+    assert _specific_monitor_from_text("https://freehire.io/jobs", html) is None
+    check_ats_redirect(html, "https://freehire.io/jobs")
+    assert (
+        _specific_monitor_from_text(
+            "https://freehire.io/jobs",
+            '<iframe src="https://primestar.jobs.personio.de/" />',
+        )
+        == "personio"
+    )
+
+
 def test_static_dom_detects_footer_ats_embeds_and_teamtailor() -> None:
     html = (
         "<main>" + ("x" * 100_100) + "</main>"

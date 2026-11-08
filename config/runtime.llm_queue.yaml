@@ -1,0 +1,42 @@
+# Optional overlay, loaded after the Telegram production runtime.
+# YAML maps replace previous maps, so keep complete provider definitions here.
+# Enhanced protection is enabled only by an explicit CLIProxy gateway marker.
+llm_dispatch_policies:
+  google_primary:
+    min_interval_seconds: 30.0
+    jitter_seconds: 10.0
+    run_jitter_seconds: 300
+    run_summary_enabled: true
+    max_calls_per_hour: 120
+    max_tokens_per_hour: 500000
+    max_pending_per_tenant: 100
+    max_attempts: 3
+    request_ttl_seconds: 86400
+    wait_seconds: 10.0
+    retry_delay_seconds: 60
+    retention_seconds: 86400
+llm_provider_profiles:
+  openai_main:
+    backend: openai
+    capabilities: [text, structured]
+  cliproxy_main:
+    gateway: cliproxy
+    timeout_seconds: 120.0
+    backend: openai
+    base_url: http://cliproxy:8317/v1
+    credential_ref: JOB_FTCH_CLIPROXY_API_KEY
+    structured_mode: json
+    capabilities: [text, structured]
+    execution: queued
+    quota_scope: google_primary
+    session_affinity: true
+  cliproxy_captcha:
+    gateway: cliproxy
+    timeout_seconds: 20.0
+    backend: openai
+    base_url: http://cliproxy:8317/v1
+    credential_ref: JOB_FTCH_CLIPROXY_API_KEY
+    capabilities: [vision]
+    execution: queued
+    quota_scope: google_primary
+    session_affinity: true

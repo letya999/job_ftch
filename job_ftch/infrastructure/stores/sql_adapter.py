@@ -124,6 +124,9 @@ class SQLStoreAdapter(abc.ABC):
     _SQL_OUTBOX_GET: str
     _SQL_OUTBOX_PENDING: str
     _SQL_OUTBOX_DELIVERED: str
+    _SQL_OUTBOX_RELEASE_UNCERTAIN: str
+    _SQL_OUTBOX_CONFIRM_UNCERTAIN: str
+    _SQL_OUTBOX_ATTEMPT: str
     _SQL_DEDUP_CLAIM_ACQUIRE: str
     _SQL_DEDUP_CLAIM_OWNER: str
     _SQL_DEDUP_CLAIM_RELEASE: str
@@ -165,6 +168,10 @@ class SQLStoreAdapter(abc.ABC):
     @abc.abstractmethod
     async def _execute(self, sql: str, params: tuple[object, ...] = ()) -> None:
         """Execute a write query."""
+
+    @abc.abstractmethod
+    def _is_unique_violation(self, error: Exception) -> bool:
+        """Recognize this backend's unique-constraint error."""
 
     @abc.abstractmethod
     async def _execute_batch(self, sql: str, params_list: tuple[tuple[object, ...], ...]) -> None:
@@ -225,7 +232,9 @@ class SQLStoreAdapter(abc.ABC):
                 record.outbox_id,
                 record.tenant_id,
                 record.idempotency_key,
-                OutboxState.OUTBOXED.value,
+                (
+                    record.state if record.state is OutboxState.UNCERTAIN else OutboxState.OUTBOXED
+                ).value,
                 record.model_dump_json(),
             ),
         )
@@ -248,6 +257,30 @@ class SQLStoreAdapter(abc.ABC):
             for row in rows
         )
 
+    async def list_uncertain_outbox(
+        self, limit: int = 100, *, tenant_id: str | None = None
+    ) -> tuple[OutboxRecord, ...]:
+        rows = await self._fetchall(
+            self._SQL_OUTBOX_PENDING, (OutboxState.UNCERTAIN.value, tenant_id or "default", limit)
+        )
+        return tuple(
+            OutboxRecord.model_validate_json(str(row[0])).model_copy(
+                update={"state": OutboxState(str(row[1]))}
+            )
+            for row in rows
+        )
+
+    async def list_outbox_attempt(
+        self, attempt_id: str, sink_name: str, *, tenant_id: str
+    ) -> tuple[OutboxRecord, ...]:
+        rows = await self._fetchall(self._SQL_OUTBOX_ATTEMPT, (tenant_id, sink_name, attempt_id))
+        return tuple(
+            OutboxRecord.model_validate_json(str(row[0])).model_copy(
+                update={"state": OutboxState(str(row[1]))}
+            )
+            for row in rows
+        )
+
     async def mark_outbox_delivered(self, idempotency_key: str) -> OutboxRecord | None:
         await self._execute(
             self._SQL_OUTBOX_DELIVERED, (OutboxState.DELIVERED.value, idempotency_key)
@@ -257,6 +290,39 @@ class SQLStoreAdapter(abc.ABC):
             return None
         record = OutboxRecord.model_validate_json(str(row[0]))
         return record.model_copy(update={"state": OutboxState(str(row[1]))})
+
+    async def release_uncertain_outbox(self, record: OutboxRecord) -> None:
+        await self._execute(
+            self._SQL_OUTBOX_RELEASE_UNCERTAIN,
+            (record.idempotency_key, OutboxState.UNCERTAIN.value, record.model_dump_json()),
+        )
+
+    async def confirm_uncertain_outbox(
+        self, record: OutboxRecord, receipt: dict[str, object]
+    ) -> OutboxRecord | None:
+        confirmed = record.model_copy(
+            update={
+                "state": OutboxState.DELIVERED,
+                "delivery_payload": {**record.delivery_payload, "receipt": receipt},
+            }
+        )
+        await self._execute(
+            self._SQL_OUTBOX_CONFIRM_UNCERTAIN,
+            (
+                OutboxState.DELIVERED.value,
+                confirmed.model_dump_json(),
+                record.idempotency_key,
+                OutboxState.UNCERTAIN.value,
+                record.model_dump_json(),
+            ),
+        )
+        row = await self._fetchone(self._SQL_OUTBOX_GET, (record.idempotency_key,))
+        if row is None:
+            return None
+        current = OutboxRecord.model_validate_json(str(row[0])).model_copy(
+            update={"state": OutboxState(str(row[1]))}
+        )
+        return confirmed if current == confirmed else None
 
     async def acquire_dedup_claim(self, key: str, owner_id: str, *, ttl_seconds: int) -> bool:
         await self._execute(
@@ -311,12 +377,8 @@ class SQLStoreAdapter(abc.ABC):
                     ),
                 )
                 return recorded
-            except Exception as e:
-                err_str = str(e).lower()
-                is_unique_violation = (
-                    "unique" in err_str or "integrity" in err_str or "duplicate" in err_str
-                )
-                if attempt == max_retries - 1 or not is_unique_violation:
+            except Exception as exc:
+                if not self._is_unique_violation(exc):
                     raise
                 existing = await self.get_observation(
                     entry.stable_id,
@@ -325,6 +387,8 @@ class SQLStoreAdapter(abc.ABC):
                 )
                 if existing is not None:
                     return existing
+                if attempt == max_retries - 1:
+                    raise
                 await asyncio.sleep(0.01 * (attempt + 1))
         return recorded
 
@@ -648,11 +712,13 @@ class SQLStoreAdapter(abc.ABC):
         *,
         available_at: datetime,
         error: str | None = None,
+        refund_attempt: bool = False,
     ) -> IngestTask | None:
         now = datetime.now(UTC)
         await self._execute(
             self._SQL_INGEST_TASK_DEFER,
             (
+                refund_attempt,
                 IngestTaskState.WAITING_RATE_LIMIT.value,
                 self._queue_time(available_at),
                 error,

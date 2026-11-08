@@ -192,6 +192,40 @@ async def test_compensation_parsing_prefers_structured_salary_over_llm_number() 
 
 
 @pytest.mark.asyncio
+async def test_compensation_period_comes_from_the_salary_not_other_numbers() -> None:
+    item = JobRecord(
+        raw_item_id="salary-period",
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="test",
+        description="One meeting per month. Salary $20-25 per hour. Work 40 hours per week.",
+        compensation={"currency": "USD", "min_amount": 20, "max_amount": 25, "period": "month"},
+    )
+
+    processed = await CompensationParsingNode().process(item)
+
+    assert processed is not None
+    assert processed.compensation is not None
+    assert processed.compensation.period == CompensationPeriod.HOUR
+
+
+@pytest.mark.asyncio
+async def test_compensation_does_not_invent_period_from_unrelated_text() -> None:
+    item = JobRecord(
+        raw_item_id="salary-no-period",
+        source_kind=SourceKind.CAREER_SITE,
+        source_name="test",
+        description="Salary 300000 RUB. One meeting per hour.",
+        compensation={"currency": "RUB", "min_amount": 300000, "period": "hour"},
+    )
+
+    processed = await CompensationParsingNode().process(item)
+
+    assert processed is not None
+    assert processed.compensation is not None
+    assert processed.compensation.period == CompensationPeriod.UNKNOWN
+
+
+@pytest.mark.asyncio
 async def test_compensation_parsing_ignores_benefit_deposit() -> None:
     node = CompensationParsingNode()
     item = JobRecord(

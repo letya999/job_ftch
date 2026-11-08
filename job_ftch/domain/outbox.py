@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class OutboxState(StrEnum):
     DECIDED = "decided"
     OUTBOXED = "outboxed"
+    UNCERTAIN = "uncertain"
     DELIVERED = "delivered"
 
 

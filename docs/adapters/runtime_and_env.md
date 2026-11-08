@@ -1,7 +1,7 @@
 ---
 title: "Runtime и env: где правда"
 description: "Короткая карта того, какие файлы являются source of truth для конфигурации и переменных окружения."
-updated: 2026-09-16
+updated: 2026-11-03
 ---
 # Runtime и env: где правда
 
@@ -16,10 +16,12 @@ updated: 2026-09-16
 - `config/runtime.yaml` — общая runtime-база.
 - `config/runtime.dev.yaml` — dev-override.
 - `config/runtime.prod.yaml` — prod-override.
-- `config/runtime.cliproxy.yaml` — overlay моделей для CLIProxyAPI; включается через `JOB_FTCH_LLM_GATEWAY=cliproxy`.
+- `config/runtime.cliproxy.yaml` — legacy overlay; глобальный gateway не переключает именованные ETL bindings.
 - `docs/operations/cliproxy-vps.md` — Compose sidecar, loopback ports, Google OAuth и подключение к bot.
+- `docs/operations/llm-queue-and-home-egress.md` — optional PostgreSQL queue, shared quota scopes and Android home egress.
+- CLIProxy-only run sessions, jitter, classified deferred states and optional aggregate reports require an explicit `gateway: cliproxy` queued profile (ADR 107); direct compatible requests retain their previous behavior.
 - `job_ftch/adapters/telegram_bot/runtime.dev.yaml` — bot-специфичный dev runtime.
-- `job_ftch/adapters/telegram_bot/runtime.prod.yaml` — bot-специфичный prod runtime.
+- `job_ftch/adapters/telegram_bot/runtime.prod.yaml` — bot-специфичный prod runtime, включая явные CLIProxy ETL bindings по ADR 102.
 - `job_ftch/adapters/telegram_bot/config/tenants/*.yaml` — tenant-level sources и wiring.
 - `scripts/check_config_layers.py` — машинная проверка границ между tenant и runtime слоями.
 

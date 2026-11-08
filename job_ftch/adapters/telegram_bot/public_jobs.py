@@ -54,9 +54,15 @@ def _public_url(value: object) -> str | None:
 
 
 def _public_job(job: object) -> dict[str, Any]:
-    tags = [str(value) for value in (getattr(job, "tools_stack", ()) or ())[:8]]
+    tags = [
+        str(getattr(value, "canonical_name", value)).strip()
+        for value in (getattr(job, "tools_stack", ()) or ())[:8]
+    ]
     if not tags:
-        tags = [str(value) for value in (getattr(job, "skills_explicit", ()) or ())[:8]]
+        tags = [
+            str(getattr(value, "canonical_name", value)).strip()
+            for value in (getattr(job, "skills_explicit", ()) or ())[:8]
+        ]
     compensation = getattr(job, "compensation", None)
     location = getattr(job, "location", None)
     if not location:

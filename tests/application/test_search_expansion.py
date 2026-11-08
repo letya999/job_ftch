@@ -217,7 +217,17 @@ def test_parser_search_wins_over_verified_generic_get(monkeypatch) -> None:
     assert out[0].url == "https://rabota.x5.ru/vacancies?search=from-parser"
 
 
-def test_getmatch_and_yandex_expand_to_combined_query() -> None:
+def test_yandex_expansion_caps_individual_queries() -> None:
+    spec = CareerSiteSpec(url="https://yandex.ru/jobs/vacancies", source_name="yandex_jobs")
+    roles = ["AI engineer", "LLM engineer", "ML engineer", "MLOps engineer"]
+
+    out = expand_career_site_specs([spec], roles)
+
+    assert len(out) == 3
+    assert [parse_qs(urlparse(item.url).query)["text"][0] for item in out] == roles[:3]
+
+
+def test_getmatch_and_yandex_expand_search_queries() -> None:
     specs = [
         CareerSiteSpec(url="https://getmatch.ru/vacancies", source_name="getmatch"),
         CareerSiteSpec(url="https://yandex.ru/jobs/vacancies", source_name="yandex_jobs"),
@@ -227,7 +237,8 @@ def test_getmatch_and_yandex_expand_to_combined_query() -> None:
     assert urlparse(out[0].url).path.startswith("/vacancies")
     assert "sp" not in parse_qs(urlparse(out[0].url).query)
     assert out[0].monitor_config["_search_keywords"] == ROLES
-    assert parse_qs(urlparse(out[1].url).query)["text"] == ["AI engineer OR LLM engineer"]
+    yandex = [item for item in out if item.source_name.startswith("yandex_jobs")]
+    assert [parse_qs(urlparse(item.url).query)["text"][0] for item in yandex] == ROLES
     assert len([item for item in out if item.source_name.startswith("hirehi_ru")]) == len(ROLES)
 
 

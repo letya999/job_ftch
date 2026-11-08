@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 from job_ftch.application.pipeline import Pipeline
 from job_ftch.domain import RawItem, SourceKind, processed_key_for_raw_item
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
@@ -38,6 +40,39 @@ class DroppingNode:
         return None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["llm_pending", "auth", "queue_capacity", "expired"])
+async def test_pending_llm_preserves_observation_and_does_not_emit(
+    tmp_path: Path, reason: str
+) -> None:
+    due = datetime.now(UTC) + timedelta(minutes=2)
+
+    class PendingNode:
+        async def process(self, item):
+            raise LLMRequestDeferredError(
+                "request-7", due, reason=reason, requires_operator=reason in {"auth", "expired"}
+            )
+
+    item = RawItem(
+        source_kind=SourceKind.DEBUG, source_name="debug", external_id="pending", text="one"
+    )
+    store = InMemoryStore()
+    pipeline = Pipeline(
+        source=StubSource([item]),
+        sanitize_node=SanitizeNode(),
+        nodes=[PendingNode()],
+        sink=JsonFileSink(tmp_path / "out.json"),
+        store=store,
+    )
+    summary = await pipeline.run()
+    assert summary.completion_state == "waiting_llm"
+    assert summary.next_retry_at == due
+    assert summary.emitted == 0 and summary.rejected == 0
+    assert summary.failed > 0
+    assert not await store.has_processed(processed_key_for_raw_item(item))
+    assert summary.llm_health_error == reason
+
+
 class ExplodingSink:
     async def emit(self, item: object) -> None:
         del item
@@ -45,6 +80,135 @@ class ExplodingSink:
 
     async def flush(self) -> None:
         raise OSError("secondary sink flush failed")
+
+
+@pytest.mark.asyncio
+async def test_reused_pipeline_releases_dedup_on_every_llm_continuation(tmp_path: Path) -> None:
+    from job_ftch.nodes.dedup import DedupNode
+
+    class EventuallyReady:
+        calls = 0
+
+        async def process(self, item):
+            self.calls += 1
+            if self.calls <= 2:
+                raise LLMRequestDeferredError("pending", datetime.now(UTC) + timedelta(seconds=30))
+            return item
+
+    item = RawItem(
+        source_kind=SourceKind.DEBUG, source_name="debug", external_id="retry", text="one"
+    )
+    store = InMemoryStore()
+    stage = EventuallyReady()
+    pipeline = Pipeline(
+        source=StubSource([item]),
+        sanitize_node=SanitizeNode(),
+        nodes=[DedupNode(store, defer_commit=True), stage],
+        sink=JsonFileSink(tmp_path / "out.json"),
+        store=store,
+    )
+    for _ in range(2):
+        summary = await pipeline.run()
+        assert summary.completion_state == "waiting_llm"
+        assert not await store.has_processed(processed_key_for_raw_item(item))
+        another_worker = DedupNode(store, defer_commit=True)
+        assert await another_worker.process(item) is item
+        await another_worker.release_claim(item.stable_id)
+    completed = await pipeline.run()
+    assert completed.emitted == 1 and completed.failed == 0
+    assert stage.calls == 3
+    assert await store.has_processed(processed_key_for_raw_item(item))
+
+
+@pytest.mark.asyncio
+async def test_pending_graph_child_releases_all_claims_from_its_source_item(tmp_path: Path) -> None:
+    from job_ftch.application.graph import GraphCompiler
+    from job_ftch.application.graph.contracts import GraphSpec, NodeSpec
+    from job_ftch.application.graph.executor import GraphExecutor
+    from job_ftch.application.graph.pipeline_stage import GraphPipelineStage
+    from job_ftch.nodes.dedup import DedupNode
+
+    children = [
+        RawItem(source_kind=SourceKind.DEBUG, source_name="debug", external_id=str(n), text=text)
+        for n, text in enumerate(["First vacancy", "Second vacancy"])
+    ]
+
+    class Candidate:
+        def __init__(self, raw):
+            self.raw = raw
+
+        def materialize_raw_item(self):
+            return self.raw
+
+    class Split:
+        is_fan_out_stage = True
+
+        async def process(self, item):
+            return tuple(Candidate(child) for child in children)
+
+    class Pass:
+        async def process(self, item):
+            return item
+
+    class PendingSecond:
+        async def process(self, item):
+            if item.stable_id == children[1].stable_id:
+                raise LLMRequestDeferredError("pending", datetime.now(UTC) + timedelta(seconds=30))
+            return item
+
+    graph = GraphCompiler().compile(
+        GraphSpec(
+            "pending-children",
+            "1",
+            (
+                NodeSpec("sanitize", "sanitize", effect="gate"),
+                NodeSpec("split", "candidate_segmentation", after=("sanitize",)),
+                NodeSpec("dedup", "dedup", effect="gate", after=("split",)),
+                NodeSpec("extract", "extraction", after=("dedup",)),
+                NodeSpec("normalize", "job_normalization", after=("extract",)),
+                NodeSpec(
+                    "terminal", "legacy_routing", effect="terminal_decision", after=("normalize",)
+                ),
+            ),
+        )
+    )
+    store = InMemoryStore()
+    dedup = DedupNode(store, defer_commit=True)
+    unrelated = RawItem(
+        source_kind=SourceKind.DEBUG, source_name="debug", external_id="other", text="Other work"
+    )
+    await dedup.process(unrelated)
+    executor = GraphExecutor(
+        graph,
+        factories={
+            "sanitize": Pass(),
+            "split": Split(),
+            "dedup": dedup,
+            "extract": PendingSecond(),
+            "normalize": Pass(),
+            "terminal": Pass(),
+        },
+    )
+    parent = RawItem(
+        source_kind=SourceKind.DEBUG, source_name="debug", external_id="digest", text="Digest"
+    )
+    pipeline = Pipeline(
+        source=StubSource([parent]),
+        sanitize_node=SanitizeNode(),
+        nodes=[GraphPipelineStage(executor)],
+        sink=JsonFileSink(tmp_path / "out.json"),
+        store=store,
+    )
+    summary = await pipeline.run()
+    assert summary.completion_state == "waiting_llm" and summary.emitted == 0
+    assert not await store.has_processed(processed_key_for_raw_item(parent))
+    another_worker = DedupNode(store, defer_commit=True)
+    for child in children:
+        assert await another_worker.process(child) is child
+        await another_worker.release_claim(child.stable_id)
+    with pytest.raises(RuntimeError, match="dedup claim is held"):
+        await another_worker.process(unrelated)
+    await dedup.release_claim(unrelated.stable_id)
 
 
 @pytest.mark.asyncio

@@ -384,6 +384,7 @@ def _classified_failure(
         FailureKind.DNS_ERROR,
         FailureKind.CONNECT_ERROR,
         FailureKind.TLS_ERROR,
+        FailureKind.CERTIFICATE_ERROR,
     }:
         return ZeroYieldReason.TRANSPORT_ERROR, None
     if classified_kind == FailureKind.PARSER_ERROR:
@@ -465,6 +466,16 @@ def _looks_like_http_error_title(title: str | None) -> bool:
     if not title:
         return False
     return bool(_HTTP_ERROR_TITLE_RE.search(" ".join(title.split())))
+
+
+def _looks_like_consent_interstitial(payload: ScrapedPostingPayload) -> bool:
+    text = html_lib.unescape(re.sub(r"<[^>]+>", " ", payload.description or "")).casefold()
+    title = (payload.title or "").casefold()
+    if len(text) > 800:
+        return False
+    return ("cookie" in title or "consent" in title or "we use cookies" in text) and any(
+        token in text for token in ("accept all", "manage preferences", "cookie settings")
+    )
 
 
 def _http_status_should_not_scrape(status_code: int | None) -> bool:
@@ -2677,6 +2688,9 @@ class CareerSiteSource(Source["RawItem"]):
         if not scrape_result:
             return None
         if not (scrape_result.title or scrape_result.description):
+            return None
+        if _looks_like_consent_interstitial(scrape_result):
+            logger.debug("detail_candidate_rejected_consent", url=url)
             return None
         if not (scrape_result.description or "").strip():
             # A generic scraper can recover a page title from arbitrary

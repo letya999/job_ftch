@@ -217,6 +217,39 @@ async def test_office_description_falls_back_to_metadata(make_job_record) -> Non
 
 
 @pytest.mark.anyio
+async def test_full_extraction_does_not_replace_verified_salary_period(make_job_record) -> None:
+    llm = _FieldLLM(
+        compensation=CompensationRange(currency="USD", min_amount=20, max_amount=25, period="month")
+    )
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        description="Salary $20-25 per hour",
+        compensation=CompensationRange(currency="USD", min_amount=20, max_amount=25, period="hour"),
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.compensation is not None
+    assert enriched.compensation.period.value == "hour"
+
+
+@pytest.mark.anyio
+async def test_full_extraction_cannot_add_salary_without_posting_evidence(make_job_record) -> None:
+    llm = _FieldLLM(
+        compensation=CompensationRange(currency="RUB", min_amount=300000, period="hour")
+    )
+    job = make_job_record(
+        routing_decision=MatchDecision.ACCEPT,
+        description="AI engineer. Salary negotiable.",
+        compensation=None,
+    )
+
+    enriched = await FullExtractionNode(llm).process(job)
+
+    assert enriched.compensation is None
+
+
+@pytest.mark.anyio
 async def test_sber_business_effect_is_not_salary(make_job_record) -> None:
     llm = _FieldLLM(compensation=CompensationRange(currency="RUB", min_amount=2))
     job = make_job_record(

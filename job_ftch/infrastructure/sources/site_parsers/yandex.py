@@ -200,7 +200,7 @@ class YandexJobsParser:
     domain_pattern = r"yandex\.ru/jobs"
     has_custom_parse = True
     supports_search = True
-    search_mode = "combined"
+    search_mode = "per_keyword"
     confirmed_empty_on_empty = True
 
     def build_search_urls(
@@ -219,7 +219,7 @@ class YandexJobsParser:
         if path in {"", "/jobs"} or not path.endswith("/vacancies"):
             parsed = parsed._replace(path="/jobs/vacancies")
         listing = urlunparse(parsed._replace(query="", fragment=""))
-        return [with_query_params(listing, {"text": " OR ".join(terms)})]
+        return [with_query_params(listing, {"text": term}) for term in terms]
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url

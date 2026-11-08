@@ -1,6 +1,6 @@
 [project]
 name = "job-ftch"
-version = "0.0.13"
+version = "0.0.33"
 description = "Open-source async pipeline for ingesting AI/tech job vacancies from Telegram and career sites"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -19,7 +19,7 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "httpx>=0.27",
-    "selectolax>=0.3",
+    "selectolax>=0.3,<1",
     "rapidfuzz>=3.9",
     "opentelemetry-api>=1.25",
     "opentelemetry-sdk>=1.25",
@@ -38,16 +38,16 @@ browser = ["patchright>=1.49", "cloakbrowser>=0.5.1"]
 camoufox = ["camoufox>=0.5.4"]
 nodriver = ["nodriver>=0.50.2"]
 parity_lab = [
-    "cryptography==50.0.0",
+    "cryptography==50.0.2",
     "httpx[http2]>=0.28.1,<0.29",
     "hypercorn[h3]==0.18.0",
     "maxminddb==3.1.1",
-    "starlette==1.3.1",
+    "starlette==1.10.0",
 ]
 # curl-cffi impersonation profiles are pinned per release so floating minors
 # cannot silently mutate the JA3/JA4 baseline. Keep this version aligned with
 # the `all` extra and regenerate uv.lock when it changes.
-stealth = ["playwright-stealth>=2.0.3", "curl-cffi==0.16.2"]
+stealth = ["playwright-stealth>=2.0.3", "curl-cffi==0.17.0"]
 tls_client = ["tls-client>=1.0.1"]
 openai = ["openai>=1.30", "instructor>=1.4"]
 telegram = ["telethon>=1.36", "aiogram>=3.7"]
@@ -67,10 +67,10 @@ bot = [
     "pdfminer.six>=20231228",
     "PyYAML>=6.0",
 ]
-fastembed = ["fastembed>=0.3", "huggingface-hub>=1.24,<2"]
+fastembed = ["fastembed>=0.3", "huggingface-hub>=1.24,<3"]
 sqlite = ["aiosqlite>=0.20"]
 postgres = ["asyncpg>=0.31.0"]
-embeddings = ["sentence-transformers>=3.0", "torch>=2.3", "huggingface-hub>=1.24,<2"]
+embeddings = ["sentence-transformers>=3.0", "torch>=2.3", "huggingface-hub>=1.24,<3"]
 qdrant = ["qdrant-client>=1.18.0"]
 pgvector = ["asyncpg>=0.31.0", "pgvector>=0.3"]
 ollama = ["httpx>=0.27"]
@@ -92,7 +92,7 @@ bgem3 = [
     "dill>=0.3.8,<0.4",
     "accelerate>=1.15.0,<1.16",
     "datasets>=5.0.1,<6",
-    "huggingface-hub>=1.24,<2",
+    "huggingface-hub>=1.24,<3",
 ]
 tracing = ["opentelemetry-exporter-otlp-proto-http>=1.27"]
 all = [
@@ -104,7 +104,7 @@ all = [
     "faststream>=0.5",
     "patchright>=1.49",
     "playwright-stealth>=2.0.3",
-    "curl-cffi==0.16.2",
+    "curl-cffi==0.17.0",
     "tls-client>=1.0.1",
     "cloakbrowser>=0.5.1",
     "camoufox>=0.5.4",
@@ -114,7 +114,7 @@ all = [
     "dill>=0.3.8,<0.4",
     "accelerate>=1.15.0,<1.16",
     "datasets>=5.0.1,<6",
-    "huggingface-hub>=1.24,<2",
+    "huggingface-hub>=1.24,<3",
     "qdrant-client>=1.18.0",
     "pgvector>=0.3",
     "feedparser>=6.0",
@@ -137,6 +137,10 @@ all = [
     "tenacity>=8.2",
     "trafilatura>=1.8",
     "extruct>=0.16",
+]
+llm-queue = [
+    "procrastinate==3.10.0",
+    "psycopg[binary,pool]>=3.2,<4",
 ]
 
 [project.scripts]
@@ -184,7 +188,7 @@ dev = [
     # formatting of the same files, so an unpinned floor let a local run "fix" code that
     # the CI version then rejected. A formatter has to be byte-deterministic; bump this
     # deliberately, not by accident.
-    "ruff==0.16.5",
+    "ruff==0.17.3",
     # Bounded below a major so the type and test verdicts cannot silently diverge between
     # a developer machine and CI the way ruff did.
     "mypy>=2.1,<3",
@@ -208,6 +212,10 @@ dev = [
 # Tell hatchling which Python packages to include in the wheel
 [tool.hatch.build.targets.wheel]
 packages = ["job_ftch"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"fixtures/dataset/eval_dataset_fixed140_locked_v1.jsonl" = "job_ftch/eval/data/eval_dataset_fixed140_locked_v1.jsonl"
+"fixtures/extraction/gold_samples.jsonl" = "job_ftch/eval/data/gold_samples.jsonl"
 
 [tool.ruff]
 target-version = "py312"

@@ -12,7 +12,7 @@ jobs:
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - name: Gitleaks
@@ -21,6 +21,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .repo-safety/gitleaks.toml
       - name: TruffleHog
-        uses: trufflesecurity/trufflehog@2b75fd2307181da49bb79cd95cdf117e125a3bc7 # main
+        uses: trufflesecurity/trufflehog@69734591624d2afb8e152fcc8f3c2325ab577dae # main
         with:
           extra_args: --results=verified,unknown --exclude-paths=.repo-safety/trufflehog-exclude.txt
