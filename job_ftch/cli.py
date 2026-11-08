@@ -357,6 +357,9 @@ def _merge_run_summaries(summaries: list[RunSummary]) -> RunSummary:
         merged.duplicates += summary.duplicates
         merged.dropped += summary.dropped
         merged.emitted += summary.emitted
+        merged.new_publish_candidates += summary.new_publish_candidates
+        merged.replayed_observations += summary.replayed_observations
+        merged.deferred += summary.deferred
         merged.posted += summary.posted
         merged.rejected += summary.rejected
         merged.quarantined += summary.quarantined
@@ -385,6 +388,7 @@ def _merge_run_summaries(summaries: list[RunSummary]) -> RunSummary:
             target.duplicates += source_stats.duplicates
             target.dropped += source_stats.dropped
             target.emitted += source_stats.emitted
+            target.deferred += source_stats.deferred
             target.posted += source_stats.posted
             target.rejected += source_stats.rejected
             target.quarantined += source_stats.quarantined
@@ -422,6 +426,7 @@ def _merge_run_summaries(summaries: list[RunSummary]) -> RunSummary:
             id_target.duplicates += id_stats.duplicates
             id_target.dropped += id_stats.dropped
             id_target.emitted += id_stats.emitted
+            id_target.deferred += id_stats.deferred
             id_target.posted += id_stats.posted
             id_target.rejected += id_stats.rejected
             id_target.quarantined += id_stats.quarantined

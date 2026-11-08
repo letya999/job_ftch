@@ -7,6 +7,7 @@ import contextlib
 import os
 import time
 from datetime import UTC, datetime
+from inspect import iscoroutinefunction
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -36,6 +37,7 @@ from job_ftch.application.channel_publisher import (
     publish_jobs,
     remaining_publish_candidates,
 )
+from job_ftch.application.llm_dispatch import uses_cliproxy_runs
 from job_ftch.application.run_report import (
     build_runtime_run_report,
     render_runtime_run_footer,
@@ -207,6 +209,11 @@ async def _recover_pending_scheduler_publish(
         since=publish_since,
         user_id=_optional_state_str(publish_user_id),
     )
+    backlog = getattr(runner, "pending_publish_jobs", None)
+    if iscoroutinefunction(backlog):
+        jobs = await backlog(
+            tenant_id, target=publish_channel, limit=publish_candidate_fetch_limit(send_limit)
+        ) + list(jobs)
     eligible = [job for job in jobs if job_passes_bot_publish_gates(job)]
     if not eligible:
         error = "pending publish candidates are missing"
@@ -333,7 +340,9 @@ async def _send_scheduler_run_report(
         logger.warning("scheduler_owner_report_state_failed", tenant_id=tenant_id, error=str(exc))
     report = build_runtime_run_report(run_result, duration_seconds=duration_seconds)
     footer = render_runtime_run_footer(report)
-    if report.completion_state == "waiting_llm":
+    if report.completion_state == "waiting_llm" and report.llm_health_error == "continuation_retry":
+        heading = "⏳ Автозапуск ожидает продолжения после ошибки"
+    elif report.completion_state == "waiting_llm":
         heading = "⏳ Автозапуск ожидает LLM-очередь"
     elif report.completion_state == "llm_preflight_blocked":
         heading = "⚠️ Автозапуск пропущен: LLM недоступна"
@@ -537,6 +546,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
     )
 
     while True:
+        sleep_seconds = 60.0
         try:
             now = datetime.now(UTC)
             tenant_ids = list(runner.tenant_ids())
@@ -583,6 +593,16 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     store.get_run_state("bot_scheduler:pending_publish_since")
                 )
                 pending_publish = isinstance(pending_raw, str) and bool(pending_raw)
+                backlog = getattr(runner, "pending_publish_jobs", None)
+                if not pending_publish and iscoroutinefunction(backlog):
+                    target = await runner.get_publish_channel(tenant_id)
+                    owner = await runner.get_publish_user_id(tenant_id)
+                    if target and owner and await backlog(tenant_id, target=str(target), limit=1):
+                        pending_raw = now.isoformat()
+                        await _maybe_await(
+                            store.set_run_state("bot_scheduler:pending_publish_since", pending_raw)
+                        )
+                        pending_publish = True
                 last_success = _parse_scheduler_timestamp(
                     await _maybe_await(store.get_run_state("bot_scheduler:last_success_at"))
                 )
@@ -818,6 +838,13 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         tenant_id=tenant_id,
                         retry_at=str(getattr(run_result, "next_retry_at", "") or ""),
                     )
+                    retry_at = getattr(run_result, "next_retry_at", None)
+                    if isinstance(retry_at, datetime) and uses_cliproxy_runs(
+                        runner.get_runtime(tenant_id).settings
+                    ):
+                        sleep_seconds = min(
+                            sleep_seconds, max(1.0, (retry_at - datetime.now(UTC)).total_seconds())
+                        )
                     continue
                 await _maybe_await(store.set_run_state("bot_scheduler:llm_notice", ""))
                 # Nothing ran (tenant lock held elsewhere): do not record a success
@@ -1211,7 +1238,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     )
 
         _mark_polling_ready()
-        await asyncio.sleep(60)
+        await asyncio.sleep(sleep_seconds)
 
 
 async def start_polling(

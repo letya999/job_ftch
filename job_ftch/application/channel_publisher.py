@@ -25,6 +25,7 @@ from uuid import uuid4
 
 import structlog
 
+from job_ftch.application.publication_backlog import mark_publication_handled
 from job_ftch.application.publish_ledger import (
     _load_string_list,
     _persist_string_list,
@@ -241,9 +242,11 @@ async def publish_jobs(
         if already_by_id or already_by_url:
             outcome.skipped_already_published += 1
             delivered_jobs.append(job)
+            await mark_publication_handled(store, target, job, reason="already_published")
             continue
         if any(same_vacancy(job, delivered) for delivered in delivered_jobs):
             outcome.skipped_duplicate += 1
+            await mark_publication_handled(store, target, job, reason="duplicate")
             continue
 
         intents: list[OutboxRecord] = []
@@ -283,6 +286,9 @@ async def publish_jobs(
                             await release(acquired)
                     if intent.state is OutboxState.DELIVERED:
                         outcome.skipped_already_published += 1
+                        await mark_publication_handled(
+                            store, target, job, reason="already_published"
+                        )
                     else:
                         outcome.error = "delivery_requires_reconciliation"
                         outcome.had_transient_failure = True
@@ -305,6 +311,9 @@ async def publish_jobs(
                     outcome.terminal_skips += 1
                     outcome.terminal_skip_reasons[delivery.reason] = (
                         outcome.terminal_skip_reasons.get(delivery.reason, 0) + 1
+                    )
+                    await mark_publication_handled(
+                        store, target, job, reason=f"rejected:{delivery.reason}"
                     )
                     logger.info(
                         "publish_card_rejected",
@@ -412,6 +421,7 @@ async def publish_jobs(
                 published_urls.add(publish_url)
                 url_ledger.append(publish_url)
                 url_ledger = await persist_publish_url_ledger(store, url_ledger)
+            await mark_publication_handled(store, target, job)
         if throttle_seconds > 0:
             await sleep(throttle_seconds)
 

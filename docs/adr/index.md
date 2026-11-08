@@ -116,6 +116,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [105 — Paced Telegram channel delivery](105-paced-channel-delivery.md) - Space channel posts without changing ingest frequency or LLM usage. (Updated: 2026-11-03)
 - [106 — Optional PostgreSQL LLM dispatch](106-optional-postgres-llm-dispatch.md) - Provider-neutral durable LLM requests, Procrastinate execution, shared admission and optional home egress. (Updated: 2026-11-08)
 - [107 — CLIProxy run sessions and resilient admission](107-cliproxy-run-resilience.md) - CLIProxy-only durable run affinity, paced admission, classified waits and bounded run reports. (Updated: 2026-11-08)
+- [108 — Observation continuations and publication backlog](108-observation-continuations-and-publication-backlog.md) - Resume pending CLIProxy work from immutable observations and track accepted publication candidates independently of fetch timestamps. (Updated: 2026-11-09)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

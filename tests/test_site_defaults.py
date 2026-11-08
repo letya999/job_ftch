@@ -181,6 +181,17 @@ async def test_career_site_source_uses_tbank_root_defaults_for_one_level_expansi
     )
     source = CareerSiteSource(spec=spec, http_client=client, auth=MagicMock())
 
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def scoped_http_client(**kwargs):
+        assert kwargs == {"ca_bundle": "tbank-russian-root"}
+        yield client
+
+    monkeypatch.setattr(
+        "job_ftch.infrastructure.sources.career_site.build_default_http_client", scoped_http_client
+    )
+
     async def _no_browser(_: str) -> None:
         return None
 
