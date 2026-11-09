@@ -15,6 +15,10 @@ from pydantic import SecretStr
 
 from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 
+RETRYABLE_TERMINAL_ERRORS = frozenset(
+    {"model_capacity", "provider_unavailable", "rate_limit", "run_route_requires_operator"}
+)
+
 if TYPE_CHECKING:
     from psycopg import AsyncConnection
     from psycopg_pool import AsyncConnectionPool
@@ -197,12 +201,17 @@ class DispatchStore:
             await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (tenant,))
             existing = await (
                 await conn.execute(
-                    "SELECT state,updated_at FROM jf_llm_requests WHERE request_id=%s",
+                    "SELECT state,updated_at,error FROM jf_llm_requests WHERE request_id=%s",
                     (request_id,),
                 )
             ).fetchone()
             if existing:
-                if (
+                retryable_failure = (
+                    profile.cliproxy_dispatch
+                    and existing["state"] == "failed"
+                    and existing["error"] in RETRYABLE_TERMINAL_ERRORS
+                )
+                if not retryable_failure and (
                     refresh_seconds is None
                     or existing["state"] in {"pending", "running", "uncertain"}
                     or existing["updated_at"] + timedelta(seconds=refresh_seconds)

@@ -553,6 +553,72 @@ async def test_cancelled_run_resumes_but_unexpected_failure_requires_review(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure,recoverable", [("model_capacity", True), ("auth", False)])
+async def test_cliproxy_terminal_failure_only_resumes_explicit_retryable_work(
+    dispatch_settings, failure, recoverable
+):
+    from job_ftch.infrastructure.llm.dispatch_session import CliproxyRun
+
+    settings, name = dispatch_settings
+    protect(settings, name)
+    async with CliproxyRun(settings, name) as session:
+        run_id = session.run_id
+        request_id = await session.store.submit(
+            name, name, "item-session", payload(), logical_run_id=run_id
+        )
+        async with session.store.pool.connection() as conn:
+            await conn.execute(
+                "UPDATE jf_llm_requests SET state='failed',error=%s,response_status=503 "
+                "WHERE request_id=%s",
+                (failure, request_id),
+            )
+        if recoverable:
+            blocked_id = await session.store.submit(
+                name, name, "blocked-session", payload("blocked"), logical_run_id=run_id
+            )
+            async with session.store.pool.connection() as conn:
+                await conn.execute(
+                    "UPDATE jf_llm_requests SET state='failed',error='run_route_requires_operator' "
+                    "WHERE request_id=%s",
+                    (blocked_id,),
+                )
+        await session.finish({"completion_state": "waiting_llm"})
+    await session.store.open()
+    async with session.store.pool.connection() as conn:
+        state = await (
+            await conn.execute("SELECT state FROM jf_llm_runs WHERE run_id=%s", (run_id,))
+        ).fetchone()
+    assert state["state"] == ("waiting" if recoverable else "operator")
+
+    if recoverable:
+        async with session.store.pool.connection() as conn:
+            await conn.execute(
+                "UPDATE jf_llm_runs SET state='operator',reason='operator' WHERE run_id=%s",
+                (run_id,),
+            )
+        await session.store.close()
+        async with CliproxyRun(settings, name) as resumed:
+            assert resumed.run_id == run_id
+            refreshed = await resumed.store.submit(
+                name, name, "item-session", payload(), logical_run_id=run_id
+            )
+            assert refreshed == request_id
+            assert (await resumed.store.get(request_id))["state"] == "pending"
+            refreshed_blocked = await resumed.store.submit(
+                name, name, "blocked-session", payload("blocked"), logical_run_id=run_id
+            )
+            assert refreshed_blocked == blocked_id
+            assert (await resumed.store.get(blocked_id))["state"] == "pending"
+            await resumed.finish({"completion_state": "waiting_llm"})
+    else:
+        await session.store.close()
+        with pytest.raises(LLMRequestDeferredError) as held:
+            async with CliproxyRun(settings, name):
+                pytest.fail("Authentication failure must remain operator-held")
+        assert held.value.requires_operator
+
+
+@pytest.mark.asyncio
 async def test_cliproxy_sessions_resume_then_rotate_and_keep_item_requests_distinct(
     dispatch_settings,
 ):
