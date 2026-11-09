@@ -59,7 +59,7 @@ class ObservationContinuation:
             if entry is None:
                 raise ValueError("Pending LLM observation is missing from the ledger")
             entries.append(entry)
-        return entries
+        return sorted(entries, key=lambda entry: entry.observed_at, reverse=True)
 
     async def _save(self, references: set[tuple[str, str]]) -> None:
         await self.store.set_run_state(self.key, json.dumps(sorted(references)))
