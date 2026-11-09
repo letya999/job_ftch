@@ -178,6 +178,14 @@ def test_jseek_search_helpers_build_query_and_urls() -> None:
         "https://jseek.co/en/explore",
         ["AI engineer", "AI Engineer"],
     ) == ["https://jseek.co/en/explore?q=AI%2Cengineer"]
+    assert parser.search_mode == "per_keyword"
+    assert parser.build_search_urls(
+        "https://jseek.co/en/explore", ["AI engineer", "LLM engineer", "ИИ инженер"]
+    ) == [
+        "https://jseek.co/en/explore?q=AI%2Cengineer",
+        "https://jseek.co/en/explore?q=LLM%2Cengineer",
+        "https://jseek.co/en/explore?q=%D0%98%D0%98%2C%D0%B8%D0%BD%D0%B6%D0%B5%D0%BD%D0%B5%D1%80",
+    ]
     assert _search_query_from_url("https://jseek.co/en/explore?q=AI%2Cengineer") == "AI engineer"
     assert _source_urls_from_typesense_payload(
         {
@@ -230,6 +238,7 @@ async def test_jseek_search_discover_uses_typesense_source_urls() -> None:
     assert search_call["headers"]["x-typesense-api-key"] == "test-key"
     assert search_call["params"]["q"] == "AI engineer"
     assert search_call["params"]["query_by"] == "title"
+    assert search_call["params"]["sort_by"] == "first_seen_at:desc,_text_match:desc"
 
 
 def test_jseek_parser_is_registered() -> None:

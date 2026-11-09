@@ -80,6 +80,36 @@ class CliproxyRun:
                 ).fetchone()
                 if (
                     row is not None
+                    and row["routes"] == routes
+                    and (
+                        row["state"] in {"active", "waiting"}
+                        or (row["state"] == "operator" and row["reason"] == "run_expired")
+                    )
+                    and isinstance(row["summary"], dict)
+                    and str(row["summary"].get("completion_state", "")).startswith("waiting")
+                ):
+                    blockers = await (
+                        await conn.execute(
+                            "SELECT count(*) AS n FROM jf_llm_requests WHERE logical_run_id=%s "
+                            "AND (state IN ('uncertain','cancelled') OR "
+                            "(state='failed' AND NOT (COALESCE(error,'')=ANY(%s))))",
+                            (row["run_id"], list(RETRYABLE_TERMINAL_ERRORS)),
+                        )
+                    ).fetchone()
+                    if blockers and not blockers["n"]:
+                        expiry = now + timedelta(
+                            seconds=min(p.request_ttl_seconds for p in policies)
+                        )
+                        await conn.execute(
+                            "UPDATE jf_llm_runs SET state='waiting',expires_at=%s,"
+                            "reason=CASE WHEN reason='run_expired' THEN 'lease_renewed' "
+                            "ELSE reason END,updated_at=now() WHERE run_id=%s",
+                            (expiry, row["run_id"]),
+                        )
+                        row["state"] = "waiting"
+                        row["expires_at"] = expiry
+                if (
+                    row is not None
                     and row["state"] == "operator"
                     and row["routes"] == routes
                     and row["expires_at"] > now

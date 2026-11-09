@@ -619,6 +619,100 @@ async def test_cliproxy_terminal_failure_only_resumes_explicit_retryable_work(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["waiting", "operator"])
+async def test_expired_unfinished_run_renews_without_changing_saved_inference(
+    dispatch_settings, state
+):
+    from job_ftch.infrastructure.llm.dispatch_session import CliproxyRun
+
+    settings, name = dispatch_settings
+    protect(settings, name)
+    async with CliproxyRun(settings, name) as session:
+        identity = session.run_id
+        request_id = await session.store.submit(
+            name, name, "pinned", payload(), logical_run_id=identity
+        )
+        async with session.store.pool.connection() as conn:
+            await conn.execute(
+                "UPDATE jf_llm_requests SET state='succeeded',response=%s,response_status=200 "
+                "WHERE request_id=%s",
+                ('{"id":"saved-result"}', request_id),
+            )
+        await session.finish({"completion_state": "waiting_llm"})
+        async with session.store.pool.connection() as conn:
+            await conn.execute(
+                "UPDATE jf_llm_runs SET state=%s,reason='run_expired',"
+                "expires_at=now()-interval '1 second' WHERE run_id=%s",
+                (state, identity),
+            )
+    async with CliproxyRun(settings, name) as resumed:
+        assert resumed.run_id == identity
+        row = await resumed.store.get(request_id)
+        assert row["response"] == {"id": "saved-result"}
+        assert row["session_id"] == "pinned"
+        assert row["state"] == "succeeded"
+        async with resumed.store.pool.connection() as conn:
+            lease = await (
+                await conn.execute(
+                    "SELECT expires_at FROM jf_llm_runs WHERE run_id=%s", (identity,)
+                )
+            ).fetchone()
+        assert lease["expires_at"] > datetime.now(UTC)
+        await resumed.finish({"completion_state": "completed"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state,error", [("uncertain", "unknown_outcome"), ("cancelled", None), ("failed", "auth")]
+)
+async def test_expiry_renewal_cannot_clear_unsafe_work(dispatch_settings, state, error):
+    from job_ftch.infrastructure.llm.dispatch_session import CliproxyRun
+
+    settings, name = dispatch_settings
+    protect(settings, name)
+    async with CliproxyRun(settings, name) as session:
+        identity = session.run_id
+        request_id = await session.store.submit(
+            name, name, "held", payload(), logical_run_id=identity
+        )
+        await session.finish({"completion_state": "waiting_llm"})
+        async with session.store.pool.connection() as conn:
+            await conn.execute(
+                "UPDATE jf_llm_requests SET state=%s,error=%s WHERE request_id=%s",
+                (state, error, request_id),
+            )
+            await conn.execute(
+                "UPDATE jf_llm_runs SET state='operator',reason='run_expired',"
+                "expires_at=now()-interval '1 second' WHERE run_id=%s",
+                (identity,),
+            )
+    with pytest.raises(LLMRequestDeferredError) as held:
+        async with CliproxyRun(settings, name):
+            pytest.fail("Unsafe outcomes must not renew")
+    assert held.value.requires_operator
+    assert held.value.request_id == identity
+
+
+@pytest.mark.asyncio
+async def test_protected_pending_request_returns_without_waiting_for_inference(dispatch_settings):
+    from job_ftch.infrastructure.llm.dispatch_transport import QueuedLLMTransport
+
+    settings, name = dispatch_settings
+    protect(settings, name).wait_seconds = 120
+    transport = QueuedLLMTransport(settings, name)
+    try:
+        async with asyncio.timeout(5):
+            response = await transport.handle_async_request(
+                httpx.Request("POST", "https://ignored.invalid/v1/chat/completions", json=payload())
+            )
+        body = response.json()["error"]
+        assert body["code"] == "llm_deferred"
+        assert (await transport.store.get(body["request_id"]))["state"] == "pending"
+    finally:
+        await transport.aclose()
+
+
+@pytest.mark.asyncio
 async def test_cliproxy_sessions_resume_then_rotate_and_keep_item_requests_distinct(
     dispatch_settings,
 ):
@@ -673,6 +767,55 @@ async def test_cliproxy_sessions_resume_then_rotate_and_keep_item_requests_disti
         assert next_run.run_id != first_run
         await next_run.finish({"completion_state": "completed"})
     await transport.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("external_cooldown", [False, True])
+@pytest.mark.parametrize("actual_tokens", [5, 20])
+async def test_actual_token_usage_reconciles_only_its_own_admission_delay(
+    dispatch_settings, external_cooldown, actual_tokens
+):
+    from job_ftch.infrastructure.llm.dispatch_worker import DispatchWait, LLMWorker
+
+    settings, name = dispatch_settings
+    policy = protect(settings, name)
+    policy.min_interval_seconds = 10
+    policy.max_calls_per_hour = 3600
+    policy.max_tokens_per_hour = 3600
+    admitted_at = None
+    cooldown = datetime.now(UTC) + timedelta(minutes=10)
+    calls = 0
+
+    async def upstream(_):
+        nonlocal admitted_at, calls
+        calls += 1
+        row = await worker.store.get(request_id)
+        admitted_at = row["updated_at"]
+        if external_cooldown:
+            async with worker.store.pool.connection() as conn:
+                await conn.execute(
+                    "UPDATE jf_llm_scopes SET not_before=%s WHERE scope=%s", (cooldown, name)
+                )
+        return httpx.Response(200, json={"id": "ok", "usage": {"total_tokens": actual_tokens}})
+
+    worker = LLMWorker(settings, transport=httpx.MockTransport(upstream))
+    try:
+        request_id = await worker.store.submit(name, name, "first", payload("x" * 1000))
+        await worker.execute(request_id)
+        assert admitted_at is not None
+        scope = next(s for s in (await worker.store.stats())["scopes"] if s["scope"] == name)
+        assert scope["not_before"] == (
+            cooldown
+            if external_cooldown
+            else admitted_at + timedelta(seconds=max(10, actual_tokens))
+        )
+        assert scope["tokens"] == actual_tokens
+        second = await worker.store.submit(name, name, "second", payload("next"))
+        with pytest.raises(DispatchWait):
+            await worker.execute(second)
+        assert calls == 1
+    finally:
+        await worker.close()
 
 
 @pytest.mark.asyncio

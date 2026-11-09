@@ -1,7 +1,7 @@
 ---
 title: "Search query ingest"
 description: "How career-site source URLs are expanded into keyword-search ingest targets."
-updated: 2026-10-27
+updated: 2026-11-10
 status: current
 audience: engineers configuring career-site ingest
 ---
@@ -144,6 +144,12 @@ normal crawl proceeds. Tests: `tests/test_generic_search_form.py`,
 `tests/test_source_assessment.py`.
 
 ## Listing pagination
+
+HH search URLs request `order_by=publication_time`, so a bounded listing starts
+with recent vacancies before the freshness cutoff is applied. JSeek expands
+separate role queries (with the shared three-query fan-out cap) instead of
+requiring unrelated roles in the same Typesense query; results prefer
+`first_seen_at` before text-match score.
 
 Target roles never become hardcoded category IDs or token shortcuts. They come
 from `FilterProfile.target_roles` in the live catalog (Postgres/SQLite) and are

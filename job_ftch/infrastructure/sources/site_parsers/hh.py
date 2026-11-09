@@ -537,6 +537,7 @@ class HhParser:
                     "text": " OR ".join(terms),
                     "search_field": "name",
                     "ored_clusters": "true",
+                    "order_by": "publication_time",
                 },
             )
         ]
