@@ -9,7 +9,7 @@ llm_dispatch_policies:
     run_summary_enabled: true
     max_calls_per_hour: 120
     max_tokens_per_hour: 500000
-    max_pending_per_tenant: 100
+    max_pending_per_tenant: 250
     max_attempts: 3
     request_ttl_seconds: 86400
     wait_seconds: 10.0
