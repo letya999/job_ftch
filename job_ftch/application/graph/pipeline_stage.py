@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from job_ftch.application.dedup_settlement import DedupSettlement
     from job_ftch.application.graph.executor import GraphExecutor
+    from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class GraphPipelineResult:
     has_terminal_decision: bool
     terminal_reasons: tuple[str, ...]
     node_events: dict[str, dict[str, Any]]
+    llm_pending: LLMRequestDeferredError | None = None
 
 
 class GraphPipelineStage:
@@ -75,6 +77,7 @@ class GraphPipelineStage:
                     has_terminal_decision=has_terminal,
                     terminal_reasons=terminal_reasons,
                     node_events=report.node_events,
+                    llm_pending=getattr(report, "llm_pending", None),
                 )
             )
         return tuple(results)

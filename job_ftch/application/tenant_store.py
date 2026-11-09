@@ -167,6 +167,15 @@ class TenantStore:
     def _key(self, key: str) -> str:
         return f"{self._tenant_id}:{key}"
 
+    async def set_add(self, key: str, member: str) -> None:
+        await cast("StoreConnector", self._store).set_add(self._key(key), member)
+
+    async def set_contains(self, key: str, member: str) -> bool:
+        return await cast("StoreConnector", self._store).set_contains(self._key(key), member)
+
+    async def set_members(self, key: str) -> frozenset[str]:
+        return await cast("StoreConnector", self._store).set_members(self._key(key))
+
     def _scope_outbox_record(self, record: OutboxRecord) -> OutboxRecord:
         scoped_key = sha256(f"{self._tenant_id}:{record.idempotency_key}".encode()).hexdigest()
         return record.model_copy(

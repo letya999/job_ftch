@@ -789,7 +789,7 @@ class Pipeline[PipelineInput, PipelineOutput]:
                 if isinstance(reason, str) and reason
             )
             node_events = getattr(graph_result, "node_events", {})
-            child = self._blank_item_result(current or source_item)
+            child = self._blank_item_result(source_item)
             child["passed_sanitize"] = True
             if isinstance(node_events, dict) and node_events:
                 child["graph_node_events"] = node_events
@@ -797,7 +797,10 @@ class Pipeline[PipelineInput, PipelineOutput]:
                     "node_events": node_events,
                     "terminal_reasons": terminal_reasons,
                 }
-            if terminal and current is not None:
+            if pending := getattr(graph_result, "llm_pending", None):
+                child["outcome"] = "llm_wait"
+                child["exc"] = pending
+            elif terminal and current is not None:
                 if status == "DEFERRED":
                     metadata = getattr(current, "metadata", None)
                     copy = getattr(current, "model_copy", None)
