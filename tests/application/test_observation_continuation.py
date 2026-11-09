@@ -158,3 +158,74 @@ async def test_sink_failure_keeps_observation_for_restart() -> None:
     restored = ObservationContinuation(store, "failed-sink", "tenant")
     await restored.load()
     assert [entry.raw_item for entry in await restored.entries()] == [item]
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_writes_only_when_references_change(monkeypatch) -> None:
+    from job_ftch.domain.observation import ObservationLedgerEntry, content_hash_for_raw_item
+
+    store = InMemoryStore()
+    write = AsyncMock(wraps=store.set_run_state)
+    monkeypatch.setattr(store, "set_run_state", write)
+    item = RawItem(source_kind=SourceKind.DEBUG, source_name="saved", external_id="one", text="job")
+    entry = ObservationLedgerEntry(
+        observation_id="one",
+        tenant_id="tenant",
+        stable_id=item.stable_id,
+        content_hash=content_hash_for_raw_item(item),
+        decision_version="test",
+        raw_item=item,
+    )
+    checkpoint = ObservationContinuation(store, "same-run", "tenant")
+    await checkpoint.add(entry)
+    restored = ObservationContinuation(store, "same-run", "tenant")
+    await restored.load()
+    await restored.add(entry)
+    assert write.await_count == 1
+    await restored.complete(entry.stable_id, entry.content_hash)
+    await restored.complete(entry.stable_id, entry.content_hash)
+    assert write.await_count == 2
+    assert await store.get_run_state(restored.key) == "[]"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["add", "complete"])
+async def test_failed_checkpoint_write_can_be_retried(monkeypatch, operation) -> None:
+    from job_ftch.domain.observation import ObservationLedgerEntry, content_hash_for_raw_item
+
+    store = InMemoryStore()
+    item = RawItem(source_kind=SourceKind.DEBUG, source_name="saved", external_id="one", text="job")
+    entry = ObservationLedgerEntry(
+        observation_id="one",
+        tenant_id="tenant",
+        stable_id=item.stable_id,
+        content_hash=content_hash_for_raw_item(item),
+        decision_version="test",
+        raw_item=item,
+    )
+    checkpoint = ObservationContinuation(store, "retry-run", "tenant")
+    if operation == "complete":
+        await checkpoint.add(entry)
+    before = set(checkpoint.references)
+    persisted_before = await store.get_run_state(checkpoint.key)
+    save = store.set_run_state
+    write = AsyncMock(side_effect=OSError("storage unavailable"))
+    monkeypatch.setattr(store, "set_run_state", write)
+
+    async def change():
+        if operation == "add":
+            await checkpoint.add(entry)
+        else:
+            await checkpoint.complete(entry.stable_id, entry.content_hash)
+
+    with pytest.raises(OSError, match="storage unavailable"):
+        await change()
+    assert checkpoint.references == before
+    assert await store.get_run_state(checkpoint.key) == persisted_before
+    write.side_effect = save
+    await change()
+    restored = ObservationContinuation(store, "retry-run", "tenant")
+    await restored.load()
+    expected = {(entry.stable_id, entry.content_hash)} if operation == "add" else set()
+    assert checkpoint.references == restored.references == expected
+    assert write.await_count == 2
