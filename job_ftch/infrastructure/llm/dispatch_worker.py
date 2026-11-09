@@ -98,6 +98,7 @@ class LLMWorker:
         *,
         response: httpx.Response | None = None,
         error: str | None = None,
+        reserved_until: datetime | None = None,
     ) -> None:
         request_row = await self.store.get(request_id)
         request_profile = self.settings.llm_provider_profiles.get(request_row["profile"])
@@ -136,6 +137,27 @@ class LLMWorker:
                         "AND r.state='running' AND s.window_start <= r.updated_at",
                         (actual, request_id),
                     )
+                    if reserved_until is not None and request_profile:
+                        policy = self.settings.llm_dispatch_policies[
+                            request_profile.quota_scope or request_row["profile"]
+                        ]
+                        spacing = (
+                            max(
+                                policy.min_interval_seconds,
+                                3600 / policy.max_calls_per_hour,
+                                3600 * actual / policy.max_tokens_per_hour,
+                            )
+                            + policy.jitter_seconds
+                        )
+                        await conn.execute(
+                            "UPDATE jf_llm_scopes SET not_before=GREATEST(now(),%s) "
+                            "WHERE scope=%s AND not_before=%s",
+                            (
+                                request_row["updated_at"] + timedelta(seconds=spacing),
+                                request_row["scope"],
+                                reserved_until,
+                            ),
+                        )
             await conn.execute(
                 "UPDATE jf_llm_requests SET state=%s,response=%s,response_status=%s,"
                 "response_headers=%s,error=%s,actual_tokens=%s,updated_at=now() WHERE request_id=%s",
@@ -292,6 +314,7 @@ class LLMWorker:
                         3600 / policy.max_calls_per_hour,
                         3600 * estimate / policy.max_tokens_per_hour,
                     ) + self.random.uniform(0, policy.jitter_seconds)
+                reserved_until = now + timedelta(seconds=spacing)
                 await conn.execute(
                     "UPDATE jf_llm_scopes SET window_start=%s,calls=%s,tokens=%s,not_before=%s "
                     "WHERE scope=%s",
@@ -299,7 +322,7 @@ class LLMWorker:
                         quota["window_start"],
                         quota["calls"] + 1,
                         quota["tokens"] + estimate,
-                        now + timedelta(seconds=spacing),
+                        reserved_until,
                         scope,
                     ),
                 )
@@ -409,6 +432,7 @@ class LLMWorker:
                 "succeeded" if response.is_success else "failed",
                 response=response,
                 error=None if response.is_success else signal.reason,
+                reserved_until=reserved_until,
             )
             return
         if response.status_code in {401, 403}:

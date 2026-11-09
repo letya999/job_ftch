@@ -16,7 +16,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [Ingest stack: источники, assessment, monitors, scrapers, parsers, bypass](ingest_stack.md) - Полное, но компактное описание ingest-цепочки: от SourceSpec и pre-ingest assessment до RawItem, snapshots и pipeline. (Updated: 2026-07-28)
 - [Публичный реестр источников](public_registry.md) - Откуда берётся live-список источников канала ai_engineer_jobs: runtime/DB, public-safe JSON и границы приватности. (Updated: 2026-08-11)
 - [Scoped source TLS trust](scoped-tls-trust.md) - Packaged public CA trust for source-specific HTTP clients without disabling TLS verification. (Updated: 2026-11-09)
-- [Search query ingest](search_query_ingest.md) - How career-site source URLs are expanded into keyword-search ingest targets. (Updated: 2026-10-27)
+- [Search query ingest](search_query_ingest.md) - How career-site source URLs are expanded into keyword-search ingest targets. (Updated: 2026-11-10)
 - [Source Setup](setup.md) - Prefer declarative source setup through `SourceSpec` entries inside a tenant YAML file. (Updated: 2026-08-01)
 - [Source assessment](source_assessment.md) - Pre-ingest оценка источников: capability hints, freshness evidence, probe outcomes и границы ответственности. (Updated: 2026-09-01)
 - [Справочник source stack](source_stack_reference.md) - Фактические модули ingestion/source stack: sources, monitors, scrapers, site parsers, assessment и bypass. (Updated: 2026-07-28)
