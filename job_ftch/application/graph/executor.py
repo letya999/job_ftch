@@ -36,6 +36,7 @@ class ExecutionReport:
     node_events: dict[str, dict[str, Any]] = field(default_factory=dict)
     evidence: EvidenceBundle = field(default_factory=EvidenceBundle)
     source_item: Any = field(default=None, repr=False)
+    llm_pending: LLMRequestDeferredError | None = field(default=None, repr=False)
 
 
 class GraphExecutor:
@@ -245,13 +246,29 @@ class GraphExecutor:
             if isinstance(result, tuple) and getattr(
                 self.factories.get(spec.id), "is_fan_out_stage", False
             ):
-                return [
-                    child
-                    for candidate in result
-                    for child in await self._run_from(
-                        _materialize(candidate), index + 1, settlement_ids
-                    )
-                ]
+                children: list[ExecutionReport] = []
+                for candidate in result:
+                    source_item = _materialize(candidate)
+                    try:
+                        children.extend(
+                            await self._run_from(source_item, index + 1, settlement_ids)
+                        )
+                    except LLMRequestDeferredError as exc:
+                        exc.settlement_item_ids = tuple(
+                            sorted(settlement_ids | set(exc.settlement_item_ids))
+                        )
+                        children.append(
+                            ExecutionReport(
+                                item=source_item,
+                                source_item=source_item,
+                                status="DEFERRED",
+                                llm_pending=exc,
+                            )
+                        )
+                    # Deliver completed siblings while keeping the parent replayable.
+                    if any(child.llm_pending is not None for child in children):
+                        break
+                return children
             if result is None and spec.effect == EffectMode.GATE and not spec.shadow:
                 self._update_event(report, spec.id, outcome="drop", reason="gate_returned_none")
                 report.status = "REJECT"

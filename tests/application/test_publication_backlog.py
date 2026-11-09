@@ -14,12 +14,17 @@ from job_ftch.application.publication_backlog import (
     pending_candidate_ids,
     record_publish_candidate,
 )
+from job_ftch.application.tenant_store import TenantStore
 from job_ftch.infrastructure.stores.in_memory import InMemoryStore
 
 
 @pytest.mark.asyncio
-async def test_confirmed_delivery_settles_only_the_selected_target(make_job_record) -> None:
-    store = InMemoryStore()
+@pytest.mark.parametrize("tenant_scoped", [False, True])
+async def test_confirmed_delivery_settles_only_the_selected_target(
+    make_job_record, tenant_scoped: bool
+) -> None:
+    base = InMemoryStore()
+    store = TenantStore("tenant", base) if tenant_scoped else base
     job = make_job_record(job_id="old-job", fetched_at=datetime(2020, 1, 1, tzinfo=UTC))
     assert await record_publish_candidate(store, job)
     assert not await record_publish_candidate(store, job)
@@ -51,6 +56,12 @@ async def test_confirmed_delivery_settles_only_the_selected_target(make_job_reco
         throttle_seconds=0,
     )
     assert repeated.sent == 0 and calls == ["old-job"]
+    if tenant_scoped:
+        restarted = TenantStore("tenant", base)
+        assert not await pending_candidate_ids(restarted, "@first")
+        assert await pending_candidate_ids(restarted, "@second") == {"old-job"}
+        assert not await pending_candidate_ids(TenantStore("other", base), "@second")
+        assert not await base.set_members("bot_publish:candidates")
 
 
 @pytest.mark.asyncio
@@ -102,7 +113,7 @@ async def test_recovery_loads_old_candidate_outside_current_window(
     from job_ftch.config import Settings
     from job_ftch.infrastructure.backends.jobs.sqlite import SQLiteJobBackend
 
-    store = InMemoryStore()
+    store = TenantStore("tenant", InMemoryStore())
     backend = SQLiteJobBackend(Settings(job_store_path=tmp_path / "jobs.sqlite"))
     runtime = SimpleNamespace(
         store=store,

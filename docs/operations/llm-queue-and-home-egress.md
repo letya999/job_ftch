@@ -262,6 +262,20 @@ volume требует явного операторского действия; 
 
 ## Проверки и откат
 
+Готовность контейнеров и успешный ответ LLM не подтверждают публикацию.
+Проверяйте цепочку: terminal ACCEPT → завершённое post-accept enrichment →
+`new_publish_candidates` → pending backlog выбранного канала → delivery receipt
+с Telegram message ID. Кандидаты и отметки handled хранятся в namespace tenant;
+повторный запуск не должен отправлять уже подтверждённую карточку.
+
+При fan-out готовые дочерние результаты публикуются независимо от ожидания LLM
+у следующего ребёнка. Родитель остаётся в continuation до завершения всех детей;
+processed-key и content hash outbox берутся из исходного RawItem ребёнка.
+Если ACCEPT уже сохранён, но кандидат отсутствует, сначала подтвердите завершение
+enrichment и принадлежность tenant, затем восстановите кандидат через
+`record_publish_candidate`. Доставку выполняет штатный publisher с его gates,
+ledger и обработкой uncertain; напрямую в Telegram ничего не отправляйте.
+
 Unit tests идут без PostgreSQL. Для интеграционных тестов задайте
 `JOB_FTCH_TEST_LLM_QUEUE_DSN` отдельной disposable БД и запустите
 `tests/infrastructure/llm/test_dispatch.py`. Тесты не должны смотреть в production.
