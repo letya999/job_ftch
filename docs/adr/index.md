@@ -118,6 +118,7 @@ Generated index for navigation. Edit source documents, then rerun `uv run python
 - [107 — CLIProxy run sessions and resilient admission](107-cliproxy-run-resilience.md) - CLIProxy-only durable run affinity, paced admission, classified waits and bounded run reports. (Updated: 2026-11-08)
 - [108 — Observation continuations and publication backlog](108-observation-continuations-and-publication-backlog.md) - Resume pending CLIProxy work from immutable observations and track accepted publication candidates independently of fetch timestamps. (Updated: 2026-11-09)
 - [109 — Live continuation leases and admission](109-live-continuation-leases-and-admission.md) - Renew safe unfinished CLIProxy runs, admit independent work and keep source acquisition live while inference waits. (Updated: 2026-11-10)
+- [110 — Проверка публикаций по недавней истории](110-publication-history-matching.md) - Повторные объявления из разных источников не обходят журнал публикаций при смене URL и ID. (Updated: 2026-11-10)
 - [Architecture Decision Records](README.md) - This directory contains ADRs for `job_ftch`. (Updated: 2026-07-24)
 
 ### Non-Markdown Files

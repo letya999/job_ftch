@@ -181,11 +181,20 @@ def render_runtime_run_report_text(report: RuntimeRunReport) -> str:
         )
         text += f"\n<i>Причины дропа: {reasons_str}</i>"
     if report.source_failures:
-        problem_lines = [
-            f"{html.escape(str(item.get('source_name') or item.get('source_id') or ''), quote=True)}: "
-            f"{html.escape(str(item.get('error') or ''), quote=True)}"
-            for item in report.source_failures
-        ]
+        problem_lines: list[str] = []
+        remaining = 2500
+        for item in report.source_failures:
+            line = (
+                f"{html.escape(str(item.get('source_name') or item.get('source_id') or '')[:80], quote=True)}: "
+                f"{html.escape(str(item.get('error') or '')[:160], quote=True)}"
+            )
+            if len(line) + 2 > remaining:
+                break
+            problem_lines.append(line)
+            remaining -= len(line) + 2
+        hidden = len(report.source_failures) - len(problem_lines)
+        if hidden:
+            problem_lines.append(f"и ещё {hidden}")
         text += "\n<i>Проблемные источники: " + "; ".join(problem_lines) + "</i>"
     if report.completion_state == "waiting_llm" and report.llm_health_error == "continuation_retry":
         text += "\n\n⏳ <b>Продолжение обработки:</b> сохранённые наблюдения ожидают повторной попытки после ошибки."

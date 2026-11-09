@@ -95,6 +95,20 @@ class TestDedup:
         )
         assert same_vacancy(a, b) is False
 
+    def test_short_repost_with_substantial_shared_details_is_merged(self) -> None:
+        shared = (
+            "Design production agents, deploy cloud services, monitor model quality, "
+            "evaluate customer conversations, improve retrieval pipelines, optimize "
+            "inference latency, maintain security controls, collaborate with product teams. "
+        )
+        a = _job("Senior AI Agent Engineer", "Cast AI").model_copy(
+            update={"description": shared + "Own the platform architecture and roadmap. " * 4}
+        )
+        b = _job("Senior AI Agent Engineer", "Cast AI").model_copy(
+            update={"description": shared + "Apply to join the cloud platform team. " * 4}
+        )
+        assert same_vacancy(a, b) is True
+
     def test_identical_template_at_different_companies_is_not_merged(self) -> None:
         body = "Build and maintain production AI agents for customer support. " * 4
         a = _job("AI Agent Engineer", "Acme").model_copy(update={"description": body})
