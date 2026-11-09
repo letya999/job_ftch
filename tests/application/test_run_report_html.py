@@ -18,6 +18,25 @@ def test_runtime_report_escapes_dynamic_html() -> None:
     assert "bad &lt;tag&gt; &amp; timeout" in text
 
 
+def test_runtime_report_bounds_long_source_failure_list() -> None:
+    summary = type(
+        "Summary",
+        (),
+        {
+            "source_failures": [
+                {"source_name": f"source_{index}", "error": "timeout & upstream unavailable " * 12}
+                for index in range(60)
+            ]
+        },
+    )()
+
+    text = render_runtime_run_report_text(build_runtime_run_report(summary, duration_seconds=1))
+
+    assert len(text) < 4096
+    assert "и ещё " in text
+    assert "</i>" in text
+
+
 @pytest.mark.asyncio
 async def test_scheduler_owner_report_failure_is_persisted_without_raising() -> None:
     class Store:

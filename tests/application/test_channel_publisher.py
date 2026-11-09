@@ -114,6 +114,133 @@ async def test_tracking_cleanup_preserves_vacancy_identity_parameter() -> None:
     assert sender.calls == [("@chan", "different-group")]
 
 
+async def test_hh_country_alias_does_not_republish_same_vacancy() -> None:
+    store = _Store()
+    sender = _Sender()
+    first = _Job("hh-kz", "https://hh.kz/vacancy/139159889")
+    repost = _Job("hh-ru", "https://hh.ru/vacancy/139159889?tech_source=api")
+
+    await publish_jobs(
+        [first], target="@chan", sender=sender, store=store, send_limit=5, sleep=_no_sleep
+    )
+    outcome = await publish_jobs(
+        [repost], target="@chan", sender=sender, store=store, send_limit=5, sleep=_no_sleep
+    )
+
+    assert outcome.sent == 0
+    assert outcome.skipped_already_published == 1
+    assert sender.calls == [("@chan", "hh-kz")]
+
+
+async def test_confirmed_near_duplicate_is_remembered_across_batches() -> None:
+    store = _Store()
+    sender = _Sender()
+    description = (
+        "Build reliable AI services and evaluate language models with our engineering team. " * 3
+    )
+    first = SimpleNamespace(
+        group_id="first",
+        canonical_url="https://t.me/source_a/1",
+        title="AI Engineer",
+        company="Example Labs",
+        description=description,
+        location="Москва",
+        compensation=None,
+        source_name="source_a",
+    )
+    repost = SimpleNamespace(
+        group_id="repost",
+        canonical_url="https://t.me/source_b/2",
+        title="AI Engineer",
+        company="Example Labs",
+        description=description.replace("reliable", "robust"),
+        location="Москва, Россия",
+        compensation=None,
+        source_name="source_b",
+    )
+    different = SimpleNamespace(
+        group_id="different",
+        canonical_url="https://t.me/source_c/3",
+        title="AI Engineer",
+        company="Example Labs",
+        description="Lead a data science research team in healthcare. " * 4,
+        location="Москва",
+        compensation=None,
+        source_name="source_c",
+    )
+
+    await publish_jobs(
+        [first], target="@chan", sender=sender, store=store, send_limit=5, sleep=_no_sleep
+    )
+    outcome = await publish_jobs(
+        [repost, different],
+        target="@chan",
+        sender=sender,
+        store=store,
+        send_limit=5,
+        sleep=_no_sleep,
+    )
+
+    assert outcome.sent == 1
+    assert outcome.skipped_duplicate == 1
+    assert sender.calls == [("@chan", "first"), ("@chan", "different")]
+
+
+async def test_same_source_distinct_ids_are_not_collapsed_by_description() -> None:
+    store = _Store()
+    sender = _Sender()
+    description = "Build production AI agents and cloud services for customer support. " * 4
+    jobs = [
+        SimpleNamespace(
+            group_id=identity,
+            canonical_url=f"https://jobs.example.org/{identity}",
+            title="AI Engineer",
+            company="Example Labs",
+            description=description,
+            source_name="company_careers",
+        )
+        for identity in ("opening-one", "opening-two")
+    ]
+
+    await publish_jobs(
+        jobs[:1], target="@chan", sender=sender, store=store, send_limit=5, sleep=_no_sleep
+    )
+    outcome = await publish_jobs(
+        jobs[1:], target="@chan", sender=sender, store=store, send_limit=5, sleep=_no_sleep
+    )
+
+    assert outcome.sent == 1
+    assert sender.calls == [("@chan", "opening-one"), ("@chan", "opening-two")]
+
+
+async def test_cross_source_salary_conflict_is_not_collapsed() -> None:
+    store = _Store()
+    sender = _Sender()
+    description = "Build production AI agents and cloud services for customer support. " * 4
+    jobs = [
+        SimpleNamespace(
+            group_id=f"opening-{salary}",
+            canonical_url=f"https://example.org/{salary}",
+            title="AI Engineer",
+            company="Example Labs",
+            description=description,
+            source_name=f"source_{salary}",
+            compensation={"currency": "RUB", "min_amount": salary},
+        )
+        for salary in (200000, 300000)
+    ]
+
+    await publish_jobs(
+        jobs[:1], target="@chan", sender=sender, store=store, send_limit=5, sleep=_no_sleep
+    )
+    outcome = await publish_jobs(
+        jobs[1:], target="@chan", sender=sender, store=store, send_limit=5, sleep=_no_sleep
+    )
+
+    assert outcome.sent == 1
+    assert sender.calls == [("@chan", "opening-200000"), ("@chan", "opening-300000")]
+
+
 async def test_malformed_legacy_url_does_not_block_publication() -> None:
     store = _Store()
     store.state["bot_publish:sent_urls"] = json.dumps(["https://[broken"])

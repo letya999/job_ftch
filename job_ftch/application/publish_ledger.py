@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol, cast
 from urllib.parse import unquote_plus, urlsplit, urlunsplit
@@ -57,6 +58,10 @@ def normalize_publish_url(url: str) -> str | None:
         return text.casefold()
     if not parts.scheme and not parts.netloc:
         return text.casefold() or None
+    if parts.hostname in {"hh.ru", "www.hh.ru", "hh.kz", "www.hh.kz"}:
+        vacancy = re.fullmatch(r"/vacancy/(\d+)/?", parts.path)
+        if vacancy:
+            return f"https://hh.ru/vacancy/{vacancy.group(1)}"
     query = "&".join(
         part
         for part in parts.query.split("&")

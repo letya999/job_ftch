@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from dataclasses import dataclass, field
 from hashlib import sha256
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Protocol, cast
 from uuid import uuid4
 
@@ -52,6 +54,38 @@ logger = structlog.get_logger(__name__)
 # Telegram tolerates roughly one channel post per 3 seconds; the extra margin
 # keeps a long batch from tripping flood control halfway through.
 _DEFAULT_THROTTLE_SECONDS = 3.5
+_RECENT_CARDS_LIMIT = 250
+
+
+def _card_snapshot(job: object) -> dict[str, str] | None:
+    title = getattr(job, "title", None)
+    company = getattr(job, "company_canonical", None) or getattr(job, "company", None)
+    description = getattr(job, "description", None)
+    if (
+        not isinstance(title, str)
+        or not title.strip()
+        or not isinstance(company, str)
+        or not company.strip()
+        or not isinstance(description, str)
+        or not description.strip()
+    ):
+        return None
+    compensation = getattr(job, "compensation", None)
+    model_dump = getattr(compensation, "model_dump", None)
+    if callable(model_dump):
+        compensation = model_dump(mode="json")
+    if isinstance(compensation, dict):
+        compensation_text = json.dumps(compensation, sort_keys=True, ensure_ascii=False)
+    else:
+        compensation_text = str(compensation) if compensation is not None else ""
+    return {
+        "title": title,
+        "company": company,
+        "description": description[:5000],
+        "location": str(getattr(job, "location", None) or ""),
+        "compensation": compensation_text,
+        "source_name": str(getattr(job, "source_name", None) or ""),
+    }
 
 
 def channel_throttle_seconds(settings: object) -> float:
@@ -198,9 +232,27 @@ async def publish_jobs(
     published_urls: set[str] = set()
     target_ids: list[str] = []
     target_key: str | None = None
+    recent_cards: list[dict[str, str]] = []
+    recent_key = f"bot_publish:recent_cards:{sha256(target.encode()).hexdigest()}"
     if store is not None:
         id_ledger = await load_publish_ledger(store)
         url_ledger = await load_publish_url_ledger(store)
+        recent_raw = await store.get_run_state(recent_key)
+        if isinstance(recent_raw, str):
+            try:
+                decoded = json.loads(recent_raw)
+                if isinstance(decoded, list):
+                    recent_cards = [
+                        card
+                        for card in decoded[-_RECENT_CARDS_LIMIT:]
+                        if isinstance(card, dict)
+                        and all(
+                            isinstance(card.get(field), str)
+                            for field in ("title", "company", "description")
+                        )
+                    ]
+            except json.JSONDecodeError:
+                pass
         enqueue = getattr(store, "enqueue_outbox", None)
         if inspect.iscoroutinefunction(enqueue):
             target_key = sha256(target.encode()).hexdigest()
@@ -247,6 +299,17 @@ async def publish_jobs(
         if any(same_vacancy(job, delivered) for delivered in delivered_jobs):
             outcome.skipped_duplicate += 1
             await mark_publication_handled(store, target, job, reason="duplicate")
+            continue
+        snapshot = _card_snapshot(job)
+        if snapshot and any(
+            same_vacancy(SimpleNamespace(**snapshot), SimpleNamespace(**prior))
+            for prior in recent_cards
+            if not snapshot["source_name"]
+            or not prior.get("source_name")
+            or snapshot["source_name"] != prior["source_name"]
+        ):
+            outcome.skipped_duplicate += 1
+            await mark_publication_handled(store, target, job, reason="published_near_duplicate")
             continue
 
         intents: list[OutboxRecord] = []
@@ -421,6 +484,10 @@ async def publish_jobs(
                 published_urls.add(publish_url)
                 url_ledger.append(publish_url)
                 url_ledger = await persist_publish_url_ledger(store, url_ledger)
+            if snapshot:
+                recent_cards.append(snapshot)
+                recent_cards = recent_cards[-_RECENT_CARDS_LIMIT:]
+                await store.set_run_state(recent_key, json.dumps(recent_cards, ensure_ascii=False))
             await mark_publication_handled(store, target, job)
         if throttle_seconds > 0:
             await sleep(throttle_seconds)
