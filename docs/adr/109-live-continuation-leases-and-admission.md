@@ -27,6 +27,9 @@ another source acquisition starved fresh sources.
   Continue independent pipeline items after a deferred item; the existing bounded
   queue and account-wide worker pacing own backpressure. Preserve checkpoints and
   release provisional dedup claims on every deferred item.
+- Successful responses reconcile token-based spacing to actual usage while
+  retaining minimum call spacing and jitter. Compare the exact reserved deadline
+  before adjusting it so a subsequently installed cooldown cannot be shortened.
 - Revisit source acquisition at the normal tenant schedule while a checkpoint
   exists. Store the last acquisition time alongside the checkpoint. Between
   acquisitions replay saved observations without network refetch. Consume oldest

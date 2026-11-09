@@ -770,6 +770,55 @@ async def test_cliproxy_sessions_resume_then_rotate_and_keep_item_requests_disti
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("external_cooldown", [False, True])
+@pytest.mark.parametrize("actual_tokens", [5, 20])
+async def test_actual_token_usage_reconciles_only_its_own_admission_delay(
+    dispatch_settings, external_cooldown, actual_tokens
+):
+    from job_ftch.infrastructure.llm.dispatch_worker import DispatchWait, LLMWorker
+
+    settings, name = dispatch_settings
+    policy = protect(settings, name)
+    policy.min_interval_seconds = 10
+    policy.max_calls_per_hour = 3600
+    policy.max_tokens_per_hour = 3600
+    admitted_at = None
+    cooldown = datetime.now(UTC) + timedelta(minutes=10)
+    calls = 0
+
+    async def upstream(_):
+        nonlocal admitted_at, calls
+        calls += 1
+        row = await worker.store.get(request_id)
+        admitted_at = row["updated_at"]
+        if external_cooldown:
+            async with worker.store.pool.connection() as conn:
+                await conn.execute(
+                    "UPDATE jf_llm_scopes SET not_before=%s WHERE scope=%s", (cooldown, name)
+                )
+        return httpx.Response(200, json={"id": "ok", "usage": {"total_tokens": actual_tokens}})
+
+    worker = LLMWorker(settings, transport=httpx.MockTransport(upstream))
+    try:
+        request_id = await worker.store.submit(name, name, "first", payload("x" * 1000))
+        await worker.execute(request_id)
+        assert admitted_at is not None
+        scope = next(s for s in (await worker.store.stats())["scopes"] if s["scope"] == name)
+        assert scope["not_before"] == (
+            cooldown
+            if external_cooldown
+            else admitted_at + timedelta(seconds=max(10, actual_tokens))
+        )
+        assert scope["tokens"] == actual_tokens
+        second = await worker.store.submit(name, name, "second", payload("next"))
+        with pytest.raises(DispatchWait):
+            await worker.execute(second)
+        assert calls == 1
+    finally:
+        await worker.close()
+
+
+@pytest.mark.asyncio
 async def test_cliproxy_pacing_is_shared_by_two_workers_and_survives_restart(dispatch_settings):
     from job_ftch.infrastructure.llm.dispatch_worker import DispatchWait, LLMWorker
 
