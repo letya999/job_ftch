@@ -210,12 +210,36 @@ async def _recover_pending_scheduler_publish(
         user_id=_optional_state_str(publish_user_id),
     )
     backlog = getattr(runner, "pending_publish_jobs", None)
+    backlog_jobs = None
     if iscoroutinefunction(backlog):
-        jobs = await backlog(
+        backlog_jobs = await backlog(
             tenant_id, target=publish_channel, limit=publish_candidate_fetch_limit(send_limit)
-        ) + list(jobs)
+        )
+        jobs = backlog_jobs + list(jobs)
     eligible = [job for job in jobs if job_passes_bot_publish_gates(job)]
     if not eligible:
+        missing = _state_int(
+            await _maybe_await(store.get_run_state("bot_publish:missing_candidates"))
+        )
+        settled = backlog_jobs == [] and missing == 0
+        uncertain = getattr(store, "list_uncertain_outbox", None)
+        if settled and iscoroutinefunction(uncertain):
+            settled = not await uncertain(limit=1)
+        if settled:
+            if slot_id:
+                await update_scheduler_slot(
+                    store,
+                    slot_id,
+                    publish_state="skipped",
+                    publish_reason="no_pending_candidates",
+                    publish_error="",
+                    last_publish_sent=0,
+                )
+            await _maybe_await(store.set_run_state("bot_scheduler:pending_publish_since", ""))
+            await _maybe_await(store.set_run_state("bot_scheduler:last_publish_error", ""))
+            await _maybe_await(store.set_run_state("bot_scheduler:last_publish_sent", "0"))
+            logger.info("scheduler_pending_publish_empty", tenant_id=tenant_id)
+            return True
         error = "pending publish candidates are missing"
         if slot_id:
             await update_scheduler_slot(
@@ -597,7 +621,18 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                 if not pending_publish and iscoroutinefunction(backlog):
                     target = await runner.get_publish_channel(tenant_id)
                     owner = await runner.get_publish_user_id(tenant_id)
-                    if target and owner and await backlog(tenant_id, target=str(target), limit=1):
+                    if (
+                        target
+                        and owner
+                        and (
+                            await backlog(tenant_id, target=str(target), limit=1)
+                            or _state_int(
+                                await _maybe_await(
+                                    store.get_run_state("bot_publish:missing_candidates")
+                                )
+                            )
+                        )
+                    ):
                         pending_raw = now.isoformat()
                         await _maybe_await(
                             store.set_run_state("bot_scheduler:pending_publish_since", pending_raw)
@@ -780,7 +815,10 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     "waiting_llm",
                 }:
                     emitted = getattr(run_result, "emitted", 0)
-                    queued_publish = bool(emitted > 0 and publish_channel and publish_user_id)
+                    new_candidates = getattr(run_result, "new_publish_candidates", emitted)
+                    queued_publish = bool(
+                        new_candidates > 0 and publish_channel and publish_user_id
+                    )
                     if queued_publish:
                         pending_since = _parse_scheduler_timestamp(
                             await _maybe_await(
@@ -936,7 +974,8 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         )
                     )
                     has_pending_publish = isinstance(pending_raw, str) and bool(pending_raw)
-                    if emitted == 0 and not has_pending_publish:
+                    new_candidates = getattr(run_result, "new_publish_candidates", emitted)
+                    if new_candidates == 0 and not has_pending_publish:
                         publish_skipped_reason = "новых вакансий 0"
                         await update_scheduler_slot(
                             store,
@@ -975,7 +1014,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                                 pending_since = pending_since.replace(tzinfo=UTC)
                             publish_since = min(publish_since, pending_since)
 
-                    if emitted > 0:
+                    if new_candidates > 0:
                         # Persist the delivery intent before reading candidates or
                         # contacting Telegram. A crash in either gap is recoverable.
                         await _maybe_await(
@@ -997,37 +1036,34 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         since=publish_since,
                         user_id=publish_user_id,
                     )
+                    backlog = getattr(runner, "pending_publish_jobs", None)
+                    if iscoroutinefunction(backlog):
+                        jobs = await backlog(
+                            tenant_id,
+                            target=str(publish_channel),
+                            limit=publish_candidate_fetch_limit(send_limit),
+                        ) + list(jobs)
                     persisted_candidates = len(jobs)
 
                     # Filter to publishable jobs; recency is already applied in latest_jobs().
                     new_jobs = [j for j in jobs if job_passes_bot_publish_gates(j)]
                     eligible_to_send = len(new_jobs)
-                    # ``emitted`` counts accepted job records, while ``latest_jobs`` returns the
-                    # publish surface after grouping.  Comparing those counts directly produces
-                    # false losses, e.g. 23 accepted jobs merged into 22 publishable cards.
-                    if emitted > 0:
-                        # Write the delivery intent before querying or contacting Telegram.
-                        # A process crash in either gap must be recoverable on the next start.
-                        await _maybe_await(
-                            store.set_run_state(
-                                "bot_scheduler:pending_publish_since", publish_since.isoformat()
-                            )
-                        )
-                    if emitted > 0 and persisted_candidates == 0:
+                    # Candidate IDs and grouped cards have different counts.
+                    if new_candidates > 0 and persisted_candidates == 0:
                         logger.warning(
                             "bot_delivery_partial_loss",
                             delivery="scheduler",
                             tenant_id=tenant_id,
-                            routing_accepted=emitted,
+                            routing_accepted=new_candidates,
                             persisted_candidates=persisted_candidates,
                             eligible_to_send=eligible_to_send,
-                            lost=emitted,
+                            lost=new_candidates,
                         )
-                    if emitted > 0 and not new_jobs:
+                    if new_candidates > 0 and not new_jobs:
                         logger.error(
                             "pipeline_delivery_contract_violation",
                             delivery="scheduler",
-                            routing_accepted=emitted,
+                            routing_accepted=new_candidates,
                             persisted_candidates=persisted_candidates,
                             eligible_to_send=eligible_to_send,
                         )

@@ -70,6 +70,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_runtime_sources.py](test_runtime_sources.py)
 - [test_scheduler.py](test_scheduler.py)
 - [test_scheduler_journal.py](test_scheduler_journal.py)
+- [test_scheduler_publication_recovery.py](test_scheduler_publication_recovery.py)
 - [test_search_expansion.py](test_search_expansion.py)
 - [test_search_session.py](test_search_session.py)
 - [test_shadow.py](test_shadow.py)

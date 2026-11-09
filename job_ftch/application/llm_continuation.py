@@ -40,13 +40,15 @@ class ObservationContinuation:
 
     async def add(self, entry: ObservationLedgerEntry) -> None:
         async with self._lock:
-            self.references.add((entry.stable_id, entry.content_hash))
-            await self._save()
+            reference = (entry.stable_id, entry.content_hash)
+            if reference not in self.references:
+                await self._save(self.references | {reference})
 
     async def complete(self, stable_id: str, content_hash: str) -> None:
         async with self._lock:
-            self.references.discard((stable_id, content_hash))
-            await self._save()
+            reference = (stable_id, content_hash)
+            if reference in self.references:
+                await self._save(self.references - {reference})
 
     async def entries(self) -> list[ObservationLedgerEntry]:
         entries = []
@@ -59,8 +61,9 @@ class ObservationContinuation:
             entries.append(entry)
         return entries
 
-    async def _save(self) -> None:
-        await self.store.set_run_state(self.key, json.dumps(sorted(self.references)))
+    async def _save(self, references: set[tuple[str, str]]) -> None:
+        await self.store.set_run_state(self.key, json.dumps(sorted(references)))
+        self.references = references
 
     def keep_pending(self, summary: RunSummary) -> None:
         if self.references and summary.completion_state != "waiting_llm":

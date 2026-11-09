@@ -10,6 +10,7 @@ import pytest
 from job_ftch.application.channel_publisher import DeliveryReceipt, RejectedDelivery, publish_jobs
 from job_ftch.application.publication_backlog import (
     handled_key,
+    mark_publication_handled,
     pending_candidate_ids,
     record_publish_candidate,
 )
@@ -141,5 +142,79 @@ async def test_recovery_loads_old_candidate_outside_current_window(
         assert sent == ["before-hold"]
         assert not await pending_candidate_ids(store, "@first")
         assert await store.get_run_state("bot_scheduler:pending_publish_since") == ""
+    finally:
+        await backend.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["handled", "missing", "uncertain"])
+async def test_empty_recovery_closes_only_verified_settled_work(
+    tmp_path, make_job_record, monkeypatch, state
+) -> None:
+    from job_ftch.adapters.telegram_bot.main import _recover_pending_scheduler_publish
+    from job_ftch.application.scheduler_journal import ensure_scheduler_slot, load_scheduler_journal
+    from job_ftch.application.tenant_runner import TenantRunner
+    from job_ftch.config import Settings
+    from job_ftch.domain.outbox import OutboxRecord, OutboxState
+    from job_ftch.infrastructure.backends.jobs.sqlite import SQLiteJobBackend
+
+    store = InMemoryStore()
+    backend = SQLiteJobBackend(Settings(job_store_path=tmp_path / "jobs.sqlite"))
+    runner = TenantRunner(
+        {"tenant": SimpleNamespace(store=store, job_backend=backend, settings=SimpleNamespace())}
+    )
+    job = make_job_record(job_id="settled-or-missing", routing_decision="accept")
+    await record_publish_candidate(store, job)
+    if state != "missing":
+        await backend.save(job)
+        await mark_publication_handled(store, "@first", job, reason="already_published")
+    if state == "uncertain":
+        await store.enqueue_outbox(
+            OutboxRecord(
+                outbox_id="unknown-legacy-send",
+                observation_id="old-input",
+                content_hash="a" * 64,
+                idempotency_key="b" * 64,
+                sink_name="telegram:legacy",
+                decision_version="publication-v1",
+                state=OutboxState.UNCERTAIN,
+            )
+        )
+    marker = datetime.now(UTC).isoformat()
+    await store.set_run_state("bot_scheduler:pending_publish_since", marker)
+    slot = await ensure_scheduler_slot(
+        store,
+        now=datetime.now(UTC),
+        interval_seconds=3600,
+        recovery_marker=datetime.now(UTC),
+        publish_pending=True,
+    )
+    assert slot is not None
+    monkeypatch.setattr(runner, "latest_jobs", AsyncMock(return_value=[]))
+    send = AsyncMock()
+    monkeypatch.setattr(
+        "job_ftch.adapters.telegram_bot.main.TelegramCardSender",
+        lambda *a, **kw: SimpleNamespace(send=send),
+    )
+    try:
+        result = await _recover_pending_scheduler_publish(
+            runner,
+            SimpleNamespace(),
+            tenant_id="tenant",
+            publish_channel="@first",
+            publish_user_id="owner",
+            slot_id=str(slot["slot_id"]),
+        )
+        send.assert_not_awaited()
+        assert result is (state == "handled")
+        assert await store.get_run_state("bot_scheduler:pending_publish_since") == (
+            "" if state == "handled" else marker
+        )
+        journal = await load_scheduler_journal(store)
+        assert journal[0]["publish_state"] == ("skipped" if state == "handled" else "failed")
+        if state == "missing":
+            assert await store.get_run_state("bot_publish:missing_candidates") == "1"
+        if state == "uncertain":
+            assert len(await store.list_uncertain_outbox()) == 1
     finally:
         await backend.close()
