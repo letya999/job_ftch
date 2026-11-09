@@ -106,6 +106,25 @@ async def test_waiting_replay_does_not_queue_already_handled_emits(scheduler):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("report_age_minutes,expected_calls", [(70, 1), (10, 0)])
+async def test_waiting_replay_reports_again_after_schedule_interval(
+    scheduler, report_age_minutes, expected_calls
+):
+    store, runner, bot, _, _ = scheduler
+    await store.set_run_state("bot_scheduler:llm_notice", "waiting_llm")
+    await store.set_run_state(
+        "bot_scheduler:last_owner_report_success_at",
+        (datetime.now(UTC) - timedelta(minutes=report_age_minutes)).isoformat(),
+    )
+    runner.run_tenant = AsyncMock(return_value=RunSummary(completion_state="waiting_llm"))
+
+    with pytest.raises(asyncio.CancelledError):
+        await bot_main._run_scheduler_loop(runner, bot)
+
+    assert bot_main._send_scheduler_run_report.await_count == expected_calls
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("completion", ["completed", "waiting_llm"])
 async def test_replayed_accept_publishes_from_backlog_outside_attempt_window(
     scheduler, make_job_record, completion

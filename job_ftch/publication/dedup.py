@@ -25,7 +25,7 @@ def _normalize_text(text: str | None) -> str:
     return " ".join(t.split())
 
 
-def same_vacancy(first: Job, second: Job) -> bool:
+def same_vacancy(first: object, second: object) -> bool:
     """Require matching role and content; metadata alone can describe two openings."""
     title_a = _normalize_text(getattr(first, "title", None))
     title_b = _normalize_text(getattr(second, "title", None))
@@ -73,9 +73,14 @@ def same_vacancy(first: Job, second: Job) -> bool:
         # shortcut: missing company labels require almost identical source text;
         # upgrade when a reliable cross-source company identity is available.
         threshold = 88 if company_a and company_b else 98
-        return (
-            fuzz.ratio(desc_a, desc_b) >= threshold and fuzz.token_set_ratio(desc_a, desc_b) >= 92
-        )
+        if fuzz.ratio(desc_a, desc_b) >= threshold and fuzz.token_set_ratio(desc_a, desc_b) >= 92:
+            return True
+        if title_a == title_b and company_a and company_b:
+            words_a = {word for word in desc_a.split() if len(word) >= 4}
+            words_b = {word for word in desc_b.split() if len(word) >= 4}
+            shorter = min(len(words_a), len(words_b))
+            return shorter >= 15 and len(words_a & words_b) >= max(12, shorter * 0.75)
+        return False
 
     return bool(company_a and company_a == company_b and title_a == title_b and desc_a == desc_b)
 

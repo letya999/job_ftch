@@ -852,9 +852,16 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         store.set_run_state("bot_scheduler:last_run_emitted", str(emitted))
                     )
                     notice = str(getattr(run_result, "completion_state", ""))
+                    last_owner_report = _parse_scheduler_timestamp(
+                        await _maybe_await(
+                            store.get_run_state("bot_scheduler:last_owner_report_success_at")
+                        )
+                    )
                     if (
                         await _maybe_await(store.get_run_state("bot_scheduler:llm_notice"))
                         != notice
+                        or last_owner_report is None
+                        or (now - last_owner_report).total_seconds() >= interval
                     ):
                         await _send_scheduler_run_report(
                             bot,
