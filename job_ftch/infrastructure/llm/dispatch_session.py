@@ -15,7 +15,13 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import PoolTimeout
 
 from job_ftch.application.llm_dispatch import LLMRequestDeferredError, llm_run
-from job_ftch.infrastructure.llm.dispatch_store import DispatchStore, route_revision
+from job_ftch.infrastructure.llm.dispatch_store import (
+    RETRYABLE_TERMINAL_ERRORS,
+    DispatchStore,
+    route_revision,
+)
+
+UPSTREAM_RETRYABLE_ERRORS = RETRYABLE_TERMINAL_ERRORS - {"run_route_requires_operator"}
 
 if TYPE_CHECKING:
     from job_ftch.config import Settings
@@ -65,12 +71,44 @@ class CliproxyRun:
                 )
                 row = await (
                     await conn.execute(
-                        "SELECT * FROM jf_llm_runs WHERE tenant_id=%s AND ((selector=%s "
-                        "AND state IN ('active','waiting','operator')) OR %s=ANY(source_run_ids)) "
+                        "SELECT * FROM jf_llm_runs WHERE tenant_id=%s "
+                        "AND state IN ('active','waiting','operator') "
+                        "AND (selector=%s OR %s=ANY(source_run_ids)) "
                         "ORDER BY CASE WHEN %s=ANY(source_run_ids) THEN 0 ELSE 1 END,created_at DESC LIMIT 1 FOR UPDATE",
                         (self.tenant, self.selector, self.parent_run_id, self.parent_run_id),
                     )
                 ).fetchone()
+                if (
+                    row is not None
+                    and row["state"] == "operator"
+                    and row["routes"] == routes
+                    and row["expires_at"] > now
+                    and row["reason"]
+                    not in {"unexpected_exception", "route_changed", "run_expired"}
+                    and isinstance(row["summary"], dict)
+                    and str(row["summary"].get("completion_state", "")).startswith("waiting")
+                ):
+                    failures = await (
+                        await conn.execute(
+                            "SELECT count(*) FILTER (WHERE state IN "
+                            "('pending','running','uncertain','cancelled') OR "
+                            "(state='failed' AND NOT (COALESCE(error,'')=ANY(%s)))) AS blocking, "
+                            "bool_or(state='failed' AND error=ANY(%s)) AS retryable "
+                            "FROM jf_llm_requests WHERE logical_run_id=%s",
+                            (
+                                list(RETRYABLE_TERMINAL_ERRORS),
+                                list(UPSTREAM_RETRYABLE_ERRORS),
+                                row["run_id"],
+                            ),
+                        )
+                    ).fetchone()
+                    if failures and failures["retryable"] and not failures["blocking"]:
+                        await conn.execute(
+                            "UPDATE jf_llm_runs SET state='waiting',reason='retryable_failure',"
+                            "updated_at=now() WHERE run_id=%s",
+                            (row["run_id"],),
+                        )
+                        row["state"] = "waiting"
                 if row is None:
                     self.run_id = uuid.uuid4().hex
                     delay = (
@@ -135,14 +173,16 @@ class CliproxyRun:
         try:
             if exc is not None and self.run_id:
                 async with self.store.pool.connection() as conn:
+                    state = (
+                        "waiting"
+                        if isinstance(exc, (LLMRequestDeferredError, asyncio.CancelledError))
+                        else "operator"
+                    )
                     await conn.execute(
-                        "UPDATE jf_llm_runs SET state=%s,updated_at=now() WHERE run_id=%s AND state='active'",
-                        (
-                            "waiting"
-                            if isinstance(exc, (LLMRequestDeferredError, asyncio.CancelledError))
-                            else "operator",
-                            self.run_id,
-                        ),
+                        "UPDATE jf_llm_runs SET state=%s,"
+                        "reason=CASE WHEN %s='operator' THEN 'unexpected_exception' ELSE reason END,"
+                        "updated_at=now() WHERE run_id=%s AND state='active'",
+                        (state, state, self.run_id),
                     )
         finally:
             if self._token is not None:
@@ -173,10 +213,11 @@ class CliproxyRun:
         async with self.store.pool.connection() as conn:
             outstanding = await (
                 await conn.execute(
-                    "SELECT min(next_run_at) AS due,bool_or(state IN ('uncertain','failed')) AS operator "
+                    "SELECT min(next_run_at) AS due,bool_or(state IN ('uncertain','cancelled') "
+                    "OR (state='failed' AND NOT (COALESCE(error,'')=ANY(%s)))) AS operator "
                     "FROM jf_llm_requests WHERE logical_run_id=%s AND operation='work' "
-                    "AND state IN ('pending','running','uncertain','failed')",
-                    (self.run_id,),
+                    "AND state IN ('pending','running','uncertain','cancelled','failed')",
+                    (list(RETRYABLE_TERMINAL_ERRORS), self.run_id),
                 )
             ).fetchone()
             assert outstanding is not None

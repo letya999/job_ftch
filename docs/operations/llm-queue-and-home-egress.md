@@ -147,6 +147,14 @@ run IDs. `report RUN_ID` показывает сохранённую стати�
 Не автоматизируйте release/resume при auth, verification или unknown outcome.
 `resume` отклоняется, пока в защищённом scope есть uncertain-запросы.
 
+После явного временного отказа модели (`model_capacity`, `provider_unavailable`,
+`rate_limit`) тот же run и request identity продолжаются автоматически после
+cooldown. Это относится и к старому operator-held run, если в нём нет других
+ошибок или uncertain-запросов. Auth, quota, verification и неизвестный исход
+по-прежнему требуют разбора оператором. Продолжение сначала обрабатывает
+сохранённые наблюдения, начиная с самых новых; новый сбор источников начнётся
+после опустошения checkpoint.
+
 Метрики `job_ftch.cliproxy.*` экспортируются через существующий OpenTelemetry
 runtime: attempts, outcomes, waits, circuit transitions, latency и oldest age.
 Worker подключается к `public_site` для внутреннего OpenObserve endpoint;

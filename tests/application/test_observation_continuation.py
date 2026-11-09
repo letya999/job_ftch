@@ -126,6 +126,37 @@ async def test_missing_checkpoint_observation_is_an_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_replay_prioritizes_recent_observations() -> None:
+    from job_ftch.domain.observation import ObservationLedgerEntry, content_hash_for_raw_item
+
+    store = InMemoryStore()
+    checkpoint = ObservationContinuation(store, "recent-first", "tenant")
+    now = datetime.now(UTC)
+    for identity, observed_at in (
+        ("old", now - timedelta(days=1)),
+        ("new", now),
+    ):
+        item = RawItem(
+            source_kind=SourceKind.DEBUG,
+            source_name="saved",
+            external_id=identity,
+            text="job",
+        )
+        entry = ObservationLedgerEntry(
+            observation_id=identity,
+            tenant_id="tenant",
+            stable_id=item.stable_id,
+            content_hash=content_hash_for_raw_item(item),
+            decision_version="test",
+            raw_item=item,
+            observed_at=observed_at,
+        )
+        await store.record_observation(entry)
+        await checkpoint.add(entry)
+    assert [entry.observation_id for entry in await checkpoint.entries()] == ["new", "old"]
+
+
+@pytest.mark.asyncio
 async def test_sink_failure_keeps_observation_for_restart() -> None:
     item = RawItem(
         source_kind=SourceKind.DEBUG, source_name="saved", external_id="unsaved", text="vacancy"
