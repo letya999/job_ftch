@@ -170,11 +170,17 @@ async def test_reused_pipeline_releases_dedup_on_every_llm_continuation(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_pending_graph_child_releases_all_claims_from_its_source_item(tmp_path: Path) -> None:
+@pytest.mark.parametrize("pending_index", [0, 1])
+async def test_pending_graph_child_preserves_completed_sibling_and_replays_parent(
+    tmp_path: Path, make_job_record, pending_index: int
+) -> None:
     from job_ftch.application.graph import GraphCompiler
     from job_ftch.application.graph.contracts import GraphSpec, NodeSpec
     from job_ftch.application.graph.executor import GraphExecutor
     from job_ftch.application.graph.pipeline_stage import GraphPipelineStage
+    from job_ftch.domain import MatchDecision
+    from job_ftch.domain.observation import content_hash_for_raw_item
+    from job_ftch.domain.outbox import OutboxState, delivery_idempotency_key
     from job_ftch.nodes.dedup import DedupNode
 
     children = [
@@ -200,10 +206,14 @@ async def test_pending_graph_child_releases_all_claims_from_its_source_item(tmp_
             return item
 
     class PendingSecond:
+        waiting = True
+
         async def process(self, item):
-            if item.stable_id == children[1].stable_id:
+            if self.waiting and item.stable_id == children[pending_index].stable_id:
                 raise LLMRequestDeferredError("pending", datetime.now(UTC) + timedelta(seconds=30))
-            return item
+            return make_job_record(
+                raw_item_id=item.stable_id, routing_decision=MatchDecision.ACCEPT
+            )
 
     graph = GraphCompiler().compile(
         GraphSpec(
@@ -223,6 +233,7 @@ async def test_pending_graph_child_releases_all_claims_from_its_source_item(tmp_
     )
     store = InMemoryStore()
     dedup = DedupNode(store, defer_commit=True)
+    extraction = PendingSecond()
     unrelated = RawItem(
         source_kind=SourceKind.DEBUG, source_name="debug", external_id="other", text="Other work"
     )
@@ -233,7 +244,7 @@ async def test_pending_graph_child_releases_all_claims_from_its_source_item(tmp_
             "sanitize": Pass(),
             "split": Split(),
             "dedup": dedup,
-            "extract": PendingSecond(),
+            "extract": extraction,
             "normalize": Pass(),
             "terminal": Pass(),
         },
@@ -249,15 +260,37 @@ async def test_pending_graph_child_releases_all_claims_from_its_source_item(tmp_
         store=store,
     )
     summary = await pipeline.run()
-    assert summary.completion_state == "waiting_llm" and summary.emitted == 0
+    assert summary.completion_state == "waiting_llm" and summary.emitted == pending_index
+    assert summary.new_publish_candidates == pending_index
+    assert summary.failed == 0
     assert not await store.has_processed(processed_key_for_raw_item(parent))
+    assert await store.has_processed(processed_key_for_raw_item(children[0])) is bool(pending_index)
+    assert not await store.has_processed(processed_key_for_raw_item(children[1]))
+    assert len(store._outbox) == pending_index
+    if pending_index:
+        key = delivery_idempotency_key(
+            content_hash=content_hash_for_raw_item(children[0]),
+            decision_version=pipeline._decision_version,
+            sink_name="primary:sink",
+        )
+        delivered = store._outbox[key]
+        assert delivered.state is OutboxState.DELIVERED
+        assert delivered.observation_id == children[0].stable_id
     another_worker = DedupNode(store, defer_commit=True)
-    for child in children:
+    for child in children[pending_index:]:
         assert await another_worker.process(child) is child
         await another_worker.release_claim(child.stable_id)
     with pytest.raises(RuntimeError, match="dedup claim is held"):
         await another_worker.process(unrelated)
     await dedup.release_claim(unrelated.stable_id)
+    extraction.waiting = False
+    completed = await pipeline.run()
+    assert completed.emitted == 2 - pending_index
+    assert completed.new_publish_candidates == 2 - pending_index
+    assert await store.has_processed(processed_key_for_raw_item(parent))
+    assert await store.has_processed(processed_key_for_raw_item(children[1]))
+    assert len(await store.set_members("bot_publish:candidates")) == 2
+    assert len(store._outbox) == 2
 
 
 @pytest.mark.asyncio
