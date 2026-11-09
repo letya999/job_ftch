@@ -1,7 +1,7 @@
 ---
 title: "Опциональная LLM-очередь и домашний выход"
 description: "Procrastinate/PostgreSQL, общие квоты, закрепление запросов и Android на домашнем Wi-Fi."
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 # Опциональная LLM-очередь и домашний выход
 
@@ -275,6 +275,14 @@ processed-key и content hash outbox берутся из исходного RawI
 enrichment и принадлежность tenant, затем восстановите кандидат через
 `record_publish_candidate`. Доставку выполняет штатный publisher с его gates,
 ledger и обработкой uncertain; напрямую в Telegram ничего не отправляйте.
+
+При непустом continuation логический прогон сохраняет identity и продлевает lease,
+если маршрут прежний и нет неизвестных, отменённых или неретрабельных результатов.
+TTL отдельных HTTP-заданий и квоты аккаунта не сбрасываются. Pending возвращается
+сразу: другие объявления проходят дешёвые фильтры и заполняют ограниченную очередь,
+а worker соблюдает общие интервалы и cooldown. Источники собираются по обычному
+расписанию даже при старом остатке; между такими сборами идёт replay без refetch.
+Старые observations обрабатываются первыми. См. [ADR 109](../adr/109-live-continuation-leases-and-admission.md).
 
 Unit tests идут без PostgreSQL. Для интеграционных тестов задайте
 `JOB_FTCH_TEST_LLM_QUEUE_DSN` отдельной disposable БД и запустите

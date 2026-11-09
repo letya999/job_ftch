@@ -1474,23 +1474,6 @@ class Pipeline[PipelineInput, PipelineOutput]:
 
                 pulled += 1
 
-                if (
-                    observation_continuation.get() is not None
-                    and summary.completion_state == "waiting_llm"
-                    and isinstance(item, RawItem)
-                ):
-                    await self._record_observation(item)
-                    summary.fetched += 1
-                    summary.source_stats(item.source_kind).fetched += 1
-                    identity = summary.source_identity_stats(item.source_kind, item.source_name)
-                    if identity is not None:
-                        identity.fetched += 1
-                    summary.record_deferred("llm_backpressure")
-                    summary.source_stats(item.source_kind).record_deferred("llm_backpressure")
-                    if identity is not None:
-                        identity.record_deferred("llm_backpressure")
-                    continue
-
                 key = processed_key_for_raw_item(item) if isinstance(item, RawItem) else None
                 if key is not None and key in seen_keys:
                     # Duplicate processed_key already seen this run — drop it

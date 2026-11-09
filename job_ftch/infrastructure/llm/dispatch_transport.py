@@ -186,7 +186,7 @@ class QueuedLLMTransport(httpx.AsyncBaseTransport):
                         }
                     },
                 )
-            if monotonic() >= deadline:
+            if self.protected or monotonic() >= deadline:
                 retry_at = max(row["next_run_at"], datetime.now(UTC) + timedelta(seconds=30))
                 if self.protected:
                     return self.deferred_response(

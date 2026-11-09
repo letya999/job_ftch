@@ -2351,7 +2351,12 @@ class TenantRunner:
         checkpoint = observation_continuation.get()
         if checkpoint is not None:
             await checkpoint.load()
-            if checkpoint.references:
+            interval = (
+                await self.get_schedule_interval(tenant_id)
+                or runtime.settings.schedule_interval_seconds
+                or 4 * 60 * 60
+            )
+            if checkpoint.references and not await checkpoint.acquisition_due(interval):
                 entries = await checkpoint.entries()
                 catalog, prompts = await self._build_runtime_catalog(runtime, user_id=user_id)
                 builder, _ = await self._build_runtime_builder(
@@ -2594,6 +2599,8 @@ class TenantRunner:
                         summary = await builder.run_async(
                             max_items=None if personal_mode else max_items
                         )
+                        if checkpoint is not None:
+                            await checkpoint.note_acquisition()
                         if summary.failed or summary.completion_state == "waiting_llm":
                             pending_cursors.clear()
                 summary.llm_usage_requests = usage.requests

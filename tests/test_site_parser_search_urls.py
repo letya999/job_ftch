@@ -75,6 +75,7 @@ def test_hh_builds_single_or_query_preserving_area() -> None:
     assert query["text"] == ["AI engineer OR LLM engineer OR ИИ инженер"]
     assert query["search_field"] == ["name"]  # title-only, avoids description noise
     assert query["ored_clusters"] == ["true"]
+    assert query["order_by"] == ["publication_time"]
     assert query["area"] == ["113"]  # existing param preserved
 
 

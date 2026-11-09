@@ -134,7 +134,7 @@ class JSeekParser:
     has_custom_parse = True
     supports_discover = True
     supports_search = True
-    search_mode = "combined"
+    search_mode = "per_keyword"
     confirmed_empty_on_empty = True
 
     def __init__(self) -> None:
@@ -161,21 +161,9 @@ class JSeekParser:
     ) -> list[str]:
         del limit
         normalized = normalize_search_keywords(keywords, cap=8)
-        tokens: list[str] = []
-        seen: set[str] = set()
-        for keyword in normalized:
-            for token in re.split(r"[\s,]+", keyword):
-                token = token.strip()
-                if not token:
-                    continue
-                key = token.casefold()
-                if key in seen:
-                    continue
-                seen.add(key)
-                tokens.append(token)
-        if not tokens:
-            return []
-        return [with_query_params(base_url, {"q": ",".join(tokens)})]
+        return [
+            with_query_params(base_url, {"q": ",".join(keyword.split())}) for keyword in normalized
+        ]
 
     async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
         limit = spec.limit or 50
@@ -252,7 +240,7 @@ class JSeekParser:
                     "q": search_query,
                     "query_by": "title",
                     "filter_by": "is_active:true && has_content:!=false && locales:[en,_none]",
-                    "sort_by": "_text_match:desc,first_seen_at:desc",
+                    "sort_by": "first_seen_at:desc,_text_match:desc",
                     "group_by": "company_id",
                     "group_limit": str(max(limit, 10)),
                     "per_page": str(per_page),

@@ -8,6 +8,9 @@ updated: 2026-11-09
 **Status**: ACCEPTED
 **Date**: 2026-11-09
 
+**Amended**: [ADR 109](109-live-continuation-leases-and-admission.md) allows
+scheduled fresh acquisition before the checkpoint is empty and renews safe run leases.
+
 ## Context
 
 ADR 106/107 preserve HTTP results, but scheduled continuation still fetches every

@@ -21,6 +21,7 @@ class ObservationContinuation:
     def __init__(self, store: Store, run_id: str, tenant_id: str) -> None:
         self.store = store
         self.key = f"llm_continuation:{run_id}"
+        self.acquisition_key = f"llm_acquisition:{run_id}"
         self.tenant_id = tenant_id
         self.references: set[tuple[str, str]] = set()
         self._lock = asyncio.Lock()
@@ -59,7 +60,19 @@ class ObservationContinuation:
             if entry is None:
                 raise ValueError("Pending LLM observation is missing from the ledger")
             entries.append(entry)
-        return sorted(entries, key=lambda entry: entry.observed_at, reverse=True)
+        return sorted(entries, key=lambda entry: entry.observed_at)
+
+    async def acquisition_due(self, interval_seconds: int) -> bool:
+        raw = await self.store.get_run_state(self.acquisition_key)
+        if raw:
+            acquired_at = datetime.fromisoformat(raw)
+        else:
+            entries = await self.entries()
+            acquired_at = max((entry.observed_at for entry in entries), default=datetime.now(UTC))
+        return datetime.now(UTC) >= acquired_at + timedelta(seconds=interval_seconds)
+
+    async def note_acquisition(self) -> None:
+        await self.store.set_run_state(self.acquisition_key, datetime.now(UTC).isoformat())
 
     async def _save(self, references: set[tuple[str, str]]) -> None:
         await self.store.set_run_state(self.key, json.dumps(sorted(references)))

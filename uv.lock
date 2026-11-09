@@ -2312,7 +2312,7 @@ wheels = [
 
 [[package]]
 name = "job-ftch"
-version = "0.0.37"
+version = "0.0.38"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },
