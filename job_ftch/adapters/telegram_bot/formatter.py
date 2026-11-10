@@ -42,7 +42,7 @@ def _is_fake_company(company: str | None, source_name: str | None) -> bool:
     if any(pat in c for pat in ["_com", "_ru", "_kz", "_org", "hh.ru", "habr.com"]):
         return True
     # Common placeholder values used by extractors
-    if c in ("unknown", "недоступно", "—", "-", "n/a", ""):
+    if c in ("unknown", "недоступно", "—", "-", "n/a", "") or re.fullmatch(r"%[a-z_]+%", c):
         return True
 
     # HTML fragments or sentence-like prose are not company names

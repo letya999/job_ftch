@@ -31,6 +31,7 @@ def test_is_fake_company():
     assert _is_fake_company("—", "source") is True
     assert _is_fake_company("-", "source") is True
     assert _is_fake_company("n/a", "source") is True
+    assert _is_fake_company("%hirify_global%", "hirify_me") is True
 
     # Returns True when company contains HTML fragments ("<b>")
     assert _is_fake_company("Company <b>Inc</b>", "source") is True
