@@ -273,6 +273,18 @@ async def test_body_comes_from_the_per_vacancy_endpoint() -> None:
     assert client.detail_calls == ["https://api.hirify.me/api/vacancies/668118"]
 
 
+def test_company_placeholder_is_not_passed_to_extraction() -> None:
+    item = HirifyParser()._to_raw_item(
+        {**_LISTING_ROW, "company_title": "%hirify_global%"},
+        None,
+        "hirify_me",
+    )
+
+    assert item is not None
+    assert item.metadata.get("company") is None
+    assert "%hirify_global%" not in item.text
+
+
 @pytest.mark.asyncio
 async def test_listing_api_paginates_until_limit() -> None:
     class Client(_ApiClient):

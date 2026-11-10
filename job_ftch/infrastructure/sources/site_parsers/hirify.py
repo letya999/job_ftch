@@ -887,6 +887,8 @@ class HirifyParser:
         if not body:
             body = str(merged.get("listing_card_text") or "").strip()
         company = str(merged.get("company_title") or "").strip()
+        if re.fullmatch(r"%[a-z_]+%", company, re.IGNORECASE):
+            company = ""
         sections = [title, company]
         if body and " ".join(body.split()).casefold() != " ".join(title.split()).casefold():
             sections.append(body)
