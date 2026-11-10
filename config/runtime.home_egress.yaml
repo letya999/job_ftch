@@ -6,7 +6,7 @@ llm_provider_profiles:
     capabilities: [text, structured]
   cliproxy_main:
     gateway: cliproxy
-    timeout_seconds: 120.0
+    timeout_seconds: 240.0
     backend: openai
     base_url: http://cliproxy:8317/v1
     credential_ref: JOB_FTCH_CLIPROXY_API_KEY
