@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import uuid
@@ -58,6 +59,7 @@ def test_production_overlays_preserve_endpoint_credentials_and_capabilities(monk
         assert bool(profile.egress_ready_url) == home
         assert profile.cliproxy_dispatch
     assert "vision" in settings.llm_provider_profiles["cliproxy_captcha"].capabilities
+    assert settings.llm_provider_profiles["cliproxy_main"].timeout_seconds == 360.0
     assert settings.llm_provider_profiles["openai_main"].execution == "inline"
     assert not settings.llm_provider_profiles["openai_main"].cliproxy_dispatch
 
@@ -1176,3 +1178,116 @@ async def test_resume_guard_preserves_unknown_outcome_and_account_pause(
     scope = next(s for s in (await worker.store.stats())["scopes"] if s["scope"] == name)
     assert scope["paused_reason"] == "uncertain"
     await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_recover_run_atomically_moves_checkpoint_under_tenant_lock(
+    dispatch_settings, tmp_path
+):
+    from psycopg.types.json import Jsonb
+
+    from job_ftch.application.tenant_locks import TenantRunAlreadyActiveError, tenant_run_lock
+    from job_ftch.infrastructure.llm.dispatch_store import DispatchStore, route_revision
+    from job_ftch.infrastructure.llm.dispatch_worker import recover_run
+
+    settings, name = dispatch_settings
+    protect(settings, name)
+    settings.tenant_lock_dir = tmp_path / "tenant_locks"
+    store = DispatchStore(settings)
+    await store.initialize()
+    old_id, unknown_id, failed_id = (uuid.uuid4().hex for _ in range(3))
+    references = [["observation-a", "hash-a"], ["observation-b", "hash-b"]]
+    routes = json.dumps({name: route_revision(settings, name)}, sort_keys=True)
+    old_key = f"{name}:llm_continuation:{old_id}"
+    old_acquisition = f"{name}:llm_acquisition:{old_id}"
+    new_id = None
+    try:
+        async with store.pool.connection() as conn:
+            await conn.execute(
+                "CREATE TABLE IF NOT EXISTS jf_kv (key text PRIMARY KEY,value text NOT NULL,"
+                "updated_at timestamptz NOT NULL DEFAULT now())"
+            )
+            await conn.execute(
+                "INSERT INTO jf_llm_runs(run_id,tenant_id,selector,routes,state,expires_at,"
+                "reason,summary) VALUES (%s,%s,'default',%s,'operator',now()+interval '1 day',"
+                "'operator',%s)",
+                (old_id, name, routes, Jsonb({"completion_state": "waiting_llm"})),
+            )
+            await conn.execute(
+                "INSERT INTO jf_llm_scopes(scope,paused_reason) VALUES (%s,'uncertain')",
+                (name,),
+            )
+            for request_id, state, error in (
+                (unknown_id, "uncertain", "upstream_outcome_unknown"),
+                (failed_id, "failed", "run_route_requires_operator"),
+            ):
+                await conn.execute(
+                    "INSERT INTO jf_llm_requests(request_id,tenant_id,profile,scope,revision,"
+                    "session_id,payload,state,expires_at,logical_run_id,error) "
+                    "VALUES (%s,%s,%s,%s,'revision','session',%s,%s,now()+interval '1 day',%s,%s)",
+                    (request_id, name, name, name, Jsonb(payload()), state, old_id, error),
+                )
+            await conn.execute(
+                "INSERT INTO jf_kv(key,value) VALUES (%s,%s)",
+                (old_key, json.dumps(references)),
+            )
+            await conn.execute(
+                "INSERT INTO jf_kv(key,value) VALUES (%s,%s)",
+                (old_acquisition, "2026-11-13T06:50:00+00:00"),
+            )
+
+        async with tenant_run_lock(settings, name, timeout=0):
+            with pytest.raises(TenantRunAlreadyActiveError):
+                await recover_run(store, settings, old_id)
+        assert (await store.get(unknown_id))["state"] == "uncertain"
+
+        new_id, count = await recover_run(store, settings, old_id)
+        assert count == 2 and new_id != old_id
+        async with store.pool.connection() as conn:
+            runs = await (
+                await conn.execute(
+                    "SELECT run_id,state,routes FROM jf_llm_runs WHERE run_id IN (%s,%s)",
+                    (old_id, new_id),
+                )
+            ).fetchall()
+            checkpoint = await (
+                await conn.execute(
+                    "SELECT value FROM jf_kv WHERE key=%s",
+                    (f"{name}:llm_continuation:{new_id}",),
+                )
+            ).fetchone()
+            acquisition = await (
+                await conn.execute(
+                    "SELECT value FROM jf_kv WHERE key=%s",
+                    (f"{name}:llm_acquisition:{new_id}",),
+                )
+            ).fetchone()
+            scope = await (
+                await conn.execute(
+                    "SELECT paused_reason FROM jf_llm_scopes WHERE scope=%s", (name,)
+                )
+            ).fetchone()
+        assert {run["run_id"]: run["state"] for run in runs} == {
+            old_id: "completed",
+            new_id: "waiting",
+        }
+        assert all(run["routes"] == routes for run in runs)
+        assert json.loads(checkpoint["value"]) == references
+        assert acquisition["value"] == "2026-11-13T06:50:00+00:00"
+        assert (await store.get(unknown_id))["state"] == "cancelled"
+        assert (await store.get(failed_id))["state"] == "failed"
+        assert scope["paused_reason"] is None
+    finally:
+        async with store.pool.connection() as conn:
+            await conn.execute(
+                "DELETE FROM jf_kv WHERE key=ANY(%s)",
+                (
+                    [old_key, old_acquisition]
+                    + (
+                        [f"{name}:llm_continuation:{new_id}", f"{name}:llm_acquisition:{new_id}"]
+                        if new_id
+                        else []
+                    ),
+                ),
+            )
+        await store.close()

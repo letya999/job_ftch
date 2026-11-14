@@ -103,6 +103,10 @@ uv run python scripts/check_docs_generated.py
 - `job_ftch/adapters/telegram_bot/runtime.dev.yaml`,
   `job_ftch/adapters/telegram_bot/runtime.prod.yaml`.
 
+Для CLIProxy сверить `timeout_seconds` основного профиля в обоих optional
+overlays (`runtime.llm_queue.yaml` и `runtime.home_egress.yaml`): 360 секунд.
+OCR остаётся на 20 секундах.
+
 Текущий production recipe требует:
 
 - `embedding_enabled: false`;

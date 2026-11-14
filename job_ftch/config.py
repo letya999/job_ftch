@@ -78,7 +78,7 @@ class LLMProviderProfile(BaseModel):
     backend: str = "openai"
     base_url: str | None = None
     credential_ref: str = "JOB_FTCH_OPENAI_API_KEY"
-    timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
+    timeout_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
     max_retries: int = Field(default=2, ge=0, le=10)
     structured_mode: Literal["tools", "json"] = "tools"
     capabilities: tuple[str, ...] = ("text", "structured")
