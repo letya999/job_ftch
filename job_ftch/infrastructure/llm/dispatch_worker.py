@@ -8,6 +8,7 @@ import json
 import os
 import random
 import sys
+import uuid
 from datetime import UTC, datetime, timedelta
 from math import ceil
 from pathlib import Path
@@ -20,6 +21,7 @@ import procrastinate
 import structlog
 from psycopg.types.json import Jsonb
 
+from job_ftch.application.tenant_locks import tenant_run_lock
 from job_ftch.config import Settings, get_settings
 from job_ftch.infrastructure.llm import dispatch_metrics
 from job_ftch.infrastructure.llm.dispatch_policy import (
@@ -27,7 +29,11 @@ from job_ftch.infrastructure.llm.dispatch_policy import (
     classify_response,
     retry_time,
 )
-from job_ftch.infrastructure.llm.dispatch_store import DispatchStore, profile_revision
+from job_ftch.infrastructure.llm.dispatch_store import (
+    DispatchStore,
+    profile_revision,
+    route_revision,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -618,6 +624,153 @@ class LLMWorker:
             await self.close()
 
 
+async def recover_run(store: DispatchStore, settings: Settings, run_id: str) -> tuple[str, int]:
+    if settings.tenant_lock_dir is None:
+        raise ValueError("Recovery requires the bot's shared tenant lock directory")
+    await store.open()
+    async with store.pool.connection() as conn:
+        tenant = await (
+            await conn.execute("SELECT tenant_id FROM jf_llm_runs WHERE run_id=%s", (run_id,))
+        ).fetchone()
+    if tenant is None:
+        raise ValueError("Unknown run ID")
+    async with (
+        tenant_run_lock(settings, tenant["tenant_id"], timeout=0),
+        store.pool.connection() as conn,
+        conn.transaction(),
+    ):
+        run = await (
+            await conn.execute("SELECT * FROM jf_llm_runs WHERE run_id=%s FOR UPDATE", (run_id,))
+        ).fetchone()
+        if run is None or run["state"] != "operator" or run["reason"] != "operator":
+            raise ValueError("Run is not held for operator review")
+        routes = json.dumps(
+            {
+                name: route_revision(settings, name)
+                for name in sorted(
+                    {
+                        binding.provider
+                        for binding in settings.llm_bindings.values()
+                        if settings.llm_provider_profiles[binding.provider].cliproxy_dispatch
+                    }
+                )
+            },
+            sort_keys=True,
+        )
+        if run["routes"] != routes:
+            raise ValueError("Run route changed; review credentials and account generation")
+        siblings = await (
+            await conn.execute(
+                "SELECT count(*) AS n FROM jf_llm_runs WHERE tenant_id=%s AND selector=%s "
+                "AND run_id<>%s AND state IN ('active','waiting','operator')",
+                (run["tenant_id"], run["selector"], run_id),
+            )
+        ).fetchone()
+        if siblings and siblings["n"]:
+            raise ValueError("Another logical run is active for this selector")
+        blocked = await (
+            await conn.execute(
+                "SELECT count(*) AS n FROM jf_llm_requests WHERE logical_run_id=%s "
+                "AND (state IN ('pending','running','cancelled') OR "
+                "(state='failed' AND coalesce(error,'')<>'run_route_requires_operator'))",
+                (run_id,),
+            )
+        ).fetchone()
+        if blocked and blocked["n"]:
+            raise ValueError("Resolve other outstanding requests first")
+        unknown = await (
+            await conn.execute(
+                "SELECT request_id,scope,error,profile FROM jf_llm_requests "
+                "WHERE logical_run_id=%s AND state='uncertain' FOR UPDATE",
+                (run_id,),
+            )
+        ).fetchall()
+        if len(unknown) != 1 or unknown[0]["error"] != "upstream_outcome_unknown":
+            raise ValueError("Expected exactly one reviewed unknown upstream outcome")
+        request = unknown[0]
+        profile = settings.llm_provider_profiles.get(request["profile"])
+        if not profile or not profile.cliproxy_dispatch:
+            raise ValueError("Recovery is only available for protected CLIProxy requests")
+        scope = await (
+            await conn.execute(
+                "SELECT paused_reason FROM jf_llm_scopes WHERE scope=%s FOR UPDATE",
+                (request["scope"],),
+            )
+        ).fetchone()
+        other_unknown = await (
+            await conn.execute(
+                "SELECT count(*) AS n FROM jf_llm_requests WHERE scope=%s AND state='uncertain'",
+                (request["scope"],),
+            )
+        ).fetchone()
+        if (
+            not scope
+            or scope["paused_reason"] != "uncertain"
+            or not other_unknown
+            or other_unknown["n"] != 1
+        ):
+            raise ValueError("Account pause or unknown-outcome count changed")
+        old_key = f"{run['tenant_id']}:llm_continuation:{run_id}"
+        checkpoint = await (
+            await conn.execute("SELECT value FROM jf_kv WHERE key=%s FOR UPDATE", (old_key,))
+        ).fetchone()
+        if checkpoint is None:
+            raise ValueError("Observation checkpoint is missing")
+        references = json.loads(checkpoint["value"])
+        if not isinstance(references, list) or any(
+            not isinstance(ref, list)
+            or len(ref) != 2
+            or not all(isinstance(part, str) and part for part in ref)
+            for ref in references
+        ):
+            raise ValueError("Invalid observation checkpoint")
+        ttl = min(
+            settings.llm_dispatch_policies[
+                settings.llm_provider_profiles[name].quota_scope or name
+            ].request_ttl_seconds
+            for name in json.loads(routes)
+        )
+        replacement = uuid.uuid4().hex
+        await conn.execute(
+            "UPDATE jf_llm_requests SET state='cancelled',updated_at=now() WHERE request_id=%s",
+            (request["request_id"],),
+        )
+        await conn.execute(
+            "UPDATE jf_llm_runs SET state='completed',"
+            "report_request_id=coalesce(report_request_id,'skipped:operator_release'),"
+            "updated_at=now() WHERE run_id=%s",
+            (run_id,),
+        )
+        await conn.execute(
+            "INSERT INTO jf_llm_runs(run_id,tenant_id,selector,routes,state,not_before,"
+            "expires_at,summary) VALUES (%s,%s,%s,%s,'waiting',now(),%s,%s)",
+            (
+                replacement,
+                run["tenant_id"],
+                run["selector"],
+                run["routes"],
+                datetime.now(UTC) + timedelta(seconds=ttl),
+                Jsonb({"completion_state": "waiting_llm"}),
+            ),
+        )
+        await conn.execute(
+            "INSERT INTO jf_kv(key,value,updated_at) VALUES (%s,%s,now())",
+            (f"{run['tenant_id']}:llm_continuation:{replacement}", checkpoint["value"]),
+        )
+        await conn.execute(
+            "INSERT INTO jf_kv(key,value,updated_at) SELECT %s,value,now() FROM jf_kv WHERE key=%s",
+            (
+                f"{run['tenant_id']}:llm_acquisition:{replacement}",
+                f"{run['tenant_id']}:llm_acquisition:{run_id}",
+            ),
+        )
+        await conn.execute(
+            "UPDATE jf_llm_scopes SET paused_reason=NULL WHERE scope=%s",
+            (request["scope"],),
+        )
+        return replacement, len(references)
+
+
 async def admin(args: argparse.Namespace) -> None:
     worker = LLMWorker(get_settings())
     store = worker.store
@@ -671,6 +824,11 @@ async def admin(args: argparse.Namespace) -> None:
                     (args.target,),
                 )
             print("Run released after operator review; account pause is unchanged")
+        elif args.command == "recover-run":
+            if not args.reviewed_unknown:
+                raise ValueError("Review the unknown upstream outcome before recovery")
+            replacement, references = await recover_run(store, worker.settings, args.target)
+            print(json.dumps({"new_run_id": replacement, "checkpoint_references": references}))
         else:
             await store.open()
             async with store.pool.connection() as conn:
@@ -710,11 +868,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=["init", "worker", "status", "pause", "resume", "cancel", "report", "release-run"],
+        choices=[
+            "init",
+            "worker",
+            "status",
+            "pause",
+            "resume",
+            "cancel",
+            "report",
+            "release-run",
+            "recover-run",
+        ],
     )
     parser.add_argument("target", nargs="?")
+    parser.add_argument("--reviewed-unknown", action="store_true")
     args = parser.parse_args()
-    if args.command in {"pause", "resume", "cancel", "report", "release-run"} and not args.target:
+    if (
+        args.command in {"pause", "resume", "cancel", "report", "release-run", "recover-run"}
+        and not args.target
+    ):
         parser.error("target scope/request ID is required")
     if sys.platform == "win32":
         with asyncio.Runner(loop_factory=asyncio.SelectorEventLoop) as runner:

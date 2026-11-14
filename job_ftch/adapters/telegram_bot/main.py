@@ -364,7 +364,11 @@ async def _send_scheduler_run_report(
         logger.warning("scheduler_owner_report_state_failed", tenant_id=tenant_id, error=str(exc))
     report = build_runtime_run_report(run_result, duration_seconds=duration_seconds)
     footer = render_runtime_run_footer(report)
-    if report.completion_state == "waiting_llm" and report.llm_health_error == "continuation_retry":
+    if report.completion_state == "waiting_llm" and report.llm_health_error == "operator":
+        heading = "🚨 Автозапуск остановлен: нужен оператор"
+    elif (
+        report.completion_state == "waiting_llm" and report.llm_health_error == "continuation_retry"
+    ):
         heading = "⏳ Автозапуск ожидает продолжения после ошибки"
     elif report.completion_state == "waiting_llm":
         heading = "⏳ Автозапуск ожидает LLM-очередь"
@@ -851,7 +855,11 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     await _maybe_await(
                         store.set_run_state("bot_scheduler:last_run_emitted", str(emitted))
                     )
-                    notice = str(getattr(run_result, "completion_state", ""))
+                    notice = (
+                        "operator"
+                        if preflight_message == "operator"
+                        else str(getattr(run_result, "completion_state", ""))
+                    )
                     last_owner_report = _parse_scheduler_timestamp(
                         await _maybe_await(
                             store.get_run_state("bot_scheduler:last_owner_report_success_at")
@@ -872,7 +880,9 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                             duration_seconds=int(time.monotonic() - run_monotonic_start),
                             channel_sent=0,
                             skipped_reason=(
-                                "обработка ожидает LLM"
+                                "LLM-маршрут поставлен на паузу"
+                                if notice == "operator"
+                                else "обработка ожидает LLM"
                                 if notice == "waiting_llm"
                                 else "ingestion не запускался"
                             ),

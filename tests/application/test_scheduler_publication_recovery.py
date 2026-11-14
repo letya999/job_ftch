@@ -125,6 +125,28 @@ async def test_waiting_replay_reports_again_after_schedule_interval(
 
 
 @pytest.mark.asyncio
+async def test_operator_hold_alerts_owner_after_a_recent_waiting_report(scheduler):
+    store, runner, bot, _, _ = scheduler
+    await store.set_run_state("bot_scheduler:llm_notice", "waiting_llm")
+    await store.set_run_state(
+        "bot_scheduler:last_owner_report_success_at", datetime.now(UTC).isoformat()
+    )
+    runner.run_tenant = AsyncMock(
+        return_value=RunSummary(completion_state="waiting_llm", llm_health_error="operator")
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await bot_main._run_scheduler_loop(runner, bot)
+
+    bot_main._send_scheduler_run_report.assert_awaited_once()
+    assert await store.get_run_state("bot_scheduler:llm_notice") == "operator"
+    assert (
+        bot_main._send_scheduler_run_report.await_args.kwargs["skipped_reason"]
+        == "LLM-маршрут поставлен на паузу"
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("completion", ["completed", "waiting_llm"])
 async def test_replayed_accept_publishes_from_backlog_outside_attempt_window(
     scheduler, make_job_record, completion
