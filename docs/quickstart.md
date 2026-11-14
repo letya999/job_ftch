@@ -1,7 +1,7 @@
 ---
 title: "Быстрый старт"
 description: "Быстрый локальный запуск job_ftch на fixture tenant без внешних сервисов."
-updated: 2026-11-08
+updated: 2026-11-14
 ---
 # Быстрый старт
 
@@ -23,6 +23,8 @@ CLIProxyAPI и домашний выход через Android опциональ
 [настройки провайдеров](adapters/runtime_and_env.md) и
 [runbook](operations/llm-queue-and-home-egress.md). Fixture-сценарий ниже
 не требует этих компонентов.
+Для защищённого CLIProxy при неизвестном исходе запроса используйте описанное
+там ручное восстановление; повторять запрос автоматически нельзя.
 
 ## 2. Tenant config для smoke-запуска
 

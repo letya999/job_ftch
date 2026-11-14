@@ -64,3 +64,30 @@ async def test_scheduler_owner_report_failure_is_persisted_without_raising() -> 
     assert store.state["bot_scheduler:last_owner_report_attempt_at"]
     assert store.state["bot_scheduler:last_owner_report_error"] == 'bad <future> & "source"'
     assert "bot_scheduler:last_owner_report_success_at" not in store.state
+
+
+@pytest.mark.asyncio
+async def test_operator_hold_report_has_distinct_heading() -> None:
+    sent: list[str] = []
+
+    class Store:
+        async def set_run_state(self, *_: object) -> None:
+            pass
+
+    class Bot:
+        async def send_message(self, _target: str, text: str, **_: object) -> None:
+            sent.append(text)
+
+    await _send_scheduler_run_report(
+        Bot(),
+        store=Store(),
+        tenant_id="ai_jobs",
+        publish_user_id="42",
+        run_result=type(
+            "Summary", (), {"completion_state": "waiting_llm", "llm_health_error": "operator"}
+        )(),
+        duration_seconds=1,
+        channel_sent=0,
+    )
+
+    assert sent and "🚨 Автозапуск остановлен: нужен оператор" in sent[0]
