@@ -642,7 +642,15 @@ async def recover_run(store: DispatchStore, settings: Settings, run_id: str) -> 
         run = await (
             await conn.execute("SELECT * FROM jf_llm_runs WHERE run_id=%s FOR UPDATE", (run_id,))
         ).fetchone()
-        if run is None or run["state"] != "operator" or run["reason"] != "operator":
+        if (
+            run is None
+            or run["state"] != "operator"
+            or run["reason"]
+            not in {
+                "operator",
+                "run_expired",
+            }
+        ):
             raise ValueError("Run is not held for operator review")
         routes = json.dumps(
             {

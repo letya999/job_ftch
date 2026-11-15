@@ -1181,8 +1181,9 @@ async def test_resume_guard_preserves_unknown_outcome_and_account_pause(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["operator", "run_expired"])
 async def test_recover_run_atomically_moves_checkpoint_under_tenant_lock(
-    dispatch_settings, tmp_path
+    dispatch_settings, tmp_path, reason
 ):
     from psycopg.types.json import Jsonb
 
@@ -1209,9 +1210,15 @@ async def test_recover_run_atomically_moves_checkpoint_under_tenant_lock(
             )
             await conn.execute(
                 "INSERT INTO jf_llm_runs(run_id,tenant_id,selector,routes,state,expires_at,"
-                "reason,summary) VALUES (%s,%s,'default',%s,'operator',now()+interval '1 day',"
-                "'operator',%s)",
-                (old_id, name, routes, Jsonb({"completion_state": "waiting_llm"})),
+                "reason,summary) VALUES (%s,%s,'default',%s,'operator',%s,%s,%s)",
+                (
+                    old_id,
+                    name,
+                    routes,
+                    datetime.now(UTC) + timedelta(days=-1 if reason == "run_expired" else 1),
+                    reason,
+                    Jsonb({"completion_state": "waiting_llm"}),
+                ),
             )
             await conn.execute(
                 "INSERT INTO jf_llm_scopes(scope,paused_reason) VALUES (%s,'uncertain')",
