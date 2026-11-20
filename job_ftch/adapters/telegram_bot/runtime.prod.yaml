@@ -10,12 +10,12 @@ bot_channel_throttle_seconds: 45.0
 review_output_backend: store
 rejected_output_backend: store
 
-# ADR 102: the bot uses CLIProxy for ETL while the direct OpenAI quota is blocked.
+# Production LLM calls use the paid OpenAI API; CLIProxy remains an optional profile.
 llm_preflight_timeout_seconds: 30.0
 llm_provider_profiles:
   openai_main:
     backend: openai
-    capabilities: [text, structured]
+    capabilities: [text, structured, vision]
   cliproxy_main:
     backend: openai
     base_url: http://cliproxy:8317/v1
@@ -29,11 +29,11 @@ llm_provider_profiles:
     capabilities: [vision]
 
 llm_bindings:
-  extraction: {provider: cliproxy_main, model: gemini-3.8-flash-high}
-  relevance: {provider: cliproxy_main, model: gemini-3.8-flash-high}
-  ontology: {provider: cliproxy_main, model: gemini-3.8-flash-high}
-  presentation: {provider: cliproxy_main, model: gemini-3.8-flash-high}
-  captcha_image: {provider: cliproxy_captcha, model: gemini-3.8-flash-high, capability: vision}
+  extraction: {provider: openai_main, model: gpt-5.4-nano}
+  relevance: {provider: openai_main, model: gpt-4.1-mini}
+  ontology: {provider: openai_main, model: gpt-4.1-mini}
+  presentation: {provider: openai_main, model: gpt-4.1-mini}
+  captcha_image: {provider: openai_main, model: gpt-4.1-mini, capability: vision}
 
 embedding_provider: sentence_transformers
 embedding_model: BAAI/bge-m3
