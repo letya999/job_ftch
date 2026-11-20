@@ -1,7 +1,7 @@
 ---
 title: "Runtime и env: где правда"
 description: "Короткая карта того, какие файлы являются source of truth для конфигурации и переменных окружения."
-updated: 2026-11-14
+updated: 2026-11-20
 ---
 # Runtime и env: где правда
 
@@ -22,7 +22,7 @@ updated: 2026-11-14
 - `config/runtime.llm_queue.yaml` и `config/runtime.home_egress.yaml` — полный CLIProxy profile overlay; оба задают основной HTTP timeout 360 секунд.
 - CLIProxy-only run sessions, jitter, classified deferred states and optional aggregate reports require an explicit `gateway: cliproxy` queued profile (ADR 107); direct compatible requests retain their previous behavior.
 - `job_ftch/adapters/telegram_bot/runtime.dev.yaml` — bot-специфичный dev runtime.
-- `job_ftch/adapters/telegram_bot/runtime.prod.yaml` — bot-специфичный prod runtime, включая явные CLIProxy ETL bindings по ADR 102.
+- `job_ftch/adapters/telegram_bot/runtime.prod.yaml` — bot-специфичный prod runtime; текущие ETL и CAPTCHA bindings используют оплаченный OpenAI API, CLIProxy profile остаётся опциональным.
 - `job_ftch/adapters/telegram_bot/config/tenants/*.yaml` — tenant-level sources и wiring.
 - `scripts/check_config_layers.py` — машинная проверка границ между tenant и runtime слоями.
 

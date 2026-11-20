@@ -18,7 +18,7 @@ llm_dispatch_policies:
 llm_provider_profiles:
   openai_main:
     backend: openai
-    capabilities: [text, structured]
+    capabilities: [text, structured, vision]
   cliproxy_main:
     gateway: cliproxy
     timeout_seconds: 360.0

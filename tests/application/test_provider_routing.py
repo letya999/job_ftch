@@ -29,33 +29,35 @@ def test_tenant_settings_keep_implicit_heuristic_provider() -> None:
     assert settings.llm_provider_profiles["openai_main"].backend == "heuristic"
 
 
-def test_production_bot_routes_etl_through_cliproxy() -> None:
+def test_production_bot_routes_llm_through_paid_openai() -> None:
     config = yaml.safe_load(
         Path("job_ftch/adapters/telegram_bot/runtime.prod.yaml").read_text(encoding="utf-8")
     )
     settings = Settings.model_validate(config)
 
     assert settings.llm_preflight_timeout_seconds == 30.0
-    for name in ("extraction", "relevance", "ontology", "presentation"):
+    for name in ("extraction", "relevance", "ontology", "presentation", "captcha_image"):
         binding = settings.llm_bindings[name]
-        assert binding.provider == "cliproxy_main"
-        assert binding.model == "gemini-3.8-flash-high"
+        assert binding.provider == "openai_main"
+        assert binding.model == ("gpt-5.4-nano" if name == "extraction" else "gpt-4.1-mini")
+    assert settings.llm_provider_profiles["openai_main"].credential_ref == "JOB_FTCH_OPENAI_API_KEY"
+    assert "vision" in settings.llm_provider_profiles["openai_main"].capabilities
     profile = settings.llm_provider_profiles["cliproxy_main"]
     assert profile.base_url == "http://cliproxy:8317/v1"
     assert profile.credential_ref == "JOB_FTCH_CLIPROXY_API_KEY"
     assert profile.structured_mode == "json"
-    assert settings.llm_bindings["captcha_image"].provider == "cliproxy_captcha"
-    assert settings.llm_provider_profiles["cliproxy_captcha"].base_url == "http://cliproxy:8317/v1"
     tenant = TenantConfig(tenant_id="test", display_name="Test")
-    assert (
-        tenant_to_settings(tenant, settings).llm_bindings["extraction"].provider == "cliproxy_main"
-    )
+    assert tenant_to_settings(tenant, settings).llm_bindings["extraction"].provider == "openai_main"
 
 
 def test_cliproxy_json_mode_reaches_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     config = yaml.safe_load(
         Path("job_ftch/adapters/telegram_bot/runtime.prod.yaml").read_text(encoding="utf-8")
     )
+    config["llm_bindings"]["extraction"] = {
+        "provider": "cliproxy_main",
+        "model": "gemini-3.8-flash-high",
+    }
     settings = Settings.model_validate(config)
     passed: list[Settings] = []
 
