@@ -166,7 +166,7 @@ def test_multi_office_post_7645_keeps_both_hiring_countries() -> None:
     )
     facts = publication_facts(job)
     assert facts.country is None and facts.city is None
-    assert facts.location == "Limassol, Cyprus / Dubai, UAE"
+    assert facts.location == "Лимасол, Кипр, Дубай, ОАЭ"
     for basis in ("eligibility", "office"):
         for code, expected in (("AE", "allow"), ("CY", "allow"), ("KZ", "skip")):
             decision = evaluate_audience(
@@ -213,6 +213,75 @@ def test_explicit_residence_requirement_in_remote_source() -> None:
     job = posting(work_mode="remote", description_raw="Note: You have to be based in Portugal!")
     decision = evaluate_audience(job, PublicationPolicy(eligible_countries=("KZ",)))
     assert decision.status == "skip" and decision.evidence["remote_restrictions"] == "Portugal"
+
+
+@pytest.mark.parametrize(
+    ("fields", "countries", "expected"),
+    [
+        ({"location": "Костанай"}, ("KZ",), "allow"),
+        (
+            {
+                "work_mode": "remote",
+                "description_raw": "Условия работы: работа из любой точки мира.",
+            },
+            ("KZ",),
+            "allow",
+        ),
+        (
+            {
+                "work_mode": "remote",
+                "description_raw": "Не допускается работа из любой точки мира.",
+            },
+            ("KZ",),
+            "review",
+        ),
+        (
+            {"remote_restrictions": "РФ или Армения; командировки в Ереван 1 раз в месяц"},
+            ("AM",),
+            "allow",
+        ),
+        (
+            {"remote_restrictions": "РФ или Армения; командировки в Ереван 1 раз в месяц"},
+            ("KZ",),
+            "skip",
+        ),
+        (
+            {"remote_restrictions": "Based in Ireland; occasional international travel required"},
+            ("RU",),
+            "skip",
+        ),
+        ({"remote_restrictions": "United States and Canada only"}, ("CA",), "allow"),
+        ({"remote_restrictions": "United States and Canada only"}, ("KZ",), "skip"),
+        (
+            {"remote_restrictions": "Canada; additional hiring restrictions apply"},
+            ("CA",),
+            "review",
+        ),
+    ],
+)
+def test_locations_and_restrictions_in_independent_source_sample(
+    fields, countries, expected
+) -> None:
+    assert (
+        evaluate_audience(posting(**fields), PublicationPolicy(eligible_countries=countries)).status
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        ("Santa Clara, CA, US", "skip"),
+        ("Toronto, CA", "allow"),
+        ("Unverified City, CA", "review"),
+        ("Canada, US", "allow"),
+    ],
+)
+def test_canada_filter_distinguishes_state_abbreviations(address: str, expected: str) -> None:
+    result = evaluate_audience(
+        posting(location=address, work_mode="onsite"), PublicationPolicy(eligible_countries=("CA",))
+    )
+    assert result.status == expected
 
 
 @pytest.mark.parametrize(

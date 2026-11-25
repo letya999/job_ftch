@@ -140,7 +140,8 @@ class PublicationFacts:
 def publication_facts(job: object) -> PublicationFacts:
     city, country, location = (getattr(job, key, None) for key in ("city", "country", "location"))
     geo = normalize_geo_sources((city, country) if city else (location, country))
-    options = normalize_geo_sources((location,)).country_options if city else geo.country_options
+    listed = normalize_geo_sources((location,)) if city and location else geo
+    options = listed.country_options
     metadata = getattr(job, "metadata", {}) or {}
     recorded_locations = metadata.get("publication_locations")
     alternatives = [
@@ -210,7 +211,7 @@ def publication_facts(job: object) -> PublicationFacts:
         city=None if options else geo.city or normalize_geo_sources((_known(city),)).display,
         languages=languages,
         work_mode=mode,
-        location=location if options else geo.display,
+        location=listed.display if options else geo.display,
         country_options=options,
         remote_restrictions=restrictions,
     )
@@ -218,11 +219,18 @@ def publication_facts(job: object) -> PublicationFacts:
 
 _WORLD = {"worldwide", "anywhere in the world", "anywhere", "по всему миру", "из любой страны"}
 _REMOTE_WORLD = re.compile(
-    r"\b(?:remote(?: work)?|work remotely|удал[её]н(?:ка|но))\s*[(:—–-]?\s*"
-    r"(?:(?:from|из)\s+)?(?:worldwide|anywhere in the world|глобально|по всему миру|любой страны)\b",
+    r"\b(?:работа(?:ть)? из любой точки мира|(?:remote(?: work)?|work remotely|удал[её]н(?:ка|но))\s*[(:—–-]?\s*"
+    r"(?:(?:from|из)\s+)?(?:worldwide|anywhere in the world|глобально|по всему миру|любой страны))\b",
     re.I,
 )
-_QUALIFIERS = re.compile(r"^(?:only in|only|только из|только в)\s+|\s+(?:only|только)$", re.I)
+_QUALIFIERS = re.compile(
+    r"^(?:only in|only|based in|только из|только в)\s+|\s+(?:only|только)$", re.I
+)
+_TRAVEL_NOTE = re.compile(
+    r";\s*(?:(?:(?:occasional|international|business)\s+)*travel (?:is )?required|"
+    r"командировки в [а-яё-]+(?: \d+ раз\w* в (?:неделю|месяц|год))?)\s*[.!]?$",
+    re.I,
+)
 _COMPANY_RU = re.compile(
     r"\b(?:рабочий язык компании\s*[-—–:]\s*русский"
     r"|company(?:'s)? working language is russian|мы\s*[-—–:]?\s*русскоязычная компания)\b",
@@ -256,7 +264,11 @@ def _eligible(job: object, facts: PublicationFacts, allowed: tuple[str, ...]) ->
             if None not in excluded and exclusion[0].strip().casefold() in _WORLD:
                 return True
             return None
-        tokens = re.split(r"\s*[,;/|]\s*|\s+(?:or|или)\s+", restriction.strip())
+        tokens = re.split(
+            r"\s*[,;/|]\s*|\s+(?:or|and|или|и)\s+",
+            _TRAVEL_NOTE.sub("", restriction.strip()),
+            flags=re.I,
+        )
         codes = [country_code(_QUALIFIERS.sub("", token).strip()) for token in tokens]
         if any(code in allowed for code in codes):
             return True if all(codes) else None
@@ -269,10 +281,18 @@ def _eligible(job: object, facts: PublicationFacts, allowed: tuple[str, ...]) ->
             metadata.get("original_posting_text") or getattr(job, "description_raw", None) or ""
         )
         world = _REMOTE_WORLD.search(original) if isinstance(original, str) else None
-        if world and not re.search(
-            r"\b(?:except|excluding|but|not|кроме|исключением|только)\b",
-            original[world.end() : world.end() + 100],
-            re.I,
+        if (
+            world
+            and not re.search(
+                r"\b(?:not|never|нельзя|невозможна|не допускается)\s*$",
+                original[max(0, world.start() - 28) : world.start()],
+                re.I,
+            )
+            and not re.search(
+                r"\b(?:except|excluding|but|not|кроме|но|исключением|только|невозможн\w*|запрещ\w*)\b",
+                original[world.end() : world.end() + 100],
+                re.I,
+            )
         ):
             return True
         return None

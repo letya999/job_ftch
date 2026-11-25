@@ -15,6 +15,17 @@ _PAREN_NOTE = re.compile(r"\s*\([^)]*\)")
 _EXCLUDED_PLACES = re.compile(
     r"\b(?:excluding|except|outside(?: of)?|кроме|за исключением|вне)\b", re.I
 )
+_US_ADDRESS = re.compile(
+    r"([^,;/|]+),\s*([A-Z]{2}),\s*(US|USA|United States(?: of America)?)", re.I
+)
+# fmt: off
+_US_STATE_CODES = frozenset({
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO",
+    "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA",
+    "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+})
+# fmt: on
 
 _GEO_NOISE = frozenset(
     {
@@ -101,6 +112,18 @@ _COUNTRY_ALIASES = {
     "greece": "Греция",
     "cn": "Китай",
     "china": "Китай",
+    "sg": "Сингапур",
+    "singapore": "Сингапур",
+    "jp": "Япония",
+    "japan": "Япония",
+    "mx": "Мексика",
+    "mexico": "Мексика",
+    "dk": "Дания",
+    "denmark": "Дания",
+    "ie": "Ирландия",
+    "ireland": "Ирландия",
+    "ca": "Канада",
+    "canada": "Канада",
     "united states of america": "США",
 }
 
@@ -134,6 +157,14 @@ _CITY_ALIASES = {
     "barcelona": "Барселона",
     "shanghai": "Шанхай",
     "batumi": "Батуми",
+    "kostanay": "Костанай",
+    "tijuana": "Тихуана",
+    "tokyo": "Токио",
+    "copenhagen": "Копенгаген",
+    "toronto": "Торонто",
+    "san francisco": "Сан-Франциско",
+    "los angeles": "Лос-Анджелес",
+    "santa clara": "Санта-Клара",
 }
 
 _COUNTRY_ALIASES.update({name.casefold(): name for name in _COUNTRY_ALIASES.values()})
@@ -170,6 +201,14 @@ _CITY_COUNTRIES = {
     "Барселона": "Испания",
     "Шанхай": "Китай",
     "Батуми": "Грузия",
+    "Костанай": "Казахстан",
+    "Тихуана": "Мексика",
+    "Токио": "Япония",
+    "Копенгаген": "Дания",
+    "Торонто": "Канада",
+    "Сан-Франциско": "США",
+    "Лос-Анджелес": "США",
+    "Санта-Клара": "США",
     "Berlin": "Германия",
     "Берлин": "Германия",
 }
@@ -203,7 +242,23 @@ def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
         if not source:
             continue
         positive = _EXCLUDED_PLACES.split(_PAREN_NOTE.sub("", source), maxsplit=1)[0]
-        for chunk in _GEO_SPLIT.split(positive):
+        address = _US_ADDRESS.fullmatch(positive.strip())
+        if (
+            address
+            and address[2].upper() in _US_STATE_CODES
+            and address[1].strip().casefold() not in _COUNTRY_ALIASES
+        ):
+            positive = f"{address[1]}, {address[3]}"
+        chunks = _GEO_SPLIT.split(positive)
+        # In an address, CA alone can mean California or Canada.
+        if (
+            len(chunks) == 2
+            and chunks[1].strip() == "CA"
+            and chunks[0].strip().casefold() not in _COUNTRY_ALIASES
+        ):
+            known = _CITY_COUNTRIES.get(normalize_geo_chunk(chunks[0]) or "")
+            chunks = [chunks[0], known] if known else [chunks[0]]
+        for chunk in chunks:
             normalized = normalize_geo_chunk(chunk)
             if normalized and normalized.casefold() not in {item.casefold() for item in seen}:
                 seen.append(normalized)
@@ -236,12 +291,14 @@ def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
             None,
         )
 
+    alternatives = tuple(dict.fromkeys(options)) if len(set(options)) > 1 else ()
     return GeoNormalization(
-        display=", ".join(seen[:3]) if seen else None,
+        display=", ".join(seen[:6] if alternatives and countries and known_cities else seen[:3])
+        or None,
         city=city,
         country=country,
         corrections=tuple(corrections),
-        country_options=tuple(dict.fromkeys(options)) if len(set(options)) > 1 else (),
+        country_options=alternatives,
     )
 
 

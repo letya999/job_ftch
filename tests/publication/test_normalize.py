@@ -177,7 +177,7 @@ class TestFormatGeo:
 
     def test_city_same_as_country_no_duplicate(self) -> None:
         job = _job(city="Singapore", country="Singapore")
-        assert format_geo(job) == "Singapore"
+        assert format_geo(job) == "Сингапур"
 
     def test_falls_back_to_free_text_location(self) -> None:
         """Site parsers fill `location` far more often than city/country."""
