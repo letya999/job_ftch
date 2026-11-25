@@ -58,6 +58,28 @@ def test_probe_runs_are_excluded_from_the_quality_window() -> None:
     assert is_pipeline_run(full) is True
 
 
+def test_unfetched_boards_and_partial_results_do_not_become_reliable() -> None:
+    runs = [
+        _run(
+            run_id=str(i),
+            fetched=10,
+            outcomes=[
+                {"source_id": "career_site:a", "status": "not_due"},
+                {"source_id": "career_site:b", "status": "partial_with_items", "yielded": 10},
+                {"source_id": "career_site:c", "status": "unconfirmed_empty"},
+                {"source_id": "career_site:d", "status": "policy_not_scraped"},
+            ],
+            emitted_by={"career_site:a": 0},
+        )
+        for i in range(8)
+    ]
+    stats = classify_source_quality(runs)
+    assert set(stats) == {"b", "c"}
+    for row in stats.values():
+        assert (row.attempted, row.ok, row.reliable) == (8, 0, False)
+    assert stats["b"].yield_sum == 80
+
+
 def test_classify_marks_reliable_rich_and_high_relevance() -> None:
     runs = []
     for index in range(12):

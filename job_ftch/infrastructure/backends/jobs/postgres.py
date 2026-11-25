@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import structlog
+
 from job_ftch.application.contracts import JobGroupStore, JobPersistenceBackend, SearchBackend
+from job_ftch.application.publication_audience import evaluate_audience
 from job_ftch.application.registry import (
     register_job_backend,
     register_job_group_store,
@@ -36,6 +40,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from job_ftch.config import Settings
+    from job_ftch.domain.publication_policy import PublicationPolicy
 
 
 ALLOWED_SEARCH_LANGUAGES = {"simple", "english", "russian"}
@@ -452,17 +457,17 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                 )
             return [load_group(row["raw_json"]) for row in rows]
 
-    async def list_public_canonical_jobs(self, limit: int) -> list[JobRecord]:
+    async def list_public_canonical_jobs(
+        self, limit: int, *, policy: PublicationPolicy | None = None
+    ) -> list[JobRecord]:
         """Read only fields needed by the anonymous public catalog."""
         pool = await self._get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
+        query = """
                 WITH recent AS MATERIALIZED (
-                    SELECT group_id, raw_json->'canonical_job' AS job
+                    SELECT group_id, updated_at, raw_json->'canonical_job' AS job
                     FROM (
-                        SELECT group_id, raw_json
-                        FROM jf_job_groups ORDER BY updated_at DESC LIMIT $1
+                        SELECT group_id, updated_at, raw_json
+                        FROM jf_job_groups ORDER BY updated_at DESC, group_id LIMIT $1 OFFSET $2
                     ) AS selected
                 )
                 SELECT jsonb_build_object(
@@ -471,8 +476,30 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                     'source_kind', job->'source_kind',
                     'source_name', job->'source_name',
                     'title', job->'title',
+                    'title_raw', job->'title_raw',
                     'company', job->'company',
                     'description', left(job->>'description', 360),
+                    'description_raw', CASE
+                        WHEN job->'compensation'->>'currency' IN ('USD', 'EUR', 'GBP', 'CAD', 'AUD', 'SGD', 'CHF')
+                            OR job->'metadata'->>'parser' = 'quick_offer'
+                            OR job->>'source_name' LIKE 'quick_offer%'
+                            OR $3::boolean
+                        THEN coalesce(nullif(job->'metadata'->>'original_posting_text', ''), job->>'description_raw', job->>'description')
+                        ELSE left(coalesce(nullif(job->'metadata'->>'original_posting_text',''), job->>'description_raw'), 2800) END,
+                    'language', coalesce(nullif(job->'language','null'::jsonb), '"unknown"'::jsonb),
+                    'languages_detected', coalesce(nullif(job->'languages_detected','null'::jsonb), '[]'::jsonb),
+                    'role_family', job->'role_family',
+                    'remote_restrictions', job->'remote_restrictions',
+                    'company_canonical', job->'company_canonical',
+                    'metadata', jsonb_strip_nulls(jsonb_build_object(
+                        'detected_language', job->'metadata'->'detected_language',
+                        'publication_locations', job->'metadata'->'publication_locations',
+                        'seniority', job->'metadata'->'seniority',
+                        'grade', job->'metadata'->'grade',
+                        'salary_text', job->'metadata'->'salary_text',
+                        'base_salary_text', job->'metadata'->'base_salary_text',
+                        'compensation_evidence', job->'metadata'->'compensation_evidence',
+                        'compensation_review_reason', job->'metadata'->'compensation_review_reason')),
                     'location', job->'location',
                     'city', job->'city',
                     'region', job->'region',
@@ -485,11 +512,37 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                     'compensation', job->'compensation',
                     'canonical_url', job->'canonical_url'
                 ) AS public_job
-                FROM recent
-                """,
-                limit,
+                FROM recent ORDER BY updated_at DESC, group_id
+                """
+        async with pool.acquire() as conn:
+            if policy is None:
+                rows = await conn.fetch(query, limit, 0, False)
+                return [JobRecord.model_validate_json(row["public_job"]) for row in rows]
+            matched: list[JobRecord] = []
+            decisions: Counter[str] = Counter()
+            offset = 0
+            async with conn.transaction(isolation="repeatable_read", readonly=True):
+                while len(matched) < limit:
+                    rows = await conn.fetch(query, 128, offset, bool(policy.company_languages))
+                    for row in rows:
+                        job = JobRecord.model_validate_json(row["public_job"])
+                        decision = evaluate_audience(job, policy)
+                        decisions[decision.status] += 1
+                        if decision.status == "allow" or policy.shadow:
+                            matched.append(job)
+                            if len(matched) == limit:
+                                break
+                    if len(rows) < 128:
+                        break
+                    offset += len(rows)
+            structlog.get_logger(__name__).info(
+                "public_catalog_audience",
+                version=policy.version,
+                shadow=policy.shadow,
+                counts=dict(decisions),
+                returned=len(matched),
             )
-        return [JobRecord.model_validate_json(row["public_job"]) for row in rows]
+            return matched
 
     async def count(self, since: datetime | None = None) -> int:
         pool = await self._get_pool()

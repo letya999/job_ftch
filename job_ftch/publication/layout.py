@@ -150,6 +150,7 @@ def _default_layout() -> CardLayout:
             BlockSpec(field="summary", max_len=180, omit_if_empty=True),
             BlockSpec(field="key_requirements", prefix="Нужно: ", max_len=160, omit_if_empty=True),
             BlockSpec(field="stack", prefix="Стек: ", max_len=200, omit_if_empty=True),
+            BlockSpec(field="hashtags", omit_if_empty=True),
         ),
         footer=FooterSpec(
             template="{source_label} {link}",

@@ -8,17 +8,11 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-# Slavic languages that should map to 'ru' when detected with low confidence
-# (Cyrillic scripts that share significant vocabulary overlap with Russian)
-_SLAVIC_TO_RU = frozenset({"bg", "uk", "be", "mk", "sr"})
-_SLAVIC_CONFIDENCE_THRESHOLD = 0.8
-
 
 class LinguaLanguageDetector:
     """LanguageDetectorPort implementation using the lingua-language-detector library.
 
-    Supports RU, EN, KZ and 72 other languages.
-    On low-confidence Slavic language detection, normalises to 'ru' (pattern from support_rag).
+    Returns ISO language codes and abstains on ambiguous text.
     """
 
     def __init__(self) -> None:
@@ -37,7 +31,7 @@ class LinguaLanguageDetector:
         return self._detector
 
     def detect(self, text: str) -> str:
-        """Detect language of text. Returns ISO code: 'ru', 'en', 'kz', or 'unknown'."""
+        """Detect the source language without using the writing system as proof."""
         if not text or not text.strip():
             return "unknown"
         try:
@@ -50,26 +44,7 @@ class LinguaLanguageDetector:
             lang_name: str = best.language.iso_code_639_1.name.lower()
             confidence: float = best.value
 
-            # Check if it's a Slavic language with low confidence — remap to 'ru'
-            if lang_name in _SLAVIC_TO_RU and confidence < _SLAVIC_CONFIDENCE_THRESHOLD:
-                return "ru"
-
-            # Common mappings
-            lang_map = {
-                "ru": "ru",
-                "en": "en",
-                "kk": "kz",  # lingua ISO 639-1 for Kazakh
-                "de": "de",
-                "fr": "fr",
-            }
-            return lang_map.get(lang_name, lang_name)
+            return lang_name if confidence >= 0.8 else "unknown"
         except Exception as exc:
             logger.warning("language_detection_failed", error=str(exc))
-            # Heuristic fallback: check for Cyrillic chars
-            cyrillic_chars = sum(1 for c in text if "Ѐ" <= c <= "ӿ")
-            kazakh_chars = sum(1 for c in text if c in "әғқңөұүһӘҒҚҢӨҰҮҺ")
-            if kazakh_chars > 5:
-                return "kz"
-            if cyrillic_chars > len(text) * 0.3:
-                return "ru"
             return "unknown"

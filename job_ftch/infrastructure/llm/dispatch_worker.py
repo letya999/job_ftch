@@ -127,6 +127,15 @@ class LLMWorker:
                 if key.lower() in {"content-type", "retry-after"}
             }
         async with self.store.pool.connection() as conn, conn.transaction():
+            active = await (
+                await conn.execute(
+                    "SELECT 1 FROM jf_llm_requests WHERE request_id=%s "
+                    "AND state IN ('pending','running') FOR UPDATE",
+                    (request_id,),
+                )
+            ).fetchone()
+            if active is None:
+                return
             if state == "uncertain":
                 await conn.execute(
                     "UPDATE jf_llm_scopes s SET paused_reason='uncertain' "
@@ -267,6 +276,15 @@ class LLMWorker:
             return
         async with self.store.pool.connection() as conn, conn.transaction():
             await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (scope,))
+            # An operator can cancel while preflight is awaiting I/O.
+            pending = await (
+                await conn.execute(
+                    "SELECT 1 FROM jf_llm_requests WHERE request_id=%s AND state='pending' FOR UPDATE",
+                    (request_id,),
+                )
+            ).fetchone()
+            if pending is None:
+                return
             await conn.execute(
                 "INSERT INTO jf_llm_scopes(scope) VALUES (%s) ON CONFLICT DO NOTHING", (scope,)
             )
@@ -522,11 +540,13 @@ class LLMWorker:
         self, row: dict[str, Any], due: datetime, *, reason: str | None = None
     ) -> None:
         async with self.store.pool.connection() as conn:
-            await conn.execute(
+            updated = await conn.execute(
                 "UPDATE jf_llm_requests SET state='pending',next_run_at=%s,error=%s,updated_at=now() "
-                "WHERE request_id=%s",
+                "WHERE request_id=%s AND state IN ('pending','running')",
                 (due, reason, row["request_id"]),
             )
+            if not updated.rowcount:
+                return
         if reason:
             dispatch_metrics.waits.add(1, {"reason": reason})
         raise DispatchWait(due)

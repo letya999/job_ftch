@@ -252,13 +252,14 @@ class InMemoryStore:
         )[:limit]
 
     async def list_uncertain_outbox(
-        self, limit: int = 100, *, tenant_id: str | None = None
+        self, limit: int = 100, *, tenant_id: str | None = None, sink_name: str | None = None
     ) -> tuple[OutboxRecord, ...]:
         return tuple(
             record
             for record in self._outbox.values()
             if record.state is OutboxState.UNCERTAIN
             and (tenant_id is None or record.tenant_id == tenant_id)
+            and (sink_name is None or record.sink_name == sink_name)
         )[:limit]
 
     async def list_outbox_attempt(

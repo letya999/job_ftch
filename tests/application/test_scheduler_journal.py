@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -20,6 +21,53 @@ class _Store:
 
     async def set_run_state(self, key: str, value: str) -> None:
         self.state[key] = value
+
+
+@pytest.mark.asyncio
+async def test_full_journal_keeps_newly_completed_slot() -> None:
+    store = _Store()
+    start = datetime(2026, 8, 2, tzinfo=UTC)
+    ids = [(start + timedelta(hours=4 * i)).isoformat() for i in range(128)]
+    store.state["bot_scheduler:journal"] = json.dumps(
+        [{"slot_id": key, "run_state": "succeeded", "publish_state": "succeeded"} for key in ids]
+    )
+    now = datetime(2026, 11, 25, 21, 35, tzinfo=UTC)
+    store.state["bot_scheduler:next_due_at"] = now.isoformat()
+    slot = await ensure_scheduler_slot(store, now=now, interval_seconds=43200)
+    assert slot is not None
+    await update_scheduler_slot(
+        store, str(slot["slot_id"]), run_state="succeeded", publish_state="succeeded"
+    )
+    assert [s["slot_id"] for s in await load_scheduler_journal(store)] == [
+        *ids[1:],
+        now.isoformat(),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_key", ["bot_scheduler:journal", "bot_scheduler:next_due_at"])
+async def test_each_failed_write_leaves_the_scheduled_run_recoverable(failed_key: str) -> None:
+    class FailOnce(_Store):
+        async def set_run_state(self, key: str, value: str) -> None:
+            if key == failed_key:
+                raise OSError("injected interrupted write")
+            await super().set_run_state(key, value)
+
+    now = datetime(2026, 11, 25, 21, 35, tzinfo=UTC)
+    store = FailOnce()
+    store.state["bot_scheduler:next_due_at"] = now.isoformat()
+    with pytest.raises(OSError):
+        await ensure_scheduler_slot(store, now=now, interval_seconds=43200)
+    recovered = _Store()
+    recovered.state = store.state.copy()
+    slot = await ensure_scheduler_slot(recovered, now=now, interval_seconds=43200)
+    assert slot is not None and slot["slot_id"] == now.isoformat()
+    await update_scheduler_slot(
+        recovered, now.isoformat(), run_state="succeeded", publish_state="succeeded"
+    )
+    assert await ensure_scheduler_slot(recovered, now=now, interval_seconds=43200) is None
+    assert recovered.state["bot_scheduler:next_due_at"] == (now + timedelta(hours=12)).isoformat()
+    assert len(await load_scheduler_journal(recovered)) == 1
 
 
 @pytest.mark.asyncio

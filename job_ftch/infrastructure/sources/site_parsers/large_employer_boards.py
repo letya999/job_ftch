@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qsl, urljoin, urlsplit
@@ -14,6 +13,7 @@ from job_ftch.domain import SourceKind
 from job_ftch.infrastructure.sources.browser_utils import navigate, open_page, safe_content
 from job_ftch.infrastructure.sources.career_site import client_for_config
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
+from job_ftch.infrastructure.sources.scrapers.json_ld import parse_html as parse_job_posting
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
     DEFAULT_LISTING_MAX_PAGES,
@@ -675,7 +675,7 @@ class DataArtCareerParser(_EmployerBoardParser):
         while True:
             response = await safe_fetch(
                 client,
-                f"https://www.dataart.team/dataart-team/api/vacancies/filter-content-page?page={page_number}",
+                f"https://websitesapi.dataart.com/dataart-team/api/vacancies/filter-content-page?page={page_number}",
                 follow_redirects=False,
             )
             payload = response.json()
@@ -694,37 +694,35 @@ class DataArtCareerParser(_EmployerBoardParser):
                     raise ValueError("invalid DataArt vacancy identifier")
                 url = f"https://www.dataart.team/vacancies/{slug.lower()}"
                 detail = await safe_fetch(client, url, follow_redirects=False)
-                page = LexborHTMLParser(detail.text)
-                postings = (
-                    json.loads(node.text())
-                    for node in page.css('script[type="application/ld+json"]')
-                )
-                posting = next(
-                    (candidate for candidate in postings if candidate.get("@type") == "JobPosting"),
-                    None,
-                )
+                posting = parse_job_posting(detail.text, url=url)
                 if (
                     posting is None
-                    or not isinstance(posting.get("description"), str)
-                    or not posting["description"].strip()
+                    or (posting.metadata or {}).get("page_type") != "job_posting"
+                    or not posting.title
+                    or not posting.description
+                    or not posting.description.strip()
                 ):
                     raise ValueError("invalid DataArt vacancy detail")
-                description = LexborHTMLParser(posting["description"]).text(
-                    separator="\n", strip=True
-                )
-                locations = ", ".join(
+                description = LexborHTMLParser(posting.description).text(separator="\n", strip=True)
+                locations = posting.locations or [
                     tag["title"]
                     for key in ("countriesTags", "locationTags")
                     for tag in vacancy.get(key, [])
                     if isinstance(tag, dict) and isinstance(tag.get("title"), str)
-                )
+                ]
                 yield build_raw_item(
                     source_kind=SourceKind.CAREER_SITE,
                     source_name=spec.source_name or self.parser_name,
                     external_id=slug,
                     url=url,
-                    text=f"{posting['title']}\n{locations}\n\n{description}",
+                    text=f"{posting.title}\n{', '.join(locations)}\n\n{description}",
                     metadata={
+                        "title": posting.title,
+                        "locations": locations or None,
+                        "date_posted": posting.date_posted,
+                        "employment_type": posting.employment_type,
+                        "job_location_type": posting.job_location_type,
+                        "base_salary": posting.base_salary,
                         "board_url": spec.url,
                         "parser": self.parser_name,
                         "observation_kind": "vacancy_detail",
@@ -1076,6 +1074,97 @@ class HalykCareerParser(_EmployerBoardParser):
                 return
 
 
+class _StaticVacancyBoard(_EmployerBoardParser):
+    """Boards with server-rendered vacancy links and a distinct vacancy body."""
+
+    supports_discover = False
+    terminal_on_error = True
+    link_selector: str
+    body_selector: str
+    next_selector: str | None = None
+    city_selector: str | None = None
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        return SiteRuntimeDefaults(render=False)
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        listing_url = spec.url
+        pages: set[str] = set()
+        jobs: set[str] = set()
+        limit = _board_item_limit(spec)
+        for _ in range(DEFAULT_LISTING_MAX_PAGES):
+            if listing_url in pages:
+                break
+            pages.add(listing_url)
+            response = await safe_fetch(client, listing_url)
+            if _host_of(str(response.url)) != _host_of(spec.url):
+                raise ValueError("vacancy listing redirected to another host")
+            listing = LexborHTMLParser(response.text)
+            for anchor in listing.css(self.link_selector):
+                url = urljoin(str(response.url), anchor.attributes["href"])
+                if url in jobs or _host_of(url) != _host_of(spec.url):
+                    continue
+                if not self.detail_pattern.fullmatch(urlsplit(url).path):
+                    continue
+                jobs.add(url)
+                response_detail = await safe_fetch(client, url, follow_redirects=False)
+                page = LexborHTMLParser(response_detail.text)
+                heading = page.css_first("h1")
+                body = page.css_first(self.body_selector)
+                if not heading or not body or not body.text(strip=True):
+                    raise ValueError(f"{self.parser_name} vacancy detail missing title or body")
+                title = heading.text(separator=" ", strip=True)
+                description = body.text(separator="\n", strip=True)
+                city = page.css_first(self.city_selector) if self.city_selector else None
+                posted = page.css_first('meta[itemprop="datePosted"][content]')
+                yield build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=spec.source_name or self.parser_name,
+                    external_id=urlsplit(url).path.rstrip("/").rsplit("/", 1)[-1],
+                    url=url,
+                    text=f"{title}\n\n{description}",
+                    metadata={
+                        "board_url": spec.url,
+                        "parser": self.parser_name,
+                        "title": title,
+                        "company": self.company,
+                        "company_authoritative": bool(self.company),
+                        "locations": [city.text(strip=True)] if city else None,
+                        "date_posted": posted.attributes["content"] if posted else None,
+                        "detail_vacancy_confirmed": True,
+                    },
+                )
+                if len(jobs) >= limit:
+                    return
+            more = listing.css_first(self.next_selector) if self.next_selector else None
+            if more is None:
+                break
+            listing_url = urljoin(str(response.url), more.attributes["href"])
+            if _host_of(listing_url) != _host_of(spec.url):
+                break
+        if not jobs:
+            raise ValueError(f"{self.parser_name} listing contains no identifiable vacancies")
+
+
+class KiatCareerParser(_StaticVacancyBoard):
+    domain_pattern = r"^https?://(?:www\.)?kiat\.by/jobs/?(?:[?#].*)?$"
+    parser_name = "kiat_career"
+    link_selector = "a.read_more[href]"
+    detail_pattern = re.compile(r"/jobs/[\w-]+/")
+    body_selector = ".nodecontent.fjob"
+    next_selector = 'a[href*="/jobs/index?page="]'
+    city_selector = ".field-name-field-city .field-item"
+
+
+class HalykFinanceCareerParser(_StaticVacancyBoard):
+    domain_pattern = r"^https?://(?:www\.)?halykfinance\.kz/karera/?(?:[?#].*)?$"
+    parser_name = "halykfinance_career"
+    company = "Halyk Finance"
+    link_selector = ".vacancies-row a.left[href]"
+    detail_pattern = re.compile(r"/karera/[\w-]+\.html")
+    body_selector = "article.vacancy-text-column"
+
+
 class FreedomCareerParser(_EmployerBoardParser):
     domain_pattern = r"^https?://job\.freedomholdingcorp\.com(?:/|$)"
     parser_name = "freedom_career"
@@ -1202,6 +1291,8 @@ for _parser_class in (
     CsbiCareerParser,
     CasibCareerParser,
     HalykCareerParser,
+    HalykFinanceCareerParser,
+    KiatCareerParser,
     FreedomCareerParser,
     ForteCareerParser,
     BeelineKazakhstanCareerParser,

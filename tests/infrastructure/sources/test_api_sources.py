@@ -72,9 +72,16 @@ async def test_hh_mapping():
         "max": 300000,
         "currency": "RUR",
         "gross": False,
-        "period": "month",
+        "period": "unknown",
     }
     assert raw.metadata["company_authoritative"] is True
+
+    item["salary_range"] = {
+        **item["salary"],
+        "mode": {"id": "HOUR"},
+        "frequency": {"id": "MONTHLY"},
+    }
+    assert adapter._map_to_raw_item(item).metadata["base_salary"]["period"] == "hour"
 
 
 @pytest.mark.asyncio

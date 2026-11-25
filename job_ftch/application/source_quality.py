@@ -37,6 +37,8 @@ FAIL_STATUSES = frozenset(
     {
         "protected",
         "waf_challenge",
+        "soft_403_with_content",
+        "parser_gap",
         "deadline_exceeded",
         "source_error",
         "transport_error",
@@ -198,19 +200,21 @@ def classify_source_quality(
             )
             if key == "unknown":
                 continue
+            category = source_status_category(str(outcome.get("status") or ""))
+            if category in {"skipped", "policy_not_scraped"}:
+                continue
             yielded = int(outcome.get("yielded") or 0)
             per_run_yield[key] = per_run_yield.get(key, 0) + yielded
-            status = str(outcome.get("status") or "unknown")
-            if status in FAIL_STATUSES:
+            if category in {"hard_failure", "transport_error"}:
                 per_run_fail[key] = True
-            else:
+            elif category == "ok":
                 per_run_ok[key] = True
         emitted_by_key = _emitted_by_key(getattr(summary, "by_source_id", None) or {})
-        for key in set(per_run_yield) | set(emitted_by_key):
+        for key in set(per_run_yield) | {key for key, count in emitted_by_key.items() if count}:
             attempted[key] = attempted.get(key, 0) + 1
             if per_run_fail.get(key) and not per_run_ok.get(key):
                 fail[key] = fail.get(key, 0) + 1
-            else:
+            elif per_run_ok.get(key):
                 ok[key] = ok.get(key, 0) + 1
             run_yield = per_run_yield.get(key, 0)
             yield_sum[key] = yield_sum.get(key, 0) + run_yield

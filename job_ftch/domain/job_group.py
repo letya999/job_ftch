@@ -123,7 +123,7 @@ def merge_jobs(jobs: list[JobRecord]) -> JobRecord:
         (j.company_canonical for j in sorted_jobs if j.company_canonical),
         canonical.company_canonical,
     )
-    location = next((j.location for j in sorted_jobs if j.location), canonical.location)
+    geo_job = next((j for j in sorted_jobs if j.city or j.country or j.location), canonical)
 
     # work_mode: from highest-priority source that is NOT UNKNOWN
     work_mode = next(
@@ -183,6 +183,41 @@ def merge_jobs(jobs: list[JobRecord]) -> JobRecord:
     metadata: dict[str, Any] = {}
     for j in reversed(sorted_jobs):  # lower priority first so higher priority overwrites
         metadata.update(j.metadata)
+    evidence_job = canonical
+    if canonical.canonical_url and canonical.metadata.get("detail_vacancy_confirmed") is False:
+        detail = max(
+            (
+                j
+                for j in sorted_jobs
+                if j.canonical_url == canonical.canonical_url
+                and j.metadata.get("detail_vacancy_confirmed") is True
+                and j.description_raw
+            ),
+            key=lambda j: len(j.description_raw or ""),
+            default=None,
+        )
+        if detail:
+            evidence_job = detail
+            metadata["original_posting_text"] = (
+                detail.metadata.get("original_posting_text") or detail.description_raw
+            )
+            metadata["detail_vacancy_confirmed"] = True
+            metadata["detail_evidence_source"] = detail.source_name
+            metadata["detected_language"] = detail.metadata.get("detected_language") or (
+                detail.language.value
+            )
+    language_jobs = (evidence_job,) if evidence_job is not canonical else sorted_jobs
+    locations = list(
+        dict.fromkeys(
+            (j.city, j.country, j.location)
+            for j in sorted_jobs
+            if j.city or j.country or j.location
+        )
+    )
+    if len(locations) > 1:
+        metadata["publication_locations"] = locations
+    else:
+        metadata.pop("publication_locations", None)
 
     provenance = ProvenanceTrail(
         extraction=tuple(sorted({step for job in jobs for step in job.provenance.extraction})),
@@ -200,14 +235,35 @@ def merge_jobs(jobs: list[JobRecord]) -> JobRecord:
             "title": title,
             "title_normalized": title,
             "description": description,
-            "description_raw": canonical.description_raw or description,
+            "description_raw": evidence_job.description_raw or description,
             "description_clean": description,
             "company": company,
             "company_canonical": company_canonical,
             "company_name_raw": canonical.company_name_raw or company,
             "company_name_normalized": company_canonical or company,
             "canonical_url": canonical_url,
-            "location": location,
+            "location": geo_job.location,
+            "city": geo_job.city,
+            "country": geo_job.country,
+            "region": geo_job.region,
+            "role_family": next((j.role_family for j in sorted_jobs if j.role_family), None),
+            "seniority": next(
+                (j.seniority for j in sorted_jobs if j.seniority != "unknown"), canonical.seniority
+            ),
+            "language": next(
+                (j.language for j in language_jobs if j.language != "unknown"), canonical.language
+            ),
+            "languages_detected": tuple(
+                dict.fromkeys(
+                    lang
+                    for j in language_jobs
+                    for lang in (j.language, *j.languages_detected)
+                    if lang != "unknown"
+                )
+            ),
+            "remote_restrictions": next(
+                (j.remote_restrictions for j in sorted_jobs if j.remote_restrictions), None
+            ),
             "work_mode": work_mode,
             "compensation": compensation,
             "extraction_status": extraction_status,

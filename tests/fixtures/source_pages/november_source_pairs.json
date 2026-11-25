@@ -1,0 +1,75 @@
+{
+  "capture_date": "2026-11-25",
+  "note": "Public listing and detail pairs. Selectors, identifiers and posting titles match the captured pages. Body excerpts and non-vacancy siblings use synthetic text.",
+  "kiat": {
+    "board": "https://kiat.by/jobs/",
+    "url": "https://kiat.by/jobs/middle-java-kotlin-developer/",
+    "title": "Middle Java / Kotlin Developer",
+    "id": "middle-java-kotlin-developer",
+    "listing": "<a href=\"/jobs/other/\">Cross-sell</a><div class=\"job__button\"><a class=\"read_more\" href=\"/jobs/middle-java-kotlin-developer/\">Подробнее</a></div>",
+    "detail": "<meta itemprop=\"datePosted\" content=\"2026-08-24\"><h1>Middle Java / Kotlin Developer</h1><div class=\"nodecontent fjob\"><div class=\"field-name-field-city\"><div class=\"field-item\">Минск</div></div><h2>Обязанности</h2><p>Разработка сервисов Kotlin.</p></div><footer>Unrelated navigation</footer>"
+  },
+  "halykfinance": {
+    "board": "https://halykfinance.kz/karera/?lang=ru",
+    "url": "https://halykfinance.kz/karera/starshiy-menedzher-upravleniya-investitsionnyh-fondov.html",
+    "id": "starshiy-menedzher-upravleniya-investitsionnyh-fondov.html",
+    "title": "Старший менеджер Управления инвестиционных фондов",
+    "listing": "<a href=\"/novosti/obzor.html\">Новости</a><div class=\"vacancies-row\"><a class=\"left\" href=\"/karera/starshiy-menedzher-upravleniya-investitsionnyh-fondov.html\">Старший менеджер Управления инвестиционных фондов</a><a class=\"right\" href=\"/karera/starshiy-menedzher-upravleniya-investitsionnyh-fondov.html\"></a></div>",
+    "detail": "<h1>Старший менеджер Управления инвестиционных фондов</h1><article class=\"vacancy-text-column\"><p class=\"content-title\">Ваши основные задачи</p><ul><li>Подготовка инвестиционных предложений.</li></ul></article><nav>Unrelated navigation</nav>"
+  },
+  "dataart": {
+    "board": "https://www.dataart.team/vacancies",
+    "feed": "https://websitesapi.dataart.com/dataart-team/api/vacancies/filter-content-page?page=1",
+    "url": "https://www.dataart.team/vacancies/jav00306",
+    "id": "JAV00306",
+    "title": "Lead Java Developer with React, Banking App",
+    "listing": {
+      "pagesTotal": 1,
+      "page": 1,
+      "items": [
+        {
+          "slug": "JAV00306",
+          "contentType": 0,
+          "countriesTags": [
+            {
+              "title": "India"
+            }
+          ]
+        }
+      ]
+    },
+    "detail": "<script type=\"application/ld+json\">{\"@type\":\"JobPosting\",\"title\":\"Lead Java Developer with React, Banking App\",\"description\":\"<p>Build Java services for banking.</p>\",\"datePosted\":\"2026-11-25\",\"jobLocation\":[{\"@type\":\"Place\",\"address\":{\"addressCountry\":\"India\",\"addressLocality\":\"Bengaluru\"}}]}</script>"
+  },
+  "getmatch": {
+    "board": "https://getmatch.ru/vacancies",
+    "feed": "https://getmatch.ru/api/offers",
+    "url": "https://getmatch.ru/vacancies/37223-rukovoditel-komandy-kontekstnykh-rekomendatsii-v-vk",
+    "id": "37223",
+    "title": "Руководитель команды контекстных рекомендаций в VK Клипы",
+    "listing": {
+      "meta": {
+        "total": 763
+      },
+      "offers": [
+        {
+          "id": 37223,
+          "is_active": true,
+          "position": "Руководитель команды контекстных рекомендаций в VK Клипы",
+          "url": "/vacancies/37223-rukovoditel-komandy-kontekstnykh-rekomendatsii-v-vk",
+          "company": {
+            "name": "VK"
+          }
+        }
+      ]
+    },
+    "detail": "<title>Вакансия в VK — getmatch</title><div class=\"b-vacancy one-day-offer-v3--main\"><div class=\"one-day-offer-v3\"><h2 class=\"header__name\">Руководитель команды контекстных рекомендаций в VK Клипы</h2><span class=\"header__company\"><a href=\"/companies/vk\">VK</a></span><section class=\"description\"><div class=\"description__wrap\"><h2>Какие задачи вас ждут:</h2>Управлять командой разработки.</div></section></div></div><script>window.i18n = {\"vacancyArchived\":\"Вакансия в архиве\"}</script>"
+  },
+  "hirehi": {
+    "board": "https://hirehi.ru/?search=AI",
+    "url": "https://hirehi.ru/qa/ai-quality-analyst-manual-of-machine-learning-models-291832",
+    "id": "https://hirehi.ru/qa/ai-quality-analyst-manual-of-machine-learning-models-291832",
+    "title": "AI quality analyst (manual) of machine learning models",
+    "listing": "<script type=\"application/ld+json\">{\"@type\":\"ItemList\",\"itemListElement\":[{\"@type\":\"ListItem\",\"position\":1,\"url\":\"https://hirehi.ru/qa/ai-quality-analyst-manual-of-machine-learning-models-291832\",\"name\":\"AI quality analyst (manual) of machine learning models\"}]}</script>",
+    "detail": "<script type=\"application/ld+json\">{\"@type\":\"JobPosting\",\"title\":\"AI quality analyst (manual) of machine learning models\",\"description\":\"<p>Evaluate model quality using test cases.</p>\",\"hiringOrganization\":{\"name\":\"We Are META\"},\"jobLocation\":{\"address\":{\"addressCountry\":\"Portugal\",\"addressLocality\":\"Лиссабон\"}}}</script>"
+  }
+}

@@ -14,6 +14,19 @@ from job_ftch.domain.models import RawItem  # noqa: TC001 - Pydantic resolves th
 def content_hash_for_raw_item(item: RawItem) -> str:
     """Hash the complete immutable raw-item envelope, not just its locator."""
     payload = item.model_dump(mode="json", exclude={"stable_id"})
+    return _hash_payload(payload)
+
+
+def semantic_hash_for_raw_item(item: RawItem) -> str:
+    """Version source facts independently of fetch time and pipeline provenance."""
+    payload = item.model_dump(
+        mode="json",
+        exclude={"stable_id": True, "fetched_at": True, "metadata": {"source_run_id"}},
+    )
+    return _hash_payload(payload)
+
+
+def _hash_payload(payload: dict[str, object]) -> str:
     encoded = json.dumps(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode()

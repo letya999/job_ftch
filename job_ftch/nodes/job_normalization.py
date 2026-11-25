@@ -5,6 +5,12 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from job_ftch.application.compensation import (
+    normalize_compensation,
+)
+from job_ftch.application.compensation import (
+    parse_compensation_text as _parse_compensation_text,  # noqa: F401 - existing parser entry point
+)
 from job_ftch.application.contracts import TypeChangingNode
 from job_ftch.application.geo import normalize_geo_chunk, normalize_geo_sources
 from job_ftch.domain import (
@@ -20,27 +26,6 @@ if TYPE_CHECKING:
 
 _PREFIX_RE = re.compile(r"^(hiring|vacancy|opening|role|ищем|вакансия)\s*[:\-]\s*", re.IGNORECASE)
 _COMP_SPLIT_RE = re.compile(r"\s+(?:at|@)\s+", re.IGNORECASE)
-_CURRENCY_PATTERN = r"USD|EUR|GBP|RUB|RUR|KZT|CAD|AUD|CHF|PLN|UZS|KGS|AMD|GEL|AZN|TJS|BYN|тенге|руб(?:лей|ля|\.)?|р\.|\$|€|£|₽|₸"
-_AMOUNT_PATTERN = r"\d(?:[\d\s.,]*\d)?\s*(?:k|к|тыс(?:яч)?\.?|млн\.?)?"
-_SALARY_PREFIX_RE = re.compile(
-    rf"(?P<currency>{_CURRENCY_PATTERN})\s*(?P<direction>от|до|from|up\s+to)?\s*"
-    rf"(?P<min>{_AMOUNT_PATTERN})(?:\s*(?:-|to|до|–|—)\s*(?P<max>{_AMOUNT_PATTERN}))?",
-    re.IGNORECASE,
-)
-_SALARY_SUFFIX_RE = re.compile(
-    rf"(?P<direction>от|до|from|up\s+to)?\s*(?P<min>{_AMOUNT_PATTERN})"
-    rf"(?:\s*(?:-|to|до|–|—)\s*(?P<max>{_AMOUNT_PATTERN}))?"
-    rf"\s*(?P<currency>{_CURRENCY_PATTERN})",
-    re.IGNORECASE,
-)
-_SALARY_CONTEXT_RE = re.compile(
-    r"зарплат|оклад|компенсац|доход|вознагражд|вилка|salary|income|pay\b",
-    re.IGNORECASE,
-)
-_NON_SALARY_CONTEXT_RE = re.compile(
-    r"кафетер|льгот|депозит|больнич|ипотек|кредит|страхов|дмс|отпуск|day\s+off",
-    re.IGNORECASE,
-)
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
@@ -83,84 +68,6 @@ def _detect_work_mode(*parts: str | None) -> WorkMode:
     if any(token in lowered for token in ("on-site", "onsite", "office")):
         return WorkMode.ONSITE
     return WorkMode.UNKNOWN
-
-
-def _normalize_amount(value: str | None) -> int | None:
-    if value is None:
-        return None
-    normalized = value.strip().casefold()
-    unit_match = re.search(r"(k|к|тыс(?:яч)?\.?|млн\.?)$", normalized)
-    multiplier = 1
-    if unit_match:
-        unit = unit_match.group(1)
-        multiplier = 1_000_000 if unit.startswith("млн") else 1_000
-        normalized = normalized[: unit_match.start()].strip().replace(",", ".")
-        normalized = normalized.replace(" ", "")
-        try:
-            return round(float(normalized) * multiplier)
-        except ValueError:
-            return None
-    digits = re.sub(r"\D", "", normalized)
-    return int(digits) if digits else None
-
-
-def _normalize_currency(value: str) -> str:
-    normalized = value.strip().casefold()
-    return {
-        "$": "USD",
-        "€": "EUR",
-        "£": "GBP",
-        "₽": "RUB",
-        "₸": "KZT",
-        "тенге": "KZT",
-        "rur": "RUB",
-        "руб": "RUB",
-        "руб.": "RUB",
-        "рублей": "RUB",
-        "рубля": "RUB",
-        "р.": "RUB",
-    }.get(normalized, value.upper())
-
-
-def _compensation_bounds(match: re.Match[str]) -> tuple[int | None, int | None] | None:
-    first = _normalize_amount(match.group("min"))
-    second = _normalize_amount(match.group("max"))
-    direction = (match.group("direction") or "").casefold()
-    if first is None:
-        return None
-    if direction in {"до", "up to"} and second is None:
-        return None, first
-    minimum, maximum = first, second
-    if maximum is not None and minimum > maximum:
-        minimum, maximum = maximum, minimum
-    return minimum, maximum
-
-
-def _currency_amount_is_salary(value: str, match: re.Match[str]) -> bool:
-    context = value[max(0, match.start() - 100) : match.end() + 100]
-    return not (_NON_SALARY_CONTEXT_RE.search(context) and not _SALARY_CONTEXT_RE.search(context))
-
-
-def _compensation_match(value: str) -> re.Match[str] | None:
-    for match in (_SALARY_PREFIX_RE.search(value), _SALARY_SUFFIX_RE.search(value)):
-        if match is None:
-            continue
-        if not _currency_amount_is_salary(value, match):
-            continue
-        if _compensation_bounds(match) is not None:
-            return match
-
-    # A number or Russian wording does not establish currency.
-    return None
-
-
-def _parse_compensation_text(value: str) -> tuple[str, int | None, int | None] | None:
-    match = _compensation_match(value)
-    if match is None:
-        return None
-    bounds = _compensation_bounds(match)
-    assert bounds is not None
-    return _normalize_currency(match.group("currency")), *bounds
 
 
 class TitleCompanyNormalizationNode(TypeChangingNode[JobDraft, JobRecord]):
@@ -309,126 +216,27 @@ class LocationWorkModeNormalizationNode:
 
 class CompensationParsingNode:
     async def process(self, item: JobRecord) -> JobRecord | None:
-        metadata_salary = item.metadata.get("salary_text") or item.metadata.get("base_salary_text")
-        salary_source = "\n".join(
-            part for part in (item.title, item.description, str(metadata_salary or "")) if part
-        )
-        salary_evidence = re.sub(
-            r"[\u200b-\u200f\ufeff]", "", str(metadata_salary or "") or salary_source
-        ).casefold()
-        gross = None
-        if re.search(r"\bgross\b|до\s+вычета\s+налог", salary_evidence):
-            gross = True
-        elif re.search(r"\bnet\b|на\s+руки|после\s+вычета\s+налог", salary_evidence):
-            gross = False
-        base_salary = item.metadata.get("base_salary")
-        if isinstance(base_salary, dict):
-            try:
-                currency = str(base_salary.get("currency") or "").strip()
-                if not currency:
-                    raise ValueError("Structured salary has no currency evidence")
-                currency = _normalize_currency(currency)
-
-                minimum = base_salary.get("min")
-                maximum = base_salary.get("max")
-
-                if isinstance(minimum, str):
-                    minimum = _normalize_amount(minimum)
-                if isinstance(maximum, str):
-                    maximum = _normalize_amount(maximum)
-
-                minimum = int(minimum) if isinstance(minimum, (int, float)) else None
-                maximum = int(maximum) if isinstance(maximum, (int, float)) else None
-
-                if minimum is not None or maximum is not None:
-                    if minimum is not None and maximum is not None and minimum > maximum:
-                        minimum, maximum = maximum, minimum
-
-                    raw_period = str(
-                        base_salary.get("period") or base_salary.get("unit") or "unknown"
-                    ).lower()
-
-                    from job_ftch.domain import CompensationPeriod, CompensationRange
-
-                    try:
-                        period = CompensationPeriod(raw_period)
-                    except ValueError:
-                        period = CompensationPeriod.UNKNOWN
-
-                    compensation = CompensationRange(
-                        currency=currency,
-                        min_amount=minimum,
-                        max_amount=maximum,
-                        period=period,
-                        gross=base_salary.get("gross")
-                        if isinstance(base_salary.get("gross"), bool)
-                        else gross,
-                    )
-
-                    return item.model_copy(
-                        update={
-                            "compensation": compensation,
-                            "provenance": item.provenance.model_copy(
-                                update={
-                                    "normalization": tuple(
-                                        list(item.provenance.normalization)
-                                        + ["compensation:structured_metadata"]
-                                    )
-                                }
-                            ),
-                        }
-                    )
-            except (ValueError, TypeError, KeyError):
-                pass
-
-        salary_text = re.sub(r"[\u200b-\u200f\ufeff]", "", str(metadata_salary or ""))
-        match = _compensation_match(salary_text)
-        if match is None:
-            salary_text = re.sub(r"[\u200b-\u200f\ufeff]", "", salary_source)
-            match = _compensation_match(salary_text)
-        parsed = _parse_compensation_text(salary_text) if match is not None else None
-        if parsed is None:
-            if item.compensation is not None:
-                # LLMs sometimes turn unrelated numbers such as "от 3 лет"
-                # into a salary. Keep compensation only when the posting or
-                # parser metadata provides salary evidence.
-                return item.model_copy(update={"compensation": None})
+        compensation, source, quote, reason = normalize_compensation(item)
+        if source is None and compensation is item.compensation and not reason:
             return item
-        assert match is not None
-        currency, minimum, maximum = parsed
-
-        from job_ftch.domain import CompensationPeriod, CompensationRange
-
-        period = CompensationPeriod.UNKNOWN
-        for unit, pattern in (
-            (CompensationPeriod.MONTH, r"/\s*(?:month|мес)|per\s+month|в\s+месяц"),
-            (CompensationPeriod.YEAR, r"/\s*(?:year|год)|per\s+year|в\s+год"),
-            (CompensationPeriod.HOUR, r"/\s*(?:hour|час)|per\s+hour|в\s+час"),
-            (CompensationPeriod.DAY, r"/\s*(?:day|день)|per\s+day|в\s+день"),
-            (CompensationPeriod.WEEK, r"/\s*(?:week|нед)|per\s+week|в\s+неделю"),
-        ):
-            if re.match(r"\s*" + pattern, salary_text[match.end() :], re.IGNORECASE):
-                period = unit
-                break
-        previous = item.compensation
-        if previous and (previous.currency, previous.min_amount, previous.max_amount) == parsed:
-            gross = gross if gross is not None else previous.gross
-        compensation = CompensationRange(
-            currency=currency,
-            min_amount=minimum,
-            max_amount=maximum,
-            period=period,
-            gross=gross,
-        )
+        metadata = dict(item.metadata)
+        metadata.pop("compensation_review_reason", None)
+        metadata.pop("compensation_evidence", None)
+        if quote:
+            metadata["compensation_evidence"] = quote
+        if reason:
+            metadata["compensation_review_reason"] = reason
         return item.model_copy(
             update={
                 "compensation": compensation,
+                "metadata": metadata,
                 "provenance": item.provenance.model_copy(
                     update={
                         "normalization": tuple(
-                            list(item.provenance.normalization)
-                            + ["compensation:parsed_from_description"]
+                            dict.fromkeys((*item.provenance.normalization, source))
                         )
+                        if source
+                        else item.provenance.normalization
                     }
                 ),
             }

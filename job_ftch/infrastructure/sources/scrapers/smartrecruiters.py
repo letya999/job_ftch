@@ -76,7 +76,7 @@ def _parse_salary(posting: dict[str, Any]) -> dict[str, Any] | None:
     if sal_min is None and sal_max is None:
         return None
     currency = salary.get("currency")
-    unit = normalize_salary_unit(salary.get("period")) or "year"
+    unit = normalize_salary_unit(salary.get("period"))
     return {"currency": currency, "min": sal_min, "max": sal_max, "unit": unit}
 
 

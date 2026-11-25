@@ -158,11 +158,12 @@ async def test_recovery_loads_old_candidate_outside_current_window(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("state", ["handled", "missing", "uncertain"])
+@pytest.mark.parametrize("state", ["handled", "missing", "uncertain", "other_target"])
 async def test_empty_recovery_closes_only_verified_settled_work(
     tmp_path, make_job_record, monkeypatch, state
 ) -> None:
     from job_ftch.adapters.telegram_bot.main import _recover_pending_scheduler_publish
+    from job_ftch.application.channel_publisher import telegram_sink_name
     from job_ftch.application.scheduler_journal import ensure_scheduler_slot, load_scheduler_journal
     from job_ftch.application.tenant_runner import TenantRunner
     from job_ftch.config import Settings
@@ -179,14 +180,14 @@ async def test_empty_recovery_closes_only_verified_settled_work(
     if state != "missing":
         await backend.save(job)
         await mark_publication_handled(store, "@first", job, reason="already_published")
-    if state == "uncertain":
+    if state in {"uncertain", "other_target"}:
         await store.enqueue_outbox(
             OutboxRecord(
                 outbox_id="unknown-legacy-send",
                 observation_id="old-input",
                 content_hash="a" * 64,
                 idempotency_key="b" * 64,
-                sink_name="telegram:legacy",
+                sink_name=telegram_sink_name("@first" if state == "uncertain" else "@second"),
                 decision_version="publication-v1",
                 state=OutboxState.UNCERTAIN,
             )
@@ -217,15 +218,16 @@ async def test_empty_recovery_closes_only_verified_settled_work(
             slot_id=str(slot["slot_id"]),
         )
         send.assert_not_awaited()
-        assert result is (state == "handled")
+        settled = state in {"handled", "other_target"}
+        assert result is settled
         assert await store.get_run_state("bot_scheduler:pending_publish_since") == (
-            "" if state == "handled" else marker
+            "" if settled else marker
         )
         journal = await load_scheduler_journal(store)
-        assert journal[0]["publish_state"] == ("skipped" if state == "handled" else "failed")
+        assert journal[0]["publish_state"] == ("skipped" if settled else "failed")
         if state == "missing":
             assert await store.get_run_state("bot_publish:missing_candidates") == "1"
-        if state == "uncertain":
+        if state in {"uncertain", "other_target"}:
             assert len(await store.list_uncertain_outbox()) == 1
     finally:
         await backend.close()

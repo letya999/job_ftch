@@ -66,6 +66,25 @@ async def test_dedup_node_drops_exact_content(dedup_node, store, make_raw_item):
 
 
 @pytest.mark.anyio
+async def test_legacy_content_signature_allows_changed_fields_once(store, make_raw_item):
+    from job_ftch.domain import DedupKeyKind, RememberedDedupKey, dedup_content_key_for_raw_item
+
+    item = make_raw_item(external_id="posting", metadata={"salary": "120k/year"})
+    key = dedup_content_key_for_raw_item(item)
+    old = RememberedDedupKey(
+        key=key,
+        kind=DedupKeyKind.CONTENT,
+        item_id=item.stable_id,
+        source_kind=item.source_kind,
+        source_name=item.source_name,
+    )
+    await store.set(f"dedup_record:{key}", old.model_dump_json(exclude={"content_version"}))
+    assert await DedupNode(store).process(item) is item
+    with pytest.raises(RawItemDropped):
+        await DedupNode(store).process(item)
+
+
+@pytest.mark.anyio
 async def test_dedup_node_store_error_propagates(make_raw_item):
     class ExplodingStore:
         async def has_dedup_key(self, key: str) -> bool:

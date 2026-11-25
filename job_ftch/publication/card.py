@@ -10,13 +10,14 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from job_ftch.application.publication_audience import publication_facts
+
 if TYPE_CHECKING:
     from job_ftch.domain import Job, JobRecord
 
 from job_ftch.publication.normalize import (
     detect_content_language,
     format_compensation,
-    format_geo,
     format_work_mode,
     pick_source_label,
     resolve_card_url,
@@ -37,6 +38,7 @@ class PublicationCard(BaseModel):
     summary: str | None = Field(default=None, max_length=300)
     key_requirements: str | None = Field(default=None, max_length=300)
     stack: str | None = Field(default=None, max_length=200)
+    hashtags: str | None = None
     url: str | None = None
     source_name: str | None = None
     source_kind: str | None = None
@@ -59,7 +61,7 @@ def build_card(job: Job | JobRecord) -> PublicationCard:
     )
 
     content_lang = detect_content_language(job)
-    geo = format_geo(job)
+    facts = publication_facts(job)
     work_format = format_work_mode(job)
     salary = format_compensation(job)
     url = resolve_card_url(job)
@@ -97,12 +99,13 @@ def build_card(job: Job | JobRecord) -> PublicationCard:
     return PublicationCard(
         role=title,
         company=company,
-        geo=geo,
+        geo=facts.location,
         work_format=work_format,
         salary=salary,
         summary=summary,
         key_requirements=key_requirements,
         stack=stack,
+        hashtags=" ".join(facts.hashtags()) or None,
         url=url,
         source_name=pick_source_label(job),
         source_kind=source_kind,

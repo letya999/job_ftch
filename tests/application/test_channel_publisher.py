@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -749,11 +750,11 @@ async def test_acknowledgement_write_failure_does_not_resend() -> None:
     class FailedAcknowledgementStore(InMemoryStore):
         fail = True
 
-        async def set_run_state(self, key: str, value: str, **kwargs: Any) -> None:
-            if key == "bot_publish:delivery_receipts" and self.fail:
+        async def confirm_uncertain_outbox(self, record, receipt):
+            if self.fail:
                 self.fail = False
                 raise OSError("acknowledgement store unavailable")
-            await super().set_run_state(key, value, **kwargs)
+            return await super().confirm_uncertain_outbox(record, receipt)
 
     class ConfirmedSender:
         calls = 0
@@ -1127,4 +1128,27 @@ async def test_delivery_receipt_is_persisted_before_publish_ledger() -> None:
     )
 
     assert outcome.sent == 1
-    assert json.loads(store.state["bot_publish:delivery_receipts"])[0]["message_id"] == 42
+    assert json.loads(store.state["bot_publish:delivery_receipts:-100:42"])["message_id"] == 42
+
+
+async def test_concurrent_kv_only_receipts_preserve_both_messages() -> None:
+    from job_ftch.application.publish_ledger import persist_delivery_receipt
+
+    class ConcurrentStore(_Store):
+        async def get_run_state(self, key):
+            current = await super().get_run_state(key)
+            await asyncio.sleep(0)
+            return current
+
+    store = ConcurrentStore()
+    await asyncio.gather(
+        *(
+            persist_delivery_receipt(store, DeliveryReceipt("-100", number, datetime.now(UTC)))
+            for number in (41, 42)
+        )
+    )
+    receipts = []
+    for value in store.state.values():
+        decoded = json.loads(value)
+        receipts.extend(decoded if isinstance(decoded, list) else [decoded])
+    assert {row["message_id"] for row in receipts} == {41, 42}

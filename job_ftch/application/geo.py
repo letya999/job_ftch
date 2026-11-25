@@ -9,9 +9,23 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-_GEO_SPLIT = re.compile(r"\s*[;,/|&]\s*|\s+[-–—]\s+")
+_GEO_SPLIT = re.compile(r"\s*[;,/|&]\s*|\s+[-–—]\s+|\s+(?:or|или|либо)\s+", re.I)
 _SETTLEMENT_PREFIX = re.compile(r"^(?:г|гор|пос|пгт|с|д|ст)\.?\s+", re.IGNORECASE)
 _PAREN_NOTE = re.compile(r"\s*\([^)]*\)")
+_EXCLUDED_PLACES = re.compile(
+    r"\b(?:excluding|except|outside(?: of)?|кроме|за исключением|вне)\b", re.I
+)
+_US_ADDRESS = re.compile(
+    r"([^,;/|]+),\s*([A-Z]{2}),\s*(US|USA|United States(?: of America)?)", re.I
+)
+# fmt: off
+_US_STATE_CODES = frozenset({
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO",
+    "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA",
+    "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+})
+# fmt: on
 
 _GEO_NOISE = frozenset(
     {
@@ -66,6 +80,51 @@ _COUNTRY_ALIASES = {
     "de": "Германия",
     "rs": "Сербия",
     "gb": "Великобритания",
+    "kg": "Кыргызстан",
+    "kyrgyzstan": "Кыргызстан",
+    "киргизия": "Кыргызстан",
+    "md": "Молдова",
+    "moldova": "Молдова",
+    "tm": "Туркменистан",
+    "turkmenistan": "Туркменистан",
+    "ua": "Украина",
+    "ukraine": "Украина",
+    "nl": "Нидерланды",
+    "netherlands": "Нидерланды",
+    "ae": "ОАЭ",
+    "uae": "ОАЭ",
+    "united arab emirates": "ОАЭ",
+    "fr": "Франция",
+    "france": "Франция",
+    "es": "Испания",
+    "spain": "Испания",
+    "it": "Италия",
+    "italy": "Италия",
+    "in": "Индия",
+    "india": "Индия",
+    "pt": "Португалия",
+    "portugal": "Португалия",
+    "ch": "Швейцария",
+    "switzerland": "Швейцария",
+    "ro": "Румыния",
+    "romania": "Румыния",
+    "gr": "Греция",
+    "greece": "Греция",
+    "cn": "Китай",
+    "china": "Китай",
+    "sg": "Сингапур",
+    "singapore": "Сингапур",
+    "jp": "Япония",
+    "japan": "Япония",
+    "mx": "Мексика",
+    "mexico": "Мексика",
+    "dk": "Дания",
+    "denmark": "Дания",
+    "ie": "Ирландия",
+    "ireland": "Ирландия",
+    "ca": "Канада",
+    "canada": "Канада",
+    "united states of america": "США",
 }
 
 _CITY_ALIASES = {
@@ -86,6 +145,26 @@ _CITY_ALIASES = {
     "warsaw": "Варшава",
     "warszawa": "Варшава",
     "tashkent": "Ташкент",
+    "toshkent": "Ташкент",
+    "amsterdam": "Амстердам",
+    "new york city": "Нью-Йорк",
+    "bishkek": "Бишкек",
+    "abu dhabi": "Абу-Даби",
+    "limassol": "Лимасол",
+    "dubai": "Дубай",
+    "dushanbe": "Душанбе",
+    "london": "Лондон",
+    "barcelona": "Барселона",
+    "shanghai": "Шанхай",
+    "batumi": "Батуми",
+    "kostanay": "Костанай",
+    "tijuana": "Тихуана",
+    "tokyo": "Токио",
+    "copenhagen": "Копенгаген",
+    "toronto": "Торонто",
+    "san francisco": "Сан-Франциско",
+    "los angeles": "Лос-Анджелес",
+    "santa clara": "Санта-Клара",
 }
 
 _COUNTRY_ALIASES.update({name.casefold(): name for name in _COUNTRY_ALIASES.values()})
@@ -111,7 +190,40 @@ _CITY_COUNTRIES = {
     "Ереван": "Армения",
     "Варшава": "Польша",
     "Ташкент": "Узбекистан",
+    "Амстердам": "Нидерланды",
+    "Нью-Йорк": "США",
+    "Бишкек": "Кыргызстан",
+    "Абу-Даби": "ОАЭ",
+    "Лимасол": "Кипр",
+    "Дубай": "ОАЭ",
+    "Душанбе": "Таджикистан",
+    "Лондон": "Великобритания",
+    "Барселона": "Испания",
+    "Шанхай": "Китай",
+    "Батуми": "Грузия",
+    "Костанай": "Казахстан",
+    "Тихуана": "Мексика",
+    "Токио": "Япония",
+    "Копенгаген": "Дания",
+    "Торонто": "Канада",
+    "Сан-Франциско": "США",
+    "Лос-Анджелес": "США",
+    "Санта-Клара": "США",
+    "Berlin": "Германия",
+    "Берлин": "Германия",
 }
+
+
+def country_code(value: str | None, *, allow_city: bool = True) -> str | None:
+    """Return the configured ISO code for a country name, alias or known city."""
+    if not value:
+        return None
+    normalized = normalize_geo_chunk(value)
+    name = _CITY_COUNTRIES.get(normalized or "", normalized) if allow_city else normalized
+    for code, country in _COUNTRY_ALIASES.items():
+        if country == name and len(code) == 2 and code.isascii() and code != "uk":
+            return code.upper()
+    return value if re.fullmatch(r"[A-Z]{2}", value) else None
 
 
 @dataclass(frozen=True)
@@ -120,6 +232,7 @@ class GeoNormalization:
     city: str | None = None
     country: str | None = None
     corrections: tuple[str, ...] = ()
+    country_options: tuple[str, ...] = ()
 
 
 def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
@@ -128,7 +241,31 @@ def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
     for source in sources:
         if not source:
             continue
-        for chunk in _GEO_SPLIT.split(source):
+        positive = _EXCLUDED_PLACES.split(_PAREN_NOTE.sub("", source), maxsplit=1)[0]
+        address = _US_ADDRESS.fullmatch(positive.strip())
+        if (
+            address
+            and address[2].upper() in _US_STATE_CODES
+            and address[1].strip().casefold() not in _COUNTRY_ALIASES
+        ):
+            positive = f"{address[1]}, {address[3]}"
+        chunks: list[str] = []
+        for chunk in _GEO_SPLIT.split(positive):
+            places = re.split(r"\s+(?:and|и|\+)\s+", chunk, flags=re.I)
+            chunks.extend(
+                places
+                if len(places) > 1 and all(country_code(p.strip()) for p in places)
+                else (chunk,)
+            )
+        # In an address, CA alone can mean California or Canada.
+        if (
+            len(chunks) == 2
+            and chunks[1].strip() == "CA"
+            and chunks[0].strip().casefold() not in _COUNTRY_ALIASES
+        ):
+            known = _CITY_COUNTRIES.get(normalize_geo_chunk(chunks[0]) or "")
+            chunks = [chunks[0], known] if known else [chunks[0]]
+        for chunk in chunks:
             normalized = normalize_geo_chunk(chunk)
             if normalized and normalized.casefold() not in {item.casefold() for item in seen}:
                 seen.append(normalized)
@@ -136,6 +273,11 @@ def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
     country = next((item for item in seen if item in set(_COUNTRY_ALIASES.values())), None)
     known_cities = [item for item in seen if item in _CITY_COUNTRIES]
     countries = [item for item in seen if item in set(_COUNTRY_ALIASES.values())]
+    options = (
+        countries
+        if len(known_cities) <= 1
+        else (countries + [_CITY_COUNTRIES[item] for item in known_cities])
+    )
     if len(known_cities) == 1 and len(countries) == 1:
         expected_country = _CITY_COUNTRIES[known_cities[0]]
         if country != expected_country:
@@ -156,11 +298,14 @@ def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
             None,
         )
 
+    alternatives = tuple(dict.fromkeys(options)) if len(set(options)) > 1 else ()
     return GeoNormalization(
-        display=", ".join(seen[:3]) if seen else None,
+        display=", ".join(seen[:6] if alternatives and countries and known_cities else seen[:3])
+        or None,
         city=city,
         country=country,
         corrections=tuple(corrections),
+        country_options=alternatives,
     )
 
 

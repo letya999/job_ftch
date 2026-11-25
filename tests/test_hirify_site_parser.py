@@ -471,6 +471,35 @@ async def test_structured_fields_reach_metadata() -> None:
 
 
 @pytest.mark.asyncio
+async def test_hirify_1479323_annual_base_pay_survives_to_publication() -> None:
+    from job_ftch.domain import JobRecord
+    from job_ftch.nodes.job_normalization import CompensationParsingNode
+    from job_ftch.publication.card import build_card
+
+    row = {
+        **_LISTING_ROW,
+        "id": 1479323,
+        "slug": "1479323-staff-product-manager-agents",
+        "title": "Staff Product Manager, Agents",
+        "salary": {"min": 141000, "max": 248000, "currency": "USD", "salary_period": "year"},
+    }
+    body = "Base salary: $141,000.00–$248,000.00 per year"
+    client = _ApiClient(listing={"data": [row]}, detail={**row, "text": f"<p>{body}</p>"})
+    [raw] = [item async for item in HirifyParser().parse(_spec(), client)]
+    assert raw.metadata["base_salary"]["unit"] == "year"
+    record = JobRecord(
+        raw_item_id=raw.stable_id,
+        source_kind=raw.source_kind,
+        source_name=raw.source_name,
+        description=raw.text,
+        metadata=raw.metadata,
+    )
+    normalized = await CompensationParsingNode().process(record)
+    assert normalized is not None
+    assert build_card(normalized).salary == "141 000–248 000 $/год"
+
+
+@pytest.mark.asyncio
 async def test_empty_detail_lists_do_not_wipe_listing_values() -> None:
     """The detail payload returns grades/tags empty; the listing had them."""
     items = [item async for item in HirifyParser().parse(_spec(), _ApiClient())]

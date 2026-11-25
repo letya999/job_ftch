@@ -85,6 +85,13 @@ def test_compose_env_files_have_tracked_examples(compose_path: Path) -> None:
             )
 
 
+def test_prod_qdrant_requires_the_client_api_key() -> None:
+    service = _read_yaml(TELEGRAM_COMPOSE_PROD)["services"]["qdrant"]
+    assert service["environment"]["QDRANT__SERVICE__API_KEY"].startswith(
+        "${JOB_FTCH_QDRANT_API_KEY:?"
+    )
+
+
 def test_prod_deploy_docs_use_env_file_for_compose_interpolation() -> None:
     docs = (ROOT / "docs/deploy.md").read_text(encoding="utf-8")
     prod_compose = "job_ftch/adapters/telegram_bot/docker-compose.prod.yml"

@@ -36,6 +36,7 @@ from job_ftch.domain import (
     TriageRejectionReason,
     WorkMode,
 )
+from job_ftch.domain.triage import explicit_non_vacancy
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -551,6 +552,8 @@ class ExtractionNode:
     async def process(self, item: RawItem | JobDraft) -> JobDraft | None:
         if isinstance(item, JobDraft):
             return item
+        if reason := explicit_non_vacancy(item.source_kind, item.text):
+            raise RawItemDropped(reason=reason, details=reason.value, item=item)
         structured_fast_path = item.metadata.get("extraction_cost_hint") == "structured"
         if self._extraction_mode == "structured_or_heuristic" and not structured_fast_path:
             return self._heuristic_triage_draft(item)

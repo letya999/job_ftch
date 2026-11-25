@@ -1407,17 +1407,19 @@ class AdaptiveBypassManager:
             elif self._budget.source_proxy_rotations == 0:
                 network_moved = self.activate_proxy()
             if not network_moved:
-                # ADR-074: DNS/connect/timeout try the network axis first.
-                # When that axis cannot move (no proxy, or proxy already
-                # failed transport), the conservative fallback is the
-                # engine ladder. Staying on noop turned CIS timeouts into
-                # empty transport_error outcomes.
+                # A transport failure alone does not justify launching a browser.
                 logger.info(
                     "bypass_transport_conservative_engine_fallback",
                     failure_kind=kind,
                     tier=self.current_name,
                 )
-                self.escalate()
+                self._select_engine(
+                    tuple(
+                        name
+                        for name in self._tiers[self.current_tier_index + 1 :]
+                        if self._capabilities[name].browser_family is None
+                    )
+                )
             return kind
         if decision.action is TransitionAction.RETRY_SAME_ROUTE:
             # Same-route retries belong to the caller's retry loop. Only when

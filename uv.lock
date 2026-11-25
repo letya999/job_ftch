@@ -2539,8 +2539,8 @@ dev = [
 requires-dist = [
     { name = "accelerate", marker = "extra == 'all'", specifier = ">=1.15.0,<1.16" },
     { name = "accelerate", marker = "extra == 'bgem3'", specifier = ">=1.15.0,<1.16" },
-    { name = "aiogram", marker = "extra == 'bot'", specifier = ">=3.7" },
-    { name = "aiogram", marker = "extra == 'telegram'", specifier = ">=3.7" },
+    { name = "aiogram", marker = "extra == 'bot'", specifier = ">=3.30" },
+    { name = "aiogram", marker = "extra == 'telegram'", specifier = ">=3.30" },
     { name = "aiohttp", marker = "extra == 'all'", specifier = ">=3.9.0" },
     { name = "aiohttp", marker = "extra == 'realtime'", specifier = ">=3.9.0" },
     { name = "aiosqlite", marker = "extra == 'all'", specifier = ">=0.20" },
@@ -2667,7 +2667,7 @@ provides-extras = ["browser", "camoufox", "nodriver", "parity-lab", "stealth", "
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "aiogram", specifier = ">=3.7" },
+    { name = "aiogram", specifier = ">=3.30" },
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "bandit", extras = ["toml"], specifier = ">=1.7" },
     { name = "httpx" },

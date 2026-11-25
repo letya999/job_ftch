@@ -166,6 +166,8 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.18.2
+    environment:
+      QDRANT__SERVICE__API_KEY: ${JOB_FTCH_QDRANT_API_KEY:?JOB_FTCH_QDRANT_API_KEY must be set}
     volumes:
       - qdrant_data:/qdrant/storage
     mem_limit: 1g

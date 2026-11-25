@@ -1233,7 +1233,10 @@ class CareerSiteSource(Source["RawItem"]):
                             emitted_parser_keys.add(key)
                             attempt_parser_keys.add(key)
                         attempt_items.append(parsed_item)
-                        self.stats.detail_cards_extracted += 1
+                        if (getattr(parsed_item, "metadata", {}) or {}).get(
+                            "detail_vacancy_confirmed"
+                        ) is True:
+                            self.stats.detail_cards_extracted += 1
                         yield parsed_item
                     if attempt_items:
                         return
@@ -2481,7 +2484,7 @@ class CareerSiteSource(Source["RawItem"]):
 
         rich_urls: set[str] = set()
         for url, payload in (result.payloads_by_url or {}).items():
-            if url not in owned_urls:
+            if url not in owned_urls or payload.url != url:
                 continue
             if not self._passes_freshness_cutoff(payload.date_posted):
                 continue
@@ -2490,16 +2493,14 @@ class CareerSiteSource(Source["RawItem"]):
             completeness = score_completeness(payload)
             payload.metadata["monitor_type"] = monitor_name
             payload.metadata["heuristic_completeness"] = completeness
+            complete = len((payload.description or "").strip()) >= 300 and payload.metadata.get(
+                "content_kind"
+            ) not in {"announcement", "excerpt"}
             candidates.append(
                 DiscoveredCandidate(
                     url=url,
-                    rich_payload=(
-                        payload
-                        if (payload.description or "").strip()
-                        and len(payload.description or "") >= 300
-                        and payload.metadata.get("content_kind") not in {"announcement", "excerpt"}
-                        else None
-                    ),
+                    rich_payload=payload if complete else None,
+                    listing_payload=None if complete else payload,
                     completeness=completeness,
                 )
             )
@@ -2630,7 +2631,27 @@ class CareerSiteSource(Source["RawItem"]):
                 ranked_trusted.append(url)
         ranked_generic = _rank_detail_urls(urls_to_scrape - seen_trusted, self.spec.url)
         ranked = [*ranked_trusted, *ranked_generic]
+        listings = {c.url: c.listing_payload for c in candidates if c.listing_payload is not None}
         async for item in self._iter_scraped_detail_items(ranked, scraper_chain, source_name):
+            listing = listings.get(str(item.external_id))
+            if listing is not None:
+                fields = {
+                    "company": (listing.metadata or {}).get("company"),
+                    "base_salary": listing.base_salary,
+                    "locations": listing.locations,
+                    "language": listing.language,
+                    "employment_type": listing.employment_type,
+                    "job_location_type": listing.job_location_type,
+                    "date_posted": listing.date_posted,
+                }
+                evidence = {key: value for key, value in fields.items() if value}
+                if evidence:
+                    metadata = dict(item.metadata)
+                    metadata["listing_evidence"] = evidence
+                    for key, value in evidence.items():
+                        if not metadata.get(key):
+                            metadata[key] = value
+                    item = item.model_copy(update={"metadata": metadata})
             self.stats.zero_reason = None
             yield item
 

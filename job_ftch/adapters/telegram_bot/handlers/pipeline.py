@@ -21,6 +21,7 @@ from job_ftch.adapters.telegram_bot.handlers.feedback import build_feedback_mark
 from job_ftch.adapters.telegram_bot.sender import ReplyCardSender, TelegramCardSender
 from job_ftch.adapters.telegram_bot.utils import safe_error_reply
 from job_ftch.application.channel_publisher import channel_throttle_seconds, publish_jobs
+from job_ftch.application.publication_audience import policy_for
 from job_ftch.application.run_report import (
     build_runtime_run_report,
     render_runtime_run_footer,
@@ -411,6 +412,7 @@ async def run_pipeline_for_chat(
         chat_outcome = await publish_jobs(
             live_jobs,
             target="chat",
+            policy=policy_for(runner.get_runtime(tenant_id), "chat"),
             sender=ReplyCardSender(message),
             send_limit=send_limit,
             throttle_seconds=0.3,
@@ -477,6 +479,7 @@ async def run_pipeline_for_chat(
                 channel_outcome = await publish_jobs(
                     delivered_jobs,
                     target=publish_channel,
+                    policy=policy_for(runner.get_runtime(tenant_id), publish_channel),
                     sender=TelegramCardSender(
                         bot,
                         markup_for=build_feedback_markup

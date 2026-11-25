@@ -745,7 +745,7 @@ async def test_run_pipeline_reports_partial_chat_delivery_and_publishes_only_del
     message.answer = AsyncMock(side_effect=_answer)
 
     bot = MagicMock()
-    bot.send_message = AsyncMock(
+    bot.send_rich_message = AsyncMock(
         return_value=SimpleNamespace(message_id=2, chat=SimpleNamespace(id=123))
     )
 
@@ -754,8 +754,8 @@ async def test_run_pipeline_reports_partial_chat_delivery_and_publishes_only_del
     status_text = status_msg.edit_text.call_args_list[-1].args[0]
     assert "✉️ Отправлено: 1" in status_text
     assert "Дальше отправка остановилась: chat send failed" in status_text
-    bot.send_message.assert_called_once()
-    assert bot.send_message.call_args.args[1] == "card:AI Engineer 1"
+    bot.send_rich_message.assert_called_once()
+    assert bot.send_rich_message.call_args.args[1].html == "<p>card:AI Engineer 1</p>"
 
 
 async def test_run_pipeline_backfills_past_dead_links_before_send_limit(

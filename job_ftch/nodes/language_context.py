@@ -11,21 +11,10 @@ from job_ftch.domain import (
     SourceKind,
     source_identity_for_raw_item,
 )
+from job_ftch.domain.posting_language import posting_language
 
-_CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
-_LATIN_RE = re.compile(r"[A-Za-z]")
 _HASHTAG_RE = re.compile(r"#\w+")
 _URL_RE = re.compile(r"https?://\S+")
-
-
-def _detect_language(text: str) -> LanguageCode:
-    cyrillic = len(_CYRILLIC_RE.findall(text))
-    latin = len(_LATIN_RE.findall(text))
-    if cyrillic == 0 and latin == 0:
-        return LanguageCode.UNKNOWN
-    if cyrillic >= latin:
-        return LanguageCode.RU
-    return LanguageCode.EN
 
 
 class SourceContextNode:
@@ -35,7 +24,13 @@ class SourceContextNode:
 
     async def process(self, item: RawItem) -> RawItem | None:
         # 1. Language detection
-        language = _detect_language(item.text)
+        declared = item.metadata.get("detected_language")
+        language = (
+            LanguageCode(declared)
+            if isinstance(declared, str)
+            and declared in {code.value for code in LanguageCode if code != LanguageCode.UNKNOWN}
+            else posting_language(item.text)
+        )
 
         # 2. Source family and trust scoring
         identity = source_identity_for_raw_item(item)

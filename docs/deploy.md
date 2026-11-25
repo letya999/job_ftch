@@ -34,6 +34,7 @@ cp job_ftch/adapters/telegram_bot/.env.prod.example job_ftch/adapters/telegram_b
 Обязательные секреты:
 
 - `POSTGRES_PASSWORD`;
+- `JOB_FTCH_QDRANT_API_KEY` для сервера Qdrant и его клиентов;
 - `JOB_FTCH_TELEGRAM_API_ID`;
 - `JOB_FTCH_TELEGRAM_API_HASH`;
 - `JOB_FTCH_AUTH_TELEGRAM_BOT_TOKEN`;
@@ -48,10 +49,10 @@ Non-secret runtime policy не должна жить в `.env.prod`: она за
 ```bash
 docker build -f docker/runtime/Dockerfile.prod -t job-ftch-runtime:prod .
 docker compose --env-file job_ftch/adapters/telegram_bot/.env.prod \
-  -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml config
+  -f job_ftch/adapters/telegram_bot/docker-compose.prod.yml config --quiet
 ```
 
-`docker compose config` должен падать, если `POSTGRES_PASSWORD` пустой.
+Для PostgreSQL и Qdrant задайте два разных случайных секрета в env-файле бота. Проверка Compose требует оба значения. Флаг `--quiet` оставляет значения вне консоли и журналов проверки.
 
 ## Запуск
 

@@ -23,7 +23,10 @@ async def test_public_projection_avoids_full_group_json(monkeypatch: pytest.Monk
         async def __aexit__(self, *_args: object) -> None:
             return None
 
-        async def fetch(self, query: str, limit: int) -> list[dict[str, str]]:
+        async def fetch(
+            self, query: str, limit: int, offset: int, read_language_evidence: bool
+        ) -> list[dict[str, str]]:
+            assert offset == 0 and not read_language_evidence
             self.query, self.limit = query, limit
             return [
                 {

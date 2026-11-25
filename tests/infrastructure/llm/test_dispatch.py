@@ -204,6 +204,65 @@ async def test_inline_affinity_needs_no_queue_and_keeps_item_session(monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("preflight", ["ready", "missing_credential", "offline"])
+async def test_cancel_during_preflight_preserves_terminal_state_and_budget(
+    dispatch_settings, monkeypatch, preflight
+):
+    from argparse import Namespace
+
+    from job_ftch.infrastructure.llm import dispatch_worker
+
+    settings, name = dispatch_settings
+    if preflight == "offline":
+        settings.llm_provider_profiles[name].egress_ready_url = "http://home.invalid/ready"
+        real_client = httpx.AsyncClient
+        monkeypatch.setattr(
+            httpx,
+            "AsyncClient",
+            lambda **kwargs: real_client(
+                **kwargs, transport=httpx.MockTransport(lambda _: httpx.Response(503))
+            ),
+        )
+    calls = []
+
+    def upstream(request):
+        calls.append(request)
+        return httpx.Response(200, json={"choices": []})
+
+    worker = dispatch_worker.LLMWorker(settings, transport=httpx.MockTransport(upstream))
+    request_id = await worker.store.submit(name, name, "cancel-race", payload())
+    read_pending, cancelled = asyncio.Event(), asyncio.Event()
+    get = worker.store.get
+
+    async def pause_after_read(key):
+        row = await get(key)
+        if not read_pending.is_set():
+            read_pending.set()
+            await cancelled.wait()
+        return row
+
+    monkeypatch.setattr(worker.store, "get", pause_after_read)
+    monkeypatch.setattr(dispatch_worker, "get_settings", lambda: settings)
+    if preflight == "missing_credential":
+        monkeypatch.delenv("JOB_FTCH_TEST_DISPATCH_CREDENTIAL")
+    task = asyncio.create_task(worker.execute(request_id))
+    try:
+        await asyncio.wait_for(read_pending.wait(), timeout=5)
+        await dispatch_worker.admin(Namespace(command="cancel", target=request_id))
+        assert (await get(request_id))["state"] == "cancelled"
+        cancelled.set()
+        await asyncio.wait_for(task, timeout=5)
+        row = await get(request_id)
+        assert (row["state"], row["attempts"], row["reserved_tokens"]) == ("cancelled", 0, 0)
+        assert not calls
+        assert all(s["scope"] != name for s in (await worker.store.stats())["scopes"])
+    finally:
+        cancelled.set()
+        await asyncio.gather(task, return_exceptions=True)
+        await worker.close()
+
+
+@pytest.mark.asyncio
 async def test_offline_egress_reserves_no_budget_or_attempt(dispatch_settings, monkeypatch):
     from job_ftch.infrastructure.llm.dispatch_worker import DispatchWait, LLMWorker
 

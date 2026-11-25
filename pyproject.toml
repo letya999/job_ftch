@@ -50,14 +50,14 @@ parity_lab = [
 stealth = ["playwright-stealth>=2.0.3", "curl-cffi==0.17.0"]
 tls_client = ["tls-client>=1.0.1"]
 openai = ["openai>=1.30", "instructor>=1.4"]
-telegram = ["telethon>=1.36", "aiogram>=3.7"]
+telegram = ["telethon>=1.36", "aiogram>=3.30"]
 dagster = ["dagster>=1.8"]
 faststream = ["faststream>=0.5"]
 api = ["fastapi>=0.115", "uvicorn>=0.30"]
 mcp = ["fastmcp>=2.4"]
 local_mcp = ["numpy>=1.26"]
 bot = [
-    "aiogram>=3.7",
+    "aiogram>=3.30",
     "telethon>=1.36",
     "fastapi>=0.115",
     "uvicorn>=0.30",
@@ -198,7 +198,7 @@ dev = [
     "pytest-benchmark>=4.0",
     "bandit[toml]>=1.7",
     "pip-audit>=2.10",
-    "aiogram>=3.7",
+    "aiogram>=3.30",
     "jsonschema>=4.0",
     "httpx",
     "hypothesis>=6.100",

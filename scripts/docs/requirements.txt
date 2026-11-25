@@ -9,6 +9,7 @@ pymdown-extensions==12.3
 GitPython==3.2.1
 certifi==2026.10.23
 idna==3.19
+wcmatch==11.2
 
 # Навигация из структуры папок вместо ручного nav.
 mkdocs-awesome-pages-plugin==2.9.3

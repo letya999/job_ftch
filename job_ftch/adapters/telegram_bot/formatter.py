@@ -6,7 +6,8 @@ import re
 from html import escape
 from typing import TYPE_CHECKING
 
-from job_ftch.publication.normalize import format_compensation, format_geo
+from job_ftch.application.publication_audience import publication_facts
+from job_ftch.publication.normalize import format_compensation
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -100,7 +101,8 @@ def format_vacancy_card(job: Job | JobRecord) -> str:
         work_mode = None
 
     # Location
-    normalized_location = format_geo(job)
+    facts = publication_facts(job)
+    normalized_location = facts.location
     location = escape(normalized_location or "")[:_MAX_LOCATION] if normalized_location else None
 
     # Salary from nested compensation object
@@ -133,6 +135,8 @@ def format_vacancy_card(job: Job | JobRecord) -> str:
         parts.append(meta_line)
     if desc_block:
         parts.append(desc_block)
+    if tags := facts.hashtags():
+        parts.append(" ".join(tags))
     if url_line:
         parts.append(url_line)
 

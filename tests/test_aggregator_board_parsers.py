@@ -13,6 +13,7 @@ from job_ftch.infrastructure.sources.site_parsers.aggregator_boards import (
     AIJobsComParser,
     AIJobsParser,
     QuickOfferParser,
+    RemoteRocketshipParser,
 )
 
 
@@ -48,6 +49,36 @@ class _Client:
         if url in self.fail:
             raise RuntimeError("origin unavailable")
         return self.responses[url]
+
+
+@pytest.mark.asyncio
+async def test_rocketship_category_follows_company_job_links_only() -> None:
+    board = "https://www.remoterocketship.com/jobs/ai-engineer/"
+    detail = (
+        "https://www.remoterocketship.com/publicjobs/company/softwaremind/jobs/"
+        "senior-full-stack-engineer-ai-prototyping-argentina-remote-3/"
+    )
+    page = (
+        "<h1>Remote AI Engineer Jobs</h1><a href='/jobs/data-engineer/'>Jobs by Type</a>"
+        f"<h3><a href='{detail}'>Senior Full-Stack Engineer</a></h3>"
+    )
+    client = _Client(
+        {
+            board: _Response(page, board),
+            detail: _Response(
+                "<main><h1>Senior Full-Stack Engineer</h1><p>Build AI prototypes in Argentina.</p></main>",
+                detail,
+            ),
+        }
+    )
+    items = [
+        item
+        async for item in RemoteRocketshipParser().parse(CareerSiteSpec(url=board, limit=1), client)
+    ]
+    assert len(items) == 1
+    assert str(items[0].url) == detail
+    assert "Build AI prototypes in Argentina" in items[0].text
+    assert "Jobs by Type" not in items[0].text
 
 
 def test_all_requested_aggregators_are_registered() -> None:

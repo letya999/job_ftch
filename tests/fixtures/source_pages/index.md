@@ -7,5 +7,6 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 ## Files On This Level
 
 - [jseek_consent.html](jseek_consent.html)
+- [november_source_pairs.json](november_source_pairs.json)
 - [wantapply_detail.html](wantapply_detail.html)
 - [wantapply_listing.html](wantapply_listing.html)

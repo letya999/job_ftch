@@ -36,8 +36,10 @@ from job_ftch.application.channel_publisher import (
     channel_throttle_seconds,
     publish_jobs,
     remaining_publish_candidates,
+    telegram_sink_name,
 )
 from job_ftch.application.llm_dispatch import uses_cliproxy_runs
+from job_ftch.application.publication_audience import policy_for
 from job_ftch.application.run_report import (
     build_runtime_run_report,
     render_runtime_run_footer,
@@ -224,7 +226,7 @@ async def _recover_pending_scheduler_publish(
         settled = backlog_jobs == [] and missing == 0
         uncertain = getattr(store, "list_uncertain_outbox", None)
         if settled and iscoroutinefunction(uncertain):
-            settled = not await uncertain(limit=1)
+            settled = not await uncertain(limit=1, sink_name=telegram_sink_name(publish_channel))
         if settled:
             if slot_id:
                 await update_scheduler_slot(
@@ -260,6 +262,7 @@ async def _recover_pending_scheduler_publish(
     outcome = await publish_jobs(
         eligible,
         target=publish_channel,
+        policy=policy_for(runtime, publish_channel),
         sender=TelegramCardSender(
             bot,
             markup_for=build_feedback_markup
@@ -727,6 +730,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     )
                     continue
 
+                recovering_delivery = False
                 if pending_publish and publish_channel and publish_user_id:
                     last_publish_attempt = _parse_scheduler_timestamp(
                         await _maybe_await(
@@ -737,16 +741,29 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                         last_publish_attempt is None
                         or (now - last_publish_attempt).total_seconds() >= 60
                     )
-                    if retry_ready:
-                        await _recover_pending_scheduler_publish(
-                            runner,
-                            bot,
-                            tenant_id=tenant_id,
-                            publish_channel=str(publish_channel),
-                            publish_user_id=publish_user_id,
-                            slot_id=scheduler_slot_id,
-                        )
-                    continue
+                    if retry_ready and await _recover_pending_scheduler_publish(
+                        runner,
+                        bot,
+                        tenant_id=tenant_id,
+                        publish_channel=str(publish_channel),
+                        publish_user_id=publish_user_id,
+                        slot_id=scheduler_slot_id,
+                    ):
+                        continue
+                    if llm_blocked_until is not None and now < llm_blocked_until:
+                        continue
+                    ingest_slot = await ensure_scheduler_slot(
+                        store,
+                        now=now,
+                        interval_seconds=int(interval),
+                        legacy_last_attempt=last_run,
+                        ingest_only=True,
+                    )
+                    if ingest_slot is None:
+                        continue
+                    recovering_delivery = True
+                    scheduler_slot_id = str(ingest_slot["slot_id"])
+                    scheduler_slot = ingest_slot
 
                 # Run with the channel owner's profile so scheduled publishing matches
                 # the same profile-aware filtering as manual /run.
@@ -821,7 +838,10 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     emitted = getattr(run_result, "emitted", 0)
                     new_candidates = getattr(run_result, "new_publish_candidates", emitted)
                     queued_publish = bool(
-                        new_candidates > 0 and publish_channel and publish_user_id
+                        new_candidates > 0
+                        and publish_channel
+                        and publish_user_id
+                        and not recovering_delivery
                     )
                     if queued_publish:
                         pending_since = _parse_scheduler_timestamp(
@@ -974,6 +994,16 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     )
                     continue
 
+                if recovering_delivery:
+                    # The earlier durable window owns every accepted candidate, including this run.
+                    await update_scheduler_slot(
+                        store,
+                        scheduler_slot_id,
+                        publish_state="skipped",
+                        publish_reason="existing_delivery_window",
+                    )
+                    continue
+
                 publish_context_tokens = bind_contextvars(
                     tenant_id=tenant_id,
                     source_run_id=str(getattr(run_result, "source_run_id", "") or ""),
@@ -1110,6 +1140,7 @@ async def _run_scheduler_loop(runner: TenantRunner, bot: Bot) -> None:
                     publish_outcome = await publish_jobs(
                         new_jobs,
                         target=publish_channel,
+                        policy=policy_for(runner.get_runtime(tenant_id), publish_channel),
                         sender=TelegramCardSender(
                             bot,
                             markup_for=build_feedback_markup

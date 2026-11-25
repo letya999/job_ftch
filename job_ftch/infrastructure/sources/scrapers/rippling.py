@@ -49,7 +49,7 @@ def _parse_salary(pay_ranges: list[dict[str, Any]] | None) -> dict[str, Any] | N
     if sal_min is None and sal_max is None:
         return None
     currency = pr.get("currency")
-    unit = normalize_salary_unit(pr.get("frequency")) or "year"
+    unit = normalize_salary_unit(pr.get("frequency"))
     return {"currency": currency, "min": sal_min, "max": sal_max, "unit": unit}
 
 

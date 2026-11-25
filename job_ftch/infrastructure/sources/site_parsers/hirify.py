@@ -407,7 +407,7 @@ def _salary_metadata(row: dict[str, Any]) -> dict[str, Any] | None:
         "min": minimum,
         "max": maximum,
         "currency": salary.get("currency"),
-        "unit": "month",
+        "unit": salary.get("salary_period") or salary.get("period") or salary.get("unit"),
     }
 
 

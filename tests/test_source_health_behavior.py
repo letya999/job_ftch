@@ -26,6 +26,36 @@ def _write_fixture(path: Path) -> None:
     path.write_text(json.dumps([item]), encoding="utf-8")
 
 
+def test_empty_coverage_preserves_baseline_and_recovers_on_confirmed_outcome() -> None:
+    start = datetime(2026, 11, 1, tzinfo=UTC)
+
+    def update(previous, stats, day, status=None):
+        return _update_source_health_payload(
+            previous,
+            source_id="career_site:x",
+            source_kind="career_site",
+            source_name="x",
+            stats=stats,
+            finished_at=start + timedelta(days=day),
+            outcome_status=status,
+        )
+
+    health = update(None, SourceRunStats(fetched=12, emitted=10), 0)
+    for day in range(1, 7):
+        health = update(health, SourceRunStats(), day)
+        assert health.status == "degraded"
+        assert health.baseline_emitted == 10
+        assert health.last_success_at == start.isoformat()
+    for status in ("no_new_vacancies", "no_open_vacancies"):
+        recovered = update(health, SourceRunStats(), 7, status)
+        assert recovered.status == "healthy"
+        assert recovered.success_count == 2
+        assert recovered.baseline_emitted == 10
+    failed = update(health, SourceRunStats(fetched=1, failed=1), 7, "parsed_ok")
+    assert (failed.status, failed.success_count, failed.failure_streak) == ("failing", 1, 1)
+    assert update(failed, SourceRunStats(fetched=1, emitted=1), 8, "parsed_ok").status == "healthy"
+
+
 @pytest.mark.asyncio
 async def test_legacy_auto_paused_source_is_resumed_immediately(tmp_path: Path) -> None:
     fixture_path = tmp_path / "fixture.json"

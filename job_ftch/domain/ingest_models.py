@@ -44,6 +44,7 @@ class DiscoveredCandidate:
     rich_payload: DiscoveredPostingPayload | None = None
     completeness: float = 0.0
     status: IngestItemStatus = IngestItemStatus.DISCOVERED
+    listing_payload: DiscoveredPostingPayload | None = None
 
 
 def score_completeness(payload: DiscoveredPostingPayload) -> float:

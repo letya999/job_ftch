@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
 from job_ftch.adapters.telegram_bot.sender import ReplyCardSender, TelegramCardSender
 from job_ftch.domain.models import JobRecord, LanguageCode, SourceKind, WorkMode
 
@@ -50,6 +56,27 @@ def test_reply_card_sender_defaults_to_yaml_layout() -> None:
 
     assert "Компания: Яндекс" in text
     assert "Открыть вакансию" not in text
+
+
+@pytest.mark.asyncio
+async def test_channel_sends_rich_card_with_hashtags_link_keyboard_and_receipt() -> None:
+    bot = AsyncMock()
+    bot.send_rich_message.return_value = SimpleNamespace(
+        chat=SimpleNamespace(id=-100), message_id=83
+    )
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="✓", callback_data="ok")]]
+    )
+    receipt = await TelegramCardSender(bot, markup_for=lambda _: keyboard).send("@jobs", _job())
+    call = bot.send_rich_message.await_args
+    target, content = call.args
+    assert target == "@jobs" and call.kwargs["reply_markup"] is keyboard
+    assert "<p><b>Senior ML Engineer</b></p>" in content.html
+    assert "#москва" in content.html and "#hybrid" in content.html
+    assert 'href="https://hh.ru/vacancy/123"' in content.html
+    assert not content.skip_entity_detection
+    assert receipt.message_id == 83 and receipt.chat_id == "-100"
+    bot.send_message.assert_not_called()
 
 
 def test_incomplete_public_job_is_rejected_before_send() -> None:

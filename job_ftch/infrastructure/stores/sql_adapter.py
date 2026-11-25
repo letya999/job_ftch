@@ -123,6 +123,7 @@ class SQLStoreAdapter(abc.ABC):
     _SQL_OUTBOX_ENQUEUE: str
     _SQL_OUTBOX_GET: str
     _SQL_OUTBOX_PENDING: str
+    _SQL_OUTBOX_FOR_SINK: str
     _SQL_OUTBOX_DELIVERED: str
     _SQL_OUTBOX_RELEASE_UNCERTAIN: str
     _SQL_OUTBOX_CONFIRM_UNCERTAIN: str
@@ -258,10 +259,14 @@ class SQLStoreAdapter(abc.ABC):
         )
 
     async def list_uncertain_outbox(
-        self, limit: int = 100, *, tenant_id: str | None = None
+        self, limit: int = 100, *, tenant_id: str | None = None, sink_name: str | None = None
     ) -> tuple[OutboxRecord, ...]:
-        rows = await self._fetchall(
-            self._SQL_OUTBOX_PENDING, (OutboxState.UNCERTAIN.value, tenant_id or "default", limit)
+        state = OutboxState.UNCERTAIN.value
+        tenant = tenant_id or "default"
+        rows = (
+            await self._fetchall(self._SQL_OUTBOX_FOR_SINK, (state, tenant, sink_name, limit))
+            if sink_name is not None
+            else await self._fetchall(self._SQL_OUTBOX_PENDING, (state, tenant, limit))
         )
         return tuple(
             OutboxRecord.model_validate_json(str(row[0])).model_copy(

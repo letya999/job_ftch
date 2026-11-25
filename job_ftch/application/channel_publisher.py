@@ -27,7 +27,12 @@ from uuid import uuid4
 
 import structlog
 
-from job_ftch.application.publication_backlog import mark_publication_handled
+from job_ftch.application.publication_audience import evaluate_audience
+from job_ftch.application.publication_backlog import (
+    audience_revision,
+    audience_target,
+    mark_publication_handled,
+)
 from job_ftch.application.publish_ledger import (
     _load_string_list,
     _persist_string_list,
@@ -48,6 +53,7 @@ if TYPE_CHECKING:
     from job_ftch.application.capabilities import OutboxCapable
     from job_ftch.application.publish_ledger import RunStateStore
     from job_ftch.domain import Job
+    from job_ftch.domain.publication_policy import PublicationPolicy
 
 logger = structlog.get_logger(__name__)
 
@@ -193,6 +199,10 @@ def remaining_publish_candidates(total_candidates: int, outcome: PublishOutcome)
     )
 
 
+def telegram_sink_name(target: str) -> str:
+    return f"telegram:{sha256(target.encode()).hexdigest()}"
+
+
 def _is_fatal_target_error(error: BaseException) -> bool:
     text = str(error).lower()
     return any(marker in text for marker in _FATAL_TARGET_MARKERS)
@@ -211,6 +221,7 @@ async def publish_jobs(
     *,
     target: str,
     sender: CardSender,
+    policy: PublicationPolicy | None = None,
     store: RunStateStore | None = None,
     send_limit: int,
     throttle_seconds: float = _DEFAULT_THROTTLE_SECONDS,
@@ -284,10 +295,40 @@ async def publish_jobs(
             published_urls = set(url_ledger)
 
     delivered_jobs: list[Job] = []
+    policy_version = policy.version if policy else ""
     for job in jobs:
         if outcome.sent >= send_limit:
             break
         job_id = extract_publish_job_id(job)
+        if policy is not None:
+            decision = evaluate_audience(job, policy)
+            logger.info(
+                "publication_audience_decision",
+                job_id=job_id,
+                target=target,
+                version=policy_version,
+                decision=decision.status,
+                reasons=decision.reasons,
+                evidence=decision.evidence,
+                shadow=policy.shadow,
+            )
+            if decision.status != "allow" and not policy.shadow:
+                reason = f"audience_{decision.status}"
+                await mark_publication_handled(
+                    store,
+                    audience_target(target, policy_version),
+                    job,
+                    reason=f"{reason}:{','.join(decision.reasons)}",
+                    revision=(getattr(job, "metadata", {}) or {}).get(
+                        "publication_candidate_revision"
+                    )
+                    or audience_revision(job),
+                )
+                outcome.terminal_skips += 1
+                outcome.terminal_skip_reasons[reason] = (
+                    outcome.terminal_skip_reasons.get(reason, 0) + 1
+                )
+                continue
         publish_url = extract_publish_canonical_url(job)
         already_by_id = job_id is not None and job_id in published_ids
         already_by_url = publish_url is not None and publish_url in published_urls
@@ -332,7 +373,7 @@ async def publish_jobs(
                         observation_id=content_hash,
                         content_hash=content_hash,
                         decision_version="publication-v1",
-                        sink_name=f"telegram:{sha256(target.encode()).hexdigest()}",
+                        sink_name=telegram_sink_name(target),
                         idempotency_key=key,
                         delivery_payload={
                             "attempt_id": attempt_id,
@@ -438,7 +479,7 @@ async def publish_jobs(
         if not sent:
             continue
 
-        if store is not None and isinstance(delivery, DeliveryReceipt):
+        if not intents and store is not None and isinstance(delivery, DeliveryReceipt):
             from job_ftch.application.publish_ledger import persist_delivery_receipt
 
             await persist_delivery_receipt(store, delivery)
