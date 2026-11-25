@@ -182,9 +182,9 @@ async def test_scheduler_loop_uses_publish_owner_profile(
         ]
     )
     bot = MagicMock()
-    bot.send_message = MagicMock(return_value=asyncio.Future())
-    bot.send_message.return_value.set_result(
-        SimpleNamespace(message_id=1, chat=SimpleNamespace(id=123))
+    bot.send_message = AsyncMock()
+    bot.send_rich_message = AsyncMock(
+        return_value=SimpleNamespace(message_id=1, chat=SimpleNamespace(id=123))
     )
 
     with pytest.raises(asyncio.CancelledError):
@@ -198,10 +198,8 @@ async def test_scheduler_loop_uses_publish_owner_profile(
         since=runner.latest_jobs.call_args.kwargs["since"],
         user_id="123",
     )
-    assert bot.send_message.call_count == 2
-    sent_targets = [call.args[0] for call in bot.send_message.call_args_list]
-    assert "@out" in sent_targets
-    assert "123" in sent_targets
+    assert bot.send_rich_message.await_args.args[0] == "@out"
+    assert bot.send_message.call_args.args[0] == "123"
     assert store_state["bot_scheduler:last_run_emitted"] == "1"
     assert store_state["bot_scheduler:last_publish_sent"] == "1"
     assert store_state["bot_scheduler:last_publish_error"] == ""
@@ -348,6 +346,9 @@ async def test_scheduler_recovers_pending_publish_before_next_run(
         runner.latest_jobs.return_value = []
     bot = MagicMock()
     bot.send_message = AsyncMock()
+    bot.send_rich_message = AsyncMock(
+        return_value=SimpleNamespace(message_id=1, chat=SimpleNamespace(id=123))
+    )
 
     with pytest.raises(asyncio.CancelledError):
         await _run_scheduler_loop(runner, bot)
@@ -421,7 +422,8 @@ async def test_scheduler_loop_does_not_warn_when_jobs_are_grouped_for_publish(
     )
 
     bot = MagicMock()
-    bot.send_message = AsyncMock(
+    bot.send_message = AsyncMock()
+    bot.send_rich_message = AsyncMock(
         return_value=SimpleNamespace(message_id=1, chat=SimpleNamespace(id=123))
     )
 
@@ -431,8 +433,8 @@ async def test_scheduler_loop_does_not_warn_when_jobs_are_grouped_for_publish(
     warning_events = [call.args[0] for call in warning.call_args_list if call.args]
     assert "bot_delivery_partial_loss" not in warning_events
     assert store_state["bot_scheduler:last_publish_sent"] == "1"
-    sent_targets = [call.args[0] for call in bot.send_message.call_args_list]
-    assert sent_targets == ["@out", "123"]
+    assert bot.send_rich_message.await_args.args[0] == "@out"
+    assert bot.send_message.await_args.args[0] == "123"
 
 
 @pytest.mark.asyncio
@@ -723,6 +725,7 @@ async def test_scheduler_loop_drains_pending_publish_window_on_zero_emit_run(
 
     bot = MagicMock()
     bot.send_message = AsyncMock(side_effect=send_message)
+    bot.send_rich_message = AsyncMock(side_effect=send_message)
 
     with pytest.raises(asyncio.CancelledError):
         await _run_scheduler_loop(runner, bot)

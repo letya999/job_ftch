@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
+from aiogram.types import InputRichMessage
 
 from job_ftch.application.channel_publisher import (
     DeliveryReceipt,
@@ -32,6 +33,12 @@ if TYPE_CHECKING:
     from job_ftch.domain import Job
 
 logger = structlog.get_logger(__name__)
+
+
+def rich_card(text: str) -> InputRichMessage:
+    """Preserve the rendered card's paragraphs, inline links and native hashtag detection."""
+    paragraphs = (part.replace("\n", "<br>") for part in text.split("\n\n") if part)
+    return InputRichMessage(html="".join(f"<p>{part}</p>" for part in paragraphs))
 
 
 def _translate(error: Exception) -> Exception:
@@ -100,11 +107,9 @@ class TelegramCardSender:
             text = self._render(job)
             if text is None:
                 return RejectedDelivery("card_validation_rejected")
-            message = await self._bot.send_message(
+            message = await self._bot.send_rich_message(
                 target,
-                text,
-                parse_mode="HTML",
-                disable_web_page_preview=True,
+                rich_card(text),
                 reply_markup=self._markup_for(job) if self._markup_for else None,
             )
             chat_id = getattr(getattr(message, "chat", None), "id", target)

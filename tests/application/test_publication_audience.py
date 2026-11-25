@@ -425,7 +425,9 @@ async def test_catalog_filters_before_limit_and_invalidates_cached_policy() -> N
     cache = PublicJobsCache()
     api = await build_public_jobs_response(Runner(), "ai_jobs", limit=1, cache=cache)
     assert api["jobs"][0]["country"] == "Казахстан"
-    assert api["jobs"][0]["publicationTags"] == ["#staff", "#менеджер", "#казахстан", "#язык_kk"]
+    assert "publicationTags" not in api["jobs"][0]
+    assert api["jobs"][0]["postingLanguages"] == ["kk"]
+    assert api["jobs"][0]["profile"] == "manager"
     policies["site"] = PublicationPolicy(eligible_countries=("US",))
     api = await build_public_jobs_response(Runner(), "ai_jobs", limit=1, cache=cache)
     assert api["jobs"][0]["country"] == "США"

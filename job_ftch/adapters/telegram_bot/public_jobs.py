@@ -83,7 +83,6 @@ def _public_job(job: object) -> dict[str, Any]:
         "roleFamily": getattr(job, "role_family", None),
         "profile": facts.role,
         "postingLanguages": list(facts.languages),
-        "publicationTags": list(facts.hashtags()),
         "workMode": str(getattr(job, "work_mode", "unknown")),
         "seniority": facts.grade or "unknown",
         "tags": tags,
