@@ -10,7 +10,9 @@ display_name: AI Jobs RU/KZ
 # Set shadow to true on an individual recipient to preview policy decisions.
 publication_policies:
   "@ai_engineer_jobs": &ru_market
-    eligible_countries: [AM, AZ, BY, KG, KZ, MD, RU, TJ, TM, UZ]
+    eligible_countries: &cis_hiring_market [AM, AZ, BY, KG, KZ, MD, RU, TJ, TM, UZ]
+    region_countries:
+      CIS: *cis_hiring_market
     posting_languages: [ru]
     company_languages: [ru]
     verified_employers:

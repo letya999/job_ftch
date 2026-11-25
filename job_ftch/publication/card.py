@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 from job_ftch.publication.normalize import (
     detect_content_language,
     format_compensation,
-    format_geo,
     format_work_mode,
     pick_source_label,
     resolve_card_url,
@@ -62,7 +61,7 @@ def build_card(job: Job | JobRecord) -> PublicationCard:
     )
 
     content_lang = detect_content_language(job)
-    geo = format_geo(job)
+    facts = publication_facts(job)
     work_format = format_work_mode(job)
     salary = format_compensation(job)
     url = resolve_card_url(job)
@@ -100,13 +99,13 @@ def build_card(job: Job | JobRecord) -> PublicationCard:
     return PublicationCard(
         role=title,
         company=company,
-        geo=geo,
+        geo=facts.location,
         work_format=work_format,
         salary=salary,
         summary=summary,
         key_requirements=key_requirements,
         stack=stack,
-        hashtags=" ".join(publication_facts(job).hashtags()) or None,
+        hashtags=" ".join(facts.hashtags()) or None,
         url=url,
         source_name=pick_source_label(job),
         source_kind=source_kind,

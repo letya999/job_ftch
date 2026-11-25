@@ -166,6 +166,8 @@ def test_multi_office_post_7645_keeps_both_hiring_countries() -> None:
     )
     facts = publication_facts(job)
     assert facts.country is None and facts.city is None
+    assert facts.hiring_countries == ("Кипр", "ОАЭ")
+    assert {"#кипр", "#оаэ"} <= set(facts.hashtags())
     assert facts.location == "Лимасол, Кипр, Дубай, ОАЭ"
     for basis in ("eligibility", "office"):
         for code, expected in (("AE", "allow"), ("CY", "allow"), ("KZ", "skip")):
@@ -177,6 +179,18 @@ def test_multi_office_post_7645_keeps_both_hiring_countries() -> None:
             )
             assert decision.status == expected
 
+    assert publication_facts(
+        posting(location="Armenia and Kazakhstan", work_mode="onsite")
+    ).hiring_countries == ("Армения", "Казахстан")
+    assert (
+        publication_facts(
+            posting(
+                title="Developer", description_raw="Job Description: Work with a Senior Director."
+            )
+        ).grades
+        == ()
+    )
+
 
 def test_tashkent_grade_from_explicit_level_field() -> None:
     job = posting(
@@ -184,6 +198,108 @@ def test_tashkent_grade_from_explicit_level_field() -> None:
         description_raw="<dt>Level</dt><dd>Middle</dd><dt>Location</dt><dd>Toshkent</dd>",
     )
     assert publication_facts(job).grade == "middle"
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("AI Engineer (Middle+/Senior) (Python)", ("middle", "senior")),
+        ("Middle-Senior+ Backend Developer", ("middle", "senior")),
+        ("Мидл / Сеньор разработчик", ("middle", "senior")),
+        ("Backend Developer", ()),
+        ("Lead Generation Analyst, Middle East", ()),
+    ],
+)
+def test_grade_requires_explicit_position_evidence(title: str, expected: tuple[str, ...]) -> None:
+    job = posting(
+        title=title,
+        seniority="senior",
+        description_raw="5+ years of experience. You report to a Senior Director.",
+    )
+    assert publication_facts(job).grades == expected
+    assert publication_facts(posting(title=title, metadata={"seniority": "senior"})).grades == (
+        expected if "senior" in expected else ("senior",)
+    )
+
+
+@pytest.mark.parametrize(
+    ("title", "roles"),
+    [
+        ("Backend Developer / Data Analyst", ("developer", "analyst")),
+        ("Разработчик-аналитик", ("developer", "analyst")),
+        ("Розробник та аналітик", ("developer", "analyst")),
+        ("Développeur et analyste", ("developer", "analyst")),
+        ("Dasturchi va tahlilchi", ("developer", "analyst")),
+        ("Әзірлеуші және талдаушы", ("developer", "analyst")),
+        ("AI/ML Engineer", ("data_ml",)),
+        ("工程技术专家", ()),
+    ],
+)
+def test_profiles_describe_the_open_role_in_any_supported_spelling(
+    title: str, roles: tuple[str, ...]
+) -> None:
+    job = posting(
+        title=title, description_raw="Work closely with designers, analysts and managers."
+    )
+    assert publication_facts(job).roles == roles
+
+
+def test_named_hiring_regions_and_exclusions() -> None:
+    policy = PublicationPolicy(eligible_countries=("AM",), region_countries={"CIS": ("AM", "KZ")})
+    cases = (
+        ("Remote (Armenia / Kazakhstan)", ("#армения", "#казахстан"), "allow"),
+        ("Europe", ("#европа",), "review"),
+        ("CIS", ("#снг",), "allow"),
+        ("Worldwide", ("#глобал",), "allow"),
+        ("Worldwide except CIS", (), "skip"),
+        ("Worldwide except EU", (), "review"),
+        ("US only", ("#сша",), "skip"),
+        ("Tokyo, Japan (Hybrid)", ("#япония",), "skip"),
+    )
+    for scope, tags, decision in cases:
+        job = posting(title="Specialist", work_mode="remote", remote_restrictions=scope)
+        assert publication_facts(job).hashtags() == (*tags, "#remote"), scope
+        assert evaluate_audience(job, policy).status == decision, scope
+
+
+def test_three_independent_routes_are_selected_entirely_by_recipient_settings() -> None:
+    policy = PublicationPolicy(
+        eligible_countries=("AM",), posting_languages=("ru",), company_languages=("ru",)
+    )
+    office = posting(title="Engineer", country="US", work_mode="onsite", language="en")
+    assert evaluate_audience(office, policy).status == "review"
+    for change in (
+        {"country": "AM"},
+        {"language": "ru"},
+        {"description_raw": "We are a Russian-speaking company."},
+    ):
+        assert evaluate_audience(office.model_copy(update=change), policy).status == "allow"
+    for phrase in (
+        "Russian is preferred.",
+        "We are a Russian company.",
+        "We are not a Russian-speaking company.",
+    ):
+        assert (
+            evaluate_audience(office.model_copy(update={"description_raw": phrase}), policy).status
+            == "review"
+        )
+    alias = PublicationPolicy(company_languages=("pl",), language_aliases={"pl": ("Polish",)})
+    assert (
+        evaluate_audience(
+            office.model_copy(
+                update={"description_raw": "Our company's working language is Polish."}
+            ),
+            alias,
+        ).status
+        == "allow"
+    )
+    assert (
+        evaluate_audience(
+            office.model_copy(update={"description_raw": "We are a Russian-speaking company."}),
+            alias,
+        ).status
+        == "review"
+    )
 
 
 def test_mayflower_ai_automation_is_not_quality_assurance() -> None:
@@ -367,8 +483,9 @@ async def test_review_is_scoped_and_policy_change_cannot_redeliver() -> None:
 def test_conflicting_group_locations_agree_across_card_and_public_facts() -> None:
     group = merge_jobs(
         [
-            posting(city="Москва", country="Россия"),
+            posting(title="Senior Data Analyst", city="Москва", country="Россия"),
             posting(
+                title="Senior Data Analyst",
                 source_kind="telegram_channel",
                 location="Астана, Казахстан",
                 seniority="senior",
@@ -382,7 +499,7 @@ def test_conflicting_group_locations_agree_across_card_and_public_facts() -> Non
     facts = publication_facts(group)
     card = build_card(group)
     assert facts.country is None and facts.city is None and card.geo is None
-    assert card.hashtags == "#senior #аналитик #язык_ru #remote"
+    assert card.hashtags == "#senior #аналитик #казахстан #язык_ru #remote"
     assert evaluate_audience(group, PublicationPolicy(eligible_countries=("KZ",))).status == "allow"
 
 

@@ -24,10 +24,12 @@ class PublicationPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     eligible_countries: tuple[CountryCode, ...] = ()
+    region_countries: dict[str, tuple[CountryCode, ...]] = Field(default_factory=dict)
     country_basis: Literal["eligibility", "office"] = "eligibility"
     require_country: bool = False
     posting_languages: tuple[Language, ...] = ()
     company_languages: tuple[Language, ...] = ()
+    language_aliases: dict[Language, tuple[str, ...]] = Field(default_factory=dict)
     accept_team_language: bool = False
     verified_employers: dict[str, VerifiedEmployer] = Field(default_factory=dict)
     match: Literal["any", "all"] = "any"
@@ -42,4 +44,4 @@ class PublicationPolicy(BaseModel):
 
     @property
     def version(self) -> str:
-        return sha256(("audience-v4:" + self.model_dump_json()).encode()).hexdigest()[:16]
+        return sha256(("audience-v5:" + self.model_dump_json()).encode()).hexdigest()[:16]

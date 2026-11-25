@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-_GEO_SPLIT = re.compile(r"\s*[;,/|&]\s*|\s+[-–—]\s+")
+_GEO_SPLIT = re.compile(r"\s*[;,/|&]\s*|\s+[-–—]\s+|\s+(?:or|или|либо)\s+", re.I)
 _SETTLEMENT_PREFIX = re.compile(r"^(?:г|гор|пос|пгт|с|д|ст)\.?\s+", re.IGNORECASE)
 _PAREN_NOTE = re.compile(r"\s*\([^)]*\)")
 _EXCLUDED_PLACES = re.compile(
@@ -249,7 +249,14 @@ def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
             and address[1].strip().casefold() not in _COUNTRY_ALIASES
         ):
             positive = f"{address[1]}, {address[3]}"
-        chunks = _GEO_SPLIT.split(positive)
+        chunks: list[str] = []
+        for chunk in _GEO_SPLIT.split(positive):
+            places = re.split(r"\s+(?:and|и|\+)\s+", chunk, flags=re.I)
+            chunks.extend(
+                places
+                if len(places) > 1 and all(country_code(p.strip()) for p in places)
+                else (chunk,)
+            )
         # In an address, CA alone can mean California or Canada.
         if (
             len(chunks) == 2

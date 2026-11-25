@@ -476,6 +476,7 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                     'source_kind', job->'source_kind',
                     'source_name', job->'source_name',
                     'title', job->'title',
+                    'title_raw', job->'title_raw',
                     'company', job->'company',
                     'description', left(job->>'description', 360),
                     'description_raw', CASE
@@ -493,6 +494,8 @@ class PostgreSQLJobBackend(JobPersistenceBackend, JobGroupStore, SearchBackend):
                     'metadata', jsonb_strip_nulls(jsonb_build_object(
                         'detected_language', job->'metadata'->'detected_language',
                         'publication_locations', job->'metadata'->'publication_locations',
+                        'seniority', job->'metadata'->'seniority',
+                        'grade', job->'metadata'->'grade',
                         'salary_text', job->'metadata'->'salary_text',
                         'base_salary_text', job->'metadata'->'base_salary_text',
                         'compensation_evidence', job->'metadata'->'compensation_evidence',

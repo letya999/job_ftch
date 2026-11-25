@@ -5,11 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import { copy, type Locale } from "@/lib/i18n";
 
 export type Compensation = { currency: string; min_amount?: number; max_amount?: number; period?: string; gross?: boolean };
-export type Job = { id: string; title: string; company: string; location: string; workMode: string; seniority: string; profile?: string; roleFamily?: string; country?: string; city?: string; postingLanguages?: string[]; tags: string[]; source: string; postedAt: string; compensation?: Compensation; url: string };
+export type Job = { id: string; title: string; company: string; location: string; workMode: string; seniority: string; profile?: string; profiles?: string[]; grades?: string[]; countries?: string[]; regions?: string[]; roleFamily?: string; country?: string; city?: string; postingLanguages?: string[]; tags: string[]; source: string; postedAt: string; compensation?: Compensation; url: string };
 const PAGE_SIZE = 20;
 const facets = [
   ["seniority", "Грейд", "Grade"], ["profile", "Профиль", "Role"],
-  ["country", "Страна", "Country"], ["city", "Город", "City"],
+  ["country", "Страна или регион", "Country or region"], ["city", "Город", "City"],
   ["postingLanguages", "Язык объявления", "Posting language"], ["workMode", "Формат", "Work mode"],
 ] as const;
 type Facet = (typeof facets)[number][0];
@@ -21,6 +21,9 @@ const russianFacetLabels: Record<string, string> = {
   ru: "Русский", en: "Английский", kk: "Казахский", uk: "Украинский", uz: "Узбекский",
 };
 function values(job: Job, facet: Facet): string[] {
+  if (facet === "seniority" && job.grades) return job.grades;
+  if (facet === "profile" && job.profiles) return job.profiles;
+  if (facet === "country" && job.countries) return [...job.countries, ...(job.regions ?? [])];
   const value = job[facet];
   return Array.isArray(value) ? value : value && value !== "unknown" ? [value] : [];
 }

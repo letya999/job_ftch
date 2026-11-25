@@ -19,6 +19,7 @@ _AUDIENCE_FIELDS = (
     "city",
     "country",
     "location",
+    "region",
     "work_mode",
     "remote_restrictions",
     "language",
