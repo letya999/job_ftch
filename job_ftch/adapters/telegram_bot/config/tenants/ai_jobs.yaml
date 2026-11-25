@@ -6,8 +6,8 @@
 tenant_id: ai_jobs
 display_name: AI Jobs RU/KZ
 
-# Editorial hiring market. Shadow records the decision while existing readers
-# keep receiving the current feed. Each recipient can be promoted independently.
+# Editorial hiring market shared by the public channel and the site.
+# Set shadow to true on an individual recipient to preview policy decisions.
 publication_policies:
   "@ai_engineer_jobs": &ru_market
     eligible_countries: [AM, AZ, BY, KG, KZ, MD, RU, TJ, TM, UZ]
@@ -20,10 +20,8 @@ publication_policies:
         checked_on: 2026-11-25
     match: any
     insufficient_evidence: review
-    shadow: true
-  site:
-    <<: *ru_market
     shadow: false
+  site: *ru_market
 
 source_backend: telegram_channel
 sources:

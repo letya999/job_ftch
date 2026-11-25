@@ -42,4 +42,4 @@ class PublicationPolicy(BaseModel):
 
     @property
     def version(self) -> str:
-        return sha256(("audience-v2:" + self.model_dump_json()).encode()).hexdigest()[:16]
+        return sha256(("audience-v3:" + self.model_dump_json()).encode()).hexdigest()[:16]

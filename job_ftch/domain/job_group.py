@@ -183,6 +183,30 @@ def merge_jobs(jobs: list[JobRecord]) -> JobRecord:
     metadata: dict[str, Any] = {}
     for j in reversed(sorted_jobs):  # lower priority first so higher priority overwrites
         metadata.update(j.metadata)
+    evidence_job = canonical
+    if canonical.canonical_url and canonical.metadata.get("detail_vacancy_confirmed") is False:
+        detail = max(
+            (
+                j
+                for j in sorted_jobs
+                if j.canonical_url == canonical.canonical_url
+                and j.metadata.get("detail_vacancy_confirmed") is True
+                and j.description_raw
+            ),
+            key=lambda j: len(j.description_raw or ""),
+            default=None,
+        )
+        if detail:
+            evidence_job = detail
+            metadata["original_posting_text"] = (
+                detail.metadata.get("original_posting_text") or detail.description_raw
+            )
+            metadata["detail_vacancy_confirmed"] = True
+            metadata["detail_evidence_source"] = detail.source_name
+            metadata["detected_language"] = detail.metadata.get("detected_language") or (
+                detail.language.value
+            )
+    language_jobs = (evidence_job,) if evidence_job is not canonical else sorted_jobs
     locations = list(
         dict.fromkeys(
             (j.city, j.country, j.location)
@@ -211,7 +235,7 @@ def merge_jobs(jobs: list[JobRecord]) -> JobRecord:
             "title": title,
             "title_normalized": title,
             "description": description,
-            "description_raw": canonical.description_raw or description,
+            "description_raw": evidence_job.description_raw or description,
             "description_clean": description,
             "company": company,
             "company_canonical": company_canonical,
@@ -227,12 +251,12 @@ def merge_jobs(jobs: list[JobRecord]) -> JobRecord:
                 (j.seniority for j in sorted_jobs if j.seniority != "unknown"), canonical.seniority
             ),
             "language": next(
-                (j.language for j in sorted_jobs if j.language != "unknown"), canonical.language
+                (j.language for j in language_jobs if j.language != "unknown"), canonical.language
             ),
             "languages_detected": tuple(
                 dict.fromkeys(
                     lang
-                    for j in sorted_jobs
+                    for j in language_jobs
                     for lang in (j.language, *j.languages_detected)
                     if lang != "unknown"
                 )

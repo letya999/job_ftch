@@ -37,7 +37,7 @@ _PROFILE_PATTERNS = (
     ("devops", re.compile(r"\b(?:devops|mlops|sre|site reliability)\b", re.I)),
     (
         "qa",
-        re.compile(r"\b(?:qa|sdet|quality assurance|quality engineering|тестировщик\w*)\b", re.I),
+        re.compile(r"\b(?:qa|sdet|quality assurance|quality engineer\w*|тестировщик\w*)\b", re.I),
     ),
     ("analyst", re.compile(r"\b(?:analysts?|analytics|аналитик\w*)\b", re.I)),
     ("architect", re.compile(r"\b(?:architect\w*|архитектор\w*)\b", re.I)),
@@ -45,7 +45,7 @@ _PROFILE_PATTERNS = (
     (
         "data_ml",
         re.compile(
-            r"\b(?:machine learning|ml engineer|data scien\w+|data engineer\w*|ai engineer\w*|artificial intelligence)\b",
+            r"\b(?:machine learning|ml engineer|data scien\w+|data engineer\w*|ai[ -](?:automation |agent )?(?:engineer\w*|инженер\w*)|artificial intelligence)\b",
             re.I,
         ),
     ),
@@ -75,11 +75,23 @@ _PROFILE_LABELS = {
     "product": "продукт",
 }
 _GRADES = {grade.value for grade in Seniority if grade != Seniority.UNKNOWN}
+_GRADE_FIELD = re.compile(r"<dt>\s*(?:level|seniority|грейд)\s*</dt>\s*<dd>\s*(\w+)\s*</dd>", re.I)
+_SOURCE_TITLE_GRADE = re.compile(r"\bjob (?:title|description)\s*:\s*(\w+)\s+[\w/-]+", re.I)
+_TENTATIVE_MODE = re.compile(
+    r"\b(?:onsite|on-site|hybrid|remote)\s*/\s*(?:onsite|on-site|hybrid|remote)\s*[-–—:]?\s*to be confirmed\b",
+    re.I,
+)
+_RESIDENCE = re.compile(
+    r"\b(?:you (?:must|have to) be based in|candidates must (?:be based|reside) in|кандидат должен проживать в)\s+([\w ,/-]{2,70})(?=[!.?;\n<]|$)",
+    re.I,
+)
 
 
 def _profile(job: object) -> str | None:
     role = _known(getattr(job, "role_family", None))
-    for text in (role, getattr(job, "title", None)):
+    title = getattr(job, "title", None)
+    # Some boards file AI workflow automation under QA despite an explicit engineering title.
+    for text in (title, role) if role == "qa" else (role, title):
         if text:
             normalized = re.sub(r"[_/]+", " ", text)
             for profile, pattern in _PROFILE_PATTERNS:
@@ -105,6 +117,8 @@ class PublicationFacts:
     languages: tuple[str, ...]
     work_mode: str | None
     location: str | None
+    country_options: tuple[str, ...] = ()
+    remote_restrictions: str | None = None
 
     def hashtags(self) -> tuple[str, ...]:
         values = [
@@ -126,6 +140,7 @@ class PublicationFacts:
 def publication_facts(job: object) -> PublicationFacts:
     city, country, location = (getattr(job, key, None) for key in ("city", "country", "location"))
     geo = normalize_geo_sources((city, country) if city else (location, country))
+    options = normalize_geo_sources((location,)).country_options if city else geo.country_options
     metadata = getattr(job, "metadata", {}) or {}
     recorded_locations = metadata.get("publication_locations")
     alternatives = [
@@ -137,6 +152,7 @@ def publication_facts(job: object) -> PublicationFacts:
     cities = {g.city for g in alternatives if g.city}
     if len({country_code(value) for value in countries} - {None}) > 1:
         city = country = None
+        options = ()
         geo = normalize_geo_sources(())
     elif len(cities) > 1:
         city = None
@@ -169,14 +185,34 @@ def publication_facts(job: object) -> PublicationFacts:
         )
         if len(title_grades) == 1:
             grade = title_grades.pop()
+        elif isinstance(original, str) and (
+            field := _GRADE_FIELD.search(original) or _SOURCE_TITLE_GRADE.search(original)
+        ):
+            value = field.group(1).casefold()
+            grade = value if value in _GRADES else None
+    mode = _known(getattr(job, "work_mode", None))
+    restrictions = _known(getattr(job, "remote_restrictions", None))
+    if isinstance(original, str):
+        if mode and _TENTATIVE_MODE.search(original):
+            mode = None
+        if not restrictions and (residence := _RESIDENCE.search(original)):
+            restrictions = residence.group(1).strip()
     return PublicationFacts(
         grade=grade,
         role=_profile(job),
-        country=geo.country or _known(country) or normalize_geo_chunk(country_code(geo.city) or ""),
-        city=geo.city or _known(city),
+        country=None
+        if options
+        else (
+            geo.country
+            or normalize_geo_sources((_known(country),)).display
+            or normalize_geo_chunk(country_code(geo.city) or "")
+        ),
+        city=None if options else geo.city or normalize_geo_sources((_known(city),)).display,
         languages=languages,
-        work_mode=_known(getattr(job, "work_mode", None)),
-        location=geo.display,
+        work_mode=mode,
+        location=location if options else geo.display,
+        country_options=options,
+        remote_restrictions=restrictions,
     )
 
 
@@ -201,10 +237,25 @@ _TEAM_RU = re.compile(
 
 
 def _eligible(job: object, facts: PublicationFacts, allowed: tuple[str, ...]) -> bool | None:
-    restriction = getattr(job, "remote_restrictions", None)
+    restriction = facts.remote_restrictions
     if restriction:
         if restriction.strip().casefold() in _WORLD:
             return True
+        exclusion = re.split(
+            r"\b(?:except|excluding|outside(?: of)?|кроме|за исключением|вне)\b",
+            restriction,
+            maxsplit=1,
+            flags=re.I,
+        )
+        if len(exclusion) == 2:
+            excluded = {
+                country_code(s.strip()) for s in re.split(r"[,;/]|\s+(?:and|и)\s+", exclusion[1])
+            }
+            if set(allowed).issubset(excluded):
+                return False
+            if None not in excluded and exclusion[0].strip().casefold() in _WORLD:
+                return True
+            return None
         tokens = re.split(r"\s*[,;/|]\s*|\s+(?:or|или)\s+", restriction.strip())
         codes = [country_code(_QUALIFIERS.sub("", token).strip()) for token in tokens]
         if any(code in allowed for code in codes):
@@ -225,11 +276,8 @@ def _eligible(job: object, facts: PublicationFacts, allowed: tuple[str, ...]) ->
         ):
             return True
         return None
-    geo = getattr(job, "location", None) or ""
-    if re.search(r"[,;/|]", geo) and not getattr(job, "city", None):
-        listed = {country_code(part.strip(), allow_city=False) for part in re.split(r"[,;/|]", geo)}
-        if len(listed - {None}) > 1:
-            return bool(set(allowed).intersection(listed))
+    if facts.country_options:
+        return any(country_code(place) in allowed for place in facts.country_options)
     code = country_code(facts.country) or country_code(facts.city)
     return code in allowed if code else None
 
@@ -256,15 +304,20 @@ def evaluate_audience(job: object, policy: PublicationPolicy) -> AudienceDecisio
             ("country", facts.country),
             ("city", facts.city),
             ("work_mode", facts.work_mode),
-            ("remote_restrictions", getattr(job, "remote_restrictions", None)),
+            ("remote_restrictions", facts.remote_restrictions),
         ):
             if value:
                 evidence[key] = str(value)[:180]
+        if facts.country_options:
+            evidence["country_options"] = ", ".join(facts.country_options)
         if policy.country_basis == "office":
             code = country_code(facts.country) or country_code(facts.city)
+            offices = {country_code(place) for place in facts.country_options} or (
+                {code} if code else set()
+            )
             checks["office_country"] = (
-                code in policy.eligible_countries
-                if code and facts.work_mode in {"hybrid", "onsite"}
+                bool(offices.intersection(policy.eligible_countries))
+                if offices and facts.work_mode in {"hybrid", "onsite"}
                 else None
             )
         else:

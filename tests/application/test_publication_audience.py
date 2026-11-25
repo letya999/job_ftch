@@ -88,7 +88,7 @@ def posting(**fields: object) -> JobRecord:
                 "language": "kk",
             },
             "any",
-            "review",
+            "skip",
         ),
     ],
 )
@@ -142,6 +142,77 @@ def test_mandatory_applicant_geography_even_when_post_is_russian() -> None:
     assert evaluate_audience(us_only, policy).status == "skip"
     kz = remote.model_copy(update={"remote_restrictions": "KZ only"})
     assert evaluate_audience(kz, policy).status == "allow"
+
+
+def test_exclusions_in_telegram_6838_are_never_published_as_city_or_country() -> None:
+    job = posting(
+        location="remote (excluding Russia, Ukraine, Belarus)",
+        remote_restrictions="remote except Russia, Ukraine, Belarus",
+        work_mode="remote",
+    )
+    facts = publication_facts(job)
+    assert (facts.city, facts.country, facts.location) == (None, None, None)
+    assert (
+        evaluate_audience(job, PublicationPolicy(eligible_countries=("RU", "BY"))).status == "skip"
+    )
+
+
+def test_multi_office_post_7645_keeps_both_hiring_countries() -> None:
+    job = posting(
+        location="Limassol, Cyprus / Dubai, UAE",
+        city="Limassol",
+        country="Кипр",
+        work_mode="onsite",
+    )
+    facts = publication_facts(job)
+    assert facts.country is None and facts.city is None
+    assert facts.location == "Limassol, Cyprus / Dubai, UAE"
+    for basis in ("eligibility", "office"):
+        for code, expected in (("AE", "allow"), ("CY", "allow"), ("KZ", "skip")):
+            decision = evaluate_audience(
+                job,
+                PublicationPolicy.model_validate(
+                    {"eligible_countries": [code], "country_basis": basis}
+                ),
+            )
+            assert decision.status == expected
+
+
+def test_tashkent_grade_from_explicit_level_field() -> None:
+    job = posting(
+        title="AI Agent Engineer",
+        description_raw="<dt>Level</dt><dd>Middle</dd><dt>Location</dt><dd>Toshkent</dd>",
+    )
+    assert publication_facts(job).grade == "middle"
+
+
+def test_mayflower_ai_automation_is_not_quality_assurance() -> None:
+    assert (
+        publication_facts(posting(title="AI Automation Engineer", role_family="qa")).role
+        == "data_ml"
+    )
+
+
+def test_hirehi_role_header_and_unconfirmed_work_arrangement() -> None:
+    job = posting(
+        title="AI Engineer",
+        location="Лондон",
+        work_mode="hybrid",
+        description_raw="Job Description: Principal AI Engineer. Work Model: Onsite / Hybrid – to be confirmed.",
+    )
+    facts = publication_facts(job)
+    assert (facts.grade, facts.city, facts.country, facts.work_mode) == (
+        "principal",
+        "Лондон",
+        "Великобритания",
+        None,
+    )
+
+
+def test_explicit_residence_requirement_in_remote_source() -> None:
+    job = posting(work_mode="remote", description_raw="Note: You have to be based in Portugal!")
+    decision = evaluate_audience(job, PublicationPolicy(eligible_countries=("KZ",)))
+    assert decision.status == "skip" and decision.evidence["remote_restrictions"] == "Portugal"
 
 
 @pytest.mark.parametrize(
@@ -244,6 +315,30 @@ def test_conflicting_group_locations_agree_across_card_and_public_facts() -> Non
     assert facts.country is None and facts.city is None and card.geo is None
     assert card.hashtags == "#senior #аналитик #язык_ru #remote"
     assert evaluate_audience(group, PublicationPolicy(eligible_countries=("KZ",))).status == "allow"
+
+
+def test_confirmed_hireseeker_detail_supplies_original_even_when_listing_arrived_first() -> None:
+    title = "NLP Engineer (AI Agents Developer)"
+    listing = posting(
+        title=title,
+        description_raw=title,
+        language="en",
+        metadata={"detail_vacancy_confirmed": False, "original_posting_text": title},
+    )
+    body = "Мы создаем интеллектуальные решения для обработки данных и ищем разработчика."
+    detail = posting(
+        title=title,
+        description_raw=body,
+        source_name="hireseeker_kw2",
+        language="ru",
+        metadata={"detail_vacancy_confirmed": True, "original_posting_text": body},
+    )
+    group = merge_jobs([listing, detail])
+    assert group.metadata["original_posting_text"] == group.description_raw == body
+    assert group.language == "ru" and group.languages_detected == ("ru",)
+    assert publication_facts(group).languages == ("ru",)
+    other = detail.model_copy(update={"canonical_url": None})
+    assert merge_jobs([listing, other]).description_raw == title
 
 
 @pytest.mark.asyncio

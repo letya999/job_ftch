@@ -12,6 +12,9 @@ if TYPE_CHECKING:
 _GEO_SPLIT = re.compile(r"\s*[;,/|&]\s*|\s+[-–—]\s+")
 _SETTLEMENT_PREFIX = re.compile(r"^(?:г|гор|пос|пгт|с|д|ст)\.?\s+", re.IGNORECASE)
 _PAREN_NOTE = re.compile(r"\s*\([^)]*\)")
+_EXCLUDED_PLACES = re.compile(
+    r"\b(?:excluding|except|outside(?: of)?|кроме|за исключением|вне)\b", re.I
+)
 
 _GEO_NOISE = frozenset(
     {
@@ -96,6 +99,8 @@ _COUNTRY_ALIASES = {
     "romania": "Румыния",
     "gr": "Греция",
     "greece": "Греция",
+    "cn": "Китай",
+    "china": "Китай",
     "united states of america": "США",
 }
 
@@ -123,6 +128,12 @@ _CITY_ALIASES = {
     "bishkek": "Бишкек",
     "abu dhabi": "Абу-Даби",
     "limassol": "Лимасол",
+    "dubai": "Дубай",
+    "dushanbe": "Душанбе",
+    "london": "Лондон",
+    "barcelona": "Барселона",
+    "shanghai": "Шанхай",
+    "batumi": "Батуми",
 }
 
 _COUNTRY_ALIASES.update({name.casefold(): name for name in _COUNTRY_ALIASES.values()})
@@ -153,6 +164,12 @@ _CITY_COUNTRIES = {
     "Бишкек": "Кыргызстан",
     "Абу-Даби": "ОАЭ",
     "Лимасол": "Кипр",
+    "Дубай": "ОАЭ",
+    "Душанбе": "Таджикистан",
+    "Лондон": "Великобритания",
+    "Барселона": "Испания",
+    "Шанхай": "Китай",
+    "Батуми": "Грузия",
     "Berlin": "Германия",
     "Берлин": "Германия",
 }
@@ -176,6 +193,7 @@ class GeoNormalization:
     city: str | None = None
     country: str | None = None
     corrections: tuple[str, ...] = ()
+    country_options: tuple[str, ...] = ()
 
 
 def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
@@ -184,7 +202,8 @@ def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
     for source in sources:
         if not source:
             continue
-        for chunk in _GEO_SPLIT.split(source):
+        positive = _EXCLUDED_PLACES.split(_PAREN_NOTE.sub("", source), maxsplit=1)[0]
+        for chunk in _GEO_SPLIT.split(positive):
             normalized = normalize_geo_chunk(chunk)
             if normalized and normalized.casefold() not in {item.casefold() for item in seen}:
                 seen.append(normalized)
@@ -192,6 +211,11 @@ def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
     country = next((item for item in seen if item in set(_COUNTRY_ALIASES.values())), None)
     known_cities = [item for item in seen if item in _CITY_COUNTRIES]
     countries = [item for item in seen if item in set(_COUNTRY_ALIASES.values())]
+    options = (
+        countries
+        if len(known_cities) <= 1
+        else (countries + [_CITY_COUNTRIES[item] for item in known_cities])
+    )
     if len(known_cities) == 1 and len(countries) == 1:
         expected_country = _CITY_COUNTRIES[known_cities[0]]
         if country != expected_country:
@@ -217,6 +241,7 @@ def normalize_geo_sources(sources: Iterable[str | None]) -> GeoNormalization:
         city=city,
         country=country,
         corrections=tuple(corrections),
+        country_options=tuple(dict.fromkeys(options)) if len(set(options)) > 1 else (),
     )
 
 
