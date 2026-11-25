@@ -57,7 +57,12 @@ async def _save_scheduler_journal(
 ) -> None:
     # Keep incomplete slots forever; trim only the oldest completed history.
     incomplete = [item for item in journal if not _is_complete(item)]
-    completed = [item for item in journal if _is_complete(item)][-_JOURNAL_LIMIT:]
+    completed = sorted(
+        (item for item in journal if _is_complete(item)),
+        key=lambda item: (
+            parse_scheduler_timestamp(item["slot_id"]) or datetime.min.replace(tzinfo=UTC)
+        ),
+    )[-_JOURNAL_LIMIT:]
     await _maybe_await(store.set_run_state(_JOURNAL_KEY, json.dumps(incomplete + completed)))
 
 
@@ -124,7 +129,7 @@ async def ensure_scheduler_slot(
     elapsed_slots = int((now - next_due).total_seconds()) // interval_seconds
     next_due += timedelta(seconds=elapsed_slots * interval_seconds)
     slot_id = next_due.isoformat()
-    if ingest_only and _find_slot(journal, slot_id) is not None:
+    if _find_slot(journal, slot_id) is not None:
         await _maybe_await(
             store.set_run_state(
                 _NEXT_DUE_KEY, (next_due + timedelta(seconds=interval_seconds)).isoformat()
@@ -140,9 +145,10 @@ async def ensure_scheduler_slot(
         "run_attempts": 0,
     }
     journal.append(scheduled_record)
+    # Save the work before advancing the clock so either write can be retried.
+    await _save_scheduler_journal(store, journal)
     next_due += timedelta(seconds=interval_seconds)
     await _maybe_await(store.set_run_state(_NEXT_DUE_KEY, next_due.isoformat()))
-    await _save_scheduler_journal(store, journal)
     return scheduled_record
 
 
