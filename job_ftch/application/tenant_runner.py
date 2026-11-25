@@ -4098,7 +4098,10 @@ class TenantRunner:
     ) -> list[JobRecord]:
         """Read accepted candidates independently of source fetch timestamps."""
         from job_ftch.application.publication_audience import policy_for
-        from job_ftch.application.publication_backlog import pending_candidate_ids
+        from job_ftch.application.publication_backlog import (
+            candidate_revision,
+            pending_candidate_ids,
+        )
 
         runtime = self.get_runtime(tenant_id)
         jobs = []
@@ -4111,6 +4114,11 @@ class TenantRunner:
         )
         groups = getattr(runtime, "job_group_store", None)
         for identity in sorted(pending):
+            revision = (
+                await candidate_revision(runtime.store, identity)
+                if policy and not policy.shadow
+                else None
+            )
             job = await runtime.job_backend.get_job(identity)
             if job is None:
                 missing += 1
@@ -4122,6 +4130,12 @@ class TenantRunner:
                     job = group.canonical_job.model_copy(
                         update={"job_id": identity, "group_id": job.group_id}
                     )
+            if revision:
+                job = job.model_copy(
+                    update={
+                        "metadata": {**job.metadata, "publication_candidate_revision": revision}
+                    }
+                )
             jobs.append(job)
             if len(jobs) >= limit:
                 break

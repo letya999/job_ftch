@@ -13,6 +13,13 @@ const facets = [
   ["postingLanguages", "Язык объявления", "Posting language"], ["workMode", "Формат", "Work mode"],
 ] as const;
 type Facet = (typeof facets)[number][0];
+const russianFacetLabels: Record<string, string> = {
+  developer: "Разработчик", analyst: "Аналитик", manager: "Менеджер", data_ml: "Данные и ML",
+  architect: "Архитектор", security: "Безопасность", engineer: "Инженер", designer: "Дизайнер",
+  devops: "DevOps", qa: "Тестирование", research: "Исследования", legal: "Юрист",
+  operations: "Операции", product: "Продукт", onsite: "Офис", hybrid: "Гибрид", remote: "Удалённо",
+  ru: "Русский", en: "Английский", kk: "Казахский", uk: "Украинский", uz: "Узбекский",
+};
 function values(job: Job, facet: Facet): string[] {
   const value = job[facet];
   return Array.isArray(value) ? value : value && value !== "unknown" ? [value] : [];
@@ -46,7 +53,7 @@ export function JobCatalog({ locale, initialJobs }: { locale: Locale; initialJob
       {locale === "ru" ? ru : en}
       <select value={filters[key] || ""} onChange={(event) => setFilters({...filters, [key]: event.target.value})}>
         <option value="">{locale === "ru" ? "Все" : "All"}</option>
-        {options[key].map((value) => <option key={value} value={value}>{value}</option>)}
+        {options[key].map((value) => <option key={value} value={value}>{locale === "ru" ? russianFacetLabels[value] ?? value : value}</option>)}
       </select>
     </label>)}</div>
     {visible.length === 0 && <p className="catalog-state">{jobs.length ? t.noResults : t.noJobs}</p>}<div className="catalog-list">{pageJobs.map((job) => <a className="job-row" key={job.id || job.url} href={job.url || "https://t.me/ai_engineer_jobs"} target="_blank" rel="noreferrer"><div className="job-main"><h2>{job.title || (locale === "ru" ? "Без названия" : "Untitled")}</h2><p>{job.company || (locale === "ru" ? "Компания не указана" : "Company not specified")}</p></div><div className="job-facts"><span>{job.location || (job.workMode === "remote" ? (locale === "ru" ? "Удалённо" : "Remote") : (locale === "ru" ? "География не указана" : "Location not specified"))}</span><span>{salary(job.compensation, locale)}</span></div><div className="job-meta"><time dateTime={job.postedAt}>{job.postedAt ? new Intl.DateTimeFormat(locale === "ru" ? "ru-RU" : "en-US", { dateStyle: "medium" }).format(new Date(job.postedAt)) : (locale === "ru" ? "Дата не указана" : "Date not specified")}</time><span>{job.publicationTags?.join(" ")}</span><span>{job.tags?.slice(0, 3).join(" · ") || job.source || "—"}</span></div><ArrowUpRight size={18} /></a>)}</div>{visible.length > PAGE_SIZE && <nav className="pagination" aria-label={locale === "ru" ? "Страницы вакансий" : "Vacancy pages"}><button disabled={page === 1} onClick={() => setPage(page - 1)} aria-label={locale === "ru" ? "Предыдущая страница" : "Previous page"}>←</button>{Array.from({ length: pages }, (_, index) => index + 1).map((value) => <button key={value} className={value === page ? "active" : ""} aria-current={value === page ? "page" : undefined} onClick={() => setPage(value)}>{value}</button>)}<button disabled={page === pages} onClick={() => setPage(page + 1)} aria-label={locale === "ru" ? "Следующая страница" : "Next page"}>→</button></nav>}</>;

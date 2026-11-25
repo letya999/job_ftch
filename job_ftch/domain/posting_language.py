@@ -7,9 +7,9 @@ from job_ftch.domain.models import LanguageCode
 # Distinct words prevent a city, a stack of English product names or page chrome
 # from establishing the language of the vacancy by itself.
 _WORDS = {
-    LanguageCode.RU: "и в на от для из по мы вы команда команду ищем опыт работы лет разработки разработчик который чем предстоит обязанности требуется условия компания вакансия гибрид удаленно удалённо данные данных стек офис",
+    LanguageCode.RU: "и в на от для из по мы вы команда команду ищем опыт работы лет разработки разработчик который чем предстоит обязанности требуется условия компания вакансия гибрид удаленно удалённо данные данных стек офис зарплата оплата валюте релокация релокацией помогают",
     LanguageCode.EN: "the and for with of our you we is are will to an role experience years hiring join familiarity basic",
-    LanguageCode.UK: "і та для на це у в з ми ви що як які досвід роботи шукаємо обов'язки пропонуємо розробки команда команду працювати офіс гібрид віддалено",
+    LanguageCode.UK: "і та для на це у в з ми ви що як які досвід роботи шукаємо обов'язки пропонуємо розробки команда команду працювати офіс гібрид віддалено зарплата оплата валюті релокація",
     LanguageCode.KK: "және үшін бұл бар біз сіз жұмыс іздейміз тәжірибесі командаға бойынша талаптар білім біздің міндеттері",
     LanguageCode.UZ: "va uchun ish bilan biz siz tajriba ham bir bo'yicha jamoamizga bo'lishi talablar qilinadi kerak ishlash",
 }

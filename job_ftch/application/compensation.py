@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 _CURRENCY = r"USD|EUR|GBP|RUB|RUR|KZT|CAD|AUD|CHF|PLN|UZS|KGS|AMD|GEL|AZN|TJS|BYN|тенге|руб(?:лей|ля|\.)?|р\.|\$|€|£|₽|₸"
 _SCALE = r"(?:k|к|тыс(?:яч)?\.?|млн\.?)(?!\w)"
-_AMOUNT = rf"\d+(?:[., \u00a0\u202f]\d+)*(?:\s*{_SCALE})?"
+_AMOUNT = rf"\d+(?:[.,]\d+|[ \u00a0\u202f]\d{{3}}(?!\d))*(?:\s*{_SCALE})?"
 _SEP = r"\s*(?:-|to|до|–|—)\s*"
 _DIR = r"(?P<direction>от|до|from|up\s+to)?\s*"
 _PREFIX = re.compile(
@@ -229,6 +229,17 @@ def _needs_pay_evidence(offer: CompensationRange) -> bool:
     )
 
 
+def _thousandfold_range_conflict(offer: CompensationRange, actual: CompensationRange) -> bool:
+    return (
+        actual.currency == offer.currency
+        and actual.min_amount is not None
+        and actual.min_amount > 0
+        and actual.max_amount is not None
+        and offer.min_amount == actual.min_amount * 1_000
+        and offer.max_amount == actual.max_amount * 1_000
+    )
+
+
 def _job_texts(job: object) -> tuple[str, ...]:
     metadata = getattr(job, "metadata", {})
     return tuple(
@@ -290,6 +301,8 @@ def normalize_compensation(
             break
     if structured is not None:
         source = "compensation:structured_metadata"
+        if matched and _thousandfold_range_conflict(structured, matched):
+            return None, source, quote, "conflicting_salary_scale"
         if matched is not None and _same_pay(structured, matched):
             if matched.period is not CompensationPeriod.UNKNOWN:
                 if structured.period not in {CompensationPeriod.UNKNOWN, matched.period}:
@@ -346,6 +359,16 @@ def public_compensation(job: object) -> CompensationRange | None:
                 return employer_offer
         return None
     if not _needs_pay_evidence(offer):
+        if (
+            offer.min_amount
+            and offer.max_amount
+            and offer.max_amount >= 1_000_000
+            and not (offer.min_amount % 1_000 or offer.max_amount % 1_000)
+        ):
+            for source_text in _job_texts(job):
+                actual, _ = _parse_text(source_text)
+                if actual and _thousandfold_range_conflict(offer, actual):
+                    return None
         return offer
     for text in (metadata.get("compensation_evidence"), *_job_texts(job)):
         if isinstance(text, str):

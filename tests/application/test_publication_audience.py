@@ -66,6 +66,24 @@ def posting(**fields: object) -> JobRecord:
         (
             {
                 "work_mode": "remote",
+                "description_raw": "Формат: Удалёнка — глобально (возможна работа из офисов компании)",
+                "language": "en",
+            },
+            "any",
+            "allow",
+        ),
+        (
+            {
+                "work_mode": "remote",
+                "description_raw": "Remote worldwide except Kazakhstan",
+                "language": "en",
+            },
+            "any",
+            "review",
+        ),
+        (
+            {
+                "work_mode": "remote",
                 "remote_restrictions": "worldwide except Kazakhstan",
                 "language": "kk",
             },
@@ -127,6 +145,20 @@ def test_mandatory_applicant_geography_even_when_post_is_russian() -> None:
 
 
 @pytest.mark.parametrize(
+    ("family", "expected"),
+    [
+        ("software_development", "developer"),
+        ("ai/ml", "data_ml"),
+        ("cloud architecture", "architect"),
+        ("quality engineering", "qa"),
+        ("unclassified specialist", None),
+    ],
+)
+def test_catalog_groups_production_role_spellings(family: str, expected: str | None) -> None:
+    assert publication_facts(posting(role_family=family, title="Specialist")).role == expected
+
+
+@pytest.mark.parametrize(
     ("body", "code"),
     [
         ("Для нашої команди ми шукаємо розробника з досвідом роботи.", "uk"),
@@ -157,6 +189,15 @@ async def test_review_is_scoped_and_policy_change_cannot_redeliver() -> None:
     )
     assert result.terminal_skip_reasons == {"audience_review": 1}
     sender.send.assert_not_awaited()
+    assert not await pending_candidate_ids(store, "@jobs", policy_version=policy.version)
+    changed_post = job.model_copy(update={"description_raw": "Updated vacancy details in English."})
+    await record_publish_candidate(store, changed_post)
+    assert await pending_candidate_ids(store, "@jobs", policy_version=policy.version) == {
+        job.job_id
+    }
+    await publish_jobs(
+        [changed_post], target="@jobs", sender=sender, policy=policy, store=store, send_limit=1
+    )
     assert not await pending_candidate_ids(store, "@jobs", policy_version=policy.version)
     assert await pending_candidate_ids(store, "@other", policy_version=policy.version) == {
         job.job_id

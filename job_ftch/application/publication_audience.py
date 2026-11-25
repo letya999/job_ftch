@@ -8,8 +8,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from job_ftch.application.geo import country_code, normalize_geo_chunk, normalize_geo_sources
+from job_ftch.domain.company import normalize_company_name
 from job_ftch.domain.models import Seniority
 from job_ftch.domain.posting_language import posting_language
+from job_ftch.domain.triage import explicit_non_vacancy
 
 if TYPE_CHECKING:
     from job_ftch.domain.publication_policy import PublicationPolicy
@@ -32,12 +34,20 @@ _PROFILE_PATTERNS = (
         "manager",
         re.compile(r"\b(?:manager|management|product owner|менеджер\w*|продакт\w*)\b", re.I),
     ),
-    ("devops", re.compile(r"\b(?:devops|sre|site reliability)\b", re.I)),
-    ("qa", re.compile(r"\b(?:qa|sdet|quality assurance|тестировщик\w*)\b", re.I)),
+    ("devops", re.compile(r"\b(?:devops|mlops|sre|site reliability)\b", re.I)),
+    (
+        "qa",
+        re.compile(r"\b(?:qa|sdet|quality assurance|quality engineering|тестировщик\w*)\b", re.I),
+    ),
     ("analyst", re.compile(r"\b(?:analysts?|analytics|аналитик\w*)\b", re.I)),
+    ("architect", re.compile(r"\b(?:architect\w*|архитектор\w*)\b", re.I)),
+    ("security", re.compile(r"\b(?:security|безопасност\w*)\b", re.I)),
     (
         "data_ml",
-        re.compile(r"\b(?:machine learning|ml engineer|data scien\w+|ai engineering)\b", re.I),
+        re.compile(
+            r"\b(?:machine learning|ml engineer|data scien\w+|data engineer\w*|ai engineer\w*|artificial intelligence)\b",
+            re.I,
+        ),
     ),
     ("designer", re.compile(r"\b(?:designer|design|дизайнер\w*)\b", re.I)),
     (
@@ -56,6 +66,13 @@ _PROFILE_LABELS = {
     "data_ml": "data_ml",
     "designer": "дизайнер",
     "developer": "разработчик",
+    "engineer": "инженер",
+    "architect": "архитектор",
+    "security": "безопасность",
+    "research": "исследования",
+    "operations": "операции",
+    "legal": "юрист",
+    "product": "продукт",
 }
 _GRADES = {grade.value for grade in Seniority if grade != Seniority.UNKNOWN}
 
@@ -64,10 +81,19 @@ def _profile(job: object) -> str | None:
     role = _known(getattr(job, "role_family", None))
     for text in (role, getattr(job, "title", None)):
         if text:
+            normalized = re.sub(r"[_/]+", " ", text)
             for profile, pattern in _PROFILE_PATTERNS:
-                if pattern.search(text):
+                if pattern.search(normalized):
                     return profile
-    return role
+    if role:
+        family = re.sub(r"[\s_/]+", " ", role.casefold()).strip()
+        if family in {"data", "ai", "ai ml", "ai safety"}:
+            return "data_ml"
+        if family.endswith("engineering") or family == "automation":
+            return "engineer"
+        if family in _PROFILE_LABELS:
+            return family
+    return None
 
 
 @dataclass(frozen=True)
@@ -155,6 +181,11 @@ def publication_facts(job: object) -> PublicationFacts:
 
 
 _WORLD = {"worldwide", "anywhere in the world", "anywhere", "по всему миру", "из любой страны"}
+_REMOTE_WORLD = re.compile(
+    r"\b(?:remote(?: work)?|work remotely|удал[её]н(?:ка|но))\s*[(:—–-]?\s*"
+    r"(?:(?:from|из)\s+)?(?:worldwide|anywhere in the world|глобально|по всему миру|любой страны)\b",
+    re.I,
+)
 _QUALIFIERS = re.compile(r"^(?:only in|only|только из|только в)\s+|\s+(?:only|только)$", re.I)
 _COMPANY_RU = re.compile(
     r"\b(?:рабочий язык компании\s*[-—–:]\s*русский"
@@ -180,7 +211,20 @@ def _eligible(job: object, facts: PublicationFacts, allowed: tuple[str, ...]) ->
             return True if all(codes) else None
         return False if all(codes) else None
     if facts.work_mode == "remote":
-        return True if (getattr(job, "location", "") or "").strip().casefold() in _WORLD else None
+        if (getattr(job, "location", "") or "").strip().casefold() in _WORLD:
+            return True
+        metadata = getattr(job, "metadata", {}) or {}
+        original = (
+            metadata.get("original_posting_text") or getattr(job, "description_raw", None) or ""
+        )
+        world = _REMOTE_WORLD.search(original) if isinstance(original, str) else None
+        if world and not re.search(
+            r"\b(?:except|excluding|but|not|кроме|исключением|только)\b",
+            original[world.end() : world.end() + 100],
+            re.I,
+        ):
+            return True
+        return None
     geo = getattr(job, "location", None) or ""
     if re.search(r"[,;/|]", geo) and not getattr(job, "city", None):
         listed = {country_code(part.strip(), allow_city=False) for part in re.split(r"[,;/|]", geo)}
@@ -198,6 +242,12 @@ class AudienceDecision:
 
 
 def evaluate_audience(job: object, policy: PublicationPolicy) -> AudienceDecision:
+    metadata = getattr(job, "metadata", {}) or {}
+    original = metadata.get("original_posting_text") or getattr(job, "description_raw", None)
+    if isinstance(original, str):
+        reason = explicit_non_vacancy(str(getattr(job, "source_kind", "")), original)
+        if reason:
+            return AudienceDecision("skip", (reason.value,), {})
     facts = publication_facts(job)
     checks: dict[str, bool | None] = {}
     evidence: dict[str, str] = {}
@@ -228,16 +278,16 @@ def evaluate_audience(job: object, policy: PublicationPolicy) -> AudienceDecisio
             else None
         )
     if policy.company_languages:
-        name = (
-            (getattr(job, "company_canonical", None) or getattr(job, "company", "") or "")
-            .casefold()
-            .strip()
-        )
+        names = {
+            normalize_company_name(str(value))
+            for value in (getattr(job, "company_canonical", None), getattr(job, "company", None))
+            if value
+        }
         employer = next(
             (
                 record
                 for k, record in policy.verified_employers.items()
-                if k.casefold().strip() == name
+                if normalize_company_name(k) in names
             ),
             None,
         )

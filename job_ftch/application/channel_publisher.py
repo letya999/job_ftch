@@ -28,7 +28,11 @@ from uuid import uuid4
 import structlog
 
 from job_ftch.application.publication_audience import evaluate_audience
-from job_ftch.application.publication_backlog import audience_target, mark_publication_handled
+from job_ftch.application.publication_backlog import (
+    audience_revision,
+    audience_target,
+    mark_publication_handled,
+)
 from job_ftch.application.publish_ledger import (
     _load_string_list,
     _persist_string_list,
@@ -315,6 +319,10 @@ async def publish_jobs(
                     audience_target(target, policy_version),
                     job,
                     reason=f"{reason}:{','.join(decision.reasons)}",
+                    revision=(getattr(job, "metadata", {}) or {}).get(
+                        "publication_candidate_revision"
+                    )
+                    or audience_revision(job),
                 )
                 outcome.terminal_skips += 1
                 outcome.terminal_skip_reasons[reason] = (

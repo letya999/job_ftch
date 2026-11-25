@@ -251,6 +251,12 @@ async def test_compensation_parsing_ignores_benefit_deposit() -> None:
     [
         ("Бюджет на обучение €1000. Зарплата €8000 в месяц.", {}, "от 8 000 €/мес", None),
         ("Annual salary: $100,000.", {}, "от 100 000 $/год", None),
+        (
+            "812243 Software Engineer $235,000.00 812243. Salary: Up to $235,000.00 per year.",
+            {},
+            "до 235 000 $/год",
+            None,
+        ),
         ("Salary: 4000–8000 USD net per month.", {}, "4 000–8 000 $/мес на руки", None),
         ("Base salary $100,000 per month.", {}, "от 100 000 $/мес", None),
         ("Base salary $100,000.", {}, None, "unverified_high_salary"),
@@ -273,6 +279,29 @@ async def test_only_evidenced_compensation_reaches_card(
     assert job is not None
     assert format_compensation(job) == expected
     assert job.metadata.get("compensation_review_reason") == reason
+
+
+@pytest.mark.asyncio
+async def test_geekjob_scaled_bounds_require_review(make_job_record) -> None:
+    from job_ftch.publication.normalize import format_compensation
+
+    job = make_job_record(
+        description="Зарплата: от 200 000 до 230 000 ₽ на руки.",
+        metadata={
+            "base_salary": {"min": 200000000, "max": 230000000, "currency": "RUB", "unit": "month"}
+        },
+        compensation={
+            "currency": "RUB",
+            "min_amount": 200000000,
+            "max_amount": 230000000,
+            "period": "month",
+        },
+    )
+    assert format_compensation(job) is None
+    processed = await CompensationParsingNode().process(job)
+    assert processed is not None
+    assert processed.metadata["compensation_review_reason"] == "conflicting_salary_scale"
+    assert format_compensation(processed) is None
 
 
 @pytest.mark.asyncio

@@ -77,6 +77,26 @@ _COUNTRY_ALIASES = {
     "ukraine": "Украина",
     "nl": "Нидерланды",
     "netherlands": "Нидерланды",
+    "ae": "ОАЭ",
+    "uae": "ОАЭ",
+    "united arab emirates": "ОАЭ",
+    "fr": "Франция",
+    "france": "Франция",
+    "es": "Испания",
+    "spain": "Испания",
+    "it": "Италия",
+    "italy": "Италия",
+    "in": "Индия",
+    "india": "Индия",
+    "pt": "Португалия",
+    "portugal": "Португалия",
+    "ch": "Швейцария",
+    "switzerland": "Швейцария",
+    "ro": "Румыния",
+    "romania": "Румыния",
+    "gr": "Греция",
+    "greece": "Греция",
+    "united states of america": "США",
 }
 
 _CITY_ALIASES = {
@@ -101,6 +121,8 @@ _CITY_ALIASES = {
     "amsterdam": "Амстердам",
     "new york city": "Нью-Йорк",
     "bishkek": "Бишкек",
+    "abu dhabi": "Абу-Даби",
+    "limassol": "Лимасол",
 }
 
 _COUNTRY_ALIASES.update({name.casefold(): name for name in _COUNTRY_ALIASES.values()})
@@ -129,6 +151,8 @@ _CITY_COUNTRIES = {
     "Амстердам": "Нидерланды",
     "Нью-Йорк": "США",
     "Бишкек": "Кыргызстан",
+    "Абу-Даби": "ОАЭ",
+    "Лимасол": "Кипр",
     "Berlin": "Германия",
     "Берлин": "Германия",
 }

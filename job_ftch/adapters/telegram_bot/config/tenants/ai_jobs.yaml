@@ -13,10 +13,17 @@ publication_policies:
     eligible_countries: [AM, AZ, BY, KG, KZ, MD, RU, TJ, TM, UZ]
     posting_languages: [ru]
     company_languages: [ru]
+    verified_employers:
+      RMAA Agency:
+        languages: [ru]
+        source: https://russia-promo.com/ru/careers
+        checked_on: 2026-11-25
     match: any
     insufficient_evidence: review
     shadow: true
-  site: *ru_market
+  site:
+    <<: *ru_market
+    shadow: false
 
 source_backend: telegram_channel
 sources:
