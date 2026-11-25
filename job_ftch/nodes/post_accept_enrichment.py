@@ -43,7 +43,9 @@ class PostAcceptEnrichment:
             update={
                 "metadata": {
                     **current.metadata,
-                    "post_accept_enrichment": "completed",
+                    "post_accept_enrichment": current.metadata.get(
+                        "full_extraction_outcome", "completed"
+                    ),
                 }
             }
         )

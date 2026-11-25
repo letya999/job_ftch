@@ -86,7 +86,7 @@ def _parse_job(offer: dict[str, Any]) -> DiscoveredPostingPayload | None:
             "currency": salary.get("currency"),
             "min": salary.get("min"),
             "max": salary.get("max"),
-            "unit": normalize_salary_unit(salary.get("period")) or "year",
+            "unit": normalize_salary_unit(salary.get("period")),
         }
 
     return DiscoveredPostingPayload(

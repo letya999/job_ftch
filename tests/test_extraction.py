@@ -7,11 +7,89 @@ from typing import TypeVar
 
 import pytest
 
+from job_ftch.application.drops import RawItemDropped
 from job_ftch.domain import JobDraft, JobExtractionStatus, PostType, RawItem, SourceKind, WorkMode
 from job_ftch.infrastructure.llm.heuristic import HeuristicLLMProvider
 from job_ftch.nodes.extraction import ExtractionNode, _fallback_title
 
 ExtractedItem = TypeVar("ExtractedItem")
+
+
+@pytest.mark.parametrize(
+    ("source_kind", "external_id", "text", "expected"),
+    [
+        (
+            SourceKind.CAREER_SITE,
+            "7926",
+            "AI Engineer\n<p>Agency</p><h2>This job is no longer open</h2>"
+            "<p>It was posted on October 22 and has closed. Applications aren&#x27;t accepted any more.</p>",
+            "vacancy_closed",
+        ),
+        (
+            SourceKind.CAREER_SITE,
+            "ai-engineer-prompt",
+            "AI Engineer jobs\n41 AI Engineer jobs\nAI Engineer\nSenior AI Solutions Engineer",
+            "career_site_non_job_page",
+        ),
+        (
+            SourceKind.CAREER_SITE,
+            "ats-title-with-category-body",
+            "AI Developer Intern - Employer Jobs\nLog In Sign Up 🌐 Worldwide Jobs You've Hidden "
+            "Remote AI Engineer Jobs Search 1,953 work from home ai engineer positions. Jobs by Type",
+            "career_site_non_job_page",
+        ),
+        (
+            SourceKind.CAREER_SITE,
+            "ats-title-with-footer",
+            "AI Developer Intern\nBuild evaluation systems for a small team in Rockville. "
+            "Responsibilities include model deployment.\nLog In Sign Up 🌐 Worldwide Jobs You've Hidden "
+            "Remote AI Engineer Jobs Search 1,953 work from home ai engineer positions. Jobs by Type",
+            None,
+        ),
+        (
+            SourceKind.TELEGRAM_CHANNEL,
+            "92232",
+            "#фриланс #Python #ищузаказы\nРазрабатываю AI-решения на Python под ваши задачи.",
+            "candidate_self_promotion",
+        ),
+        (
+            SourceKind.TELEGRAM_CHANNEL,
+            "7460",
+            "Привет! Я разработчик MVP. Помогаю бизнесу и стартапам создавать продукты.\n"
+            "Открыта к проектной работе, запуску MVP под ключ.",
+            "candidate_self_promotion",
+        ),
+        (
+            SourceKind.CAREER_SITE,
+            "open",
+            "AI Engineer\nWe build products for 41 engineering jobs. Applications are open.",
+            None,
+        ),
+        (
+            SourceKind.TELEGRAM_CHANNEL,
+            "employer",
+            "Вакансия: разработчик MVP. Команда открыта к проектной работе. Присылайте резюме.",
+            None,
+        ),
+    ],
+)
+async def test_extraction_checks_original_before_heuristic_and_structured_paths(
+    source_kind, external_id, text, expected
+):
+    node = ExtractionNode(HeuristicLLMProvider())
+    node.configure_graph_params({"extraction_mode": "structured_or_heuristic"})
+    item = RawItem(
+        source_kind=source_kind, source_name="sample", external_id=external_id, text=text
+    )
+    for metadata in ({}, {"extraction_cost_hint": "structured", "detail_vacancy_confirmed": True}):
+        observation = item.model_copy(update={"metadata": metadata})
+        if expected is None:
+            assert await node.process(observation) is not None
+        else:
+            with pytest.raises(RawItemDropped) as exc:
+                await node.process(observation)
+            assert exc.value.reason.value == expected
+            assert exc.value.item.external_id == external_id
 
 
 class ExplodingLLMProvider:

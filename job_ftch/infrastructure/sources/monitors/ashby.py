@@ -82,7 +82,7 @@ def _parse_compensation(
             currency = tier.get("currency")
             if sal_min is None and sal_max is None:
                 return None
-            unit = normalize_salary_unit(tier.get("interval")) or "year"
+            unit = normalize_salary_unit(tier.get("interval"))
             return {"currency": currency, "min": sal_min, "max": sal_max, "unit": unit}
 
     return None

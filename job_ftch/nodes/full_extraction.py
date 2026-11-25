@@ -163,12 +163,13 @@ class FullExtractionNode:
         )
         extracted, degraded = await self._extractor._extract_fields(raw)
         if degraded:
-            reasons = tuple(dict.fromkeys((*job.review_reasons, "full_extraction_deferred")))
-            return job.model_copy(update={"review_reasons": reasons})
+            return self._deferred(job, "full extraction provider degraded")
         metadata = {
             **job.metadata,
+            "full_extraction_outcome": "completed",
             "full_extraction_backend": self._extractor._llm.__class__.__name__,
         }
+        metadata.pop("full_extraction_deferred_reason", None)
 
         # Identity-shaped fields the delivery card actually renders. For title
         # and company the LLM wins: metadata often holds listing-page noise.

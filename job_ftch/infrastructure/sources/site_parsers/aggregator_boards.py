@@ -783,7 +783,7 @@ class AIEngineerParser(HtmlAggregatorParser):
 class RemoteRocketshipParser(HtmlAggregatorParser):
     domain_pattern = r"^https?://(?:www\.)?remoterocketship\.com(?:/|$)"
     parser_name = "remote_rocketship"
-    detail_pattern = re.compile(r"/jobs/[a-z0-9-]+/?$", re.IGNORECASE)
+    detail_pattern = re.compile(r"^/publicjobs/company/[^/]+/jobs/[^/]+/?$", re.IGNORECASE)
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url

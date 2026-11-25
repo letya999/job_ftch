@@ -43,6 +43,7 @@ class SQLiteStore(SQLStoreAdapter):
     _SQL_OUTBOX_GET = "SELECT payload_json, state FROM jf_outbox WHERE idempotency_key = ?"
     _SQL_OUTBOX_ATTEMPT = "SELECT payload_json, state FROM jf_outbox WHERE tenant_id = ? AND json_extract(payload_json, '$.sink_name') = ? AND json_extract(payload_json, '$.delivery_payload.attempt_id') = ?"
     _SQL_OUTBOX_PENDING = "SELECT payload_json, state FROM jf_outbox WHERE state = ? AND tenant_id = ? ORDER BY updated_at ASC LIMIT ?"
+    _SQL_OUTBOX_FOR_SINK = "SELECT payload_json, state FROM jf_outbox WHERE state = ? AND tenant_id = ? AND json_extract(payload_json, '$.sink_name') = ? ORDER BY updated_at ASC LIMIT ?"
     _SQL_OUTBOX_DELIVERED = "UPDATE jf_outbox SET state = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE idempotency_key = ?"
     _SQL_OUTBOX_RELEASE_UNCERTAIN = (
         "DELETE FROM jf_outbox WHERE idempotency_key = ? AND state = ? AND payload_json = ?"

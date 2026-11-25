@@ -6,6 +6,7 @@ import re
 from html import escape
 from typing import TYPE_CHECKING
 
+from job_ftch.application.publication_audience import publication_facts
 from job_ftch.publication.normalize import format_compensation, format_geo
 
 if TYPE_CHECKING:
@@ -133,6 +134,8 @@ def format_vacancy_card(job: Job | JobRecord) -> str:
         parts.append(meta_line)
     if desc_block:
         parts.append(desc_block)
+    if tags := publication_facts(job).hashtags():
+        parts.append(" ".join(tags))
     if url_line:
         parts.append(url_line)
 

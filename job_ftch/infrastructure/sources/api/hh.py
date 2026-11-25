@@ -42,13 +42,14 @@ class HHAPISource(OfficialAPISource):
         salary = item.get("salary_range") or item.get("salary")
         metadata = dict(raw.metadata)
         if isinstance(salary, dict):
+            mode = salary.get("mode")
             metadata["base_salary"] = {
                 "min": salary.get("from"),
                 "max": salary.get("to"),
                 "currency": salary.get("currency"),
                 "gross": salary.get("gross"),
-                "period": "month"
-                if item.get("salary") and not item.get("salary_range")
+                "period": str(mode.get("id") or "unknown").lower()
+                if isinstance(mode, dict)
                 else "unknown",
             }
         employer = item.get("employer")

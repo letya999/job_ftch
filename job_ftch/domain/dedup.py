@@ -9,7 +9,7 @@ from hashlib import sha256
 from pydantic import BaseModel, ConfigDict, Field
 
 from job_ftch.domain.models import RawItem, SourceKind
-from job_ftch.domain.observation import content_hash_for_raw_item
+from job_ftch.domain.observation import semantic_hash_for_raw_item
 
 _TOKEN_RE = re.compile(r"[A-Za-zА-Яа-я0-9+#]+")
 _DEDUP_URL_METADATA_KEYS = ("job_url", "canonical_url", "origin_url", "apply_url")
@@ -28,10 +28,10 @@ def _normalize_text(value: str) -> str:
 
 
 def processed_key_for_raw_item(item: RawItem) -> str:
-    """Return the terminal-state key for one immutable content observation.
+    """Return the terminal-state key for one version of the source facts.
 
     A locator identifies where an item was found, not which version of its
-    content was processed.  Including the full envelope hash lets a changed
+    content was processed.  Including the semantic hash lets a changed
     Telegram message or vacancy URL re-enter the pipeline while preserving
     suppression for an unchanged replay.
     """
@@ -40,7 +40,7 @@ def processed_key_for_raw_item(item: RawItem) -> str:
         str(item.source_kind),
         item.source_name.casefold(),
         str(item.stable_id),
-        content_hash_for_raw_item(item),
+        semantic_hash_for_raw_item(item),
     )
 
 
@@ -123,6 +123,7 @@ class RememberedDedupKey(BaseModel):
     key: str = Field(min_length=1)
     kind: DedupKeyKind
     item_id: str = Field(min_length=1)
+    content_version: str | None = None
     source_kind: SourceKind
     source_name: str = Field(min_length=1)
     match_text: str | None = None

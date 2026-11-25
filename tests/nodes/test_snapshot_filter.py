@@ -377,6 +377,8 @@ def test_derive_source_id_fallback() -> None:
 
 
 def test_content_hash_stable() -> None:
+    from datetime import timedelta
+
     from job_ftch.domain.models import RawItem
 
     item = RawItem(source_kind=SourceKind.DEBUG, source_name="d", text="hello", external_id="1")
@@ -385,3 +387,8 @@ def test_content_hash_stable() -> None:
     assert h1 == h2
     other = item.model_copy(update={"text": "world"})
     assert _content_hash(other) != h1
+    assert (
+        _content_hash(item.model_copy(update={"fetched_at": item.fetched_at + timedelta(days=1)}))
+        == h1
+    )
+    assert _content_hash(item.model_copy(update={"metadata": {"salary": "120k/year"}})) != h1

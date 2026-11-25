@@ -51,7 +51,7 @@ def _parse_salary(posting: dict[str, Any]) -> dict[str, Any] | None:
         "currency": comp.get("currencyIsoCode"),
         "min": sal_min,
         "max": sal_max,
-        "unit": "year",
+        "unit": comp.get("period") or comp.get("frequency"),
     }
 
 

@@ -460,7 +460,14 @@ class Pipeline[PipelineInput, PipelineOutput]:
                         if not result.failed and not result.partial and not result.limited
                     )
                     if isinstance(source_results, dict)
-                    else None
+                    else self._snapshot_filter.bound_sources
+                )
+                # A complete fetch can still contain retryable processing failures.
+                # Such a snapshot must never certify those observations as seen.
+                completed_source_ids = completed_source_ids.difference(
+                    source_id
+                    for source_id, stats in summary.by_source_id.items()
+                    if stats.failed or stats.deferred or stats.drop_reasons.get("max_items_budget")
                 )
                 await self._snapshot_filter.save_and_purge(
                     source_run_complete=not run_interrupted,

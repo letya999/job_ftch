@@ -684,8 +684,10 @@ def item_from_detail_html(
         return None
     external_id = vacancy_id_from_url(canonical) or canonical
     tree = HTMLParser(html_text or "")
+    for node in tree.css("script, style, template, noscript"):
+        node.decompose()
 
-    title_node = tree.css_first("h1")
+    title_node = tree.css_first(".one-day-offer-v3 .header__name") or tree.css_first("h1")
     title = _strip_text(title_node.text() if title_node is not None else "")
     if not title:
         title_tag = tree.css_first("title")
@@ -723,10 +725,10 @@ def item_from_detail_html(
     locations: list[str] = []
     location_text = ""
     for sel in (".b-location", ".b-vacancy-locations", ".b-vacancy-locations__group"):
-        node = tree.css_first(sel)
-        if node is None:
+        location_node = tree.css_first(sel)
+        if location_node is None:
             continue
-        location_text = _strip_text(node.text(separator=" "))
+        location_text = _strip_text(location_node.text(separator=" "))
         if location_text:
             cleaned = location_text.replace("📍", " ").strip()
             if cleaned:
@@ -756,7 +758,8 @@ def item_from_detail_html(
 
     description = ""
     desc_node = (
-        tree.css_first(".b-vacancy-description")
+        tree.css_first(".one-day-offer-v3 .description__wrap")
+        or tree.css_first(".b-vacancy-description")
         or tree.css_first(".b-vacancy-description.markdown")
         or tree.css_first(".markdown")
     )
@@ -771,7 +774,7 @@ def item_from_detail_html(
     archived = bool(
         re.search(
             r"the vacancy has been archived|вакансия (?:в архиве|архивн)|больше не ищет",
-            html_text or "",
+            tree.text(separator=" ", strip=True),
             flags=re.I,
         )
     )
@@ -1228,7 +1231,7 @@ class GetmatchParser:
             for url in page_urls:
                 urls.append(url)
                 if len(urls) >= limit:
-                    break
+                    return urls
             if total is not None and offset + page_size >= total:
                 break
             if total is None and len(inventory) < page_size:

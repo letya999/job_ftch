@@ -20,7 +20,7 @@ from job_ftch.domain import (
     dedup_title_for_raw_item,
     dedup_url_for_raw_item,
 )
-from job_ftch.domain.observation import content_hash_for_raw_item
+from job_ftch.domain.observation import semantic_hash_for_raw_item
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import Store
@@ -63,9 +63,10 @@ class DedupNode:
     async def process(self, item: RawItem) -> RawItem | None:
         if self._personal_mode:
             return item
-        duplicate = await self._find_duplicate(item)
+        version = semantic_hash_for_raw_item(item)
+        duplicate = await self._find_duplicate(item, version)
         if duplicate is None:
-            records = self._records_for_item(item)
+            records = self._records_for_item(item, version)
             if self._defer_commit:
                 claim_keys = tuple(
                     record.key
@@ -112,11 +113,11 @@ class DedupNode:
             if record.kind in (DedupKeyKind.URL, DedupKeyKind.CONTENT):
                 await self._store.release_dedup_claim(record.key, self._claim_owner)
 
-    async def _find_duplicate(self, item: RawItem) -> DuplicateRecord | None:
+    async def _find_duplicate(self, item: RawItem, version: str) -> DuplicateRecord | None:
         item_id = item.stable_id
         url = dedup_url_for_raw_item(item)
         if url is not None:
-            url_key = f"url:{url}:{content_hash_for_raw_item(item)}"
+            url_key = f"url:{url}:{version}"
             match = await self._lookup_dedup_key(url_key)
             if match is not None:
                 return DuplicateRecord(
@@ -133,7 +134,7 @@ class DedupNode:
                 )
         content_key = dedup_content_key_for_raw_item(item)
         match = await self._lookup_dedup_key(content_key)
-        if match is not None:
+        if match is not None and (match.item_id != item_id or match.content_version == version):
             return DuplicateRecord(
                 item_id=item_id,
                 source_kind=item.source_kind,
@@ -148,11 +149,11 @@ class DedupNode:
             )
         return None
 
-    def _records_for_item(self, item: RawItem) -> tuple[RememberedDedupKey, ...]:
+    def _records_for_item(self, item: RawItem, version: str) -> tuple[RememberedDedupKey, ...]:
         url = dedup_url_for_raw_item(item)
         if url is not None:
             url_record = RememberedDedupKey(
-                key=f"url:{url}:{content_hash_for_raw_item(item)}",
+                key=f"url:{url}:{version}",
                 kind=DedupKeyKind.URL,
                 item_id=item.stable_id,
                 source_kind=item.source_kind,
@@ -164,6 +165,7 @@ class DedupNode:
             records = []
         content_record = RememberedDedupKey(
             key=dedup_content_key_for_raw_item(item),
+            content_version=version,
             kind=DedupKeyKind.CONTENT,
             item_id=item.stable_id,
             source_kind=item.source_kind,

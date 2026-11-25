@@ -30,6 +30,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [live_trace_report.py](live_trace_report.py)
 - [merge_manual_labels.py](merge_manual_labels.py)
 - [merge_pool.py](merge_pool.py)
+- [preview_publication_audience.py](preview_publication_audience.py)
 - [promote_champion_recipe.py](promote_champion_recipe.py)
 - [refreeze_production_recipe.py](refreeze_production_recipe.py)
 - [run_bot_browser_parity_lab.py](run_bot_browser_parity_lab.py)

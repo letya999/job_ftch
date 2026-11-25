@@ -263,6 +263,46 @@ def test_rich_payload_cannot_change_source_ownership():
     assert source.stats.truncated is True
 
 
+@pytest.mark.asyncio
+async def test_short_listing_fills_missing_detail_fields_by_posting_url(monkeypatch):
+    from job_ftch.domain.site_models import (
+        DiscoveredPostingPayload,
+        MonitorResult,
+        ScrapedPostingPayload,
+    )
+    from job_ftch.domain.source_spec import CareerSiteSpec
+    from job_ftch.infrastructure.sources.career_site_source import CareerSiteSource
+
+    source = CareerSiteSource(CareerSiteSpec(url="https://example.org/jobs"), None, None)
+    url = "https://example.org/jobs/12345"
+    salary = {"currency": "USD", "min": 100000, "unit": "year"}
+    listing = DiscoveredPostingPayload(
+        url=url,
+        title="Data analyst",
+        description="Apply today",
+        locations=["Astana"],
+        base_salary=salary,
+        metadata={"company": "Listing employer"},
+    )
+    candidates = source._discover_candidates(MonitorResult({url}, {url: listing}), "api_sniffer")
+
+    async def scrape(url, chain):
+        return ScrapedPostingPayload(
+            title="Data analyst",
+            description="Responsibilities: review financial data.",
+            metadata={"company": "Detail employer", "detail_vacancy_confirmed": True},
+        )
+
+    monkeypatch.setattr(source, "_scrape_with_fallback", scrape)
+    jobs = [job async for job in source._enrich_candidates(candidates, ["dom"], "board")]
+    assert len(jobs) == 1
+    assert jobs[0].metadata["locations"] == ["Astana"]
+    assert jobs[0].metadata["base_salary"] == salary
+    assert jobs[0].metadata["company"] == "Detail employer"
+    assert jobs[0].metadata["listing_evidence"]["company"] == "Listing employer"
+    assert "review financial data" in jobs[0].text
+
+
 def test_generic_dom_keeps_requirements_and_long_tail():
     from job_ftch.infrastructure.sources.dom_utils import flatten, walk_steps
     from job_ftch.infrastructure.sources.scrapers.dom import can_handle

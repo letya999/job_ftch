@@ -34,6 +34,43 @@ class ExplodingNode:
         return item
 
 
+@pytest.mark.asyncio
+async def test_snapshot_retries_failed_item_and_replays_changed_salary(tmp_path: Path) -> None:
+    from job_ftch.nodes.dedup import DedupNode
+    from job_ftch.nodes.snapshot_filter import SnapshotFilterNode
+
+    item = RawItem(
+        source_kind=SourceKind.DEBUG,
+        source_name="board",
+        external_id="2",
+        text="Developer",
+        metadata={"salary": 100000},
+    )
+    store = InMemoryStore()
+
+    async def run(raw, run_id, *, fail=False):
+        nodes = [DedupNode(store, defer_commit=True)]
+        if fail:
+            nodes.append(ExplodingNode())
+        return await Pipeline(
+            source=StubSource([raw]),
+            sanitize_node=SanitizeNode(),
+            nodes=nodes,
+            sink=JsonFileSink(tmp_path / "replay.json"),
+            store=store,
+            snapshot_filter=SnapshotFilterNode(store, tenant_id="t", run_id=run_id),
+        ).run()
+
+    first = await run(item, "first", fail=True)
+    assert first.failed == 1
+    again = item.model_copy(update={"fetched_at": item.fetched_at + timedelta(hours=1)})
+    assert (await run(again, "retry")).emitted == 1
+    assert (await run(item, "unchanged")).emitted == 0
+    changed = again.model_copy(update={"metadata": {"salary": 120000}})
+    assert (await run(changed, "changed")).emitted == 1
+    assert (await run(changed, "settled")).emitted == 0
+
+
 class DroppingNode:
     async def process(self, item: RawItem) -> RawItem | None:
         del item

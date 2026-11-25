@@ -15,7 +15,8 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from job_ftch.application.registry import register_llm
-from job_ftch.domain import EmploymentType, LanguageCode, PostType, Seniority, SkillTag, WorkMode
+from job_ftch.domain import EmploymentType, PostType, Seniority, SkillTag, WorkMode
+from job_ftch.domain.posting_language import posting_language
 
 if TYPE_CHECKING:
     from job_ftch.application.contracts import OntologyStore
@@ -214,14 +215,6 @@ def _detect_work_mode(text: str) -> WorkMode | None:
         if any(token in lowered for token in tokens):
             return WorkMode(mode_name)
     return None
-
-
-def _detect_language(text: str) -> LanguageCode:
-    cyrillic = sum(1 for char in text if "а" <= char.casefold() <= "я" or char.casefold() == "ё")
-    latin = sum(1 for char in text if "a" <= char.casefold() <= "z")
-    if cyrillic == 0 and latin == 0:
-        return LanguageCode.UNKNOWN
-    return LanguageCode.RU if cyrillic >= latin else LanguageCode.EN
 
 
 def _detect_post_type(text: str) -> PostType:
@@ -568,7 +561,7 @@ class HeuristicLLMProvider:
             "post_type": post_type,
             "ai_relevance": _detect_ai_relevance(text),
             "hiring_intent": hiring_intent,
-            "language": _detect_language(text),
+            "language": posting_language(text),
             "seniority": _detect_seniority(text, self._seniority_snapshot),
             "employment_type": _detect_employment_type(text),
             "skills_explicit": skills,

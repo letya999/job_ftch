@@ -47,8 +47,17 @@ async def mark_publication_handled(
         await add(handled_key(target), identity)
 
 
-async def pending_candidate_ids(store: object, target: str) -> frozenset[str]:
+def audience_target(target: str, version: str) -> str:
+    return f"audience:{version}:{target}"
+
+
+async def pending_candidate_ids(
+    store: object, target: str, *, policy_version: str | None = None
+) -> frozenset[str]:
     members = getattr(store, "set_members", None)
     if not callable(members):
         return frozenset()
-    return frozenset(await members(CANDIDATES_KEY) - await members(handled_key(target)))
+    pending = await members(CANDIDATES_KEY) - await members(handled_key(target))
+    if policy_version:
+        pending = pending - await members(handled_key(audience_target(target, policy_version)))
+    return frozenset(pending)

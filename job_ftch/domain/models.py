@@ -31,6 +31,7 @@ class LanguageCode(StrEnum):
     EN = "en"
     KK = "kk"
     UZ = "uz"
+    UK = "uk"
     UNKNOWN = "unknown"
 
 

@@ -11,4 +11,6 @@ class TriageRejectionReason(StrEnum):
     TELEGRAM_LOW_SIGNAL = "telegram_low_signal"
     LOW_RELEVANCE_PREFILTER = "low_relevance_prefilter"
     CAREER_SITE_NON_JOB_PAGE = "career_site_non_job_page"
+    VACANCY_CLOSED = "vacancy_closed"
+    CANDIDATE_SELF_PROMOTION = "candidate_self_promotion"
     ALREADY_SEEN = "already_seen"

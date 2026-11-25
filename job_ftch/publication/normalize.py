@@ -10,7 +10,9 @@ import re
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from job_ftch.application.geo import normalize_geo_sources
+from job_ftch.application.compensation import public_compensation
+from job_ftch.application.publication_audience import publication_facts
+from job_ftch.domain.posting_language import posting_language
 
 if TYPE_CHECKING:
     from job_ftch.domain import Job, JobRecord
@@ -64,7 +66,7 @@ def _fmt_amount(amount: int) -> str:
 
 
 def format_compensation(job: Job | JobRecord) -> str | None:
-    comp = getattr(job, "compensation", None)
+    comp = public_compensation(job)
     if comp is None:
         return None
 
@@ -107,20 +109,7 @@ def format_geo(job: Job | JobRecord) -> str | None:
     Belgrade") far more often than the structured ``city``/``country`` pair, and
     reading only the latter dropped the geo from most career-site cards.
     """
-    city = (getattr(job, "city", None) or "").strip()
-    country = (getattr(job, "country", None) or "").strip()
-    location = (getattr(job, "location", None) or "").strip()
-    # Keep a complete structured pair authoritative, but do not discard a
-    # location when only one structured field survived enrichment. That was the
-    # path that rendered Warsaw with a stale country-only value of Russia.
-    if city:
-        sources = [city, country]
-    elif country:
-        sources = [location, country]
-    else:
-        sources = [location]
-
-    return normalize_geo_sources(sources).display
+    return publication_facts(job).location
 
 
 def format_work_mode(job: Job | JobRecord) -> str | None:
@@ -196,6 +185,8 @@ def detect_content_language(job: Job | JobRecord) -> str:
     """
     lang_attr = getattr(job, "language", None)
     base_lang = lang_attr.value if lang_attr and hasattr(lang_attr, "value") else "en"
+    if base_lang in {"kk", "uk", "uz"}:
+        return base_lang
     if base_lang == "unknown":
         base_lang = "en"
 
@@ -203,20 +194,8 @@ def detect_content_language(job: Job | JobRecord) -> str:
     req_text = " ".join(str(r) for r in reqs[:5])
     desc_text = (getattr(job, "description", "") or "")[:500]
     sample = req_text if req_text else desc_text
-    if not sample:
-        return base_lang
-
-    cyrillic = sum(1 for c in sample if "Ѐ" <= c <= "ӿ")
-    latin = sum(1 for c in sample if "a" <= c.lower() <= "z")
-    total = cyrillic + latin
-    if total == 0:
-        return base_lang
-    ratio = cyrillic / total
-    if ratio > 0.3:
-        return "ru"
-    if ratio < 0.05:
-        return "en"
-    return base_lang
+    detected = posting_language(sample)
+    return detected.value if detected.value != "unknown" else base_lang
 
 
 def summarise_requirements(job: Job | JobRecord) -> str | None:

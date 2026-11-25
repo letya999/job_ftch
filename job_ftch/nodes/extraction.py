@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from html import unescape
 from typing import TYPE_CHECKING
 
 from opentelemetry import trace
@@ -79,6 +81,40 @@ def _preclassified_post_type(item: RawItem) -> PostType:
         return PostType(str(raw))
     except ValueError:
         return PostType.UNKNOWN
+
+
+def _explicit_non_vacancy(item: RawItem) -> TriageRejectionReason | None:
+    """Recognize observed source notices even on the structured/heuristic fast path."""
+    text = item.text.casefold()
+    if item.source_kind is SourceKind.CAREER_SITE:
+        if "this job is no longer open" in text:
+            notice = unescape(text).replace("’", "'")
+            if "applications aren't accepted any more" in notice:
+                return TriageRejectionReason.VACANCY_CLOSED
+        # Category title followed by the same title prefixed with a result count.
+        lines = [line.strip() for line in text.splitlines()[:4]]
+        if (
+            len(lines) >= 4
+            and lines[0].endswith(" jobs")
+            and re.fullmatch(r"[0-9][0-9,]*\s+" + re.escape(lines[0]), lines[1])
+        ):
+            return TriageRejectionReason.CAREER_SITE_NON_JOB_PAGE
+        # An ATS title can be prepended to a job-search page. Check only
+        # the beginning of the body so a navigation footer cannot trigger this.
+        if len(lines) >= 2 and lines[1].startswith("log in sign up"):
+            head = lines[1][:400]
+            if "jobs you've hidden" in head and re.search(
+                r"\bsearch [\d,]+ work from home [\w -]{1,80} positions\b", head
+            ):
+                return TriageRejectionReason.CAREER_SITE_NON_JOB_PAGE
+    elif item.source_kind in {SourceKind.TELEGRAM_CHANNEL, SourceKind.TELEGRAM_GROUP}:
+        offers_services = re.search(r"\b(?:разрабатываю|создаю|помогаю)\b", text[:500])
+        if offers_services and (
+            re.search(r"(?<!\w)#ищузаказы\b", text[:250])
+            or re.search(r"(?m)^открыта? к проектной работе\b", text)
+        ):
+            return TriageRejectionReason.CANDIDATE_SELF_PROMOTION
+    return None
 
 
 class ExtractedJobFields(BaseModel):
@@ -551,6 +587,8 @@ class ExtractionNode:
     async def process(self, item: RawItem | JobDraft) -> JobDraft | None:
         if isinstance(item, JobDraft):
             return item
+        if reason := _explicit_non_vacancy(item):
+            raise RawItemDropped(reason=reason, details=reason.value, item=item)
         structured_fast_path = item.metadata.get("extraction_cost_hint") == "structured"
         if self._extraction_mode == "structured_or_heuristic" and not structured_fast_path:
             return self._heuristic_triage_draft(item)

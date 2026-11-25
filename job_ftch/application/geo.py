@@ -66,6 +66,17 @@ _COUNTRY_ALIASES = {
     "de": "Германия",
     "rs": "Сербия",
     "gb": "Великобритания",
+    "kg": "Кыргызстан",
+    "kyrgyzstan": "Кыргызстан",
+    "киргизия": "Кыргызстан",
+    "md": "Молдова",
+    "moldova": "Молдова",
+    "tm": "Туркменистан",
+    "turkmenistan": "Туркменистан",
+    "ua": "Украина",
+    "ukraine": "Украина",
+    "nl": "Нидерланды",
+    "netherlands": "Нидерланды",
 }
 
 _CITY_ALIASES = {
@@ -86,6 +97,10 @@ _CITY_ALIASES = {
     "warsaw": "Варшава",
     "warszawa": "Варшава",
     "tashkent": "Ташкент",
+    "toshkent": "Ташкент",
+    "amsterdam": "Амстердам",
+    "new york city": "Нью-Йорк",
+    "bishkek": "Бишкек",
 }
 
 _COUNTRY_ALIASES.update({name.casefold(): name for name in _COUNTRY_ALIASES.values()})
@@ -111,7 +126,24 @@ _CITY_COUNTRIES = {
     "Ереван": "Армения",
     "Варшава": "Польша",
     "Ташкент": "Узбекистан",
+    "Амстердам": "Нидерланды",
+    "Нью-Йорк": "США",
+    "Бишкек": "Кыргызстан",
+    "Berlin": "Германия",
+    "Берлин": "Германия",
 }
+
+
+def country_code(value: str | None, *, allow_city: bool = True) -> str | None:
+    """Return the configured ISO code for a country name, alias or known city."""
+    if not value:
+        return None
+    normalized = normalize_geo_chunk(value)
+    name = _CITY_COUNTRIES.get(normalized or "", normalized) if allow_city else normalized
+    for code, country in _COUNTRY_ALIASES.items():
+        if country == name and len(code) == 2 and code.isascii() and code != "uk":
+            return code.upper()
+    return value if re.fullmatch(r"[A-Z]{2}", value) else None
 
 
 @dataclass(frozen=True)

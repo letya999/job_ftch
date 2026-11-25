@@ -80,12 +80,18 @@ async def ensure_scheduler_slot(
     legacy_last_attempt: datetime | None = None,
     recovery_marker: datetime | None = None,
     publish_pending: bool = False,
+    ingest_only: bool = False,
 ) -> dict[str, object] | None:
     """Return the oldest incomplete slot or create the next due fixed slot."""
     if interval_seconds <= 0:
         return None
     journal = await load_scheduler_journal(store)
-    incomplete = [item for item in journal if not _is_complete(item)]
+    incomplete = [
+        item
+        for item in journal
+        if not _is_complete(item)
+        and (not ingest_only or item.get("run_state") not in {"succeeded", "skipped"})
+    ]
     if incomplete:
         incomplete.sort(key=lambda item: str(item.get("slot_id", "")))
         return incomplete[0]
@@ -118,6 +124,13 @@ async def ensure_scheduler_slot(
     elapsed_slots = int((now - next_due).total_seconds()) // interval_seconds
     next_due += timedelta(seconds=elapsed_slots * interval_seconds)
     slot_id = next_due.isoformat()
+    if ingest_only and _find_slot(journal, slot_id) is not None:
+        await _maybe_await(
+            store.set_run_state(
+                _NEXT_DUE_KEY, (next_due + timedelta(seconds=interval_seconds)).isoformat()
+            )
+        )
+        return None
     scheduled_record: dict[str, object] = {
         "slot_id": slot_id,
         "scheduled_for": slot_id,

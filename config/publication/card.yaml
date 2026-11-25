@@ -34,6 +34,9 @@ blocks:
     max_len: 200
     omit_if_empty: true
 
+  - field: hashtags
+    omit_if_empty: true
+
 footer:
   template: "{source_label} {link}"
   auto_mark: '🤖 <a href="https://github.com/letya999/job_ftch">job_ftch</a>'

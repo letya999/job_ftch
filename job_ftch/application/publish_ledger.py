@@ -131,28 +131,17 @@ async def persist_publish_url_ledger(store: RunStateStore, ledger: list[str]) ->
 
 
 async def persist_delivery_receipt(store: RunStateStore, receipt: object) -> None:
-    """Append a confirmed transport receipt before publication ledgers move."""
-    raw = await _maybe_await(store.get_run_state(_DELIVERY_RECEIPTS_KEY))
-    rows: list[dict[str, object]] = []
-    if isinstance(raw, str):
-        try:
-            decoded = json.loads(raw)
-            if isinstance(decoded, list):
-                rows = [item for item in decoded if isinstance(item, dict)]
-        except json.JSONDecodeError:
-            rows = []
+    """Persist a confirmed receipt for transports using a KV-only store."""
+    chat_id = str(getattr(receipt, "chat_id", ""))
+    message_id = getattr(receipt, "message_id", "")
     confirmed_at = getattr(receipt, "confirmed_at", datetime.now(UTC))
-    rows.append(
-        {
-            "chat_id": str(getattr(receipt, "chat_id", "")),
-            "message_id": getattr(receipt, "message_id", ""),
-            "confirmed_at": (
-                confirmed_at.isoformat()
-                if isinstance(confirmed_at, datetime)
-                else str(confirmed_at)
-            ),
-        }
-    )
+    row = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "confirmed_at": confirmed_at.isoformat()
+        if isinstance(confirmed_at, datetime)
+        else str(confirmed_at),
+    }
     await _maybe_await(
-        store.set_run_state(_DELIVERY_RECEIPTS_KEY, json.dumps(rows[-_PUBLISH_LEDGER_LIMIT:]))
+        store.set_run_state(f"{_DELIVERY_RECEIPTS_KEY}:{chat_id}:{message_id}", json.dumps(row))
     )

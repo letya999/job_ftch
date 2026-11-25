@@ -108,6 +108,9 @@ a { color: inherit; }
 .catalog-intro h1 span { color: var(--accent); }
 .catalog-intro div p { max-width: 55ch; margin: 0; color: var(--muted); }
 .catalog-intro a { color: var(--ink); text-underline-offset: 4px; }
+.catalog-facets { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 12px; margin: 12px 0 20px; }
+.catalog-facets label { display: grid; gap: 4px; font-size: 13px; color: var(--subtle); }
+.catalog-facets select { min-width: 0; width: 100%; padding: 7px; border: 1px solid var(--line); background: var(--bg-elevated); color: var(--ink); font: inherit; }
 .catalog-toolbar { min-height: 66px; display: flex; align-items: center; gap: 16px; padding: 0 20px; border: 1px solid var(--line); background: var(--bg-elevated); }
 .catalog-toolbar label { flex: 1; display: flex; align-items: center; gap: 12px; color: var(--subtle); }
 .catalog-toolbar input, .catalog-toolbar select { min-width: 0; border: 0; background: transparent; color: var(--ink); outline: 0; font-family: inherit; font-size: 13px; }

@@ -230,7 +230,12 @@ def _update_source_health_payload(
     drift_ratio_threshold: float = 0.2,
     min_baseline_threshold: float = 3.0,
     majority_failure_ratio: float = 0.5,
+    outcome_status: str | None = None,
 ) -> SourceHealth:
+    from job_ftch.application.source_quality import source_status_category
+
+    category = source_status_category(outcome_status)
+    confirmed_empty = outcome_status in {"no_open_vacancies", "no_new_vacancies"}
     prev_baseline_emitted = previous.baseline_emitted if previous else 0.0
     previous_success = previous.success_count if previous else 0
     current_emitted = int(stats.emitted)
@@ -253,18 +258,25 @@ def _update_source_health_payload(
             fetched=stats.fetched,
             failed=stats.failed,
         )
-    had_failure = (stats.fetched == 0 and stats.failed > 0) or (
-        stats.fetched > 1 and stats.failed / stats.fetched > majority_failure_ratio
+    had_failure = (
+        category in {"hard_failure", "transport_error"}
+        or (stats.fetched == 0 and stats.failed > 0)
+        or (stats.fetched > 0 and stats.failed / stats.fetched > majority_failure_ratio)
     )
-    degraded = False
+    degraded = not had_failure and category in {"partial", "unconfirmed_empty"}
     drift_ratio: float | None = None
     if prev_baseline_emitted >= min_baseline_threshold:
         drift_ratio = current_emitted / prev_baseline_emitted if prev_baseline_emitted > 0 else 0.0
         # Incremental dedup can reduce new publications while fetching still works.
-        degraded = stats.fetched == 0 and drift_ratio < drift_ratio_threshold and not had_failure
+        degraded = degraded or (
+            stats.fetched == 0
+            and drift_ratio < drift_ratio_threshold
+            and not had_failure
+            and not confirmed_empty
+        )
 
-    if had_failure:
-        failure_streak = (previous.failure_streak if previous else 0) + 1
+    if had_failure or degraded:
+        failure_streak = (previous.failure_streak if previous else 0) + int(had_failure)
         last_success_at = previous.last_success_at if previous else None
         last_started_at = previous.last_started_at if previous else None
         success_count = previous_success
@@ -279,6 +291,8 @@ def _update_source_health_payload(
             if success_count == 1
             else round((prev_baseline_emitted * 0.7) + (current_emitted * 0.3), 4)
         )
+        if confirmed_empty and stats.fetched == 0:
+            next_baseline = prev_baseline_emitted
 
     return SourceHealth(
         source_id=source_id,
@@ -2909,6 +2923,11 @@ class TenantRunner:
             )
         finished_at = summary.finished_at or datetime.now()
         started_at = summary.started_at
+        outcomes = {
+            str(row["source_id"]): str(row.get("status") or "")
+            for row in summary.source_outcomes
+            if row.get("source_id")
+        }
         failure_by_id = {
             item.get("source_id", ""): item
             for item in getattr(summary, "source_failures", [])
@@ -2920,6 +2939,9 @@ class TenantRunner:
             if item.get("source_id")
         }
         for source_id, stats in summary.by_source_id.items():
+            status = outcomes.get(source_id)
+            if status in {"not_due", "skipped", "policy_not_scraped"}:
+                continue
             source_kind, _, source_name = source_id.partition(":")
             previous = await runtime.store.get_source_health(source_id)
             payload = _update_source_health_payload(
@@ -2932,6 +2954,7 @@ class TenantRunner:
                 finished_at=finished_at,
                 drift_ratio_threshold=runtime.settings.source_health_drift_ratio,
                 min_baseline_threshold=runtime.settings.source_health_min_baseline,
+                outcome_status=status,
             )
             failure_payload = failure_by_id.get(source_id)
             if failure_payload is not None:
@@ -4074,16 +4097,31 @@ class TenantRunner:
         self, tenant_id: str, *, target: str, limit: int = 100
     ) -> list[JobRecord]:
         """Read accepted candidates independently of source fetch timestamps."""
+        from job_ftch.application.publication_audience import policy_for
         from job_ftch.application.publication_backlog import pending_candidate_ids
 
         runtime = self.get_runtime(tenant_id)
         jobs = []
         missing = 0
-        for identity in sorted(await pending_candidate_ids(runtime.store, target)):
+        policy = policy_for(runtime, target)
+        pending = await pending_candidate_ids(
+            runtime.store,
+            target,
+            policy_version=policy.version if policy and not policy.shadow else None,
+        )
+        groups = getattr(runtime, "job_group_store", None)
+        for identity in sorted(pending):
             job = await runtime.job_backend.get_job(identity)
             if job is None:
                 missing += 1
                 continue
+            if groups is not None and job.group_id:
+                group = await groups.get_group(job.group_id)
+                if group is not None:
+                    # Acknowledge the original candidate even when another member supplies the card.
+                    job = group.canonical_job.model_copy(
+                        update={"job_id": identity, "group_id": job.group_id}
+                    )
             jobs.append(job)
             if len(jobs) >= limit:
                 break

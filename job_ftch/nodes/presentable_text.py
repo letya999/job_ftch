@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+from job_ftch.application.compensation import public_compensation
 from job_ftch.application.graph.params import int_param
 from job_ftch.application.llm_dispatch import LLMRequestDeferredError
 from job_ftch.domain import JobRecord, MatchDecision, PresentableJob
@@ -31,7 +32,7 @@ _SCHEMA_VERSION = "1"
 
 
 def _format_compensation(item: JobRecord) -> str | None:
-    comp = item.compensation
+    comp = public_compensation(item)
     if comp is None:
         return None
     parts: list[str] = []

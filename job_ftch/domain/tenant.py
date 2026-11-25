@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from job_ftch.domain.publication_policy import PublicationPolicy  # noqa: TC001
+
 if TYPE_CHECKING:
     from job_ftch.domain.source_spec import SourceSpec
 
@@ -51,6 +53,7 @@ class TenantConfig(BaseModel):
 
     tenant_id: str = Field(min_length=1, max_length=63)
     display_name: str = Field(min_length=1)
+    publication_policies: dict[str, PublicationPolicy] = Field(default_factory=dict)
     enabled: bool = True
     sources: list[SourceSpec] = Field(default_factory=list)
     output: OutputSpec = Field(

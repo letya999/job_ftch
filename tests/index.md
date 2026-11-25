@@ -101,6 +101,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_nextdata_monitor_urls.py](test_nextdata_monitor_urls.py)
 - [test_nine99_md_site_parser.py](test_nine99_md_site_parser.py)
 - [test_nokia_site_parser.py](test_nokia_site_parser.py)
+- [test_november_source_pairs.py](test_november_source_pairs.py)
 - [test_official_career_site_parsers.py](test_official_career_site_parsers.py)
 - [test_ontology_and_llm.py](test_ontology_and_llm.py)
 - [test_ontology_correctness.py](test_ontology_correctness.py)

@@ -10,13 +10,13 @@ duplicates are handled by ``DedupNode`` (see ADR-005).
 
 from __future__ import annotations
 
-import hashlib
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
 import structlog
 
 from job_ftch.application.drops import RawItemDropped
+from job_ftch.domain.observation import semantic_hash_for_raw_item as _content_hash
 from job_ftch.domain.triage import TriageRejectionReason
 
 if TYPE_CHECKING:
@@ -24,17 +24,6 @@ if TYPE_CHECKING:
     from job_ftch.domain.models import RawItem
 
 logger = structlog.get_logger(__name__)
-
-
-def _content_hash(item: RawItem) -> str:
-    """Stable hash of the item content used for change detection (ADR-031 §decision-3)."""
-    parts = [
-        str(item.url or ""),
-        str(item.text or ""),
-        str(item.source_name or ""),
-    ]
-    payload = "|".join(parts).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
 
 
 def _derive_source_id(item: RawItem) -> str:
@@ -176,6 +165,7 @@ class SnapshotFilterNode:
         """
         if not source_run_complete:
             self._current_rows.clear()
+            self._last_run_hashes.clear()
             logger.warning("snapshot_commit_skipped_incomplete_source_run", run_id=self._run_id)
             return
 
@@ -218,6 +208,8 @@ class SnapshotFilterNode:
                         older_than_days=self._ttl_days,
                         deleted=deleted,
                     )
+        self._current_rows.clear()
+        self._last_run_hashes.clear()
 
 
 __all__ = ["SnapshotFilterNode", "_content_hash"]

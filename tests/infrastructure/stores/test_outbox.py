@@ -61,6 +61,11 @@ async def test_sqlite_persists_uncertain_delivery_without_replay(tmp_path) -> No
     try:
         assert (await store.enqueue_outbox(record)).state is OutboxState.UNCERTAIN
         assert await store.list_pending_outbox() == ()
+        second = record.model_copy(
+            update={"outbox_id": "second", "idempotency_key": "d" * 64, "sink_name": "channel-b"}
+        )
+        await store.enqueue_outbox(second)
+        assert await store.list_uncertain_outbox(limit=1, sink_name="channel-b") == (second,)
     finally:
         await store.close()
 

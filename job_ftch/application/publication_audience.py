@@ -1,0 +1,280 @@
+"""Canonical facts and three-valued audience decisions for public recipients."""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
+
+from job_ftch.application.geo import country_code, normalize_geo_chunk, normalize_geo_sources
+from job_ftch.domain.models import Seniority
+from job_ftch.domain.posting_language import posting_language
+
+if TYPE_CHECKING:
+    from job_ftch.domain.publication_policy import PublicationPolicy
+
+
+def policy_for(runtime: object, target: str) -> PublicationPolicy | None:
+    policies = getattr(getattr(runtime, "tenant", None), "publication_policies", {})
+    return policies.get(target, policies.get("*")) if isinstance(policies, Mapping) else None
+
+
+def _known(value: object) -> str | None:
+    if not isinstance(value, str) or value.casefold() in {"unknown", "other", "n/a"}:
+        return None
+    return value.strip() or None
+
+
+# Editorial facets group the existing, more specific ontology role families.
+_PROFILE_PATTERNS = (
+    (
+        "manager",
+        re.compile(r"\b(?:manager|management|product owner|менеджер\w*|продакт\w*)\b", re.I),
+    ),
+    ("devops", re.compile(r"\b(?:devops|sre|site reliability)\b", re.I)),
+    ("qa", re.compile(r"\b(?:qa|sdet|quality assurance|тестировщик\w*)\b", re.I)),
+    ("analyst", re.compile(r"\b(?:analysts?|analytics|аналитик\w*)\b", re.I)),
+    (
+        "data_ml",
+        re.compile(r"\b(?:machine learning|ml engineer|data scien\w+|ai engineering)\b", re.I),
+    ),
+    ("designer", re.compile(r"\b(?:designer|design|дизайнер\w*)\b", re.I)),
+    (
+        "developer",
+        re.compile(
+            r"\b(?:developers?|software (?:engineer\w*|development)|разработчик\w*|программист\w*)\b",
+            re.I,
+        ),
+    ),
+)
+_PROFILE_LABELS = {
+    "manager": "менеджер",
+    "devops": "devops",
+    "qa": "qa",
+    "analyst": "аналитик",
+    "data_ml": "data_ml",
+    "designer": "дизайнер",
+    "developer": "разработчик",
+}
+_GRADES = {grade.value for grade in Seniority if grade != Seniority.UNKNOWN}
+
+
+def _profile(job: object) -> str | None:
+    role = _known(getattr(job, "role_family", None))
+    for text in (role, getattr(job, "title", None)):
+        if text:
+            for profile, pattern in _PROFILE_PATTERNS:
+                if pattern.search(text):
+                    return profile
+    return role
+
+
+@dataclass(frozen=True)
+class PublicationFacts:
+    grade: str | None
+    role: str | None
+    country: str | None
+    city: str | None
+    languages: tuple[str, ...]
+    work_mode: str | None
+    location: str | None
+
+    def hashtags(self) -> tuple[str, ...]:
+        values = [
+            self.grade,
+            _PROFILE_LABELS.get(self.role or "", self.role),
+            self.country,
+            self.city,
+        ]
+        values.extend(f"язык_{code}" for code in self.languages)
+        values.append(self.work_mode)
+        return tuple(
+            f"#{slug}"
+            for value in values
+            if value
+            if (slug := re.sub(r"[^\w]+", "_", value.casefold()).strip("_"))
+        )
+
+
+def publication_facts(job: object) -> PublicationFacts:
+    city, country, location = (getattr(job, key, None) for key in ("city", "country", "location"))
+    geo = normalize_geo_sources((city, country) if city else (location, country))
+    metadata = getattr(job, "metadata", {}) or {}
+    recorded_locations = metadata.get("publication_locations")
+    alternatives = [
+        normalize_geo_sources(parts)
+        for parts in (recorded_locations if isinstance(recorded_locations, (list, tuple)) else ())
+        if isinstance(parts, (list, tuple)) and all(isinstance(s, str) or s is None for s in parts)
+    ]
+    countries = {g.country or country_code(g.city) for g in alternatives if g.country or g.city}
+    cities = {g.city for g in alternatives if g.city}
+    if len({country_code(value) for value in countries} - {None}) > 1:
+        city = country = None
+        geo = normalize_geo_sources(())
+    elif len(cities) > 1:
+        city = None
+        geo = normalize_geo_sources((geo.country,))
+    source_languages = [
+        getattr(job, "language", None),
+        *(getattr(job, "languages_detected", ()) or ()),
+    ]
+    if not any(_known(value) for value in source_languages):
+        source_languages = [metadata.get("detected_language")]
+    original = metadata.get("original_posting_text") or getattr(job, "description_raw", None)
+    if original or not any(_known(value) for value in source_languages):
+        inferred = posting_language(str(original or getattr(job, "description", "") or ""))
+        if inferred.value != "unknown":
+            declared = getattr(job, "languages_detected", ()) or ()
+            source_languages = [inferred, *declared] if len(declared) > 1 else [inferred]
+        elif original and re.search(r"(?:📢\s*)?Источник:\s*https?://", str(original), re.I):
+            source_languages = []
+    languages = tuple(
+        dict.fromkeys(
+            "kk" if value == "kz" else value
+            for value in source_languages
+            if isinstance(value, str) and re.fullmatch("[a-z]{2}", value)
+        )
+    )
+    grade = _known(getattr(job, "seniority", None))
+    if not grade:
+        title_grades = _GRADES.intersection(
+            re.findall(r"\w+", (getattr(job, "title", None) or "").casefold())
+        )
+        if len(title_grades) == 1:
+            grade = title_grades.pop()
+    return PublicationFacts(
+        grade=grade,
+        role=_profile(job),
+        country=geo.country or _known(country) or normalize_geo_chunk(country_code(geo.city) or ""),
+        city=geo.city or _known(city),
+        languages=languages,
+        work_mode=_known(getattr(job, "work_mode", None)),
+        location=geo.display,
+    )
+
+
+_WORLD = {"worldwide", "anywhere in the world", "anywhere", "по всему миру", "из любой страны"}
+_QUALIFIERS = re.compile(r"^(?:only in|only|только из|только в)\s+|\s+(?:only|только)$", re.I)
+_COMPANY_RU = re.compile(
+    r"\b(?:рабочий язык компании\s*[-—–:]\s*русский"
+    r"|company(?:'s)? working language is russian|мы\s*[-—–:]?\s*русскоязычная компания)\b",
+    re.I,
+)
+_TEAM_RU = re.compile(
+    r"\b(?:рабочий язык команды\s*[-—–:]\s*русский|team(?:'s)? working language is russian"
+    r"|(?:мы\s*[-—–:]?\s*русскоязычная|наша русскоязычная) команда"
+    r"|we (?:are|have) a russian[- ]speaking team)\b",
+    re.I,
+)
+
+
+def _eligible(job: object, facts: PublicationFacts, allowed: tuple[str, ...]) -> bool | None:
+    restriction = getattr(job, "remote_restrictions", None)
+    if restriction:
+        if restriction.strip().casefold() in _WORLD:
+            return True
+        tokens = re.split(r"\s*[,;/|]\s*|\s+(?:or|или)\s+", restriction.strip())
+        codes = [country_code(_QUALIFIERS.sub("", token).strip()) for token in tokens]
+        if any(code in allowed for code in codes):
+            return True if all(codes) else None
+        return False if all(codes) else None
+    if facts.work_mode == "remote":
+        return True if (getattr(job, "location", "") or "").strip().casefold() in _WORLD else None
+    geo = getattr(job, "location", None) or ""
+    if re.search(r"[,;/|]", geo) and not getattr(job, "city", None):
+        listed = {country_code(part.strip(), allow_city=False) for part in re.split(r"[,;/|]", geo)}
+        if len(listed - {None}) > 1:
+            return bool(set(allowed).intersection(listed))
+    code = country_code(facts.country) or country_code(facts.city)
+    return code in allowed if code else None
+
+
+@dataclass(frozen=True)
+class AudienceDecision:
+    status: Literal["allow", "skip", "review"]
+    reasons: tuple[str, ...]
+    evidence: dict[str, str]
+
+
+def evaluate_audience(job: object, policy: PublicationPolicy) -> AudienceDecision:
+    facts = publication_facts(job)
+    checks: dict[str, bool | None] = {}
+    evidence: dict[str, str] = {}
+    if policy.eligible_countries:
+        for key, value in (
+            ("country", facts.country),
+            ("city", facts.city),
+            ("work_mode", facts.work_mode),
+            ("remote_restrictions", getattr(job, "remote_restrictions", None)),
+        ):
+            if value:
+                evidence[key] = str(value)[:180]
+        if policy.country_basis == "office":
+            code = country_code(facts.country) or country_code(facts.city)
+            checks["office_country"] = (
+                code in policy.eligible_countries
+                if code and facts.work_mode in {"hybrid", "onsite"}
+                else None
+            )
+        else:
+            checks["eligible_country"] = _eligible(job, facts, policy.eligible_countries)
+    if policy.posting_languages:
+        if facts.languages:
+            evidence["posting_languages"] = ",".join(facts.languages)
+        checks["posting_language"] = (
+            bool(set(facts.languages).intersection(policy.posting_languages))
+            if facts.languages
+            else None
+        )
+    if policy.company_languages:
+        name = (
+            (getattr(job, "company_canonical", None) or getattr(job, "company", "") or "")
+            .casefold()
+            .strip()
+        )
+        employer = next(
+            (
+                record
+                for k, record in policy.verified_employers.items()
+                if k.casefold().strip() == name
+            ),
+            None,
+        )
+        body = getattr(job, "description_raw", None) or getattr(job, "description", "") or ""
+        declaration = _COMPANY_RU.search(body)
+        if declaration is None and policy.accept_team_language:
+            declaration = _TEAM_RU.search(body)
+        if employer:
+            evidence["employer_source"] = str(employer.source)
+            evidence["employer_checked_on"] = employer.checked_on.isoformat()
+            checks["verified_employer_language"] = bool(
+                set(employer.languages).intersection(policy.company_languages)
+            )
+        elif declaration:
+            evidence["employer_declaration"] = declaration.group()
+            checks["declared_employer_language"] = (
+                True if "ru" in policy.company_languages else None
+            )
+        else:
+            checks["verified_employer_language"] = None
+    labels = {True: "yes", False: "no", None: "unknown"}
+    reasons = tuple(f"{key}={labels[value]}" for key, value in checks.items())
+    if policy.require_country:
+        location_match = checks.pop(
+            "office_country" if policy.country_basis == "office" else "eligible_country"
+        )
+        if location_match is False:
+            return AudienceDecision("skip", reasons, evidence)
+        if location_match is None:
+            return AudienceDecision(policy.insufficient_evidence, reasons, evidence)
+    values = checks.values()
+    if (
+        not checks
+        or (policy.match == "any" and True in values)
+        or all(value is True for value in values)
+    ):
+        return AudienceDecision("allow", reasons, evidence)
+    if (policy.match == "all" and False in values) or None not in values:
+        return AudienceDecision("skip", reasons, evidence)
+    return AudienceDecision(policy.insufficient_evidence, reasons, evidence)

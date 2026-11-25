@@ -41,7 +41,7 @@ from job_ftch.domain import (
 
 class _UncertainOutboxStore(Protocol):
     async def list_uncertain_outbox(
-        self, limit: int = 100, *, tenant_id: str | None = None
+        self, limit: int = 100, *, tenant_id: str | None = None, sink_name: str | None = None
     ) -> tuple[OutboxRecord, ...]: ...
 
     async def release_uncertain_outbox(self, record: OutboxRecord) -> None: ...
@@ -199,9 +199,14 @@ class TenantStore:
     async def mark_outbox_delivered(self, idempotency_key: str) -> OutboxRecord | None:
         return await self._store.mark_outbox_delivered(idempotency_key)
 
-    async def list_uncertain_outbox(self, limit: int = 100) -> tuple[OutboxRecord, ...]:
-        return await cast("_UncertainOutboxStore", self._store).list_uncertain_outbox(
-            limit, tenant_id=self._tenant_id
+    async def list_uncertain_outbox(
+        self, limit: int = 100, *, sink_name: str | None = None
+    ) -> tuple[OutboxRecord, ...]:
+        backend = cast("_UncertainOutboxStore", self._store)
+        if sink_name is None:
+            return await backend.list_uncertain_outbox(limit, tenant_id=self._tenant_id)
+        return await backend.list_uncertain_outbox(
+            limit, tenant_id=self._tenant_id, sink_name=sink_name
         )
 
     async def list_outbox_attempt(

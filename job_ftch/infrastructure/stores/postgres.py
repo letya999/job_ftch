@@ -49,6 +49,7 @@ class PostgreSQLStore(SQLStoreAdapter):
     _SQL_OUTBOX_RELEASE_UNCERTAIN = "DELETE FROM jf_outbox WHERE idempotency_key = $1 AND state = $2 AND payload_json = $3::jsonb"
     _SQL_OUTBOX_CONFIRM_UNCERTAIN = "UPDATE jf_outbox SET state = $1, payload_json = $2::jsonb, updated_at = NOW() WHERE idempotency_key = $3 AND state = $4 AND payload_json = $5::jsonb"
     _SQL_OUTBOX_PENDING = "SELECT payload_json::text, state FROM jf_outbox WHERE state = $1 AND tenant_id = $2 ORDER BY updated_at ASC LIMIT $3"
+    _SQL_OUTBOX_FOR_SINK = "SELECT payload_json::text, state FROM jf_outbox WHERE state = $1 AND tenant_id = $2 AND payload_json->>'sink_name' = $3 ORDER BY updated_at ASC LIMIT $4"
     _SQL_OUTBOX_DELIVERED = (
         "UPDATE jf_outbox SET state = $1, updated_at = NOW() WHERE idempotency_key = $2"
     )

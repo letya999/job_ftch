@@ -90,6 +90,38 @@ async def test_empty_delivery_window_releases_waiting_ingest(scheduler, make_job
 
 
 @pytest.mark.asyncio
+async def test_due_ingest_runs_while_own_delivery_awaits_reconciliation(scheduler):
+    from job_ftch.application.channel_publisher import telegram_sink_name
+    from job_ftch.domain.outbox import OutboxRecord, OutboxState
+
+    store, runner, bot, sent, _ = scheduler
+    marker = (datetime.now(UTC) - timedelta(hours=2)).isoformat()
+    await store.set_run_state("bot_scheduler:pending_publish_since", marker)
+    await store.set_run_state("bot_scheduler:last_attempt_at", marker)
+    await store.enqueue_outbox(
+        OutboxRecord(
+            outbox_id="ambiguous",
+            observation_id="input",
+            content_hash="a" * 64,
+            idempotency_key="b" * 64,
+            decision_version="v1",
+            state=OutboxState.UNCERTAIN,
+            sink_name=telegram_sink_name("@first"),
+        )
+    )
+    runner.run_tenant = AsyncMock(return_value=RunSummary())
+    with pytest.raises(asyncio.CancelledError):
+        await bot_main._run_scheduler_loop(runner, bot)
+    runner.run_tenant.assert_awaited_once()
+    assert not sent
+    assert (await store.list_uncertain_outbox())[0].state is OutboxState.UNCERTAIN
+    assert await store.get_run_state("bot_scheduler:pending_publish_since") == marker
+    slots = await load_scheduler_journal(store)
+    assert len(slots) == 2
+    assert any(s.get("publish_reason") == "existing_delivery_window" for s in slots)
+
+
+@pytest.mark.asyncio
 async def test_waiting_replay_does_not_queue_already_handled_emits(scheduler):
     store, runner, bot, sent, cycles = scheduler
     runner.run_tenant = AsyncMock(

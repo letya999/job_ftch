@@ -55,6 +55,7 @@ Generated index for navigation and maintenance. Rerun `uv run python scripts/bui
 - [test_profile_pipeline_fixes.py](test_profile_pipeline_fixes.py)
 - [test_prompt_builder.py](test_prompt_builder.py)
 - [test_provider_routing.py](test_provider_routing.py)
+- [test_publication_audience.py](test_publication_audience.py)
 - [test_publication_backlog.py](test_publication_backlog.py)
 - [test_publication_reconciliation.py](test_publication_reconciliation.py)
 - [test_release_gates.py](test_release_gates.py)

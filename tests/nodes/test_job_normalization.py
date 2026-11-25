@@ -243,3 +243,69 @@ async def test_compensation_parsing_ignores_benefit_deposit() -> None:
 
     assert processed is not None
     assert processed.compensation is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("description", "metadata", "expected", "reason"),
+    [
+        ("Бюджет на обучение €1000. Зарплата €8000 в месяц.", {}, "от 8 000 €/мес", None),
+        ("Annual salary: $100,000.", {}, "от 100 000 $/год", None),
+        ("Salary: 4000–8000 USD net per month.", {}, "4 000–8 000 $/мес на руки", None),
+        ("Base salary $100,000 per month.", {}, "от 100 000 $/мес", None),
+        ("Base salary $100,000.", {}, None, "unverified_high_salary"),
+        (
+            "Base salary $100,000 per year.",
+            {"base_salary": {"currency": "USD", "min": 100000, "unit": "month"}},
+            None,
+            "conflicting_salary_period",
+        ),
+    ],
+)
+async def test_only_evidenced_compensation_reaches_card(
+    make_job_record, description, metadata, expected, reason
+) -> None:
+    from job_ftch.publication.normalize import format_compensation
+
+    job = await CompensationParsingNode().process(
+        make_job_record(description=description, metadata=metadata)
+    )
+    assert job is not None
+    assert format_compensation(job) == expected
+    assert job.metadata.get("compensation_review_reason") == reason
+
+
+@pytest.mark.asyncio
+async def test_market_analysis_cannot_supply_employer_compensation(make_job_record) -> None:
+    from job_ftch.publication.normalize import format_compensation
+
+    original = (
+        "Старший менеджер. Анализ зарплаты Медиана 400 000 ₽ "
+        "Рынок 300 000 ₽ – 550 000 ₽ Оценка ИИ Зарплата не указана. "
+        "Сопроводительное письмо. Описание вакансии Ищем менеджера. "
+        "Похожие вакансии Зарплата 450 000 ₽ в месяц."
+    )
+    legacy = make_job_record(
+        description_raw=original,
+        description="Зарплата 300 000–550 000 ₽ в месяц.",
+        compensation={
+            "currency": "RUB",
+            "min_amount": 300000,
+            "max_amount": 550000,
+            "period": "month",
+        },
+    )
+    assert format_compensation(legacy) is None
+    processed = await CompensationParsingNode().process(legacy)
+    assert processed is not None and processed.compensation is None
+    assert processed.metadata["compensation_review_reason"] == "market_estimate_without_offer"
+    with_offer = legacy.model_copy(
+        update={
+            "description_raw": original.replace(
+                "Ищем менеджера.", "Оклад 180 000 ₽ – 225 000 ₽ в месяц."
+            )
+        }
+    )
+    processed = await CompensationParsingNode().process(with_offer)
+    assert processed is not None
+    assert format_compensation(processed) == "180 000–225 000 ₽/мес"

@@ -55,7 +55,7 @@ async def test_recorded_deel_discovery_maps_rich_job_data() -> None:
     assert len(jobs) == 1
     assert str(jobs[0].url).endswith("/example/job-details/role-42/overview")
     assert jobs[0].locations == ["Remote"]
-    assert jobs[0].base_salary == {"currency": "USD", "min": 120000, "max": 180000, "unit": "year"}
+    assert jobs[0].base_salary == {"currency": "USD", "min": 120000, "max": 180000, "unit": None}
     assert jobs[0].metadata == {"team": "Engineering", "department": "Platform", "id": "role-42"}
 
 

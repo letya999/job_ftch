@@ -6,6 +6,7 @@ from job_ftch.domain.models import (
     CompensationPeriod,
     CompensationRange,
     Job,
+    JobRecord,
     SourceKind,
     WorkMode,
 )
@@ -31,6 +32,38 @@ def _job(**overrides: object) -> Job:
 
 
 class TestFormatCompensation:
+    def test_extreme_legacy_annual_amount_without_matching_pay_is_hidden(self) -> None:
+        salary = CompensationRange(
+            currency="USD", min_amount=23_500_000_812_243, period=CompensationPeriod.YEAR
+        )
+        assert format_compensation(_job(compensation=salary)) is None
+
+    def test_opposite_salary_bound_cannot_confirm_a_legacy_period(self) -> None:
+        salary = CompensationRange(
+            currency="USD", min_amount=100000, period=CompensationPeriod.MONTH
+        )
+        assert (
+            format_compensation(_job(compensation=salary, description="Up to $100,000 per year."))
+            is None
+        )
+
+    def test_legacy_monthly_outlier_requires_matching_original_evidence(self) -> None:
+        salary = CompensationRange(
+            currency="USD", min_amount=141000, max_amount=248000, period=CompensationPeriod.MONTH
+        )
+        legacy = JobRecord(
+            raw_item_id="1479323",
+            source_name="hirify",
+            source_kind=SourceKind.CAREER_SITE,
+            compensation=salary,
+            description_raw="Base salary: $141,000.00–$248,000.00 per year",
+        )
+        assert format_compensation(legacy) == "141 000–248 000 $/год"
+        assert (
+            format_compensation(_job(compensation=salary, description="Salary: $180,000 per year"))
+            is None
+        )
+
     def test_range_rub(self) -> None:
         job = _job(
             compensation=CompensationRange(

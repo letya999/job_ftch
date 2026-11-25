@@ -68,3 +68,51 @@ deny-domains for banking/government targets. An empty
   `job_ftch/adapters/telegram_bot/*`.
 - Operational telemetry env лежит отдельно в `deploy/observability/*`.
 - Что именно существует и как резолвится, проверяйте по `job_ftch/config.py`, а не по prose.
+
+## Аудитория вакансий
+
+В YAML тенанта `publication_policies` связывает правила с получателями. Ключ
+`site` применяется к сайту и публичному API, точное имя канала — к отправке в
+Telegram, `chat` — к ручной выдаче в чате. Ключ `"*"` задаёт резервное правило.
+Тенант без этих записей сохраняет текущую аудиторию.
+
+```yaml
+publication_policies:
+  site:
+    eligible_countries: [KZ, AM, KG]
+    posting_languages: [ru]
+    company_languages: [ru]
+    match: any
+    insufficient_evidence: review
+    shadow: true
+    verified_employers:
+      Example:
+        languages: [ru]
+        source: https://example.org/careers
+        checked_on: 2026-11-25
+```
+
+Список стран задаётся кодами ISO, языки — строчными двухбуквенными кодами.
+`match: any` пропускает вакансию при одном подтверждённом совпадении,
+`match: all` требует все заданные условия. `require_country: true` делает
+географию обязательной и применяет any/all к оставшимся условиям.
+`country_basis: eligibility` учитывает ограничения места найма. Режим
+`office` проверяет географию офисных и гибридных позиций. Русский текст сам по
+себе подтверждает только язык объявления. Рабочий язык компании должен быть
+заявлен в описании или в проверенном редактором реестре работодателей.
+Параметр `accept_team_language: true` также принимает явно указанный рабочий язык команды.
+
+В режиме `shadow: true` бот записывает фактическое решение и причины в событие
+`publication_audience_decision` и продолжает текущую доставку. Сайт сохраняет
+публичную выборку. Для проверки перед переключением передайте канонические
+`JobRecord` по одному JSON-объекту на строку через stdin.
+
+```shell
+python -m scripts.eval.preview_publication_audience --tenant-config job_ftch/adapters/telegram_bot/config/tenants/ai_jobs.yaml --target site < canonical-jobs.jsonl
+```
+
+Результат содержит ID, ссылку, теги, версию правила и причины по каждому условию.
+Сводные счётчики пишутся в stderr. `shadow: false` включает отбор с теми же
+правилами. При недостатке данных редактор может выбрать `review` либо `skip`.
+Изменения правил требуют перезагрузки конфигурации тенанта. Квитанции Telegram
+сохраняются и при смене правил.
